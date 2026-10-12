@@ -72,7 +72,7 @@ public class OrionApplicationLifecycle {
     }
 
     private void registerLifecycleEventHandlers() {
-        orionProvider.getEventManager().registerTypeHandler(
+        orionProvider.getEventManager().subscribe(
                 ApplicationShutdownRequestedEvent.class,
                 this::handleShutdownRequested);
     }

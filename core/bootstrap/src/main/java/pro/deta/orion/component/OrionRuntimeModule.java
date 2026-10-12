@@ -25,6 +25,7 @@ import pro.deta.orion.schema.orion.v2.GitProxyBinding;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.util.Result;
+import pro.deta.orion.util.OrionUtils;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -78,6 +79,10 @@ public class OrionRuntimeModule {
             provider.connectionFailures(connectionFailures, hostKeyDecisions);
             Optional<OrionDocument> adopted = BootstrapContext.adoptProxies(
                     storage, editor, provider, cipher, configurationService.configuration());
+            if (adopted.isPresent() && !OrionUtils.waitForCondition(
+                    () -> configurationService.configuration().document().equals(adopted.orElseThrow()))) {
+                throw new IllegalStateException("Adopted bootstrap configuration was not activated");
+            }
             configured.activate(() -> configurationService.configuration().document(), secrets,
                     provider::referencesBootstrapRepository);
             provider.activate(() -> configurationService.configuration().document(), secrets, adopted.isEmpty());

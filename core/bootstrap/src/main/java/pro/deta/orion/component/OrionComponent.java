@@ -1,12 +1,13 @@
 package pro.deta.orion.component;
 
+import pro.deta.orion.event.OrionEventManager;
+
 import pro.deta.orion.config.OrionConfigurationEditor;
 import dagger.BindsInstance;
 import dagger.Component;
 import jakarta.inject.Named;
 import jakarta.inject.Singleton;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -29,7 +30,6 @@ import pro.deta.orion.transport.OrionTransportModule;
 import pro.deta.orion.transport.git.GitNativeTransportService;
 import pro.deta.orion.transport.git.GitSshTransportService;
 import pro.deta.orion.transport.http.JettyHTTPServer;
-import java.util.Optional;
 
 @Singleton
 @Component(modules = {OrionRuntimeModule.class, OrionTransportModule.class})
@@ -71,19 +71,21 @@ public interface OrionComponent {
         @BindsInstance Builder acmeKeyMaterialCapability(AcmeKeyMaterialCapability capability);
         @BindsInstance Builder keyMaterialAdministrationCapability(KeyMaterialAdministrationCapability capability);
         @BindsInstance Builder configurationMaterialCapability(ConfigurationMaterialCapability capability);
-        @BindsInstance Builder initialConfiguration(Optional<OrionDocumentRevision> snapshot);
         @BindsInstance Builder configurationCipherCapability(ConfigurationCipherCapability capability);
         @BindsInstance Builder tlsCapability(TlsCapability capability);
         @BindsInstance Builder sshHostKeyCapability(SshHostKeyCapability capability);
         @BindsInstance Builder nativeGitRepositoryProvider(NativeGitRepositoryFactory repositoryProvider);
         @BindsInstance Builder s3Transport(S3Transport transport);
+        @BindsInstance Builder eventManager(OrionEventManager events);
         @BindsInstance Builder configuredRepositoryFactory(ConfiguredNativeGitRepositoryFactory factory);
 
         default Builder defaultBootstrapConfiguration() {
             BootstrapConfiguration configuration = new BootstrapConfiguration();
+            OrionEventManager events = new OrionEventManager();
             S3Transport transport = new S3Transport();
             ConfiguredNativeGitRepositoryFactory configured =
-                    new ConfiguredNativeGitRepositoryFactory(NativeGitRepositoryBackend.inMemory(), transport);
+                    new ConfiguredNativeGitRepositoryFactory(
+                            NativeGitRepositoryBackend.inMemory(events), transport, events);
             NativeGitRepositoryFactory repositoryProvider =
                     new NativeGitRepositoryFactory(configured);
             repositoryProvider.resolveProvisional(
@@ -96,13 +98,13 @@ public interface OrionComponent {
                     .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
                     .configurationMaterialCapability(ConfigurationMaterialCapability.unavailable())
                     .keyMaterialAdministrationCapability(KeyMaterialAdministrationCapability.unavailable())
-                    .initialConfiguration(Optional.empty())
                     .configurationCipherCapability(ConfigurationCipherCapability.unavailable())
                     .tlsCapability(TlsCapability.unavailable())
                     .sshHostKeyCapability(SshHostKeyCapability.unavailable())
                     .nativeGitRepositoryProvider(repositoryProvider)
                     .configuredRepositoryFactory(configured)
-                    .s3Transport(transport);
+                    .s3Transport(transport)
+                    .eventManager(events);
         }
     }
 }

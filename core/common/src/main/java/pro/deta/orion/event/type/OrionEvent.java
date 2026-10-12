@@ -13,14 +13,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * and stores the data handlers need to react to it. The base event also records when the event object was created; this
  * is not the same as the later asynchronous processing time.</p>
  *
- * <p>Events are sealed so the supported event set is explicit and easy to audit. The event manager marks an event as
+ * <p>Event types live with their publishing modules. The event manager marks an event as
  * processed after all registered handlers for its concrete class have run. The flag is intentionally small: it is useful
  * for tests and diagnostics, but event handlers should communicate real state changes through their own domain objects
  * or services.</p>
  */
 @Getter
-public sealed abstract class OrionEvent
-        permits ApplicationShutdownRequestedEvent {
+public abstract class OrionEvent {
     private final Instant createdAt = Instant.now();
     private final AtomicBoolean processed = new AtomicBoolean(false);
 

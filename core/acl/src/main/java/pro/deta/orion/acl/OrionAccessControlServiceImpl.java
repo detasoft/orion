@@ -1,6 +1,7 @@
 package pro.deta.orion.acl;
 
 import pro.deta.orion.util.Subscription;
+import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.config.*;
 import jakarta.inject.Inject;
@@ -63,10 +64,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private final OrionVersionedConfigurationStorage configurationStorage;
     private final boolean createDefaultIfMissing;
     private volatile OrionDocumentRevision activeConfiguration;
-    private final Optional<OrionDocumentRevision> initialConfiguration;
     private final JwtAccessTokenService jwtAccessTokenService;
     private final AtomicReference<char[]> plainRootToken = new AtomicReference<>();
     private volatile Subscription changeSubscription;
+    private final OrionEventManager events;
+    private final Object configurationActivation = new Object();
 
     @Inject
     public OrionAccessControlServiceImpl(
@@ -76,14 +78,14 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             OrionVersionedConfigurationStorage configurationStorage,
             BootstrapConfiguration bootstrapConfiguration,
             OrionConfigurationEditor editor,
-            Optional<OrionDocumentRevision> initialConfiguration) {
+            OrionEventManager events) {
         this.orionPasswordHashingService = orionPasswordHashingService;
         this.rootPasswordReset = rootPasswordReset;
         this.configurationStorage = configurationStorage;
         this.createDefaultIfMissing = bootstrapConfiguration.getBootstrap().getAccessControl()
                 .isCreateDefaultIfMissing();
         this.editor = editor;
-        this.initialConfiguration = Objects.requireNonNull(initialConfiguration, "initial configuration");
+        this.events = Objects.requireNonNull(events, "events");
         this.jwtAccessTokenService = new JwtAccessTokenService(serverIdentity);
     }
 
@@ -94,13 +96,14 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     private void loadAccessControlOnStart() {
-        synchronized (configurationStorage) {
+        synchronized (configurationActivation) {
             try {
-                changeSubscription = configurationStorage.onChange(this::onConfigurationChange);
-                Result<OrionDocumentRevision> initial = initialConfiguration
-                        .<Result<OrionDocumentRevision>>map(Result.Success::new)
-                        .orElseGet(configurationStorage::load);
-                switch (initial) {
+                changeSubscription = events.subscribe(ConfigurationChanged.class, event -> {
+                    if (event.storage() == configurationStorage) {
+                        onConfigurationChange(event.snapshot());
+                    }
+                });
+                switch (configurationStorage.load()) {
                     case Result.Success<OrionDocumentRevision> success -> {
                         if (rootPasswordReset.enabled()) {
                             resetRootPassword(success.value());
@@ -119,13 +122,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                         resetRootPassword(new OrionDocumentRevision(initialDocument(), OrionRevision.INITIAL));
                     }
                 }
-                if (initialConfiguration.isPresent()) {
-                    Result<OrionDocumentRevision> latest = configurationStorage.load();
-                    if (latest instanceof Result.Success<OrionDocumentRevision> success
-                            && !success.value().revision().equals(configuration().revision())) {
-                        onConfigurationChange(success.value());
-                    }
-                }
             } catch (RuntimeException failure) {
                 onStop();
                 throw new IllegalStateException("Configuration repository not initialized.", failure);
@@ -140,7 +136,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public void onStop() {
-        synchronized (configurationStorage) {
+        synchronized (configurationActivation) {
             if (changeSubscription != null) {
                 changeSubscription.close();
                 changeSubscription = null;
@@ -642,8 +638,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     private void onConfigurationChange(OrionDocumentRevision snapshot) {
-        synchronized (configurationStorage) {
-            if (changeSubscription == null) return;
+        synchronized (configurationActivation) {
+            if (changeSubscription == null || snapshot.revision().equals(configuration().revision())) return;
             try {
                 activateConfiguration(snapshot);
             } catch (RuntimeException failure) {

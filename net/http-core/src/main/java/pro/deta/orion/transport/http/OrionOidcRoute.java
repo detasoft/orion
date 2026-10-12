@@ -9,6 +9,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.acl.OrganizationAccounts;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
+import pro.deta.orion.util.OrionUtils;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
@@ -258,6 +259,12 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
                 ? accounts.accept(attempt.organization(), attempt.invitation(), login.identity().email(), attempt.provider(),
                         login.identity().subject(), body.path("first").asText(), body.path("last").asText())
                 : linked.id();
+        if (linked == null && !OrionUtils.waitForCondition(() -> {
+            User active = linkedUser(attempt.organization(), issuer, login.identity().subject());
+            return active != null && active.id().equals(userId);
+        })) {
+            throw new IllegalStateException("Account configuration was not activated");
+        }
         long now = clock.instant().getEpochSecond();
         long authenticatedAt = attempt.provider().reauthenticationTimeoutSeconds() == 0 ? now
                 : Math.min(now, login.identity().authenticatedAt());

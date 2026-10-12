@@ -1,5 +1,6 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.schema.orion.v2.RepositoryName;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
@@ -25,20 +26,16 @@ public class NativeGitRepositoryProvider implements AutoCloseable {
     private final ReentrantReadWriteLock lifecycle = new ReentrantReadWriteLock();
     private volatile boolean closed;
 
-    protected NativeGitRepositoryProvider() {
-        this(NativeGitRepositoryBackend.inMemory());
-    }
-
     public NativeGitRepositoryProvider(NativeGitRepositoryBackend factory) {
         this.factory = Objects.requireNonNull(factory, "factory");
     }
 
-    public static NativeGitRepositoryProvider file(Path rootDirectory) {
-        return new NativeGitRepositoryProvider(new FileNativeGitRepositoryFactory(rootDirectory));
+    public static NativeGitRepositoryProvider file(Path rootDirectory, OrionEventManager events) {
+        return new NativeGitRepositoryProvider(new FileNativeGitRepositoryFactory(rootDirectory, events));
     }
 
-    public static NativeGitRepositoryProvider inMemory() {
-        return new NativeGitRepositoryProvider(new InMemoryNativeGitRepositoryFactory());
+    public static NativeGitRepositoryProvider inMemory(OrionEventManager events) {
+        return new NativeGitRepositoryProvider(new InMemoryNativeGitRepositoryFactory(events));
     }
 
     public List<String> repositoryNames() {

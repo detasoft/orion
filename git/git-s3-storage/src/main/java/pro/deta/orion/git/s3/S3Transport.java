@@ -1,5 +1,6 @@
 package pro.deta.orion.git.s3;
 
+import pro.deta.orion.event.OrionEventManager;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
@@ -52,14 +53,15 @@ public final class S3Transport implements AutoCloseable {
     }
 
     public NativeGitRepositoryProvider repositories(String location, String endpoint, String region,
-            boolean pathStyleAccess, Optional<AwsCredentialsProvider> credentials) {
-        return new NativeGitRepositoryProvider(factory(location, endpoint, region, pathStyleAccess, credentials));
+            boolean pathStyleAccess, Optional<AwsCredentialsProvider> credentials, OrionEventManager events) {
+        return new NativeGitRepositoryProvider(
+                factory(location, endpoint, region, pathStyleAccess, credentials, events));
     }
 
     public S3NativeGitRepositoryFactory factory(String location, String endpoint, String region,
-            boolean pathStyleAccess, Optional<AwsCredentialsProvider> credentials) {
+            boolean pathStyleAccess, Optional<AwsCredentialsProvider> credentials, OrionEventManager events) {
         return operation(() -> S3NativeGitRepositoryFactory.shared(location, this,
-                overrides(endpoint, region, pathStyleAccess, credentials)));
+                overrides(endpoint, region, pathStyleAccess, credentials), events));
     }
 
     AwsRequestOverrideConfiguration overrides(String endpoint, String region, boolean pathStyleAccess,

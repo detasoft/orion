@@ -1,5 +1,6 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.schema.orion.v2.RepositoryName;
 import pro.deta.orion.util.Result;
@@ -26,9 +27,11 @@ final class FileNativeGitRepositoryFactory implements NativeGitRepositoryBackend
     private static final String DEFAULT_HEAD_PROPERTY = "defaultHead";
 
     private final Path rootDirectory;
+    private final OrionEventManager events;
 
-    FileNativeGitRepositoryFactory(Path rootDirectory) {
+    FileNativeGitRepositoryFactory(Path rootDirectory, OrionEventManager events) {
         this.rootDirectory = Objects.requireNonNull(rootDirectory, "rootDirectory").toAbsolutePath().normalize();
+        this.events = Objects.requireNonNull(events, "events");
         createDirectories(this.rootDirectory);
     }
 
@@ -61,7 +64,8 @@ final class FileNativeGitRepositoryFactory implements NativeGitRepositoryBackend
         }
         Path directory = repositoryDirectory(name);
         RepositoryMetadata metadata = readMetadata(directory);
-        return new Result.Success<>(NativeGitRepository.openLocal(metadata.name(), directory, metadata.defaultHead()));
+        return new Result.Success<>(NativeGitRepository.openLocal(
+                metadata.name(), directory, metadata.defaultHead(), events));
     }
 
     @Override

@@ -1,5 +1,7 @@
 package pro.deta.orion.git.s3;
 
+import pro.deta.orion.event.OrionEventManager;
+
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
@@ -45,13 +47,16 @@ public final class ConfiguredNativeGitRepositoryFactory implements NativeGitRepo
 
     private final NativeGitRepositoryBackend bootstrap;
     private final S3Transport client;
+    private final OrionEventManager events;
     private volatile RuntimeConfiguration runtime;
     private final Map<RepositoryLocation, S3NativeGitRepositoryFactory> factories = new HashMap<>();
     private volatile boolean closed;
 
-    public ConfiguredNativeGitRepositoryFactory(NativeGitRepositoryBackend bootstrap, S3Transport client) {
+    public ConfiguredNativeGitRepositoryFactory(NativeGitRepositoryBackend bootstrap, S3Transport client,
+            OrionEventManager events) {
         this.bootstrap = Objects.requireNonNull(bootstrap, "bootstrap repository factory");
         this.client = Objects.requireNonNull(client, "S3 transport");
+        this.events = Objects.requireNonNull(events, "events");
     }
 
     public S3Transport transport() {
@@ -202,7 +207,7 @@ public final class ConfiguredNativeGitRepositoryFactory implements NativeGitRepo
             selected.configure(overrides);
             return selected;
         }
-        selected = S3NativeGitRepositoryFactory.shared(location, client, overrides);
+        selected = S3NativeGitRepositoryFactory.shared(location, client, overrides, events);
         factories.put(key, selected);
         return selected;
     }

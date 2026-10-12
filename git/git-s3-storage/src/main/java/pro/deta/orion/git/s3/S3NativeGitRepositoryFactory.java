@@ -1,6 +1,7 @@
 package pro.deta.orion.git.s3;
 
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
@@ -47,27 +48,29 @@ public final class S3NativeGitRepositoryFactory implements NativeGitRepositoryBa
     private final S3Transport transport;
     private volatile AwsRequestOverrideConfiguration overrides;
     private final boolean ownsTransport;
+    private final OrionEventManager events;
     private final AtomicBoolean closed = new AtomicBoolean();
 
     S3NativeGitRepositoryFactory(String bucket, String prefix, S3Transport transport,
-            AwsRequestOverrideConfiguration overrides) {
-        this(bucket, prefix, transport, overrides, false);
+            AwsRequestOverrideConfiguration overrides, OrionEventManager events) {
+        this(bucket, prefix, transport, overrides, false, events);
     }
 
     private S3NativeGitRepositoryFactory(String bucket, String prefix, S3Transport transport,
-            AwsRequestOverrideConfiguration overrides, boolean ownsTransport) {
+            AwsRequestOverrideConfiguration overrides, boolean ownsTransport, OrionEventManager events) {
         this.bucket = Objects.requireNonNull(bucket, "bucket");
         this.prefix = Objects.requireNonNull(prefix, "prefix");
         this.transport = Objects.requireNonNull(transport, "transport");
         this.overrides = Objects.requireNonNull(overrides, "request configuration");
         this.ownsTransport = ownsTransport;
+        this.events = Objects.requireNonNull(events, "events");
     }
 
     public static S3NativeGitRepositoryFactory standalone(String location, String endpoint,
-            Map<String, String> auth, Map<String, String> environment) {
+            Map<String, String> auth, Map<String, String> environment, OrionEventManager events) {
         S3Transport transport = new S3Transport();
         try {
-            return configured(location, endpoint, auth, environment, transport, true);
+            return configured(location, endpoint, auth, environment, transport, true, events);
         } catch (RuntimeException failure) {
             transport.close();
             throw failure;
@@ -75,13 +78,13 @@ public final class S3NativeGitRepositoryFactory implements NativeGitRepositoryBa
     }
 
     public static S3NativeGitRepositoryFactory shared(String location, String endpoint,
-            Map<String, String> auth, Map<String, String> environment, S3Transport transport) {
-        return configured(location, endpoint, auth, environment, transport, false);
+            Map<String, String> auth, Map<String, String> environment, S3Transport transport, OrionEventManager events) {
+        return configured(location, endpoint, auth, environment, transport, false, events);
     }
 
     private static S3NativeGitRepositoryFactory configured(String location, String endpoint,
             Map<String, String> auth, Map<String, String> environment, S3Transport transport,
-            boolean ownsTransport) {
+            boolean ownsTransport, OrionEventManager events) {
         Location selected = parseLocation(location);
         Objects.requireNonNull(auth, "auth");
         Objects.requireNonNull(environment, "environment");
@@ -93,23 +96,23 @@ public final class S3NativeGitRepositoryFactory implements NativeGitRepositoryBa
         AwsRequestOverrideConfiguration overrides = transport.overrides(endpoint,
                 auth.getOrDefault("region", "us-east-1"), Boolean.parseBoolean(pathStyle), credentials);
         return new S3NativeGitRepositoryFactory(selected.bucket(), selected.prefix(), transport, overrides,
-                ownsTransport);
+                ownsTransport, events);
     }
 
     public static NativeGitRepositoryProvider repositories(String location, String endpoint,
-            Map<String, String> auth, Map<String, String> environment) {
-        return new NativeGitRepositoryProvider(standalone(location, endpoint, auth, environment));
+            Map<String, String> auth, Map<String, String> environment, OrionEventManager events) {
+        return new NativeGitRepositoryProvider(standalone(location, endpoint, auth, environment, events));
     }
 
     static NativeGitRepositoryProvider repositories(String location, S3Transport transport,
-            AwsRequestOverrideConfiguration overrides) {
-        return new NativeGitRepositoryProvider(shared(location, transport, overrides));
+            AwsRequestOverrideConfiguration overrides, OrionEventManager events) {
+        return new NativeGitRepositoryProvider(shared(location, transport, overrides, events));
     }
 
     static S3NativeGitRepositoryFactory shared(String location, S3Transport transport,
-            AwsRequestOverrideConfiguration overrides) {
+            AwsRequestOverrideConfiguration overrides, OrionEventManager events) {
         Location selected = parseLocation(location);
-        return new S3NativeGitRepositoryFactory(selected.bucket(), selected.prefix(), transport, overrides);
+        return new S3NativeGitRepositoryFactory(selected.bucket(), selected.prefix(), transport, overrides, events);
     }
 
     public static void validateLocation(String location) {
@@ -261,7 +264,7 @@ public final class S3NativeGitRepositoryFactory implements NativeGitRepositoryBa
         S3RepositoryObjects objects = new S3RepositoryObjects(transport, () -> overrides, bucket,
                 metadataKey.substring(0, metadataKey.length() - METADATA_FILE.length()));
         return new NativeGitRepository(name, new S3GitStorageApi(objects),
-                new S3GitIndexApi(objects, initialHead));
+                new S3GitIndexApi(objects, initialHead), events);
     }
 
     private record RepositoryMetadata(String name, RefId initialHead) {}
@@ -333,7 +336,7 @@ public final class S3NativeGitRepositoryFactory implements NativeGitRepositoryBa
     }
 
     private static Optional<AwsCredentialsProvider> credentials(
-            Map<String, String> auth, Map<String, String> environment) {
+            Map<String, String> auth, Map<String, String> environment, OrionEventManager events) {
         if (!auth.containsKey("accessKeyId") && !auth.containsKey("secretAccessKey")
                 && !auth.containsKey("sessionToken")) {
             return Optional.empty();

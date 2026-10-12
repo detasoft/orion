@@ -84,13 +84,13 @@ public class App {
                         .acmeKeyMaterialCapability(bootstrap.acmeKeyMaterial())
                         .configurationMaterialCapability(bootstrap.configurationMaterial())
                         .keyMaterialAdministrationCapability(bootstrap.keyMaterialAdministration())
-                        .initialConfiguration(bootstrap.initialConfiguration())
                         .configurationCipherCapability(bootstrap.configurationCipher())
                         .tlsCapability(bootstrap.tlsKeyMaterial())
                         .sshHostKeyCapability(bootstrap.sshHostKeys())
                         .nativeGitRepositoryProvider(bootstrap.repositoryFactory())
                         .configuredRepositoryFactory(bootstrap.storageFactory())
                         .s3Transport(bootstrap.s3Transport())
+                        .eventManager(bootstrap.events())
                         .build();
                 return run(orionComponent.orionApplicationLifecycle(), true);
             }

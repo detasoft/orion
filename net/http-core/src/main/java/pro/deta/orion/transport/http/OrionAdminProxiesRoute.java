@@ -7,6 +7,7 @@ import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.LoggerFactory;
 import pro.deta.orion.config.OrionConfigurationEditor;
+import pro.deta.orion.config.OrionConfigurationModification;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.command.audit.CommandAuditRecord;
@@ -25,6 +26,7 @@ import pro.deta.orion.schema.orion.v2.ConnectionReference;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.RemoteAlias;
 import pro.deta.orion.util.Result;
+import pro.deta.orion.util.OrionUtils;
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
@@ -89,26 +91,37 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
             action = request.action();
             RemoteAlias selected = new RemoteAlias(request.alias());
             alias = selected.value();
+            OrionDocumentRevision snapshot;
             if (action.equals("retry")) {
                 if (request.credential() != null || request.upstream() != null || request.ref() != null
                         || request.credentialKind() != null || request.username() != null || request.knownHosts() != null) {
                     throw new IllegalArgumentException("Retry accepts no configuration changes");
                 }
                 OrionRevision expected = new OrionRevision.Stored(request.revision());
-                if (!configurationService.configuration().revision().equals(expected)) {
+                snapshot = configurationService.configuration();
+                if (!snapshot.revision().equals(expected)) {
                     throw new OrionConfigurationConcurrentUpdateException("Configuration revision changed", null);
                 }
             } else {
                 MutationRequest mutation = request;
                 SecurityContext context = (SecurityContext) req.getAttribute(
                         OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
-                editor.edit(new OrionRevision.Stored(request.revision()),
+                OrionConfigurationModification edit = editor.edit(new OrionRevision.Stored(request.revision()),
                         new ChangeMetadata(new UserEmail(context.getUserIdentity().getUserId(), ""),
-                                "proxy " + action + " " + alias))
-                        .update(document -> update(document, selected, mutation))
-                        .apply();
+                                "proxy " + action + " " + alias));
+                try {
+                    edit.update(document -> update(document, selected, mutation));
+                    OrionDocument updated = edit.document();
+                    edit.apply();
+                    snapshot = new OrionDocumentRevision(updated, edit.revision());
+                } finally {
+                    edit.discard();
+                }
             }
-            OrionDocumentRevision snapshot = configurationService.configuration();
+            if (!action.equals("retry") && !OrionUtils.waitForCondition(
+                    () -> configurationService.configuration().revision().equals(snapshot.revision()))) {
+                throw new IllegalStateException("Saved proxy configuration was not activated");
+            }
             GitProxyBinding binding = find(snapshot.document(), selected);
             SyncObservation observation = retry(snapshot, binding);
             String status = action.equals("retry") ? "retried" : "saved";
@@ -117,11 +130,6 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
                     new MutationResponse(status, project(binding, snapshot.document().system(), observation),
                             ((OrionRevision.Stored) snapshot.revision()).value()));
         } catch (OrionConfigurationConcurrentUpdateException failure) {
-            try {
-                editor.reload("proxy configuration conflict");
-            } catch (RuntimeException reloadFailure) {
-                LoggerFactory.getLogger(OrionAdminProxiesRoute.class).warn("Could not reload proxy configuration");
-            }
             resultCode = "configuration-conflict";
             response = OrionHttpResponse.json(409, Map.of("status", resultCode));
         } catch (Rejected failure) {

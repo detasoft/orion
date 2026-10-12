@@ -1,7 +1,6 @@
 package pro.deta.orion.git.nativestorage;
 
-import pro.deta.orion.util.Subscription;
-import pro.deta.orion.util.EventListeners;
+import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.git.fileapi.GitFileApi;
 import pro.deta.orion.git.local.LocalGitIndex;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
@@ -52,35 +51,38 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
-import java.util.function.Consumer;
 
 /**
  * Native Git objects and ref publication. File operations are exposed separately through GitFileApi.
+ * Ref changes are dispatched asynchronously while the event manager is running. Bootstrap changes are
+ * observed through the initial configuration load before runtime event processing starts.
  */
 public class NativeGitRepository implements AutoCloseable {
     private final String name;
     private final GitStorageApi storage;
     private final GitIndexApi index;
-    private final EventListeners<RefUpdateResult> refUpdateListeners = new EventListeners<>();
+    private final OrionEventManager events;
 
-    public NativeGitRepository(String name, GitStorageApi storage, GitIndexApi index) {
+    public NativeGitRepository(String name, GitStorageApi storage, GitIndexApi index, OrionEventManager events) {
         this.name = Objects.requireNonNull(name, "name");
         this.storage = Objects.requireNonNull(storage, "storage");
         this.index = Objects.requireNonNull(index, "index");
+        this.events = Objects.requireNonNull(events, "events");
     }
 
-    public static NativeGitRepository createInMemory(RepositoryName name) {
+    public static NativeGitRepository createInMemory(RepositoryName name, OrionEventManager events) {
         return new NativeGitRepository(name.value(), new InMemoryStorage(),
-                new InMemoryIndex(new RefId("refs/heads/main")));
+                new InMemoryIndex(new RefId("refs/heads/main")), events);
     }
 
-    public static NativeGitRepository openLocal(RepositoryName name, Path directory, String initialHead) {
+    public static NativeGitRepository openLocal(RepositoryName name, Path directory, String initialHead,
+            OrionEventManager events) {
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(initialHead, "initialHead");
         try {
             GitStorageApi storage = new LocalGitStorage(directory);
             return new NativeGitRepository(name.value(), storage,
-                    new LocalGitIndex(directory, new RefId(initialHead)));
+                    new LocalGitIndex(directory, new RefId(initialHead)), events);
         } catch (IOException failure) {
             throw new UncheckedIOException("Cannot open repository " + name.value(), failure);
         }
@@ -158,8 +160,12 @@ public class NativeGitRepository implements AutoCloseable {
         return publishRefs(List.of(RefUpdate.fromWire(refName, expectedOldId, newId)), true).getFirst();
     }
 
-    public Subscription onRefUpdate(Consumer<RefUpdateResult> listener) {
-        return refUpdateListeners.subscribe(listener);
+    public NativeGitRepository eventSource() {
+        return this;
+    }
+
+    public OrionEventManager events() {
+        return events;
     }
 
     public ObjectId writeObject(GitObjectType type, byte[] data) {
@@ -264,7 +270,9 @@ public class NativeGitRepository implements AutoCloseable {
                     || result.update().expectedOld().equals(result.update().newId())) {
                 continue;
             }
-            refUpdateListeners.publish(result);
+            if (events.isRunning()) {
+                events.publish(new RepositoryRefChanged(this, result.update()));
+            }
         }
         return results;
     }
@@ -302,7 +310,7 @@ public class NativeGitRepository implements AutoCloseable {
 
     @Override
     public void close() {
-        try (storage; index; refUpdateListeners) {
+        try (storage; index) {
         } catch (IOException failure) {
             throw new UncheckedIOException(failure);
         }

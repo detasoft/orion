@@ -1,70 +1,106 @@
 package pro.deta.orion.event.disruptor;
 
 import com.lmax.disruptor.EventHandler;
-import com.lmax.disruptor.EventTranslator;
-import com.lmax.disruptor.RingBuffer;
 import com.lmax.disruptor.TimeoutException;
 import com.lmax.disruptor.dsl.Disruptor;
 import com.lmax.disruptor.util.DaemonThreadFactory;
+import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.event.type.OrionEvent;
 
+import java.util.Objects;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 /**
- * Small project-level wrapper around LMAX Disruptor for asynchronous Orion events.
- *
- * <p>The Disruptor reuses {@link EventHolder} instances in the ring buffer, while each publish call places a
- * fresh {@link OrionEvent} into the claimed holder. Keeping the wrapper small makes the event manager independent
- * from the low-level ring-buffer API and keeps lifecycle operations in one place.</p>
- *
- * <p>An Orion event is a small domain notification object, for example "a git receive finished" or "ACL data should be
- * reloaded". This class does not interpret those events. It only moves them from publishing threads into the asynchronous
- * event-processing thread through a bounded ring buffer.</p>
+ * Feeds asynchronous Orion events into a bounded Disruptor ring buffer.
+ * Publishers append to an unbounded ingress queue so they never wait for handlers while holding domain locks.
+ * One feeder preserves queue order and waits for ring-buffer capacity. Shutdown drains ingress before the ring.
+ * Sustained publication faster than dispatch consumes heap; events are neither dropped nor merged.
  */
+@Slf4j
 public class OrionDisruptor {
+    private static final Publication STOP = new Publication(null);
     private final Disruptor<EventHolder> eventHolderDisruptor;
+    private final BlockingQueue<Publication> publications = new LinkedBlockingQueue<>();
+    private final AtomicLong unprocessed = new AtomicLong();
+    private final Thread publisher;
     private volatile boolean started;
 
     public OrionDisruptor(int size) {
         eventHolderDisruptor = new Disruptor<>(EventHolder::new, size, DaemonThreadFactory.INSTANCE);
+        publisher = Thread.ofPlatform().daemon(true).name("orion-event-publisher").unstarted(this::publishQueuedEvents);
     }
 
-    public void start() {
+    public synchronized void start() {
         eventHolderDisruptor.start();
+        publisher.start();
         started = true;
     }
 
-    public void publish(OrionEvent orionEvent) {
-        publish(() -> orionEvent);
+    public synchronized void publish(OrionEvent event) {
+        Objects.requireNonNull(event, "event");
+        if (!started) {
+            throw new IllegalStateException("Cannot publish Orion event while event disruptor is stopped");
+        }
+        unprocessed.incrementAndGet();
+        publications.add(new Publication(event));
     }
 
     public void publish(Supplier<OrionEvent> eventPublisher) {
-        if (!started) {
-            throw new IllegalStateException("Cannot publish Orion event before event disruptor is started");
+        publish(Objects.requireNonNull(eventPublisher, "eventPublisher").get());
+    }
+
+    private void publishQueuedEvents() {
+        try {
+            while (true) {
+                Publication publication = publications.take();
+                if (publication == STOP) return;
+                eventHolderDisruptor.getRingBuffer().publishEvent(
+                        (holder, sequence) -> holder.setOrionEvent(publication.event()));
+            }
+        } catch (InterruptedException failure) {
+            Thread.currentThread().interrupt();
+            log.error("Event publisher interrupted before ingress was drained", failure);
         }
-        eventHolderDisruptor.getRingBuffer().publishEvent(new EventTranslator<EventHolder>() {
-            @Override
-            public void translateTo(EventHolder eventHolder, long l) {
-                eventHolder.setOrionEvent(eventPublisher.get());
+    }
+
+    public void stop() throws TimeoutException {
+        synchronized (this) {
+            if (!started) return;
+            started = false;
+            publications.add(STOP);
+        }
+        boolean interrupted = false;
+        while (publisher.isAlive()) {
+            try {
+                publisher.join();
+            } catch (InterruptedException failure) {
+                interrupted = true;
+            }
+        }
+        try {
+            eventHolderDisruptor.shutdown(10, TimeUnit.SECONDS);
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt();
+        }
+    }
+
+    public void handleEventsWith(EventHandler<EventHolder> eventHandler) {
+        eventHolderDisruptor.handleEventsWith((holder, sequence, endOfBatch) -> {
+            try {
+                eventHandler.onEvent(holder, sequence, endOfBatch);
+            } finally {
+                unprocessed.decrementAndGet();
             }
         });
     }
 
-    public void stop() throws TimeoutException {
-        started = false;
-        eventHolderDisruptor.shutdown(10, TimeUnit.SECONDS);
-    }
-
-    public void handleEventsWith(EventHandler<EventHolder> eventHandler) {
-        eventHolderDisruptor.handleEventsWith(eventHandler);
-    }
-
     public long getUnprocessedLength() {
-        RingBuffer<EventHolder> ringBuffer = eventHolderDisruptor.getRingBuffer();
-        long cursor = ringBuffer.getCursor();
-        long minConsumerSequence = ringBuffer.getMinimumGatingSequence();
-
-        return cursor - minConsumerSequence;
+        return unprocessed.get();
     }
+
+    private record Publication(OrionEvent event) {}
 }

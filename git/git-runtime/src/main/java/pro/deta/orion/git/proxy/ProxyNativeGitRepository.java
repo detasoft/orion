@@ -1,6 +1,5 @@
 package pro.deta.orion.git.proxy;
 
-import pro.deta.orion.util.Subscription;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.fileapi.GitFileApi;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
@@ -20,7 +19,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 
 /** A remote Git repository backed by a local cache and the native Git client. */
 final class ProxyNativeGitRepository extends NativeGitRepository {
@@ -41,7 +39,7 @@ final class ProxyNativeGitRepository extends NativeGitRepository {
             BootstrapGitTransportFactory transportFactory,
             BootstrapGitFetcher fetcher,
             BootstrapGitPusher pusher) {
-        super(name, repository.storage(), repository.index());
+        super(name, repository.storage(), repository.index(), repository.events());
         this.location = Objects.requireNonNull(location, "location");
         this.repository = Objects.requireNonNull(repository, "repository");
         this.transportFactory = Objects.requireNonNull(transportFactory, "transportFactory");
@@ -160,8 +158,8 @@ final class ProxyNativeGitRepository extends NativeGitRepository {
     }
 
     @Override
-    public Subscription onRefUpdate(Consumer<RefUpdateResult> listener) {
-        return repository().onRefUpdate(listener);
+    public NativeGitRepository eventSource() {
+        return repository;
     }
 
     @Override

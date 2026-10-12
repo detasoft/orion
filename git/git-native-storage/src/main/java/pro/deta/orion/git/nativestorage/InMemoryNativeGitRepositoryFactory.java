@@ -1,12 +1,20 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.schema.orion.v2.RepositoryName;
 import pro.deta.orion.util.Result;
 
 import java.util.List;
+import java.util.Objects;
 
 /** Creates ephemeral repositories; their owner keeps the only registry. */
 final class InMemoryNativeGitRepositoryFactory implements NativeGitRepositoryBackend {
+    private final OrionEventManager events;
+
+    InMemoryNativeGitRepositoryFactory(OrionEventManager events) {
+        this.events = Objects.requireNonNull(events, "events");
+    }
+
     @Override
     public List<String> repositoryNames() {
         return List.of();
@@ -25,7 +33,7 @@ final class InMemoryNativeGitRepositoryFactory implements NativeGitRepositoryBac
 
     @Override
     public Result<NativeGitRepository> create(RepositoryName name) {
-        return new Result.Success<>(NativeGitRepository.createInMemory(name));
+        return new Result.Success<>(NativeGitRepository.createInMemory(name, events));
     }
 
     @Override

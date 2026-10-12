@@ -5,6 +5,7 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import org.shredzone.acme4j.Session;
 import pro.deta.orion.config.OrionConfigurationEditor;
+import pro.deta.orion.config.OrionConfigurationModification;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.config.OrionDocumentRevision;
@@ -60,7 +61,10 @@ public final class AcmeConfigurationService {
     }
 
     public View view() {
-        OrionDocumentRevision snapshot = configurationService.configuration();
+        return view(configurationService.configuration());
+    }
+
+    private View view(OrionDocumentRevision snapshot) {
         OrionAcmeConfiguration acme = snapshot.document().system().https()
                 .flatMap(OrionHttpsConfiguration::acme).orElse(null);
         String directory = acme == null ? PRESETS.getFirst().directoryUrl() : directoryUrl(acme.directoryUrl());
@@ -81,14 +85,20 @@ public final class AcmeConfigurationService {
             if (settings.revision() == null || settings.revision().isBlank()) {
                 throw new IllegalArgumentException("Configuration revision is required");
             }
-            editor.edit(new OrionRevision.Stored(settings.revision()),
-                    new ChangeMetadata(new UserEmail(userId, ""), "Configure ACME certificate issuance"))
-                .update(document -> {
-                OrionDocument candidate = updated(document, settings);
-                certificates.prepareMaterial(candidate.system().https().orElseThrow());
-                return candidate;
-            }).apply();
-            return view();
+            OrionConfigurationModification edit = editor.edit(new OrionRevision.Stored(settings.revision()),
+                    new ChangeMetadata(new UserEmail(userId, ""), "Configure ACME certificate issuance"));
+            try {
+                edit.update(document -> {
+                    OrionDocument candidate = updated(document, settings);
+                    certificates.prepareMaterial(candidate.system().https().orElseThrow());
+                    return candidate;
+                });
+                OrionDocument updated = edit.document();
+                edit.apply();
+                return view(new OrionDocumentRevision(updated, edit.revision()));
+            } finally {
+                edit.discard();
+            }
         } finally {
             if (settings.eabHmacKey() != null) Arrays.fill(settings.eabHmacKey(), '\0');
         }

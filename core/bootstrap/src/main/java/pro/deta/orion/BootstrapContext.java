@@ -1,10 +1,10 @@
 package pro.deta.orion;
 
 import pro.deta.orion.internal.ChangeMetadata;
+import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.config.OrionVersionedConfigurationStorage;
-import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.config.OrionRevision;
@@ -43,28 +43,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 public final class BootstrapContext implements AutoCloseable {
     private static final String FAILURE_MESSAGE = "Bootstrap inputs are unavailable or invalid";
 
     private final NativeGitRepositoryFactory repositoryFactory;
+    private final OrionEventManager events;
     private final OrionKeyMaterial keyMaterial;
     private final SshHostKeyCapability sshHostKeys;
-    private final Optional<OrionDocumentRevision> initialConfiguration;
 
     private BootstrapContext(
             NativeGitRepositoryFactory repositoryFactory,
+            OrionEventManager events,
             OrionKeyMaterial keyMaterial,
-            SshHostKeyCapability sshHostKeys,
-            Optional<OrionDocumentRevision> initialConfiguration) {
+            SshHostKeyCapability sshHostKeys) {
         this.repositoryFactory = repositoryFactory;
+        this.events = events;
         this.keyMaterial = keyMaterial;
         this.sshHostKeys = sshHostKeys;
-        this.initialConfiguration = initialConfiguration;
     }
 
     public static BootstrapContext open(
@@ -83,14 +79,15 @@ public final class BootstrapContext implements AutoCloseable {
     }
 
     static NativeGitRepositoryBackend createRepositoryBackend(
-            BootstrapConfiguration configuration, Map<String, String> environment, S3Transport transport) {
+            BootstrapConfiguration configuration, Map<String, String> environment, S3Transport transport,
+            OrionEventManager events) {
         String location = configuration.getStorage().getLocation();
         if (ResourceLocation.parse(location, "Storage location").scheme().value().equals("s3")) {
             return S3NativeGitRepositoryFactory.shared(location, configuration.getStorage().getEndpoint(),
-                    configuration.getStorage().getAuth(), environment, transport);
+                    configuration.getStorage().getAuth(), environment, transport, events);
         }
         ConfigurationContext context = new ConfigurationContext(configuration, environment);
-        return NativeGitRepositoryBackend.file(context.getFileGitStoragePath());
+        return NativeGitRepositoryBackend.file(context.getFileGitStoragePath(), events);
     }
 
     @TestOnly
@@ -107,17 +104,17 @@ public final class BootstrapContext implements AutoCloseable {
             NativeGitRepositoryBackend backend,
             KeyMaterialCreation creation) {
         OrionKeyMaterial keyMaterial = null;
+        OrionEventManager events = new OrionEventManager();
         S3Transport s3Transport = new S3Transport();
         NativeGitRepositoryFactory provider = null;
         NativeGitRepositoryBackend selectedBackend = backend;
         try {
             if (selectedBackend == null) {
-                selectedBackend = createRepositoryBackend(configuration, environment, s3Transport);
+                selectedBackend = createRepositoryBackend(configuration, environment, s3Transport, events);
             }
             ConfiguredNativeGitRepositoryFactory storageFactory =
-                    new ConfiguredNativeGitRepositoryFactory(selectedBackend, s3Transport);
+                    new ConfiguredNativeGitRepositoryFactory(selectedBackend, s3Transport, events);
             provider = NativeGitRepositoryFactory.bootstrap(storageFactory, environment);
-            NativeGitRepositoryFactory repositoryFactory = provider;
             BootstrapConfigurationSourceConfig configuredConfiguration =
                     repositoryConfiguration(configuration, environment);
             provider.resolveProvisional(
@@ -130,34 +127,12 @@ public final class BootstrapContext implements AutoCloseable {
                     NativeGitRepositoryFactory.MATERIAL_SOURCE,
                     configuredMaterial,
                     creation.allowed());
-            Optional<OrionDocumentRevision> initialConfiguration;
-            try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-                CompletableFuture<OrionKeyMaterial> materialInput = CompletableFuture.supplyAsync(() -> {
-                    try {
-                        return openKeyMaterial(configuration, environment, repositoryFactory.provider(),
-                                materialRepository, configuredMaterial,
-                                creation);
-                    } catch (IOException | GeneralSecurityException error) {
-                        throw new CompletionException(error);
-                    }
-                }, executor);
-                try {
-                    initialConfiguration = loadInitialConfiguration(provider, configuredConfiguration);
-                    keyMaterial = awaitMaterial(materialInput);
-                } catch (IOException | GeneralSecurityException | RuntimeException failure) {
-                    materialInput.handle((opened, error) -> {
-                        if (opened != null) {
-                            opened.close();
-                        }
-                        return null;
-                    }).join();
-                    throw failure;
-                }
-            }
+            keyMaterial = openKeyMaterial(configuration, environment, provider.provider(),
+                    materialRepository, configuredMaterial, creation);
             SshHostKeyCapability sshHostKeys = SshHostKeyLifecycle.open(
                     keyMaterial.sshHostKeyMaterial(),
                     sshHostKeyReferences(configuration));
-            return new BootstrapContext(provider, keyMaterial, sshHostKeys, initialConfiguration);
+            return new BootstrapContext(provider, events, keyMaterial, sshHostKeys);
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {
             try {
                 closeResources(s3Transport, provider == null ? null : provider.provider(), keyMaterial);
@@ -169,6 +144,10 @@ public final class BootstrapContext implements AutoCloseable {
             }
             throw new IllegalStateException(FAILURE_MESSAGE, failure);
         }
+    }
+
+    public OrionEventManager events() {
+        return events;
     }
 
     public S3Transport s3Transport() {
@@ -185,48 +164,6 @@ public final class BootstrapContext implements AutoCloseable {
 
     public NativeGitRepositoryFactory repositoryFactory() {
         return repositoryFactory;
-    }
-
-    public Optional<OrionDocumentRevision> initialConfiguration() {
-        return initialConfiguration;
-    }
-
-    private static OrionKeyMaterial awaitMaterial(CompletableFuture<OrionKeyMaterial> materialInput)
-            throws IOException, GeneralSecurityException {
-        try {
-            return materialInput.join();
-        } catch (CompletionException failure) {
-            Throwable cause = failure.getCause();
-            while (cause instanceof CompletionException nested) {
-                cause = nested.getCause();
-            }
-            if (cause instanceof IOException error) {
-                throw error;
-            }
-            if (cause instanceof GeneralSecurityException error) {
-                throw error;
-            }
-            if (cause instanceof RuntimeException error) {
-                throw error;
-            }
-            throw failure;
-        }
-    }
-
-    private static Optional<OrionDocumentRevision> loadInitialConfiguration(
-            NativeGitRepositoryFactory provider,
-            BootstrapConfigurationSourceConfig source) {
-        OrionVersionedConfigurationStorage storage =
-                new NativeGitOrionConfigurationStorage(provider, source);
-        return switch (storage.load()) {
-            case Result.Success<OrionDocumentRevision>(var file) -> Optional.of(file);
-            case Result.Failure<OrionDocumentRevision> failure -> {
-                if (failure.code() == Result.FailureCode.NOT_FOUND && source.isCreateDefaultIfMissing()) {
-                    yield Optional.empty();
-                }
-                throw new IllegalStateException("Configuration file is unavailable", failure.throwable());
-            }
-        };
     }
 
     public static Optional<OrionDocument> adoptProxies(OrionVersionedConfigurationStorage storage,

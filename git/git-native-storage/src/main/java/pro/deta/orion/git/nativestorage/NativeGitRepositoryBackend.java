@@ -1,5 +1,6 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.schema.orion.v2.RepositoryName;
 import pro.deta.orion.util.Result;
 
@@ -8,12 +9,12 @@ import java.nio.file.Path;
 
 /** Opens repositories without retaining them; ownership of successful results passes to the caller. */
 public interface NativeGitRepositoryBackend extends AutoCloseable {
-    static NativeGitRepositoryBackend file(Path rootDirectory) {
-        return new FileNativeGitRepositoryFactory(rootDirectory);
+    static NativeGitRepositoryBackend file(Path rootDirectory, OrionEventManager events) {
+        return new FileNativeGitRepositoryFactory(rootDirectory, events);
     }
 
-    static NativeGitRepositoryBackend inMemory() {
-        return new InMemoryNativeGitRepositoryFactory();
+    static NativeGitRepositoryBackend inMemory(OrionEventManager events) {
+        return new InMemoryNativeGitRepositoryFactory(events);
     }
     List<String> repositoryNames();
 
