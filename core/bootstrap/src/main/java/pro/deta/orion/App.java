@@ -3,6 +3,10 @@ package pro.deta.orion;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
+import pro.deta.orion.event.OrionEventManager;
+import pro.deta.orion.keymaterial.SshHostKeyCapability;
+import pro.deta.orion.keymaterial.SshHostKeyReference;
+import pro.deta.orion.bootstrap.config.SshHostKeyReferenceConfig;
 import pro.deta.orion.bootstrap.config.location.BootstrapConfigurationReader;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
@@ -12,6 +16,9 @@ import pro.deta.orion.util.ConfigurationContext;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
+import java.security.GeneralSecurityException;
 import java.util.function.Supplier;
 
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
@@ -75,8 +82,10 @@ public class App {
             BootstrapConfiguration configuration = reader.readConfiguration();
             OrionApplicationLifecycle.BOOTSTRAP.getLogInitializer().configureScopedLogs(
                     new ConfigurationContext(configuration).getLogDir());
+            OrionEventManager events = new OrionEventManager();
             try (BootstrapContext bootstrap = BootstrapContext.open(
-                    configuration, Map.copyOf(System.getenv()), options.keyMaterialCreation())) {
+                    configuration, Map.copyOf(System.getenv()), options.keyMaterialCreation(), events)) {
+                SshHostKeyCapability sshHostKeys = bootstrap.sshHostKeys(sshHostKeyReferences(configuration));
                 OrionComponent orionComponent = DaggerOrionComponent.builder()
                         .bootstrapConfiguration(configuration)
                         .rootPasswordReset(options.rootPasswordReset())
@@ -86,18 +95,32 @@ public class App {
                         .keyMaterialAdministrationCapability(bootstrap.keyMaterialAdministration())
                         .configurationCipherCapability(bootstrap.configurationCipher())
                         .tlsCapability(bootstrap.tlsKeyMaterial())
-                        .sshHostKeyCapability(bootstrap.sshHostKeys())
+                        .sshHostKeyCapability(sshHostKeys)
                         .nativeGitRepositoryProvider(bootstrap.repositoryFactory())
                         .configuredRepositoryFactory(bootstrap.storageFactory())
                         .s3Transport(bootstrap.s3Transport())
-                        .eventManager(bootstrap.events())
+                        .eventManager(events)
                         .build();
                 return run(orionComponent.orionApplicationLifecycle(), true);
             }
-        } catch (RuntimeException failure) {
+        } catch (IOException | GeneralSecurityException | RuntimeException failure) {
             log.error("Cannot bootstrap Orion runtime", failure);
             return 1;
         }
+    }
+
+    private static List<SshHostKeyReference> sshHostKeyReferences(BootstrapConfiguration configuration) {
+        if (configuration.getTransport().getSsh().getHostKeys() == null) {
+            throw new IllegalArgumentException("SSH host key references must not be null");
+        }
+        List<SshHostKeyReference> references = new ArrayList<>();
+        for (SshHostKeyReferenceConfig configured : configuration.getTransport().getSsh().getHostKeys()) {
+            if (configured == null) {
+                throw new IllegalArgumentException("SSH host key reference must not be null");
+            }
+            references.add(new SshHostKeyReference(configured.getAlias()));
+        }
+        return List.copyOf(references);
     }
 
     private static String usageFor(String[] args) {

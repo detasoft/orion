@@ -68,7 +68,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private final AtomicReference<char[]> plainRootToken = new AtomicReference<>();
     private volatile Subscription changeSubscription;
     private final OrionEventManager events;
-    private final Object configurationActivation = new Object();
 
     @Inject
     public OrionAccessControlServiceImpl(
@@ -95,37 +94,35 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return new AccessControlAccess(modification, orionPasswordHashingService);
     }
 
-    private void loadAccessControlOnStart() {
-        synchronized (configurationActivation) {
-            try {
-                changeSubscription = events.subscribe(ConfigurationChanged.class, event -> {
-                    if (event.storage() == configurationStorage) {
-                        onConfigurationChange(event.snapshot());
-                    }
-                });
-                switch (configurationStorage.load()) {
-                    case Result.Success<OrionDocumentRevision> success -> {
-                        if (rootPasswordReset.enabled()) {
-                            resetRootPassword(success.value());
-                        } else {
-                            activateConfiguration(success.value());
-                        }
-                    }
-                    case Result.Failure<OrionDocumentRevision> failure -> {
-                        if (failure.code() != Result.FailureCode.NOT_FOUND) {
-                            throw new IllegalStateException("Cannot load configuration", failure.throwable());
-                        }
-                        if (!createDefaultIfMissing) {
-                            throw new IllegalStateException(
-                                    "ACL not found and default ACL creation is disabled.");
-                        }
-                        resetRootPassword(new OrionDocumentRevision(initialDocument(), OrionRevision.INITIAL));
+    private synchronized void loadAccessControlOnStart() {
+        try {
+            changeSubscription = events.subscribe(ConfigurationChanged.class, event -> {
+                if (event.storage() == configurationStorage) {
+                    onConfigurationChange(event.snapshot());
+                }
+            });
+            switch (configurationStorage.load()) {
+                case Result.Success<OrionDocumentRevision> success -> {
+                    if (rootPasswordReset.enabled()) {
+                        resetRootPassword(success.value());
+                    } else {
+                        activateConfiguration(success.value());
                     }
                 }
-            } catch (RuntimeException failure) {
-                onStop();
-                throw new IllegalStateException("Configuration repository not initialized.", failure);
+                case Result.Failure<OrionDocumentRevision> failure -> {
+                    if (failure.code() != Result.FailureCode.NOT_FOUND) {
+                        throw new IllegalStateException("Cannot load configuration", failure.throwable());
+                    }
+                    if (!createDefaultIfMissing) {
+                        throw new IllegalStateException(
+                                "ACL not found and default ACL creation is disabled.");
+                    }
+                    resetRootPassword(new OrionDocumentRevision(initialDocument(), OrionRevision.INITIAL));
+                }
             }
+        } catch (RuntimeException failure) {
+            onStop();
+            throw new IllegalStateException("Configuration repository not initialized.", failure);
         }
     }
 
@@ -135,14 +132,12 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     @Override
-    public void onStop() {
-        synchronized (configurationActivation) {
-            if (changeSubscription != null) {
-                changeSubscription.close();
-                changeSubscription = null;
-            }
-            // ACL state remains available until process shutdown.
+    public synchronized void onStop() {
+        if (changeSubscription != null) {
+            changeSubscription.close();
+            changeSubscription = null;
         }
+        // ACL state remains available until process shutdown.
     }
 
     @Override
@@ -637,14 +632,12 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()), List.of(organization));
     }
 
-    private void onConfigurationChange(OrionDocumentRevision snapshot) {
-        synchronized (configurationActivation) {
-            if (changeSubscription == null || snapshot.revision().equals(configuration().revision())) return;
-            try {
-                activateConfiguration(snapshot);
-            } catch (RuntimeException failure) {
-                log.warn("Retaining the last valid ACL configuration after reload failure", failure);
-            }
+    private synchronized void onConfigurationChange(OrionDocumentRevision snapshot) {
+        if (changeSubscription == null || snapshot.revision().equals(configuration().revision())) return;
+        try {
+            activateConfiguration(snapshot);
+        } catch (RuntimeException failure) {
+            log.warn("Retaining the last valid ACL configuration after reload failure", failure);
         }
     }
 

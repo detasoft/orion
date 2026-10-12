@@ -30,7 +30,6 @@ import pro.deta.orion.bootstrap.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.bootstrap.config.KeyMaterialConfig;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
-import pro.deta.orion.transport.git.SshHostKeyLifecycle;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.ResourceLocation;
 import pro.deta.orion.util.ResourceScheme;
@@ -38,9 +37,8 @@ import pro.deta.orion.util.Result;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.security.GeneralSecurityException;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -48,34 +46,30 @@ public final class BootstrapContext implements AutoCloseable {
     private static final String FAILURE_MESSAGE = "Bootstrap inputs are unavailable or invalid";
 
     private final NativeGitRepositoryFactory repositoryFactory;
-    private final OrionEventManager events;
     private final OrionKeyMaterial keyMaterial;
-    private final SshHostKeyCapability sshHostKeys;
 
     private BootstrapContext(
             NativeGitRepositoryFactory repositoryFactory,
-            OrionEventManager events,
-            OrionKeyMaterial keyMaterial,
-            SshHostKeyCapability sshHostKeys) {
+            OrionKeyMaterial keyMaterial) {
         this.repositoryFactory = repositoryFactory;
-        this.events = events;
         this.keyMaterial = keyMaterial;
-        this.sshHostKeys = sshHostKeys;
-    }
-
-    public static BootstrapContext open(
-            BootstrapConfiguration configuration,
-            Map<String, String> environment) {
-        return open(configuration, environment, new KeyMaterialCreation(false));
     }
 
     public static BootstrapContext open(
             BootstrapConfiguration configuration,
             Map<String, String> environment,
-            KeyMaterialCreation creation) {
+            OrionEventManager events) {
+        return open(configuration, environment, new KeyMaterialCreation(false), events);
+    }
+
+    public static BootstrapContext open(
+            BootstrapConfiguration configuration,
+            Map<String, String> environment,
+            KeyMaterialCreation creation,
+            OrionEventManager events) {
         Objects.requireNonNull(configuration, "configuration");
         Objects.requireNonNull(environment, "environment");
-        return open(configuration, environment, null, creation);
+        return open(configuration, environment, null, creation, events);
     }
 
     static NativeGitRepositoryBackend createRepositoryBackend(
@@ -94,17 +88,19 @@ public final class BootstrapContext implements AutoCloseable {
     static BootstrapContext open(
             BootstrapConfiguration configuration,
             Map<String, String> environment,
-            NativeGitRepositoryBackend backend) {
-        return open(configuration, environment, backend, new KeyMaterialCreation(false));
+            NativeGitRepositoryBackend backend,
+            OrionEventManager events) {
+        return open(configuration, environment, backend, new KeyMaterialCreation(false), events);
     }
 
     static BootstrapContext open(
             BootstrapConfiguration configuration,
             Map<String, String> environment,
             NativeGitRepositoryBackend backend,
-            KeyMaterialCreation creation) {
+            KeyMaterialCreation creation,
+            OrionEventManager events) {
+        Objects.requireNonNull(events, "events");
         OrionKeyMaterial keyMaterial = null;
-        OrionEventManager events = new OrionEventManager();
         S3Transport s3Transport = new S3Transport();
         NativeGitRepositoryFactory provider = null;
         NativeGitRepositoryBackend selectedBackend = backend;
@@ -129,10 +125,7 @@ public final class BootstrapContext implements AutoCloseable {
                     creation.allowed());
             keyMaterial = openKeyMaterial(configuration, environment, provider.provider(),
                     materialRepository, configuredMaterial, creation);
-            SshHostKeyCapability sshHostKeys = SshHostKeyLifecycle.open(
-                    keyMaterial.sshHostKeyMaterial(),
-                    sshHostKeyReferences(configuration));
-            return new BootstrapContext(provider, events, keyMaterial, sshHostKeys);
+            return new BootstrapContext(provider, keyMaterial);
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {
             try {
                 closeResources(s3Transport, provider == null ? null : provider.provider(), keyMaterial);
@@ -144,10 +137,6 @@ public final class BootstrapContext implements AutoCloseable {
             }
             throw new IllegalStateException(FAILURE_MESSAGE, failure);
         }
-    }
-
-    public OrionEventManager events() {
-        return events;
     }
 
     public S3Transport s3Transport() {
@@ -243,8 +232,9 @@ public final class BootstrapContext implements AutoCloseable {
         return keyMaterial.tls();
     }
 
-    public SshHostKeyCapability sshHostKeys() {
-        return sshHostKeys;
+    public SshHostKeyCapability sshHostKeys(List<SshHostKeyReference> references)
+            throws IOException, GeneralSecurityException {
+        return keyMaterial.sshHostKeys(references);
     }
 
     @Override
@@ -304,20 +294,6 @@ public final class BootstrapContext implements AutoCloseable {
                     creation);
         }
         return OrionKeyMaterialFactory.open(configuration, environment, creation);
-    }
-
-    private static List<SshHostKeyReference> sshHostKeyReferences(BootstrapConfiguration configuration) {
-        if (configuration.getTransport().getSsh().getHostKeys() == null) {
-            throw new IllegalArgumentException("SSH host key references must not be null");
-        }
-        List<SshHostKeyReference> references = new ArrayList<>();
-        for (var configured : configuration.getTransport().getSsh().getHostKeys()) {
-            if (configured == null) {
-                throw new IllegalArgumentException("SSH host key reference must not be null");
-            }
-            references.add(new SshHostKeyReference(configured.getAlias()));
-        }
-        return List.copyOf(references);
     }
 
     private static Path directFileRoot(

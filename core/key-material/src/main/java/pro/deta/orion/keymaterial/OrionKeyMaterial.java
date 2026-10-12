@@ -294,68 +294,96 @@ public final class OrionKeyMaterial implements AutoCloseable {
         };
     }
 
-    public SshHostKeyMaterial sshHostKeyMaterial() {
-        return new SshHostKeyMaterial() {
-            @Override
-            public KeyMaterialScope.Cluster scope() {
-                return clusterScope;
-            }
-
-            @Override
-            public List<KeyMaterialDescriptor> available() throws GeneralSecurityException {
-                return owner.privateKeyDescriptors(KeyMaterialPurpose.SSH_HOST, clusterScope);
-            }
-
-            @Override
-            public void generateIfMissing(Map<KeyMaterialDescriptor, Integer> keySizes)
-                    throws IOException, GeneralSecurityException {
-                if (keySizes == null) {
-                    throw new IllegalArgumentException("SSH host key sizes must not be null");
-                }
-                synchronized (owner) {
-                    for (var entry : keySizes.entrySet()) {
-                        KeyMaterialDescriptor descriptor = entry.getKey();
-                        requireSshHostKey(descriptor);
-                        if (entry.getValue() == null || entry.getValue() < 0) {
-                            throw new IllegalArgumentException("SSH host key size must not be negative");
-                        }
-                        if (owner.containsAlias(descriptor.alias().value())) {
-                            owner.validateExisting(descriptor);
-                        }
-                    }
-                    boolean changed = false;
-                    for (var entry : keySizes.entrySet()) {
-                        KeyMaterialDescriptor descriptor = entry.getKey();
-                        if (!owner.containsAlias(descriptor.alias().value())) {
-                            owner.generateKeyIfMissing(descriptor, entry.getValue());
-                            changed = true;
-                        }
-                    }
-                    if (changed) {
-                        owner.save();
+    public SshHostKeyCapability sshHostKeys(List<SshHostKeyReference> references)
+            throws IOException, GeneralSecurityException {
+        if (references == null) {
+            throw new IllegalArgumentException("SSH host key references must not be null");
+        }
+        synchronized (owner) {
+            List<KeyMaterialDescriptor> available = owner.privateKeyDescriptors(
+                    KeyMaterialPurpose.SSH_HOST, clusterScope);
+            if (references.isEmpty() && available.isEmpty()) {
+                KeyMaterialDescriptor rsa = defaultSshHostKey("ssh-host-rsa", KeyMaterialAlgorithm.RSA);
+                KeyMaterialDescriptor ec = defaultSshHostKey("ssh-host-ec", KeyMaterialAlgorithm.EC);
+                for (KeyMaterialDescriptor descriptor : List.of(rsa, ec)) {
+                    if (owner.containsAlias(descriptor.alias().value())) {
+                        owner.validateExisting(descriptor);
                     }
                 }
+                owner.generateKeyIfMissing(rsa, KeyMaterialConstants.RSA_KEY_SIZE_BITS);
+                owner.generateKeyIfMissing(ec, KeyMaterialConstants.EC_KEY_SIZE_BITS);
+                owner.save();
+                available = owner.privateKeyDescriptors(KeyMaterialPurpose.SSH_HOST, clusterScope);
             }
+            List<KeyMaterialDescriptor> selected = references.isEmpty()
+                    ? available : selectSshHostKeys(available, references);
+            return KeyMaterialCapabilities.open(owner, selected).sshHostKeys(selected);
+        }
+    }
 
-            @Override
-            public SshHostKeyCapability load(List<KeyMaterialDescriptor> descriptors)
-                    throws GeneralSecurityException {
-                if (descriptors == null) {
-                    throw new IllegalArgumentException("SSH host key descriptors must not be null");
-                }
-                for (KeyMaterialDescriptor descriptor : descriptors) {
-                    requireSshHostKey(descriptor);
-                }
-                return KeyMaterialCapabilities.open(owner, descriptors).sshHostKeys(descriptors);
-            }
+    private KeyMaterialDescriptor defaultSshHostKey(String logicalAlias, KeyMaterialAlgorithm algorithm) {
+        KeyMaterialVersion version = new KeyMaterialVersion(1);
+        return new KeyMaterialDescriptor(new KeyMaterialAlias(logicalAlias + "-v" + version.value()),
+                KeyMaterialPurpose.SSH_HOST, algorithm, version, clusterScope);
+    }
 
-            private void requireSshHostKey(KeyMaterialDescriptor descriptor) {
-                if (descriptor == null || descriptor.purpose() != KeyMaterialPurpose.SSH_HOST) {
-                    throw new IllegalArgumentException("SSH host key descriptor must have SSH_HOST purpose");
-                }
-                requireOwnerScope(descriptor.scope());
+    private List<KeyMaterialDescriptor> selectSshHostKeys(List<KeyMaterialDescriptor> available,
+            List<SshHostKeyReference> references) throws GeneralSecurityException {
+        List<KeyMaterialDescriptor> selected = new ArrayList<>();
+        for (SshHostKeyReference reference : references) {
+            if (reference == null) {
+                throw new IllegalArgumentException("SSH host key reference must not be null");
             }
-        };
+            KeyMaterialDescriptor match = findExactSshHostKey(available, reference.alias());
+            if (match == null && !isConcreteSshHostKeyAlias(reference.alias())) {
+                match = findLatestSshHostKey(available, reference.alias());
+            }
+            if (match == null) {
+                throw new GeneralSecurityException("SSH host key reference not found: " + reference.alias());
+            }
+            if (selected.contains(match)) {
+                throw new IllegalArgumentException("Duplicate SSH host key reference: " + reference.alias());
+            }
+            selected.add(match);
+        }
+        return List.copyOf(selected);
+    }
+
+    private KeyMaterialDescriptor findExactSshHostKey(List<KeyMaterialDescriptor> available, String alias) {
+        for (KeyMaterialDescriptor candidate : available) {
+            if (alias.equals(candidate.alias().value())) return candidate;
+        }
+        return null;
+    }
+
+    private KeyMaterialDescriptor findLatestSshHostKey(List<KeyMaterialDescriptor> available, String alias)
+            throws GeneralSecurityException {
+        KeyMaterialDescriptor match = null;
+        for (KeyMaterialDescriptor candidate : available) {
+            if (alias.equals(sshHostKeyLogicalAlias(candidate))
+                    && (match == null || candidate.version().compareTo(match.version()) > 0)) {
+                match = candidate;
+            }
+        }
+        return match;
+    }
+
+    private boolean isConcreteSshHostKeyAlias(String alias) {
+        int versionMarker = alias.lastIndexOf("-v");
+        if (versionMarker <= 0 || versionMarker + 2 == alias.length()) return false;
+        for (int index = versionMarker + 2; index < alias.length(); index++) {
+            if (!Character.isDigit(alias.charAt(index))) return false;
+        }
+        return true;
+    }
+
+    private String sshHostKeyLogicalAlias(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
+        String suffix = "-v" + descriptor.version().value();
+        String concreteAlias = descriptor.alias().value();
+        if (!concreteAlias.endsWith(suffix) || concreteAlias.length() == suffix.length()) {
+            throw new GeneralSecurityException("SSH host key alias does not identify its version: " + concreteAlias);
+        }
+        return concreteAlias.substring(0, concreteAlias.length() - suffix.length());
     }
 
     @Override
