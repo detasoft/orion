@@ -61,7 +61,8 @@ final class FileGitCompatibilityExporter implements GitCompatibilityExporter {
         }
         Path temporary = Files.createTempDirectory(parent, ".orion-git-export-");
         boolean published = false;
-        try (NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(sourceStore)) {
+        try (NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(
+                sourceStore, new pro.deta.orion.event.OrionEventManager())) {
             if (!provider.exists(repositoryName)) {
                 throw new IOException("Source repository does not exist: " + repositoryName);
             }
