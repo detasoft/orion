@@ -129,7 +129,9 @@ public class SshCommandFactory implements CommandFactory {
             try {
                 OrionDocumentRevision snapshot = accessControlService.configuration();
                 String email = "root@orion.pro";
-                for (pro.deta.orion.schema.acl.User user : snapshot.document().system().accessControl().users()) {
+                for (pro.deta.orion.schema.acl.User user : snapshot.result()
+                        .valueOrFailure("Cannot read configuration document")
+                        .system().accessControl().users()) {
                     if (user.id().equalsIgnoreCase("root")) {
                         email = java.util.Objects.requireNonNullElse(user.email(), email);
                         break;

@@ -24,12 +24,12 @@ public class OrionAdminAccessControlRoute extends BaseAdminRoute {
 
     @Override
     protected OrionHttpResponse doGet(HttpServletRequest req) throws IOException {
-        OrionDocumentRevision snapshot = storage.load().valueOrFailure("Cannot load configuration for export");
+        OrionDocumentRevision snapshot = storage.load();
         if (!(snapshot.revision() instanceof OrionRevision.Stored revision)) {
             throw new IllegalStateException("Configuration revision is unavailable");
         }
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            codec.write(snapshot.document(), output);
+            codec.write(snapshot.result().valueOrFailure("Cannot read configuration document"), output);
             return OrionHttpResponse.resource(SC_OK, output.toByteArray(), OrionHttpResponse.XML_CONTENT_TYPE)
                     .withHeader("ETag", "\"" + revision.value() + "\"");
         }

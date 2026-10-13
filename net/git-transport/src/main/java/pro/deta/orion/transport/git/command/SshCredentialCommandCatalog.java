@@ -150,7 +150,9 @@ public final class SshCredentialCommandCatalog {
         try {
             OrionDocumentRevision snapshot = accessControlService.configuration();
             String email = "";
-            for (User user : snapshot.document().system().accessControl().users()) {
+            for (User user : snapshot.result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().accessControl().users()) {
                 if (user.id().equalsIgnoreCase(userId)) {
                     email = Objects.requireNonNullElse(user.email(), "");
                     break;

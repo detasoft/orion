@@ -46,7 +46,9 @@ public class OrionAdminCreateOrUpdateUserRoute extends BaseAdminRoute {
     protected OrionHttpResponse doGet(HttpServletRequest req) {
         OrionDocumentRevision snapshot = accessControlService.configuration();
         List<Map<String, Object>> users = new ArrayList<>();
-        for (User user : snapshot.document().system().accessControl().users()) {
+        for (User user : snapshot.result()
+                .valueOrFailure("Cannot read configuration document")
+                .system().accessControl().users()) {
             List<Map<String, String>> bindings = new ArrayList<>();
             for (Credential credential : user.credentials()) {
                 if (credential.type() == CredentialType.OIDC_SUBJECT) {

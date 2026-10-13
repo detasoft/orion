@@ -62,7 +62,8 @@ class AcmeConfigurationServiceTest {
                     owner.configurationMaterial(), owner.serverIdentity());
             desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("r1"));
             ConfigurationSecrets secrets = new ConfigurationSecrets(
-                    () -> desired.acl().configuration().document(), owner.configurationCipher());
+                    () -> desired.acl().configuration().result()
+                            .valueOrFailure("Cannot read configuration document"), owner.configurationCipher());
             OrionConfigurationEditor editor = desired.editor();
             OrionAccessControlServiceImpl acl = desired.acl();
             List<KeyPair> issuedKeys = new ArrayList<>();
@@ -89,7 +90,7 @@ class AcmeConfigurationServiceTest {
             AcmeConfigurationService.View view = service.save(new AcmeConfigurationService.Settings("r1",
                     "letsencrypt", "", "admin@example.test", List.of("example.test"), "", null, reference), "root");
             assertThat(view.accountMaterial()).isEqualTo(reference);
-            assertThat(desired.stored().document()
+            assertThat(desired.stored().result().valueOrFailure("Cannot read configuration document")
                     .system().https().orElseThrow().acme().orElseThrow().accountMaterial()).contains(reference);
             EVENTS.await();
             assertThat(service.view().accountMaterial()).isEqualTo(reference);
@@ -147,7 +148,8 @@ class AcmeConfigurationServiceTest {
                     owner.configurationMaterial(), owner.serverIdentity());
             desired.publish(initial, Optional.of("r1"));
             ConfigurationSecrets secrets = new ConfigurationSecrets(
-                    () -> desired.acl().configuration().document(), owner.configurationCipher());
+                    () -> desired.acl().configuration().result()
+                            .valueOrFailure("Cannot read configuration document"), owner.configurationCipher());
             AcmeConfigurationService service = new AcmeConfigurationService(desired.acl(), secrets, null,
                     new AcmeCertificateService(bootstrap, desired.acl(), owner.acme(), null, secrets),
                     owner.configurationMaterial(), bootstrap);
@@ -198,7 +200,8 @@ class AcmeConfigurationServiceTest {
                     owner.configurationMaterial(), owner.serverIdentity());
             desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("r1"));
             ConfigurationSecrets secrets = new ConfigurationSecrets(
-                    () -> desired.acl().configuration().document(), owner.configurationCipher());
+                    () -> desired.acl().configuration().result()
+                            .valueOrFailure("Cannot read configuration document"), owner.configurationCipher());
             OrionConfigurationEditor editor = desired.editor();
             OrionAccessControlServiceImpl acl = desired.acl();
             List<KeyPair> accountKeys = new ArrayList<>();
@@ -233,7 +236,9 @@ class AcmeConfigurationServiceTest {
 
             assertThat(result.revision()).isEqualTo("saved-1");
             assertThat(result.eabConfigured()).isTrue();
-            assertThat(desired.stored().document().system().secrets())
+            assertThat(desired.stored().result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().secrets())
                     .extracting(pro.deta.orion.schema.orion.v2.ConfigurationSecret::envelope)
                     .allSatisfy(value -> assertThat(value).doesNotContain(EAB_KEY));
             EVENTS.await();
@@ -291,7 +296,8 @@ class AcmeConfigurationServiceTest {
                     owner.configurationCipher(), owner.configurationMaterial(), owner.serverIdentity());
             desired.publish(initial, Optional.of("r1"));
             ConfigurationSecrets secrets = new ConfigurationSecrets(
-                    () -> desired.acl().configuration().document(), owner.configurationCipher());
+                    () -> desired.acl().configuration().result()
+                            .valueOrFailure("Cannot read configuration document"), owner.configurationCipher());
             AcmeCertificateService certificates = new AcmeCertificateService(
                     bootstrap, desired.acl(), owner.acme(), null, secrets);
             AcmeConfigurationService service = new AcmeConfigurationService(desired.acl(), secrets, null,
@@ -327,7 +333,8 @@ class AcmeConfigurationServiceTest {
         desired.publish(initial, Optional.of("r1"));
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             ConfigurationSecrets secrets = new ConfigurationSecrets(
-                    () -> desired.acl().configuration().document(), owner.configurationCipher());
+                    () -> desired.acl().configuration().result()
+                            .valueOrFailure("Cannot read configuration document"), owner.configurationCipher());
             AcmeConfigurationService service =
                     new AcmeConfigurationService(
                             desired.acl(),

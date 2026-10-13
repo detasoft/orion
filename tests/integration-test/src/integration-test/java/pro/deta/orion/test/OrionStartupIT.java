@@ -152,7 +152,7 @@ class OrionStartupIT {
 
         try (StartedOrion orion = startServerWithConfig(configuration)) {
             OrionDocumentRevision configurationFile = orion.accessControlService().configuration();
-            loadedDocument = configurationFile.document();
+            loadedDocument = configurationFile.result().valueOrFailure("Cannot read configuration document");
 
             assertThat(hasUser(loadedDocument.system().accessControl(), "remote-user")).isTrue();
             assertThat(loadedDocument.system().proxies()).isEmpty();

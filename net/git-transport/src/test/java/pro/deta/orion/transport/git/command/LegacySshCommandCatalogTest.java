@@ -452,9 +452,9 @@ class LegacySshCommandCatalogTest {
         @Override
         public OrionDocumentRevision configuration() {
             return new OrionDocumentRevision(
-                    pro.deta.orion.schema.orion.v2.OrionDocument.withAccessControl(
-                            new pro.deta.orion.schema.acl.AccessControl()),
-                    pro.deta.orion.config.OrionRevision.INITIAL);
+                    Result.of(pro.deta.orion.schema.orion.v2.OrionDocument.withAccessControl(
+                            new pro.deta.orion.schema.acl.AccessControl())),
+                    new OrionRevision.Absent());
         }
     }
 
@@ -494,12 +494,12 @@ class LegacySshCommandCatalogTest {
         @Override
         public OperatorQueryResult<List<OperatorDomainViews.RepositoryView>> repositories() {
             return new OperatorQueryResult.AvailableSnapshot<>(List.of(new OperatorDomainViews.RepositoryView(
-                    "project",
-                    java.util.Optional.of("project"),
-                    "project",
+                                    "project",
+                                    Optional.of("project"),
+                                    "project",
                     new Head.Symbolic(new RefId("refs/heads/main")),
-                    1,
-                    java.util.Optional.empty())));
+                                    1,
+                                    Optional.empty())));
         }
 
         @Override

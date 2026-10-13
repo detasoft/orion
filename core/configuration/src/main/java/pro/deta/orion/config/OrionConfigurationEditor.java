@@ -13,7 +13,7 @@ import java.security.GeneralSecurityException;
 import java.util.Objects;
 import java.util.function.Consumer;
 
-/** Owns configuration candidates and their single persistence boundary. */
+/** Owns configuration reads and candidates, saving against the revision captured for each edit. */
 @Singleton
 public final class OrionConfigurationEditor {
     private final OrionVersionedConfigurationStorage storage;
@@ -31,9 +31,15 @@ public final class OrionConfigurationEditor {
         this.materialScope = KeyMaterialScope.cluster(configuration.getBootstrap().getKeyMaterial().getClusterId());
     }
 
-    public OrionConfigurationModification edit(OrionRevision expectedRevision, ChangeMetadata metadata) {
+    public OrionDocumentRevision load() {
+        return storage.load();
+    }
+
+    public OrionConfigurationModification edit(
+            OrionRevision expectedRevision, ChangeMetadata metadata) {
         Objects.requireNonNull(expectedRevision, "expectedRevision");
-        OrionDocumentRevision snapshot = storage.load().valueOrFailure("Cannot load configuration for update");
+        OrionDocumentRevision snapshot = load();
+        snapshot.result().failOnFailure("Cannot load configuration for update");
         if (!snapshot.revision().equals(expectedRevision)) {
             throw new OrionConfigurationConcurrentUpdateException("Configuration revision changed", null);
         }
@@ -43,13 +49,18 @@ public final class OrionConfigurationEditor {
     public OrionConfigurationModification edit(OrionDocumentRevision snapshot, ChangeMetadata metadata) {
         Objects.requireNonNull(metadata, "metadata");
         OrionDocument document = document(snapshot).valueOrFailure("Cannot validate configuration for update");
-        return new OrionConfigurationModification(new OrionDocumentRevision(document, snapshot.revision()),
+        return new OrionConfigurationModification(
+                new OrionDocumentRevision(Result.of(document), snapshot.revision()),
                 updated -> storage.save(snapshot.revision(), validateConfiguration(updated), metadata));
     }
 
     public Result<OrionDocument> document(OrionDocumentRevision snapshot) {
+        if (snapshot.result() instanceof Result.Failure<OrionDocument> failure) {
+            return failure;
+        }
         try {
-            OrionDocument document = validateConfiguration(snapshot.document());
+            OrionDocument document = validateConfiguration(snapshot.result()
+                    .valueOrFailure("Cannot read configuration document"));
             return new Result.Success<>(document);
         } catch (RuntimeException failure) {
             return new Result.Failure<>(Result.FailureCode.GENERAL,

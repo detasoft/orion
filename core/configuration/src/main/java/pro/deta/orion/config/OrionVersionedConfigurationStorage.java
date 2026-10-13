@@ -2,13 +2,15 @@ package pro.deta.orion.config;
 
 import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
-import pro.deta.orion.util.Result;
 
-/** Stores configuration documents together with their repository revision. */
+/**
+ * Reads document results with independent storage revisions and saves against an expected revision.
+ * Reading throws if the storage revision cannot be determined; Absent means confirmed absence.
+ */
 public interface OrionVersionedConfigurationStorage {
-    Result<OrionDocumentRevision> load();
+    OrionDocumentRevision load();
 
-    Result<OrionDocumentRevision> load(OrionRevision.Stored revision);
+    OrionDocumentRevision load(OrionRevision.Stored revision);
 
     OrionRevision save(OrionRevision expectedRevision, OrionDocument document, ChangeMetadata metadata);
 }

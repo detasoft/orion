@@ -1,4 +1,5 @@
 package pro.deta.orion.transport.git.command;
+import pro.deta.orion.util.Result;
 import pro.deta.orion.acl.AccessControlAccess;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -243,7 +244,12 @@ class SshCredentialCommandCatalogTest {
         @Override
         public AccessControlAccess createAccess(OrionRevision revision, ChangeMetadata metadata) {
             return new AccessControlAccess(
-                    new OrionConfigurationModification(configuration(), document -> revision),
+                    new OrionConfigurationModification(
+                            configuration(),
+                            document ->
+                                    revision instanceof OrionRevision.Stored
+                                            ? revision
+                                            : new OrionRevision.Stored("saved")),
                     new OrionPasswordHashingService()) {
 
                 @Override
@@ -313,9 +319,9 @@ class SshCredentialCommandCatalogTest {
         @Override
         public OrionDocumentRevision configuration() {
             return new OrionDocumentRevision(
-                    pro.deta.orion.schema.orion.v2.OrionDocument.withAccessControl(
-                            new pro.deta.orion.schema.acl.AccessControl()),
-                    pro.deta.orion.config.OrionRevision.INITIAL);
+                    Result.of(pro.deta.orion.schema.orion.v2.OrionDocument.withAccessControl(
+                            new pro.deta.orion.schema.acl.AccessControl())),
+                    new OrionRevision.Absent());
         }
     }
 }

@@ -305,7 +305,9 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
     }
 
     private Optional<OrionHttpsConfiguration> httpsConfiguration() {
-        return configurationService.configuration().document().system().https();
+        return configurationService.configuration().result()
+                .valueOrFailure("Cannot read configuration document")
+                .system().https();
     }
 
     private TlsMaterialConfiguration tlsMaterial(OrionHttpsConfiguration https) {

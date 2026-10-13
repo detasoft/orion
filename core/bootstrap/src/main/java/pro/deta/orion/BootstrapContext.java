@@ -4,11 +4,11 @@ import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
-import pro.deta.orion.config.OrionVersionedConfigurationStorage;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.config.OrionConfigurationEditor;
+import pro.deta.orion.config.OrionConfigurationModification;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import pro.deta.orion.git.s3.S3NativeGitRepositoryFactory;
@@ -155,30 +155,30 @@ public final class BootstrapContext implements AutoCloseable {
         return repositoryFactory;
     }
 
-    public static Optional<OrionDocument> adoptProxies(OrionVersionedConfigurationStorage storage,
+    public static Optional<OrionDocumentRevision> adoptProxies(
             OrionConfigurationEditor editor,
-            NativeGitRepositoryFactory repositoryProvider, ConfigurationCipherCapability cipher,
+            NativeGitRepositoryFactory repositoryProvider,
+            ConfigurationCipherCapability cipher,
             OrionDocumentRevision approved) {
-        Objects.requireNonNull(storage, "configuration storage");
+        Objects.requireNonNull(editor, "configuration editor");
         Objects.requireNonNull(approved, "approved configuration");
         RuntimeException lastSaveFailure = null;
         for (int attempt = 0; attempt <= 3; attempt++) {
-            Result<OrionDocumentRevision> loaded = storage.load();
-            if (!(loaded instanceof Result.Success<OrionDocumentRevision> success)) {
+            OrionDocumentRevision file = editor.load();
+            if (file.result().isFailure()) {
                 return Optional.empty();
             }
-            OrionDocumentRevision file = success.value();
             if (!file.revision().equals(approved.revision())) {
                 return Optional.empty();
             }
-            OrionDocument current = file.document();
-            if (file.revision() instanceof OrionRevision.Initial) {
+            OrionDocument current = file.result().valueOrFailure("Cannot read configuration document");
+            if (file.revision() instanceof OrionRevision.Absent) {
                 throw new IllegalStateException("Proxy adoption requires a configuration revision");
             }
             ConfigurationSecrets secrets = new ConfigurationSecrets(() -> current, cipher);
             OrionDocument candidate = repositoryProvider.adoptProvisional(current, secrets);
             if (candidate == current) {
-                return Optional.of(current);
+                return Optional.of(file);
             }
             if (lastSaveFailure != null && !(lastSaveFailure instanceof OrionConfigurationConcurrentUpdateException)) {
                 throw lastSaveFailure;
@@ -186,21 +186,29 @@ public final class BootstrapContext implements AutoCloseable {
             if (attempt == 3) {
                 throw new IllegalStateException("Proxy configuration kept changing during adoption", lastSaveFailure);
             }
-            Result<OrionDocumentRevision> prepared = storage.load();
-            if (!(prepared instanceof Result.Success<OrionDocumentRevision> preparedSuccess)) {
+            OrionDocumentRevision preparedFile = editor.load();
+            if (preparedFile.result().isFailure()) {
                 return Optional.empty();
             }
-            OrionDocumentRevision preparedFile = preparedSuccess.value();
-            if (preparedFile.revision() instanceof OrionRevision.Initial
-                    || !file.document().equals(preparedFile.document())) {
+            if (preparedFile.revision() instanceof OrionRevision.Absent
+                    || !file.result()
+                            .valueOrFailure("Cannot read configuration document")
+                            .equals(preparedFile.result()
+                            .valueOrFailure("Cannot read configuration document"))) {
                 return Optional.empty();
             }
             try {
-                editor.edit(preparedFile,
-                    new ChangeMetadata(UserEmail.EMPTY, "Adopt bootstrap Git proxies"))
-                    .update(ignored -> candidate)
-                    .apply();
-                return Optional.of(candidate);
+                OrionConfigurationModification modification =
+                        editor.edit(
+                                preparedFile,
+                                new ChangeMetadata(UserEmail.EMPTY, "Adopt bootstrap Git proxies"));
+                try {
+                    modification.update(ignored -> candidate).apply();
+                    return Optional.of(
+                            new OrionDocumentRevision(Result.of(candidate), modification.revision()));
+                } finally {
+                    modification.discard();
+                }
             } catch (RuntimeException failure) {
                 lastSaveFailure = failure;
             }

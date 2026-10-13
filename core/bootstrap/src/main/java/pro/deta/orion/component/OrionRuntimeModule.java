@@ -68,7 +68,7 @@ public class OrionRuntimeModule {
 
     @Provides
     @Named("bootstrap-proxies")
-    static Runnable bootstrapProxies(OrionVersionedConfigurationStorage storage,
+    static Runnable bootstrapProxies(
             ConfiguredNativeGitRepositoryFactory configured,
             NativeGitRepositoryFactory provider, ConfigurationCipherCapability cipher,
             ConfigurationSecrets secrets, OrionAccessControlService configurationService, OrionConfigurationEditor editor,
@@ -77,17 +77,25 @@ public class OrionRuntimeModule {
             BiFunction<ProxySshConnection, HostKeyRejectedException, Decision> hostKeyDecisions) {
         return () -> {
             provider.connectionFailures(connectionFailures, hostKeyDecisions);
-            Optional<OrionDocument> adopted = BootstrapContext.adoptProxies(
-                    storage, editor, provider, cipher, configurationService.configuration());
+            Optional<OrionDocumentRevision> adopted =
+                    BootstrapContext.adoptProxies(
+                            editor, provider, cipher, configurationService.configuration());
             if (adopted.isPresent() && !OrionUtils.waitForCondition(
-                    () -> configurationService.configuration().document().equals(adopted.orElseThrow()))) {
+                            () ->
+                                    configurationService
+                                            .configuration()
+                                            .revision()
+                                            .equals(adopted.orElseThrow().revision()))) {
                 throw new IllegalStateException("Adopted bootstrap configuration was not activated");
             }
-            configured.activate(() -> configurationService.configuration().document(), secrets,
+            configured.activate(() -> configurationService.configuration().result()
+                    .valueOrFailure("Cannot read configuration document"), secrets,
                     provider::referencesBootstrapRepository);
-            provider.activate(() -> configurationService.configuration().document(), secrets, adopted.isEmpty());
+            provider.activate(() -> configurationService.configuration().result()
+                    .valueOrFailure("Cannot read configuration document"), secrets, adopted.isEmpty());
             OrionDocumentRevision snapshot = configurationService.configuration();
-            for (BootstrapChange change : provider.bootstrapChanges(snapshot.document())) {
+            for (BootstrapChange change : provider.bootstrapChanges(snapshot.result()
+                    .valueOrFailure("Cannot read configuration document"))) {
                 Decision decision = bootstrapDecision(change,
                         actor -> saveBootstrapConnection(editor, configurationService.configuration(), change, actor));
                 decisions.register(decision).valueOrFailure("Cannot register bootstrap connection decision");
@@ -166,8 +174,12 @@ public class OrionRuntimeModule {
                 throw new IllegalStateException("Rejected host key belongs to another server", rejected);
             }
             OrionDocumentRevision snapshot = configurationService.configuration();
-            if (!snapshot.document().system().proxies().contains(binding)
-                    || !snapshot.document().system().connections().contains(connection)) {
+            if (!snapshot.result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().proxies().contains(binding)
+                    || !snapshot.result()
+                            .valueOrFailure("Cannot read configuration document")
+                            .system().connections().contains(connection)) {
                 throw new OrionConfigurationConcurrentUpdateException("Connection configuration changed", rejected);
             }
             String key = PublicKeyEntry.toString(rejected.serverKey());
@@ -228,7 +240,8 @@ public class OrionRuntimeModule {
     @Singleton
     static ConfigurationSecrets configurationSecrets(OrionAccessControlService configurationService,
             ConfigurationCipherCapability cipher) {
-        return new ConfigurationSecrets(() -> configurationService.configuration().document(), cipher);
+        return new ConfigurationSecrets(() -> configurationService.configuration().result()
+                .valueOrFailure("Cannot read configuration document"), cipher);
     }
 
     @Provides

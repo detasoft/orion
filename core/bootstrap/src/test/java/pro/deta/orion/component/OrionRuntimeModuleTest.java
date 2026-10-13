@@ -1,7 +1,5 @@
 package pro.deta.orion.component;
 
-
-
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -250,7 +248,11 @@ class OrionRuntimeModuleTest {
                 List.of(), List.of(), grants);
         OrionDocument.Repository repository = new OrionDocument.Repository("api", "API",
                 OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
-                List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        Optional.empty());
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("platform"), "Platform",
                 List.of(), List.of(), List.of(repository));
         return new OrionDocument(new OrionDocument.SystemConfiguration(
@@ -302,13 +304,14 @@ class OrionRuntimeModuleTest {
         OrionVersionedConfigurationStorage storage = runtimeOrionVersionedConfigurationStorage(configuration);
 
         storage.save(
-                OrionRevision.INITIAL,
+                new OrionRevision.Absent(),
                 OrionDocument.withAccessControl(accessControlWithUser("native-user")),
                 new ChangeMetadata(new UserEmail("tester", "tester@example.test"), "native acl"));
 
-        OrionDocumentRevision snapshot =
-                storage.load().valueOrFailure("ACL should load from local storage");
-        assertEquals("native-user", snapshot.document().system().accessControl().users().getFirst().id());
+        OrionDocumentRevision snapshot = storage.load();
+        assertEquals("native-user", snapshot.result()
+                .valueOrFailure("Cannot read configuration document")
+                .system().accessControl().users().getFirst().id());
     }
 
     @Test
@@ -319,7 +322,7 @@ class OrionRuntimeModuleTest {
 
         OrionVersionedConfigurationStorage storage = resolvedStorage(configuration, provider);
         storage.save(
-                OrionRevision.INITIAL,
+                new OrionRevision.Absent(),
                 OrionDocument.withAccessControl(accessControlWithUser("versioned-user")),
                 new ChangeMetadata(UserEmail.EMPTY, "versioned acl"));
 
@@ -328,8 +331,7 @@ class OrionRuntimeModuleTest {
         assertEquals(
                 "versioned-user",
                 storage.load()
-                        .valueOrFailure("ACL should load")
-                        .document()
+                        .result().valueOrFailure("Cannot read configuration document")
                         .system()
                         .accessControl()
                         .users()
@@ -379,9 +381,9 @@ class OrionRuntimeModuleTest {
 
     private void assertStorageLoadsUser(OrionVersionedConfigurationStorage storage, String userId)
             throws Exception {
-        OrionDocumentRevision snapshot = storage.load().valueOrFailure("ACL should load from storage");
+        OrionDocumentRevision snapshot = storage.load();
         AccessControl accessControl =
-                snapshot.document().system().accessControl();
+                snapshot.result().valueOrFailure("Cannot read configuration document").system().accessControl();
         assertEquals(1, accessControl.users().size());
         assertEquals(userId, accessControl.users().getFirst().id());
     }

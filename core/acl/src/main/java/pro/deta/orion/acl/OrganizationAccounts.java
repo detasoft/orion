@@ -93,7 +93,9 @@ public final class OrganizationAccounts {
     }
 
     public OrionDocument.Organization organization(OrganizationId id) {
-        for (OrionDocument.Organization organization : configurationService.configuration().document().organizations()) {
+        for (OrionDocument.Organization organization : configurationService.configuration().result()
+                .valueOrFailure("Cannot read configuration document")
+                .organizations()) {
             if (organization.id().equals(id)) {
                 return organization;
             }

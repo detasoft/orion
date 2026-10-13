@@ -321,7 +321,9 @@ class AcmeCertificateServiceTest {
             bootstrap.getTransport().getHttp().setEnabled(false);
             TestConfiguration desired = desiredState(false);
             OrionHttpsConfiguration old =
-                    desired.acl().configuration().document().system().https().orElseThrow();
+                    desired.acl().configuration().result()
+                            .valueOrFailure("Cannot read configuration document")
+                            .system().https().orElseThrow();
             int availablePort;
             try (ServerSocket probe = new ServerSocket(0)) { availablePort = probe.getLocalPort(); }
             OrionHttpsConfiguration https = new OrionHttpsConfiguration(true, "127.0.0.1", availablePort, old.publicUrl(),
@@ -422,7 +424,8 @@ class AcmeCertificateServiceTest {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore());
                 ExecutorService executor = Executors.newSingleThreadExecutor()) {
             TestConfiguration desired = desiredState(false);
-            OrionDocument initial = desired.acl().configuration().document();
+            OrionDocument initial = desired.acl().configuration().result()
+                    .valueOrFailure("Cannot read configuration document");
             BlockingFirstIssuer issuer = new BlockingFirstIssuer();
             AcmeCertificateService service =
                     new AcmeCertificateService(

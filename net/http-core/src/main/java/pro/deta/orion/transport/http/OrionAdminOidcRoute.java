@@ -51,7 +51,9 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
     protected OrionHttpResponse doGet(HttpServletRequest request) {
         OrionDocumentRevision snapshot = configurationService.configuration();
         List<Map<String, Object>> organizations = new ArrayList<>();
-        for (OrionDocument.Organization organization : snapshot.document().organizations()) {
+        for (OrionDocument.Organization organization : snapshot.result()
+                .valueOrFailure("Cannot read configuration document")
+                .organizations()) {
             List<Map<String, Object>> providers = new ArrayList<>();
             for (OidcProvider provider : organization.oidcProviders()) {
                 providers.add(Map.of("id", provider.id(), "issuer", provider.issuer().toString(),
@@ -61,7 +63,9 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
             organizations.add(Map.of("id", organization.id().value(), "providers", providers));
         }
         List<Map<String, Object>> systemProviders = new ArrayList<>();
-        for (OidcProvider provider : snapshot.document().system().oidcProviders()) {
+        for (OidcProvider provider : snapshot.result()
+                .valueOrFailure("Cannot read configuration document")
+                .system().oidcProviders()) {
             systemProviders.add(Map.of("id", provider.id(), "issuer", provider.issuer().toString(),
                     "clientId", provider.clientId(), "idleTimeoutSeconds", provider.idleTimeoutSeconds(),
                     "reauthenticationTimeoutSeconds", provider.reauthenticationTimeoutSeconds()));

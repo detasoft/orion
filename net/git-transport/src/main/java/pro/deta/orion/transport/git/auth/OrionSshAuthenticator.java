@@ -147,7 +147,9 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator {
         if (authentication.rootRecoveryGeneration() == null) {
             OrionDocumentRevision snapshot = accessControlService.configuration();
             String email = "";
-            for (User user : snapshot.document().system().accessControl().users()) {
+            for (User user : snapshot.result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().accessControl().users()) {
                 if (user.id().equalsIgnoreCase(username)) {
                     email = java.util.Objects.requireNonNullElse(user.email(), "");
                     break;

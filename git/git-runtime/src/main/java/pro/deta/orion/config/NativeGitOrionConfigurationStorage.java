@@ -69,45 +69,36 @@ public final class NativeGitOrionConfigurationStorage
     }
 
     @Override
-    public Result<OrionDocumentRevision> load() {
-        try {
-            NativeGitRepository repository = repositoryProvider.openForRead(repositoryName)
-                    .valueOrFailure("Cannot open native repository " + repositoryName);
-            return switch (findCurrentRevision(repository)) {
-                case Result.Failure<OrionRevision.Stored> failure ->
-                        new Result.Failure<>(failure.code(), failure.message(), failure.throwable());
-                case Result.Success<OrionRevision.Stored> success -> load(repository, success.value());
-            };
-        } catch (RuntimeException error) {
-            return new Result.Failure<>(Result.FailureCode.GENERAL, error.getMessage(), error);
+    public OrionDocumentRevision load() {
+        NativeGitRepository repository = repositoryProvider.openForRead(repositoryName)
+                .valueOrFailure("Cannot open native repository " + repositoryName);
+        String revision = repository.refs().get(configurationRef);
+        if (revision == null) {
+            return new OrionDocumentRevision(
+                    new Result.Failure<>(Result.FailureCode.NOT_FOUND),
+                    new OrionRevision.Absent());
         }
-    }
-
-    private Result<OrionRevision.Stored> findCurrentRevision(NativeGitRepository repository) {
-        String currentRevision = repository.refs().get(configurationRef);
-        if (currentRevision == null) {
-            return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
-        } else {
-            return new Result.Success<>(new OrionRevision.Stored(currentRevision));
-        }
+        return load(repository, new OrionRevision.Stored(revision));
     }
 
     @Override
-    public Result<OrionDocumentRevision> load(OrionRevision.Stored revision) {
-        Objects.requireNonNull(revision, "revision");
-        return load(revisionRepository, revision);
+    public OrionDocumentRevision load(OrionRevision.Stored revision) {
+        return load(revisionRepository, Objects.requireNonNull(revision, "revision"));
     }
 
-    private Result<OrionDocumentRevision> load(NativeGitRepository repository, OrionRevision.Stored revision) {
+    private OrionDocumentRevision load(
+            NativeGitRepository repository, OrionRevision.Stored revision) {
+        Result<OrionDocument> result;
         try {
             OrionDocument document = repository.files().readFile(new ObjectId(revision.value()), path,
                     (type, size, base, input) -> codec.read(input.newInputStream()));
-            return new Result.Success<>(new OrionDocumentRevision(document, revision));
+            result = Result.of(document);
         } catch (GitRepositoryFileNotFoundException error) {
-            return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
+            result = new Result.Failure<>(Result.FailureCode.NOT_FOUND);
         } catch (IOException | GitOperationException | RuntimeException error) {
-            return new Result.Failure<>(Result.FailureCode.GENERAL, error.getMessage(), error);
+            result = new Result.Failure<>(Result.FailureCode.GENERAL, error.getMessage(), error);
         }
+        return new OrionDocumentRevision(result, revision);
     }
 
     private byte[] serialize(OrionDocument document) {
@@ -128,7 +119,7 @@ public final class NativeGitOrionConfigurationStorage
         Objects.requireNonNull(metadata.author(), "author");
         byte[] content = serialize(document);
         String revision = switch (expectedRevision) {
-            case OrionRevision.Initial initial -> null;
+            case OrionRevision.Absent ignored -> null;
             case OrionRevision.Stored stored -> stored.value();
         };
         try {
@@ -174,10 +165,11 @@ public final class NativeGitOrionConfigurationStorage
             return;
         }
         OrionRevision.Stored revision = storedRevision(newCommit.orElseThrow());
-        switch (load(revision)) {
-            case Result.Success<OrionDocumentRevision> success ->
-                    events.publish(new ConfigurationChanged(this, success.value()));
-            case Result.Failure<OrionDocumentRevision> failure -> {
+        OrionDocumentRevision snapshot = load(revision);
+        switch (snapshot.result()) {
+            case Result.Success<OrionDocument> ignored ->
+                    events.publish(new ConfigurationChanged(this, snapshot));
+            case Result.Failure<OrionDocument> failure -> {
                 if (failure.code() == Result.FailureCode.NOT_FOUND) {
                     log.warn("Configuration file {} is missing in repository {} at {}; skipping notification",
                             path, repositoryName, revision.value());

@@ -10,6 +10,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.bootstrap.config.BootstrapConfigurationSourceConfig;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.util.Result;
 
 import pro.deta.orion.internal.ChangeMetadata;
@@ -67,7 +68,7 @@ class NativeGitOrionConfigurationStorageTest {
         OrionVersionedConfigurationStorage storage = new NativeGitOrionConfigurationStorage(
                 provider, "bootstrap/proxy-alias", "refs/heads/main", ACL_PATH);
 
-        assertThat(storage.load().valueOrFailure("resolved ACL").document())
+        assertThat(storage.load().result().valueOrFailure("Cannot read configuration document"))
                 .isEqualTo(document("resolved acl"));
         storage.save(
                 new OrionRevision.Stored(repository.refs().get("refs/heads/main")),
@@ -106,8 +107,9 @@ class NativeGitOrionConfigurationStorageTest {
         OrionVersionedConfigurationStorage storage =
                 new NativeGitOrionConfigurationStorage(provider, configuration);
 
-        OrionDocumentRevision loaded = storage.load().valueOrFailure("selected ACL");
-        assertThat(loaded.document()).isEqualTo(document("selected ACL"));
+        OrionDocumentRevision loaded = storage.load();
+        assertThat(loaded.result()
+                .valueOrFailure("Cannot read configuration document")).isEqualTo(document("selected ACL"));
         storage.save(
                 loaded.revision(),
                 document("versioned update"),
@@ -133,15 +135,20 @@ class NativeGitOrionConfigurationStorageTest {
                 NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
         OrionVersionedConfigurationStorage storage = preparedStorage(provider);
 
-        assertThat(storage.load()).isInstanceOf(Result.Failure.class);
-        assertThat(((Result.Failure<?>) storage.load()).code()).isEqualTo(Result.FailureCode.NOT_FOUND);
+        assertThat(storage.load().revision()).isInstanceOf(OrionRevision.Absent.class);
+        assertThat(storage.load().result()).isInstanceOf(Result.Failure.class);
+        assertThat(((Result.Failure<?>) storage.load().result()).code())
+                .isEqualTo(Result.FailureCode.NOT_FOUND);
 
-        storage.save(OrionRevision.INITIAL, document("initial acl"),
+        storage.save(
+                new OrionRevision.Absent(),
+                document("initial acl"),
                 new ChangeMetadata(useDefaults ? UserEmail.EMPTY : new UserEmail("root", "root@example.test"),
                         useDefaults ? "" : "bootstrap ACL"));
 
-        OrionDocumentRevision snapshot = storage.load().valueOrFailure("ACL should load");
-        assertThat(snapshot.document()).isEqualTo(document("initial acl"));
+        OrionDocumentRevision snapshot = storage.load();
+        assertThat(snapshot.result()
+                .valueOrFailure("Cannot read configuration document")).isEqualTo(document("initial acl"));
         assertThat(snapshot.revision()).isInstanceOf(OrionRevision.Stored.class);
         assertThat(provider.repositoryNames()).containsExactly("internal/configuration");
         NativeGitRepository repository = provider.find("internal/configuration").valueOrFailure("repository");
@@ -162,20 +169,26 @@ class NativeGitOrionConfigurationStorageTest {
         try (NativeGitRepositoryProvider provider =
                 NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager())) {
             OrionVersionedConfigurationStorage first = preparedStorage(provider);
-            first.save(OrionRevision.INITIAL, document("persisted acl"),
+            first.save(
+                    new OrionRevision.Absent(),
+                    document("persisted acl"),
                     new ChangeMetadata(UserEmail.EMPTY, "bootstrap ACL"));
             EVENTS.await();
         }
         try (NativeGitRepositoryProvider provider =
                 NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager())) {
             OrionVersionedConfigurationStorage restarted = preparedStorage(provider);
-            assertThat(restarted.load().valueOrFailure("ACL should survive restart").document())
+            assertThat(
+                            restarted
+                                    .load()
+                                    .result().valueOrFailure("Cannot read configuration document"))
                     .isEqualTo(document("persisted acl"));
         }
     }
 
     @Test
-    void existingRefWithoutPrimaryAclIsReportedAsMissing(@TempDir Path rootDirectory) throws Exception {
+    void createsMissingDocumentThroughEditorAtTheExistingStorageRevision(
+            @TempDir Path rootDirectory) throws Exception {
         NativeGitRepositoryProvider provider =
                 NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
         NativeGitRepository repository = provider.create("internal/configuration")
@@ -192,10 +205,102 @@ class NativeGitOrionConfigurationStorageTest {
                         });
         OrionVersionedConfigurationStorage storage = preparedStorage(provider);
 
-        Result<OrionDocumentRevision> result = storage.load();
+        OrionConfigurationEditor editor = editor(storage);
+        OrionDocumentRevision read = editor.load();
+        Result<OrionDocument> result = read.result();
+        assertThat(read.revision())
+                .isEqualTo(
+                        new OrionRevision.Stored(
+                                repository.refs().get("refs/heads/configuration")));
 
         assertThat(result).isInstanceOf(Result.Failure.class);
         assertThat(((Result.Failure<?>) result).code()).isEqualTo(Result.FailureCode.NOT_FOUND);
+        OrionConfigurationModification edit =
+                editor.edit(
+                        new OrionDocumentRevision(Result.of(document("created ACL")), read.revision()),
+                        ChangeMetadata.EMPTY);
+        edit.apply();
+        assertThat(storage.load().result().valueOrFailure("Cannot read configuration document"))
+                .isEqualTo(document("created ACL"));
+        assertThat(repository.files().readBytes("refs/heads/configuration", "README.md"))
+                .isEqualTo(bytes("not an ACL"));
+    }
+
+    @Test
+    void rejectsConcurrentCreationAfterEditorReadsAnEmptyVersionedStorage() throws Exception {
+        NativeGitRepositoryProvider provider =
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        NativeGitRepository repository =
+                provider.create("internal/configuration").valueOrFailure("repository");
+        repository
+                .files()
+                .withAccess(
+                        "refs/heads/configuration",
+                        pro.deta.orion.git.fileapi.GitCommitAuthor.EMPTY,
+                        access -> {
+                            access.write("README.md", bytes("existing file"));
+                            access.apply();
+                            return null;
+                        });
+        OrionVersionedConfigurationStorage storage = preparedStorage(provider);
+        OrionConfigurationEditor editor = editor(storage);
+        OrionDocumentRevision read = editor.load();
+        OrionConfigurationModification edit =
+                editor.edit(
+                        new OrionDocumentRevision(Result.of(document("losing ACL")), read.revision()),
+                        ChangeMetadata.EMPTY);
+        editor.edit(
+                        new OrionDocumentRevision(Result.of(document("winning ACL")), read.revision()),
+                        ChangeMetadata.EMPTY)
+                .apply();
+
+        assertThatThrownBy(edit::apply)
+                .isInstanceOf(OrionConfigurationConcurrentUpdateException.class);
+        assertThat(storage.load().result().valueOrFailure("Cannot read configuration document"))
+                .isEqualTo(document("winning ACL"));
+        assertThat(repository.files().readBytes("refs/heads/configuration", "README.md"))
+                .isEqualTo(bytes("existing file"));
+    }
+
+    private static OrionConfigurationEditor editor(OrionVersionedConfigurationStorage storage) {
+        return new OrionConfigurationEditor(
+                storage,
+                new BootstrapConfiguration(),
+                pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),
+                pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable());
+    }
+
+    @Test
+    void retainsTheStorageRevisionWhenTheDocumentCannotBeDecoded() throws Exception {
+        NativeGitRepositoryProvider provider =
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        NativeGitRepository repository =
+                provider.create("internal/configuration").valueOrFailure("repository");
+        repository
+                .files()
+                .withAccess(
+                        "refs/heads/configuration",
+                        pro.deta.orion.git.fileapi.GitCommitAuthor.EMPTY,
+                        access -> {
+                            access.write(ACL_PATH, "<broken".getBytes(StandardCharsets.UTF_8));
+                            access.apply();
+                            return null;
+                        });
+        OrionConfigurationEditor editor = editor(preparedStorage(provider));
+        OrionDocumentRevision read = editor.load();
+
+        assertThat(read.result())
+                .isInstanceOfSatisfying(
+                        Result.Failure.class,
+                        failure ->
+                                assertThat(failure.code()).isEqualTo(Result.FailureCode.GENERAL));
+        assertThat(read.revision())
+                .isEqualTo(
+                        new OrionRevision.Stored(
+                                repository.refs().get("refs/heads/configuration")));
+        assertThatThrownBy(() -> editor.edit(new OrionRevision.Stored("stale"), ChangeMetadata.EMPTY))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Cannot load configuration for update");
     }
 
     @Test
@@ -216,9 +321,9 @@ class NativeGitOrionConfigurationStorageTest {
                         });
         OrionVersionedConfigurationStorage storage = resolvedStorage(provider, ACL_PATH);
 
-        Result<OrionDocumentRevision> result = storage.load();
+        Result<OrionDocument> result = storage.load().result();
 
-        assertThat(result.valueOrFailure("configured ACL").document()).isEqualTo(document("primary ACL"));
+        assertThat(result.valueOrFailure("configured ACL")).isEqualTo(document("primary ACL"));
     }
 
     @Test
@@ -230,7 +335,10 @@ class NativeGitOrionConfigurationStorageTest {
         Subscription subscription = EVENTS.manager().subscribe(ConfigurationChanged.class,
                 event -> { if (event.storage() == storage) changes.incrementAndGet(); });
 
-        storage.save(OrionRevision.INITIAL, document("first"), new ChangeMetadata(UserEmail.EMPTY, "first"));
+        storage.save(
+                new OrionRevision.Absent(),
+                document("first"),
+                new ChangeMetadata(UserEmail.EMPTY, "first"));
         provider.find("internal/configuration")
                 .valueOrFailure("repository")
                 .files()
@@ -243,13 +351,13 @@ class NativeGitOrionConfigurationStorageTest {
                             return null;
                         });
         storage.save(
-                storage.load().valueOrFailure("first").revision(),
+                storage.load().revision(),
                 document("second"),
                 new ChangeMetadata(UserEmail.EMPTY, "second"));
         EVENTS.await();
         subscription.close();
         storage.save(
-                storage.load().valueOrFailure("second").revision(),
+                storage.load().revision(),
                 document("third"),
                 new ChangeMetadata(UserEmail.EMPTY, "third"));
 
@@ -263,10 +371,10 @@ class NativeGitOrionConfigurationStorageTest {
                 NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
         OrionVersionedConfigurationStorage storage = preparedStorage(provider);
         storage.save(
-                OrionRevision.INITIAL,
+                new OrionRevision.Absent(),
                 document("version one"),
                 new ChangeMetadata(UserEmail.EMPTY, "version one"));
-        OrionDocumentRevision stale = storage.load().valueOrFailure("version one");
+        OrionDocumentRevision stale = storage.load();
         NativeGitRepository repository = provider.find("internal/configuration").valueOrFailure("repository");
         repository
                 .files()
@@ -326,6 +434,17 @@ class NativeGitOrionConfigurationStorageTest {
     }
 
     @Test
+    void failsWhenTheStorageRevisionCannotBeDetermined() {
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        OrionVersionedConfigurationStorage storage = preparedStorage(provider);
+        provider.close();
+
+        assertThatThrownBy(storage::load)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Repository provider is closed");
+    }
+
+    @Test
     void loadsThroughProviderReadOperation(@TempDir Path rootDirectory) throws Exception {
         RecordingProvider provider =
                 new RecordingProvider(
@@ -344,10 +463,11 @@ class NativeGitOrionConfigurationStorageTest {
                             return null;
                         });
 
-        OrionDocumentRevision snapshot = storage.load().valueOrFailure("ACL should load through provider");
+        OrionDocumentRevision snapshot = storage.load();
 
         assertThat(provider.reads).hasValue(2);
-        assertThat(snapshot.document()).isEqualTo(document("provider acl"));
+        assertThat(snapshot.result()
+                .valueOrFailure("Cannot read configuration document")).isEqualTo(document("provider acl"));
     }
 
     @Test
@@ -359,7 +479,7 @@ class NativeGitOrionConfigurationStorageTest {
         OrionVersionedConfigurationStorage storage = preparedStorage(provider);
 
         storage.save(
-                OrionRevision.INITIAL,
+                new OrionRevision.Absent(),
                 document("provider acl"),
                 new ChangeMetadata(UserEmail.EMPTY, "provider ACL"));
 

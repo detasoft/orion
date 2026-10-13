@@ -17,7 +17,8 @@ public class OrionConfigurationModification implements Modification {
     public OrionConfigurationModification(OrionDocumentRevision snapshot,
             Function<OrionDocument, OrionRevision> onSave) {
         Objects.requireNonNull(snapshot, "snapshot");
-        this.document = Objects.requireNonNull(snapshot.document(), "document");
+        this.document = Objects.requireNonNull(snapshot.result()
+                .valueOrFailure("Cannot read configuration document"), "document");
         this.revision = Objects.requireNonNull(snapshot.revision(), "revision");
         this.onSave = Objects.requireNonNull(onSave, "onSave");
     }

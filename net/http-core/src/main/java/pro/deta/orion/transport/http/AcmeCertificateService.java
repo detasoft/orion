@@ -124,7 +124,9 @@ public class AcmeCertificateService {
             if (eabKey != null) Arrays.fill(eabKey, '\0');
         }
         if (Thread.currentThread().isInterrupted() || (automatic && maintenanceStopped)
-                || !settings.snapshot().system().https().equals(configurationService.configuration().document().system().https())) {
+                || !settings.snapshot().system().https().equals(configurationService.configuration().result()
+                        .valueOrFailure("Cannot read configuration document")
+                        .system().https())) {
             throw new AcmeCertificateIssueException("Certificate issuance cancelled or ACME settings changed");
         }
         try {
@@ -265,7 +267,8 @@ public class AcmeCertificateService {
 
     private IssueSettings settingsFrom(IssueRequest request) {
         IssueRequest effectiveRequest = request == null ? IssueRequest.EMPTY : request;
-        OrionDocument snapshot = configurationService.configuration().document();
+        OrionDocument snapshot = configurationService.configuration().result()
+                .valueOrFailure("Cannot read configuration document");
         OrionHttpsConfiguration https = snapshot
                 .system()
                 .https()

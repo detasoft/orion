@@ -25,7 +25,8 @@ final class TestRuntimeBootstrap {
 
     static byte[] configurationXml(pro.deta.orion.OrionAccessControlService acl) throws java.io.IOException {
         java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
-        pro.deta.orion.schema.orion.OrionXml.write(acl.configuration().document(), output);
+        pro.deta.orion.schema.orion.OrionXml.write(acl.configuration().result()
+                .valueOrFailure("Cannot read configuration document"), output);
         return output.toByteArray();
     }
 

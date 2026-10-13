@@ -60,9 +60,11 @@ class S3RepositoryManagementIT {
                             EVENTS, configured, List.of(organization), cipher);
             ConfigurationSecrets secrets =
                     new ConfigurationSecrets(
-                            () -> fixture.desired().acl().configuration().document(), cipher);
+                            () -> fixture.desired().acl().configuration().result()
+                                    .valueOrFailure("Cannot read configuration document"), cipher);
             configuredFactory.activate(
-                    () -> fixture.desired().acl().configuration().document(),
+                    () -> fixture.desired().acl().configuration().result()
+                            .valueOrFailure("Cannot read configuration document"),
                     secrets,
                     name -> false);
             SecurityContext actor = SecurityContext.createContext().withUserIdentity(new InternalUserImpl("root",
@@ -84,7 +86,7 @@ class S3RepositoryManagementIT {
                             fixture.desired()
                                     .acl()
                                     .configuration()
-                                    .document()
+                                    .result().valueOrFailure("Cannot read configuration document")
                                     .organizations()
                                     .getFirst()
                                     .teams()
@@ -101,7 +103,8 @@ class S3RepositoryManagementIT {
                             EVENTS.manager());
             NativeGitRepositoryProvider reopened = new NativeGitRepositoryProvider(reopenedFactory);
             reopenedFactory.activate(
-                    () -> fixture.desired().acl().configuration().document(),
+                    () -> fixture.desired().acl().configuration().result()
+                            .valueOrFailure("Cannot read configuration document"),
                     secrets,
                     name -> false);
             NativeGitRepository repository = reopened.find("acme/team/archive").valueOrFailure("reopen");

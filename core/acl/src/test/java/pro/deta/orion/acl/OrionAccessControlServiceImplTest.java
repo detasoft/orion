@@ -236,7 +236,9 @@ class OrionAccessControlServiceImplTest {
                         edit.apply();
                         assertThat(fixture.storage.saveCount).isEqualTo(1);
                         fixture.storage.awaitEvents();
-                        assertThat(fixture.storage.snapshot.document().system().secrets())
+                        assertThat(fixture.storage.snapshot.result()
+                                .valueOrFailure("Cannot read configuration document")
+                                .system().secrets())
                                 .extracting(ConfigurationSecret::id)
                                 .containsExactly("combined");
                         assertThat(
@@ -326,7 +328,9 @@ class OrionAccessControlServiceImplTest {
                         document.system().proxies(), document.system().connections(),
                         document.system().oidcProviders()), document.organizations()));
                 modification.apply();
-                assertThat(storage.snapshot.document().system().secrets()).extracting(ConfigurationSecret::id)
+                assertThat(storage.snapshot.result()
+                        .valueOrFailure("Cannot read configuration document")
+                        .system().secrets()).extracting(ConfigurationSecret::id)
                         .containsExactly("credential");
                 assertThat(modification.revision()).isEqualTo(storage.snapshot.revision());
                 assertThatThrownBy(modification::document).isInstanceOf(IllegalStateException.class);
@@ -349,11 +353,13 @@ class OrionAccessControlServiceImplTest {
                     "root-auth-generation:external", key(KEY_TWO.getPublic()));
             fixture.storage.snapshot =
                     new OrionDocumentRevision(
-                            OrionDocument.withAccessControl(initial.toAccessControl()),
+                            Result.of(OrionDocument.withAccessControl(initial.toAccessControl())),
                             new OrionRevision.Stored("external-root"));
             fixture.storage.publish("external root update");
             assertThat(fixture.storage.saveCount).isZero();
-            assertThat(fixture.service.configuration().document().system().accessControl())
+            assertThat(fixture.service.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().accessControl())
                     .isEqualTo(initial.toAccessControl());
             assertThat(
                             fixture.service.authenticateSshUser(
@@ -407,12 +413,13 @@ class OrionAccessControlServiceImplTest {
                 snapshot(serialize(new AccessControl()), Optional.empty()));
         OrionConfigurationEditor editor = new OrionConfigurationEditor(storage,
                 new BootstrapConfiguration(), testCipher(), testMaterial());
-        OrionConfigurationModification modification = editor.edit(OrionRevision.INITIAL, ChangeMetadata.EMPTY);
+        OrionConfigurationModification modification =
+                editor.edit(new OrionRevision.Absent(), ChangeMetadata.EMPTY);
         try {
             modification.apply();
             assertThat(storage.saved).isTrue();
             assertThat(modification.revision()).isEqualTo(new OrionRevision.Stored("saved"));
-            assertThat(storage.load()).isInstanceOf(Result.Failure.class);
+            assertThat(storage.load().result()).isInstanceOf(Result.Failure.class);
             assertThatThrownBy(modification::apply).isInstanceOf(IllegalStateException.class)
                     .hasMessage("Configuration modification is already finished");
         } finally {
@@ -430,11 +437,15 @@ class OrionAccessControlServiceImplTest {
                     .isInstanceOfSatisfying(SshCredentialListResult.Failure.class,
                             failure -> assertThat(failure.code()).isEqualTo(SshCredentialFailureCode.USER_NOT_FOUND));
             fixture.createOrUpdateUser(userUpdate("bob", "new-password-hash"));
-            assertThat(fixture.storage.snapshot.document().system().accessControl().users())
+            assertThat(fixture.storage.snapshot.result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().accessControl().users())
                     .extracting(User::id).containsExactlyInAnyOrder("alice", "bob");
             assertThat(fixture.service.userExists("BOB")).isTrue();
             fixture.createOrUpdateUser(userUpdate("BOB", "replacement-password-hash"));
-            assertThat(fixture.storage.snapshot.document().system().accessControl().users())
+            assertThat(fixture.storage.snapshot.result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().accessControl().users())
                     .extracting(User::id).containsExactlyInAnyOrder("alice", "BOB");
         }
     }
@@ -473,7 +484,9 @@ class OrionAccessControlServiceImplTest {
                     .isInstanceOf(AuthenticationResult.Failure.class);
             assertThat(fixture.service.authenticateUser("alice", "second-password".getBytes(StandardCharsets.UTF_8)))
                     .isInstanceOf(AuthenticationResult.Success.class);
-            assertThat(fixture.storage.snapshot.document().system().accessControl().users())
+            assertThat(fixture.storage.snapshot.result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().accessControl().users())
                     .extracting(User::id).containsExactly("alice");
         }
     }
@@ -678,10 +691,16 @@ class OrionAccessControlServiceImplTest {
             appliedEdit.apply();
             OrionDocumentRevision result = fixture.storage.snapshot;
 
-            assertThat(result.document().system().secrets()).extracting("id").containsExactly("credential");
+            assertThat(result.result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().secrets()).extracting("id").containsExactly("credential");
             assertThat(fixture.storage.snapshot.revision()).isEqualTo(appliedEdit.revision());
-            assertThat(fixture.storage.snapshot.document().system().secrets())
-                    .isEqualTo(result.document().system().secrets());
+            assertThat(fixture.storage.snapshot.result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().secrets())
+                    .isEqualTo(result.result()
+                            .valueOrFailure("Cannot read configuration document")
+                            .system().secrets());
         }
     }
 
@@ -745,13 +764,19 @@ class OrionAccessControlServiceImplTest {
         OrionDocument initial = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
                 Optional.of(https), List.of(), List.of(), List.of(), List.of()), List.of());
         try (ServiceFixture fixture = fixture(initial)) {
-            assertThat(fixture.service.configuration().document().system().https()).contains(https);
+            assertThat(fixture.service.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().https()).contains(https);
             fixture.createOrUpdateUser(userUpdate("alice", "password-hash"));
-            assertThat(fixture.storage.snapshot.document().system().https()).contains(https);
-            assertThat(fixture.service.configuration().document())
-                    .isEqualTo(fixture.storage.snapshot.document());
+            assertThat(fixture.storage.snapshot.result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().https()).contains(https);
+            assertThat(fixture.service.configuration().result()
+                    .valueOrFailure("Cannot read configuration document"))
+                    .isEqualTo(fixture.storage.snapshot.result()
+                            .valueOrFailure("Cannot read configuration document"));
             OrionDocumentRevision lastValid = fixture.service.configuration();
-            fixture.storage.snapshot = new OrionDocumentRevision(invalidDocument(),
+            fixture.storage.snapshot = new OrionDocumentRevision(Result.of(invalidDocument()),
                     new OrionRevision.Stored("broken-version"));
             fixture.storage.publish("invalid configuration");
             assertThat(fixture.service.configuration()).isSameAs(lastValid);
@@ -781,11 +806,12 @@ class OrionAccessControlServiceImplTest {
                             List.of());
             fixture.storage.snapshot =
                     new OrionDocumentRevision(
-                            candidate, new OrionRevision.Stored("invalid-commit"));
+                            Result.of(candidate), new OrionRevision.Stored("invalid-commit"));
             fixture.storage.publish("missing material");
             assertThat(fixture.service.configuration()).isSameAs(lastValid);
             assertThat(fixture.service.isRunning()).isTrue();
-            assertThat(fixture.storage.snapshot.document()).isEqualTo(candidate);
+            assertThat(fixture.storage.snapshot.result()
+                    .valueOrFailure("Cannot read configuration document")).isEqualTo(candidate);
             assertThat(fixture.service.configurationStatus().storedRevision()).contains("invalid-commit");
             assertThat(fixture.service.configurationStatus().validation()).isEqualTo("invalid");
             assertFailure(
@@ -804,12 +830,16 @@ class OrionAccessControlServiceImplTest {
             OrionDocument changed = new OrionDocument(new OrionDocument.SystemConfiguration(
                     acl, Optional.of(https), List.of(), List.of(), List.of(), List.of()), List.of());
             fixture.storage.snapshot =
-                    new OrionDocumentRevision(changed, new OrionRevision.Stored("second-commit"));
+                    new OrionDocumentRevision(Result.of(changed), new OrionRevision.Stored("second-commit"));
             fixture.storage.publish("configuration changed");
             assertThat(fixture.service.configuration().revision())
                     .isEqualTo(new OrionRevision.Stored("second-commit"));
-            assertThat(fixture.service.configuration().document().system().https()).contains(https);
-            assertThat(fixture.service.configuration().document().system().accessControl()).isSameAs(acl);
+            assertThat(fixture.service.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().https()).contains(https);
+            assertThat(fixture.service.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().accessControl()).isSameAs(acl);
         }
     }
 
@@ -819,7 +849,7 @@ class OrionAccessControlServiceImplTest {
             OrionDocumentRevision lastValid = fixture.service.configuration();
             fixture.storage.snapshot =
                     new OrionDocumentRevision(
-                            invalidDocument(), new OrionRevision.Stored("invalid"));
+                            Result.of(invalidDocument()), new OrionRevision.Stored("invalid"));
             fixture.storage.publish("invalid secret");
             assertThat(fixture.service.configuration()).isSameAs(lastValid);
         }
@@ -1139,7 +1169,9 @@ class OrionAccessControlServiceImplTest {
         try (ServiceFixture fixture = fixture(primary)) {
             fixture.createOrUpdateUser(userUpdate("alice", "new-hash"));
 
-            assertThat(fixture.storage.snapshot.document().system().accessControl().users())
+            assertThat(fixture.storage.snapshot.result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().accessControl().users())
                     .extracting(User::id).containsExactlyInAnyOrder("root", "alice");
             assertThat(credentials(fixture.storage.snapshot, "alice"))
                     .singleElement()
@@ -1267,7 +1299,8 @@ class OrionAccessControlServiceImplTest {
         try (PrintStream output = new PrintStream(new ByteArrayOutputStream())) {
             System.setOut(output);
             service.onStart();
-            OrionDocument created = storage.snapshot.document();
+            OrionDocument created = storage.snapshot.result()
+                    .valueOrFailure("Cannot read configuration document");
             assertThat(created.organizations()).extracting(org -> org.id().value()).containsExactly("default");
             assertThat(created.organizations().getFirst().users()).isEmpty();
             assertThat(created.system().accessControl().users()).extracting(User::id).contains("root");
@@ -1285,7 +1318,9 @@ class OrionAccessControlServiceImplTest {
             try {
                 restarted.onStart();
                 assertThat(storage.snapshot).isSameAs(beforeRestart);
-                assertThat(restarted.configuration().document().organizations())
+                assertThat(restarted.configuration().result()
+                        .valueOrFailure("Cannot read configuration document")
+                        .organizations())
                         .isEqualTo(created.organizations());
             } finally {
                 restarted.onStop();
@@ -1300,7 +1335,9 @@ class OrionAccessControlServiceImplTest {
     @Test
     void doesNotInsertDefaultOrganizationIntoExistingConfiguration() {
         try (ServiceFixture fixture = fixture(new AclFixture())) {
-            assertThat(fixture.storage.snapshot.document().organizations()).isEmpty();
+            assertThat(fixture.storage.snapshot.result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .organizations()).isEmpty();
         }
     }
 
@@ -1361,7 +1398,9 @@ class OrionAccessControlServiceImplTest {
                     "alice", "alice@example.test", List.of(),
                     List.of(new AccessControlRepositoryGrantUpdate("project", false, true, false, false, "dev"))));
 
-            AccessControl persisted = fixture.storage.snapshot.document().system().accessControl();
+            AccessControl persisted = fixture.storage.snapshot.result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().accessControl();
             User alice = persisted.users().stream()
                     .filter(user -> user.id().equals("alice")).findFirst().orElseThrow();
             assertThat(alice.grants().getFirst().info())
@@ -1408,7 +1447,7 @@ class OrionAccessControlServiceImplTest {
     private static ServiceFixture fixture(OrionDocument document, ServerIdentityCapability identity,
             OrionPasswordHashingService hashing, ConfigurationMaterialCapability material) {
         InMemoryStorage storage = new InMemoryStorage(
-                new OrionDocumentRevision(document, new OrionRevision.Stored("version-one")));
+                new OrionDocumentRevision(Result.of(document), new OrionRevision.Stored("version-one")));
         BootstrapConfiguration configuration = new BootstrapConfiguration();
         OrionConfigurationEditor editor =
                 new OrionConfigurationEditor(storage, configuration, testCipher(), material);
@@ -1425,8 +1464,9 @@ class OrionAccessControlServiceImplTest {
     }
 
     private static OrionDocumentRevision snapshot(byte[] bytes, Optional<String> revision) {
-        return new OrionDocumentRevision(parseDocument(bytes),
-                revision.<OrionRevision>map(OrionRevision.Stored::new).orElse(OrionRevision.INITIAL));
+        return new OrionDocumentRevision(Result.of(parseDocument(bytes)),
+                revision.<OrionRevision>map(OrionRevision.Stored::new)
+                        .orElseGet(OrionRevision.Absent::new));
     }
 
     private static OrionDocument invalidDocument() {
@@ -1574,7 +1614,9 @@ class OrionAccessControlServiceImplTest {
     }
 
     private static List<String> sshValues(OrionDocumentRevision file, String userId) {
-        for (User user : file.document().system().accessControl().users()) {
+        for (User user : file.result()
+                .valueOrFailure("Cannot read configuration document")
+                .system().accessControl().users()) {
             if (userId.equalsIgnoreCase(user.id())) {
                 return user.credentials().stream()
                         .filter(credential -> credential.type() == CredentialType.OPENSSH_PUBLIC_KEY)
@@ -1588,7 +1630,9 @@ class OrionAccessControlServiceImplTest {
     private static List<Credential> credentials(
             OrionDocumentRevision file,
             String userId) {
-        for (User user : file.document().system().accessControl().users()) {
+        for (User user : file.result()
+                .valueOrFailure("Cannot read configuration document")
+                .system().accessControl().users()) {
             if (userId.equalsIgnoreCase(user.id())) {
                 return user.credentials();
             }
@@ -1822,17 +1866,24 @@ class OrionAccessControlServiceImplTest {
         }
 
         @Override
-        public Result<OrionDocumentRevision> load() {
+        public OrionDocumentRevision load() {
             loadCount++;
-            if (loadUnavailable) return new Result.Failure<>(Result.FailureCode.GENERAL);
-            return snapshot == null ? new Result.Failure<>(Result.FailureCode.NOT_FOUND)
-                    : new Result.Success<>(snapshot);
+            if (loadUnavailable)
+                return new OrionDocumentRevision(
+                        new Result.Failure<>(Result.FailureCode.GENERAL),
+                        new OrionRevision.Absent());
+            return snapshot == null
+                    ? new OrionDocumentRevision(
+                            new Result.Failure<>(Result.FailureCode.NOT_FOUND),
+                            new OrionRevision.Absent())
+                    : snapshot;
         }
 
         @Override
-        public Result<OrionDocumentRevision> load(OrionRevision.Stored revision) {
+        public OrionDocumentRevision load(OrionRevision.Stored revision) {
             if (snapshot != null && snapshot.revision().equals(revision)) return load();
-            return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
+            return new OrionDocumentRevision(
+                    new Result.Failure<>(Result.FailureCode.NOT_FOUND), new OrionRevision.Absent());
         }
 
         @Override
@@ -1859,7 +1910,7 @@ class OrionAccessControlServiceImplTest {
                 throw new OrionConfigurationConcurrentUpdateException("simulated race", null);
             }
             OrionRevision revision = new OrionRevision.Stored("saved-" + ++saveCount);
-            snapshot = new OrionDocumentRevision(document, revision);
+            snapshot = new OrionDocumentRevision(Result.of(document), revision);
             events.publish(new ConfigurationChanged(this, snapshot));
             return revision;
         }
@@ -1883,14 +1934,23 @@ class OrionAccessControlServiceImplTest {
         }
 
         @Override
-        public Result<OrionDocumentRevision> load() {
-            if (saved) return new Result.Failure<>(Result.FailureCode.GENERAL,
-                    "simulated reload failure", new IOException("simulated reload failure"));
-            return initial == null ? new Result.Failure<>(Result.FailureCode.NOT_FOUND) : Result.of(initial);
+        public OrionDocumentRevision load() {
+            if (saved)
+                return new OrionDocumentRevision(
+                        new Result.Failure<>(
+                                Result.FailureCode.GENERAL,
+                                "simulated reload failure",
+                                new IOException("simulated reload failure")),
+                        new OrionRevision.Absent());
+            return initial == null
+                    ? new OrionDocumentRevision(
+                            new Result.Failure<>(Result.FailureCode.NOT_FOUND),
+                            new OrionRevision.Absent())
+                    : initial;
         }
 
         @Override
-        public Result<OrionDocumentRevision> load(OrionRevision.Stored revision) {
+        public OrionDocumentRevision load(OrionRevision.Stored revision) {
             return load();
         }
 

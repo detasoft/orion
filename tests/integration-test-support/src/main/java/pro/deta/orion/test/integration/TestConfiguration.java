@@ -76,7 +76,8 @@ public final class TestConfiguration implements AutoCloseable {
     }
 
     public ConfigurationSecrets secrets() {
-        return new ConfigurationSecrets(() -> acl.configuration().document(), cipher);
+        return new ConfigurationSecrets(() -> acl.configuration().result()
+                .valueOrFailure("Cannot read configuration document"), cipher);
     }
 
     private static ConfigurationCipherCapability defaultCipher(TestEvents events) {
@@ -110,7 +111,7 @@ public final class TestConfiguration implements AutoCloseable {
     public void publish(OrionDocument document, Optional<String> revision) {
         OrionRevision selected = revision.<OrionRevision>map(OrionRevision.Stored::new)
                 .orElseGet(() -> new OrionRevision.Stored("published-" + ++storage.revision));
-        storage.snapshot = new OrionDocumentRevision(document, selected);
+        storage.snapshot = new OrionDocumentRevision(Result.of(document), selected);
         events.manager().publishAndWait(new ConfigurationChanged(storage, storage.snapshot));
     }
 
@@ -121,19 +122,22 @@ public final class TestConfiguration implements AutoCloseable {
 
     private final class MemoryStorage implements OrionVersionedConfigurationStorage {
         private volatile OrionDocumentRevision snapshot = new OrionDocumentRevision(
-                OrionDocument.withAccessControl(new AccessControl()), new OrionRevision.Stored("initial"));
+                Result.of(OrionDocument.withAccessControl(new AccessControl())),
+                new OrionRevision.Stored("initial"));
         private int revision;
 
         @Override
-        public Result<OrionDocumentRevision> load() {
-            return Result.of(snapshot);
+        public OrionDocumentRevision load() {
+            return snapshot;
         }
 
         @Override
-        public Result<OrionDocumentRevision> load(OrionRevision.Stored selected) {
+        public OrionDocumentRevision load(OrionRevision.Stored selected) {
             return snapshot.revision().equals(selected)
                     ? load()
-                    : new Result.Failure<>(Result.FailureCode.NOT_FOUND);
+                    : new OrionDocumentRevision(
+                            new Result.Failure<>(Result.FailureCode.NOT_FOUND),
+                            new OrionRevision.Absent());
         }
 
         @Override
@@ -142,9 +146,11 @@ public final class TestConfiguration implements AutoCloseable {
             if (!snapshot.revision().equals(expected)) {
                 throw new OrionConfigurationConcurrentUpdateException("Configuration changed", null);
             }
-            if (snapshot.document().equals(document)) return snapshot.revision();
+            if (snapshot.result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .equals(document)) return snapshot.revision();
             OrionRevision saved = new OrionRevision.Stored("saved-" + ++revision);
-            snapshot = new OrionDocumentRevision(document, saved);
+            snapshot = new OrionDocumentRevision(Result.of(document), saved);
             events.manager().publish(new ConfigurationChanged(this, snapshot));
             return saved;
         }

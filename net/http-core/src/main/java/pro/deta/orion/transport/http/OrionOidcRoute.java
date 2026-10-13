@@ -204,8 +204,10 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
             throw new IllegalArgumentException("Authorization issuer mismatch");
         }
         char[] secret = attempt.organization() == null
-                ? secrets.resolveSystem(acl.configuration().document(), attempt.provider().secret())
-                : secrets.resolveOrganization(acl.configuration().document(), attempt.organization(),
+                ? secrets.resolveSystem(acl.configuration().result()
+                        .valueOrFailure("Cannot read configuration document"), attempt.provider().secret())
+                : secrets.resolveOrganization(acl.configuration().result()
+                        .valueOrFailure("Cannot read configuration document"), attempt.organization(),
                         attempt.provider().secret());
         OidcClient.Identity identity;
         try {
@@ -415,7 +417,9 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     }
 
     private List<OidcProvider> configuredProviders(OrganizationId organization) {
-        return organization == null ? acl.configuration().document().system().oidcProviders()
+        return organization == null ? acl.configuration().result()
+                .valueOrFailure("Cannot read configuration document")
+                .system().oidcProviders()
                 : accounts.organization(organization).oidcProviders();
     }
 
@@ -436,7 +440,9 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     }
 
     private String systemProviderVersion(OidcProvider provider) {
-        for (ConfigurationSecret secret : acl.configuration().document().system().secrets()) {
+        for (ConfigurationSecret secret : acl.configuration().result()
+                .valueOrFailure("Cannot read configuration document")
+                .system().secrets()) {
             if (secret.id().equals(provider.secret())) return sessionKey(secret.envelope());
         }
         throw new IllegalArgumentException("System OIDC secret is unavailable");
@@ -451,7 +457,9 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     }
 
     URI publicOrigin() {
-        URI uri = acl.configuration().document().system().https().orElseThrow().publicUrl();
+        URI uri = acl.configuration().result()
+                .valueOrFailure("Cannot read configuration document")
+                .system().https().orElseThrow().publicUrl();
         if (uri == null || !"https".equals(uri.getScheme()) || uri.getHost() == null
                 || uri.getUserInfo() != null || uri.getQuery() != null || uri.getFragment() != null
                 || !(uri.getPath().isEmpty() || uri.getPath().equals("/"))) {

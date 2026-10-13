@@ -62,18 +62,24 @@ class BootstrapConnectionDecisionTest {
             fixture.start();
             DecisionRequest request = fixture.decisions.list(ACTOR).getFirst();
             assertThat(request.description()).contains(fixture.previous.upstream(fixture.acl.configuration()
-                    .document().system()).toString(),
+                    .result().valueOrFailure("Cannot read configuration document").system()).toString(),
                     fixture.upstream.toUri().toString());
-            assertThat(fixture.acl.configuration().document().system().proxies())
+            assertThat(fixture.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().proxies())
                     .containsExactly(fixture.previous);
             fixture.decisions.decide(request.id(), new DecisionAnswer(0, ACTOR)).valueOrFailure("approve");
             EVENTS.await();
-            assertThat(fixture.acl.configuration().document().system().proxies()).singleElement()
-                    .satisfies(binding -> assertThat(binding.upstream(fixture.acl.configuration().document()
+            assertThat(fixture.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().proxies()).singleElement()
+                    .satisfies(binding -> assertThat(binding.upstream(fixture.acl.configuration().result()
+                            .valueOrFailure("Cannot read configuration document")
                             .system())).isEqualTo(fixture.upstream.toUri()));
             assertThat(fixture.decisions.list(ACTOR)).isEmpty();
-            assertThat(fixture.storage.load().isFailure()).isFalse();
-            assertThat(fixture.provider.bootstrapChanges(fixture.acl.configuration().document())).isEmpty();
+            assertThat(fixture.storage.load().result().isFailure()).isFalse();
+            assertThat(fixture.provider.bootstrapChanges(fixture.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document"))).isEmpty();
         }
     }
 
@@ -85,10 +91,13 @@ class BootstrapConnectionDecisionTest {
             fixture.decisions.decide(fixture.decisions.list(ACTOR).getFirst().id(), new DecisionAnswer(1, ACTOR))
                     .valueOrFailure("reject");
             assertThat(fixture.acl.configuration().revision()).isEqualTo(new OrionRevision.Stored(revision));
-            assertThat(fixture.storage.load().isFailure()).isFalse();
+            assertThat(fixture.storage.load().result().isFailure()).isFalse();
             assertThat(fixture.provider.retry(fixture.previous.alias(),
-                    () -> fixture.acl.configuration().document(), fixture.secrets).isFailure()).isFalse();
-            assertThat(fixture.acl.configuration().document().system().proxies())
+                    () -> fixture.acl.configuration().result()
+                            .valueOrFailure("Cannot read configuration document"), fixture.secrets).isFailure()).isFalse();
+            assertThat(fixture.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().proxies())
                     .containsExactly(fixture.previous);
         }
     }
@@ -120,10 +129,15 @@ class BootstrapConnectionDecisionTest {
             EVENTS.await();
             fixture.decisions.decide(request.id(), new DecisionAnswer(0, ACTOR)).valueOrFailure("approve");
             EVENTS.await();
-            assertThat(fixture.acl.configuration().document().system().proxies()).contains(unrelated);
-            assertThat(fixture.acl.configuration().document().system().proxies()).filteredOn(
+            assertThat(fixture.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().proxies()).contains(unrelated);
+            assertThat(fixture.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().proxies()).filteredOn(
                     binding -> binding.alias().equals(fixture.previous.alias())).singleElement()
-                    .satisfies(binding -> assertThat(binding.upstream(fixture.acl.configuration().document()
+                    .satisfies(binding -> assertThat(binding.upstream(fixture.acl.configuration().result()
+                            .valueOrFailure("Cannot read configuration document")
                             .system())).isEqualTo(fixture.upstream.toUri()));
         }
     }
@@ -134,7 +148,8 @@ class BootstrapConnectionDecisionTest {
             fixture.start();
             DecisionRequest request = fixture.decisions.list(ACTOR).getFirst();
             GitProxyBinding concurrent = new GitProxyBinding(fixture.previous.alias(),
-                new GitProxyBinding.Direct(fixture.previous.upstream(fixture.acl.configuration().document()
+                new GitProxyBinding.Direct(fixture.previous.upstream(fixture.acl.configuration().result()
+                        .valueOrFailure("Cannot read configuration document")
                         .system()), GitCredentialKind.NONE, Optional.empty(), Optional.empty()), "refs/heads/other");
             fixture.editor
                     .edit(
@@ -145,8 +160,10 @@ class BootstrapConnectionDecisionTest {
             EVENTS.await();
             fixture.decisions.decide(request.id(), new DecisionAnswer(0, ACTOR)).valueOrFailure("approve");
             EVENTS.await();
-            assertThat(fixture.acl.configuration().document().system().proxies()).containsExactly(concurrent);
-            assertThat(fixture.storage.load().isFailure()).isFalse();
+            assertThat(fixture.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().proxies()).containsExactly(concurrent);
+            assertThat(fixture.storage.load().result().isFailure()).isFalse();
         }
     }
 
@@ -227,12 +244,14 @@ class BootstrapConnectionDecisionTest {
             acl.onStart();
             secrets =
                     new ConfigurationSecrets(
-                            () -> acl.configuration().document(), material.configurationCipher());
+                            () -> acl.configuration().result()
+                                    .valueOrFailure("Cannot read configuration document"), material.configurationCipher());
         }
 
         void start() {
-            OrionRuntimeModule.bootstrapProxies(storage,
-                    configured, provider,
+            OrionRuntimeModule.bootstrapProxies(
+                            configured,
+                            provider,
                             material.configurationCipher(), secrets,
                     acl, editor, decisions,
                     OrionRuntimeModule.connectionFailures(decisions),

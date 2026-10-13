@@ -65,9 +65,13 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
     protected OrionHttpResponse doGet(HttpServletRequest req) {
         OrionDocumentRevision snapshot = configurationService.configuration();
         List<AliasResponse> aliases = new ArrayList<>();
-        for (GitProxyBinding binding : snapshot.document().system().proxies()) {
-            aliases.add(project(binding, snapshot.document().system(), provider.syncObservation(binding,
-                    snapshot.document().system())));
+        for (GitProxyBinding binding : snapshot.result()
+                .valueOrFailure("Cannot read configuration document")
+                .system().proxies()) {
+            aliases.add(project(binding, snapshot.result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system(), provider.syncObservation(binding,
+                    snapshot.result().valueOrFailure("Cannot read configuration document").system())));
         }
         aliases.sort(Comparator.comparing(AliasResponse::alias));
         return OrionHttpResponse.ok(new AliasListResponse(aliases, ((OrionRevision.Stored) snapshot.revision()).value()));
@@ -113,7 +117,7 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
                     edit.update(document -> update(document, selected, mutation));
                     OrionDocument updated = edit.document();
                     edit.apply();
-                    snapshot = new OrionDocumentRevision(updated, edit.revision());
+                    snapshot = new OrionDocumentRevision(Result.of(updated), edit.revision());
                 } finally {
                     edit.discard();
                 }
@@ -122,12 +126,15 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
                     () -> configurationService.configuration().revision().equals(snapshot.revision()))) {
                 throw new IllegalStateException("Saved proxy configuration was not activated");
             }
-            GitProxyBinding binding = find(snapshot.document(), selected);
+            GitProxyBinding binding = find(snapshot.result()
+                    .valueOrFailure("Cannot read configuration document"), selected);
             SyncObservation observation = retry(snapshot, binding);
             String status = action.equals("retry") ? "retried" : "saved";
             resultCode = status + ":" + wireStatus(observation);
             response = OrionHttpResponse.json(action.equals("create") ? 201 : 200,
-                    new MutationResponse(status, project(binding, snapshot.document().system(), observation),
+                    new MutationResponse(status, project(binding, snapshot.result()
+                            .valueOrFailure("Cannot read configuration document")
+                            .system(), observation),
                             ((OrionRevision.Stored) snapshot.revision()).value()));
         } catch (OrionConfigurationConcurrentUpdateException failure) {
             resultCode = "configuration-conflict";
@@ -155,12 +162,15 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
             throw new OrionConfigurationConcurrentUpdateException("Configuration changed before retry", null);
         }
         Result<SyncObservation> result = provider.retry(binding.alias(),
-                () -> configurationService.configuration().document(), secrets);
+                () -> configurationService.configuration().result()
+                        .valueOrFailure("Cannot read configuration document"), secrets);
         if (!configurationService.configuration().revision().equals(snapshot.revision())) {
             throw new OrionConfigurationConcurrentUpdateException("Configuration changed during retry", null);
         }
         if (result instanceof Result.Success<SyncObservation> success) return success.value();
-        return provider.syncObservation(binding, snapshot.document().system());
+        return provider.syncObservation(binding, snapshot.result()
+                .valueOrFailure("Cannot read configuration document")
+                .system());
     }
 
     private OrionDocument update(OrionDocument document, RemoteAlias alias, MutationRequest request) {

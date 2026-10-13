@@ -116,7 +116,10 @@ class BootstrapProxyTransportIT {
                     try {
                         assertThat(lifecycle.runApplication())
                                 .isEqualTo(RUNNING);
-                        var current = new AtomicReference<>(storage.load().valueOrFailure("runtime configuration").document());
+                        var current =
+                                new AtomicReference<>(
+                                        storage.load()
+                                                .result().valueOrFailure("Cannot read configuration document"));
                         assertThat(cache).isEqualTo("bootstrap");
                         assertThat(current.get().system().proxies()).isEmpty();
                         assertThat(current.get().system().secrets()).isEmpty();
@@ -219,13 +222,17 @@ class BootstrapProxyTransportIT {
                     var provider = restarted.repositoryProvider();
                     var storage = new NativeGitOrionConfigurationStorage(restarted.repositoryFactory(),
                             configuration.getBootstrap().getAccessControl());
-                    var before = storage.load().valueOrFailure("configuration before adoption").revision();
+                    var before =
+                            storage.load()
+                                    .revision();
                     var component = runtimeComponent(configuration, restarted, bootstrapEvents2);
                     var lifecycle = component.orionApplicationLifecycle();
                     try {
                         assertThat(lifecycle.runApplication())
                                 .isEqualTo(RUNNING);
-                        assertThat(storage.load().valueOrFailure("configuration after adoption").revision())
+                        assertThat(
+                                        storage.load()
+                                                .revision())
                                 .isEqualTo(before);
                         assertThat(provider.openForRead(cache)).isNotNull();
                         stopped = true;

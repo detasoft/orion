@@ -166,7 +166,8 @@ class InternalConfigurationRepositoryLifecycleIT {
     }
 
     private static void awaitConfiguration(OrionComponent component) {
-        OrionRevision revision = new OrionRevision.Stored(repository(component).refs().get(CONFIGURATION_REF));
+        OrionRevision.Stored revision =
+                new OrionRevision.Stored(repository(component).refs().get(CONFIGURATION_REF));
         assertThat(pro.deta.orion.util.OrionUtils.waitForCondition(() ->
                 component.orionAccessControlService().configuration().revision().equals(revision))).isTrue();
     }
@@ -258,7 +259,8 @@ class InternalConfigurationRepositoryLifecycleIT {
             char[] rootPassword = component.orionAccessControlService()
                     .plainRootToken(PlainRootTokenAccessForTests.create());
             assertRecoveryPasswordOnly(component, new String(rootPassword));
-            AccessControl acl = component.orionAccessControlService().configuration().document()
+            AccessControl acl = component.orionAccessControlService().configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
                             .system().accessControl();
             assertThat(acl.users().getFirst().credentials())
                     .singleElement()
@@ -301,7 +303,8 @@ class InternalConfigurationRepositoryLifecycleIT {
             addKey(first, "alice", PublicKeyEntry.toString(aliceKey.getPublic()));
             oldRootToken = issueTokenForSshKey(first, "root", rootKey);
             aliceToken = issueTokenForSshKey(first, "alice", aliceKey);
-            AccessControl acl = first.orionAccessControlService().configuration().document()
+            AccessControl acl = first.orionAccessControlService().configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
                             .system().accessControl();
             User root = acl.users().stream()
                     .filter(candidate -> "root".equalsIgnoreCase(candidate.id()))
@@ -331,7 +334,8 @@ class InternalConfigurationRepositoryLifecycleIT {
                     new ChangeMetadata(UserEmail.EMPTY, "Prepare configuration"))
                 .update(ignored -> replacement).apply();
             awaitConfiguration(first);
-            beforeReset = first.orionAccessControlService().configuration().document()
+            beforeReset = first.orionAccessControlService().configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
                             .system().accessControl();
             versionBeforeReset = repository(first).refs().get(CONFIGURATION_REF);
         } finally {
@@ -492,7 +496,8 @@ class InternalConfigurationRepositoryLifecycleIT {
             assertRecoveryPasswordOnly(reset, newPassword);
             assertAuthenticated(reset, "alice", "alice-password");
 
-            AccessControl recovered = reset.orionAccessControlService().configuration().document()
+            AccessControl recovered = reset.orionAccessControlService().configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
                             .system().accessControl();
             assertThat(recovered.users())
                     .extracting(User::id)
@@ -667,7 +672,8 @@ class InternalConfigurationRepositoryLifecycleIT {
             System.setOut(new PrintStream(resetOutput, true, StandardCharsets.UTF_8));
             assertThat(resetLifecycle.runApplication()).isEqualTo(RUNNING);
             assertThat(repository(reset).refs().get(CONFIGURATION_REF)).isNotEqualTo(versionBeforeReset);
-            AccessControl recovered = reset.orionAccessControlService().configuration().document()
+            AccessControl recovered = reset.orionAccessControlService().configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
                             .system().accessControl();
             assertThat(recovered.users())
                     .filteredOn(user -> "root".equalsIgnoreCase(user.id()))
@@ -1181,7 +1187,8 @@ class InternalConfigurationRepositoryLifecycleIT {
             OrionComponent component,
             String userId,
             String... expectedKeys) throws Exception {
-        AccessControl accessControl = component.orionAccessControlService().configuration().document()
+        AccessControl accessControl = component.orionAccessControlService().configuration().result()
+                .valueOrFailure("Cannot read configuration document")
                         .system().accessControl();
         User user = accessControl.users().stream()
                 .filter(candidate -> userId.equals(candidate.id()))

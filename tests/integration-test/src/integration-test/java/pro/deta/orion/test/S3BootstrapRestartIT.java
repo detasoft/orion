@@ -175,7 +175,8 @@ class S3BootstrapRestartIT {
                     assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
                     lifecycle.waitForStarting();
                     OrionDocumentRevision current = component.orionAccessControlService().configuration();
-                    OrionDocument document = current.document();
+                    OrionDocument document = current.result()
+                            .valueOrFailure("Cannot read configuration document");
                     ConfigurationSecrets secrets = new ConfigurationSecrets(() -> document,
                             bootstrap.configurationCipher());
                     OrionDocument updated = secrets.createSystem(document, SECRET_ID, SECRET_VALUE.toCharArray());

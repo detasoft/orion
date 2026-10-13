@@ -35,7 +35,9 @@ public final class OrionAdminInvitationsRoute extends BaseAdminRoute {
     @Override
     protected OrionHttpResponse doGet(HttpServletRequest request) {
         List<Map<String, Object>> organizations = new ArrayList<>();
-        for (OrionDocument.Organization organization : configurationService.configuration().document().organizations()) {
+        for (OrionDocument.Organization organization : configurationService.configuration().result()
+                .valueOrFailure("Cannot read configuration document")
+                .organizations()) {
             organizations.add(Map.of("id", organization.id().value(), "name",
                     organization.displayName() == null ? organization.id().value() : organization.displayName(),
                     "oidcConfigured", !organization.oidcProviders().isEmpty()));

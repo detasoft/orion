@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.git.ssh;
 
+import pro.deta.orion.util.Result;
+import java.util.Optional;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.classic.spi.ThrowableProxy;
@@ -123,7 +125,7 @@ class SshCommandFactoryTest {
         assertEquals(pro.deta.orion.command.CommandPresentation.plain(), request.context().presentation());
         SshConnectionCredentials credentialFacts =
                 request.context().securityContext().getSshConnectionCredentials();
-        assertEquals(java.util.Optional.of("SHA256:current"), credentialFacts.authenticatedKeyFingerprint());
+        assertEquals(Optional.of("SHA256:current"), credentialFacts.authenticatedKeyFingerprint());
         assertEquals(1, credentialFacts.candidatePublicKeys().size());
         assertFalse(request.context().auditMetadata().toString()
                 .contains(credentialFacts.candidatePublicKeys().getFirst()));
@@ -418,9 +420,9 @@ class SshCommandFactoryTest {
                     @Override
                     public OrionDocumentRevision configuration() {
                         return new OrionDocumentRevision(
-                                pro.deta.orion.schema.orion.v2.OrionDocument.withAccessControl(
-                                        new pro.deta.orion.schema.acl.AccessControl()),
-                                OrionRevision.INITIAL);
+                                Result.of(pro.deta.orion.schema.orion.v2.OrionDocument.withAccessControl(
+                                        new pro.deta.orion.schema.acl.AccessControl())),
+                                new OrionRevision.Absent());
                     }
 
                     @Override
@@ -428,7 +430,11 @@ class SshCommandFactoryTest {
                             OrionRevision revision, ChangeMetadata metadata) {
                         return new AccessControlAccess(
                                 new OrionConfigurationModification(
-                                        configuration(), document -> revision),
+                                        configuration(),
+                                        document ->
+                                                revision instanceof OrionRevision.Stored
+                                                        ? revision
+                                                        : new OrionRevision.Stored("saved")),
                                 new OrionPasswordHashingService()) {
                             @Override
                             public SshKeyEnrollmentResult completeRootSshKeyEnrollment(

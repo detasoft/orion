@@ -1,4 +1,5 @@
 package pro.deta.orion.transport.git;
+import pro.deta.orion.util.Result;
 import pro.deta.orion.acl.AccessControlAccess;
 import org.apache.sshd.client.SshClient;
 import org.apache.sshd.client.auth.password.UserAuthPasswordFactory;
@@ -404,9 +405,9 @@ class GitSshTransportStateMachineTest {
         @Override
         public OrionDocumentRevision configuration() {
             return new OrionDocumentRevision(
-                    pro.deta.orion.schema.orion.v2.OrionDocument.withAccessControl(
-                            new pro.deta.orion.schema.acl.AccessControl()),
-                    pro.deta.orion.config.OrionRevision.INITIAL);
+                    Result.of(pro.deta.orion.schema.orion.v2.OrionDocument.withAccessControl(
+                            new pro.deta.orion.schema.acl.AccessControl())),
+                    new OrionRevision.Absent());
         }
 
         private boolean keyMatches(byte[] encodedPublicKey) {

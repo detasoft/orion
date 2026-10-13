@@ -49,7 +49,8 @@ public final class ConfiguredStorageManagement implements StorageManagement {
             ConfigurationCipherCapability cipher, NativeGitRepositoryProvider repositories) {
         this.acl = acl;
         this.editor = editor;
-        this.secrets = new ConfigurationSecrets(() -> acl.configuration().document(), cipher);
+        this.secrets = new ConfigurationSecrets(() -> acl.configuration().result()
+                .valueOrFailure("Cannot read configuration document"), cipher);
         this.repositories = repositories;
     }
 
@@ -58,7 +59,8 @@ public final class ConfiguredStorageManagement implements StorageManagement {
         return safely(() -> {
             String name = RepositoryName.parse(requested).value();
             OrionDocumentRevision snapshot = acl.configuration();
-            requireRepositoryCreate(actor, snapshot.document(), name);
+            requireRepositoryCreate(actor, snapshot.result()
+                    .valueOrFailure("Cannot read configuration document"), name);
             if (storage.isPresent()) {
                 RepositoryAddress address = RepositoryAddress.parse(name);
                 if (name.startsWith("bootstrap/") || name.startsWith("proxy/")) throw new IllegalArgumentException();
@@ -79,7 +81,8 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                     if (s3.secretKey().isEmpty()) require(admin(actor, document));
                     return bind(document, address, binding);
                 }).apply();
-            } else if (binding(snapshot.document(), name).isPresent()) {
+            } else if (binding(snapshot.result()
+                    .valueOrFailure("Cannot read configuration document"), name).isPresent()) {
                 throw new Conflict();
             }
             Result<NativeGitRepository> result;
@@ -115,7 +118,8 @@ public final class ConfiguredStorageManagement implements StorageManagement {
             return safely(() -> {
                 if (input == null) throw new IllegalArgumentException();
                 // Check scope before revision validation to avoid exposing another organization's configuration.
-                requireOwner(actor, acl.configuration().document(), owner);
+                requireOwner(actor, acl.configuration().result()
+                        .valueOrFailure("Cannot read configuration document"), owner);
                 OrionConfigurationModification edit = editor.edit(new OrionRevision.Stored(revision),
                     new ChangeMetadata(new UserEmail(actor.getUserIdentity().getUserId(),
                         ""), create ? "Create S3 connection" : "Update S3 connection")).update(document -> {
@@ -167,7 +171,8 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                 });
                 OrionDocument updated = edit.document();
                 edit.apply();
-                return new Success<>(view(actor, owner, new OrionDocumentRevision(updated, edit.revision())));
+                return new Success<>(view(actor, owner,
+                        new OrionDocumentRevision(Result.of(updated), edit.revision())));
             });
         } finally {
             if (input != null) {
@@ -179,7 +184,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
 
     private Connections view(SecurityContext actor, Optional<OrganizationId> owner,
             OrionDocumentRevision snapshot) {
-        OrionDocument document = snapshot.document();
+        OrionDocument document = snapshot.result().valueOrFailure("Cannot read configuration document");
         requireOwner(actor, document, owner);
         List<S3View> views = new ArrayList<>();
         for (Connection connection : connections(document, owner)) {

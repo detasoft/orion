@@ -121,7 +121,7 @@ public class OrionAdminTransportsRoute extends BaseAdminRoute {
 
     private TransportDescriptor httpsDescriptor() {
         OrionHttpsConfiguration https = configurationService.configuration()
-                .document()
+                .result().valueOrFailure("Cannot read configuration document")
                 .system()
                 .https()
                 .orElse(null);

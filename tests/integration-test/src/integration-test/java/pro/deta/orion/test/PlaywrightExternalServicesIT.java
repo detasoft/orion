@@ -166,7 +166,9 @@ class PlaywrightExternalServicesIT {
                     runPlaywrightGoal(fixtureRoot, token, goal);
                     if (!issueCertificate) {
                         List<OrionDocument.Organization> organizations = component.orionAccessControlService()
-                                .configuration().document().organizations();
+                                .configuration().result()
+                                        .valueOrFailure("Cannot read configuration document")
+                                        .organizations();
                         assertThat(organizations).extracting(organization -> organization.id().value())
                                 .contains("oidc-acme", "oidc-other");
                         for (OrionDocument.Organization organization : organizations) {

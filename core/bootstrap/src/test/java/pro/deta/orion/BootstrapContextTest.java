@@ -251,9 +251,11 @@ class BootstrapContextTest {
                             });
             try (NativeGitOrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(
                     context.repositoryFactory(), configuration.getBootstrap().getAccessControl())) {
-                assertThat(storage.load(new OrionRevision.Stored(firstCommit)).valueOrFailure("pinned revision")
-                        .document()).isEqualTo(first);
-                assertThat(storage.load().valueOrFailure("current revision").document())
+                assertThat(
+                                storage.load(new OrionRevision.Stored(firstCommit))
+                                        .result()
+                                                .valueOrFailure("Cannot read configuration document")).isEqualTo(first);
+                assertThat(storage.load().result().valueOrFailure("Cannot read configuration document"))
                         .isEqualTo("configuration".equals(delayedInput) ? updated : first);
             }
             byte[] payload = bytes("already loaded material");
@@ -690,7 +692,7 @@ class BootstrapContextTest {
                 fileUri ? directory.toUri().toString() : directory.toString());
         try (NativeGitRepositoryProvider backend = repositoryWith(configuration,
                 Map.of("material.p12", materialBytes(configuration)))) {
-            String firstRevision;
+            OrionRevision firstRevision;
             try (BootstrapContext context = openContext(configuration, ENVIRONMENT, borrow(backend))) {
                 assertThat(context.repositoryFactory()
                         .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE)).isPresent();
@@ -698,12 +700,14 @@ class BootstrapContextTest {
                         new NativeGitOrionConfigurationStorage(
                                 context.repositoryFactory(),
                                 configuration.getBootstrap().getAccessControl());
-                storage.save(OrionRevision.INITIAL, OrionXml.read(new ByteArrayInputStream(xml())),
+                storage.save(
+                        new OrionRevision.Absent(),
+                        OrionXml.read(new ByteArrayInputStream(xml())),
                         new ChangeMetadata(UserEmail.EMPTY, "initial ACL"));
-                OrionDocumentRevision first = storage.load().valueOrFailure("initial ACL");
-                firstRevision = ((OrionRevision.Stored) first.revision()).value();
+                OrionDocumentRevision first = storage.load();
+                firstRevision = first.revision();
                 OrionDocument updated =
-                        first.document()
+                        first.result().valueOrFailure("Cannot read configuration document")
                                 .replaceAccessControl(
                                         new AccessControl(
                                                 List.of(
@@ -722,17 +726,15 @@ class BootstrapContextTest {
                         updated,
                         new ChangeMetadata(UserEmail.EMPTY, "update configuration"));
                 assertThat(
-                                ((OrionRevision.Stored)
-                                                storage.load()
-                                                        .valueOrFailure("updated ACL")
-                                                        .revision())
-                                        .value())
+                                storage.load()
+                                        .revision())
                         .isNotEqualTo(firstRevision);
                 assertThatThrownBy(
                                 () ->
                                         storage.save(
                                                 first.revision(),
-                                                first.document(),
+                                                first.result()
+                                                        .valueOrFailure("Cannot read configuration document"),
                                                 new ChangeMetadata(
                                                         UserEmail.EMPTY, "stale update")))
                         .isInstanceOf(OrionConfigurationConcurrentUpdateException.class);
@@ -746,11 +748,8 @@ class BootstrapContextTest {
                                 reopened.repositoryFactory(),
                                 configuration.getBootstrap().getAccessControl());
                 assertThat(
-                                ((OrionRevision.Stored)
-                                                storage.load()
-                                                        .valueOrFailure("reopened ACL")
-                                                        .revision())
-                                        .value())
+                                storage.load()
+                                        .revision())
                         .isNotEqualTo(firstRevision);
             }
         }
@@ -953,9 +952,11 @@ class BootstrapContextTest {
                         new NativeGitOrionConfigurationStorage(
                                 first.repositoryFactory(),
                                 configuration.getBootstrap().getAccessControl());
-                OrionRevision initialRevision = storage.load().valueOrFailure("configuration").revision();
+                OrionRevision initialRevision =
+                        storage.load().revision();
                 adopted = adopt(first, storage);
-                adoptedRevision = storage.load().valueOrFailure("configuration").revision();
+                adoptedRevision =
+                        storage.load().revision();
                 assertThat(adopted.system().proxies()).isEmpty();
                 assertThat(adoptedRevision).isEqualTo(initialRevision);
             }
@@ -966,7 +967,8 @@ class BootstrapContextTest {
                                 restarted.repositoryFactory(),
                                 configuration.getBootstrap().getAccessControl());
                 assertThat(adopt(restarted, storage)).isEqualTo(adopted);
-                assertThat(storage.load().valueOrFailure("configuration").revision()).isEqualTo(adoptedRevision);
+                assertThat(storage.load().revision())
+                        .isEqualTo(adoptedRevision);
                 String cache = restarted.repositoryFactory()
                         .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE).orElseThrow();
                 assertThat(restarted.repositoryProvider().isPublicRepositoryName(cache)).isFalse();
@@ -1004,9 +1006,11 @@ class BootstrapContextTest {
         };
         try (Git ignored = upstream.git(); Git ignoredMaterial = materialUpstream.git();
              BootstrapContext context = openContext(configuration, ENVIRONMENT, backend)) {
-            Optional<OrionDocument> adopted = adoptApproved(context, storage, approved);
+            Optional<OrionDocumentRevision> adopted = adoptApproved(context, storage, approved);
             if ("material".equals(changedFile)) {
-                assertThat(adopted.orElseThrow().system().proxies()).hasSize(1);
+                assertThat(adopted.orElseThrow().result()
+                        .valueOrFailure("Cannot read configuration document")
+                        .system().proxies()).hasSize(1);
                 assertThat(storage.saves).isEqualTo(1);
                 assertThat(OrionXml.read(new ByteArrayInputStream(storage.content))
                         .system().proxies()).hasSize(1);
@@ -1148,12 +1152,16 @@ class BootstrapContextTest {
         }
 
         @Override
-        public Result<OrionDocumentRevision> load() {
+        public OrionDocumentRevision load() {
             if (mode == Mode.FAIL_RELOAD && saves > 0) {
-                return new Result.Failure<>(Result.FailureCode.GENERAL, "reload failed");
+                return new OrionDocumentRevision(
+                        new Result.Failure<>(Result.FailureCode.GENERAL, "reload failed"),
+                        new OrionRevision.Absent());
             }
-            OrionRevision revision = mode == Mode.UNVERSIONED
-                    ? OrionRevision.INITIAL : new OrionRevision.Stored(Integer.toString(version));
+            OrionRevision revision =
+                    mode == Mode.UNVERSIONED
+                            ? new OrionRevision.Absent()
+                            : new OrionRevision.Stored(Integer.toString(version));
             OrionDocument document;
             try {
                 document =
@@ -1171,23 +1179,25 @@ class BootstrapContextTest {
                                         List.of())
                                 : OrionXml.read(new ByteArrayInputStream(content));
             } catch (IOException failure) {
-                return new Result.Failure<>(Result.FailureCode.GENERAL, "invalid XML", failure);
+                return new OrionDocumentRevision(
+                        new Result.Failure<>(Result.FailureCode.GENERAL, "invalid XML", failure),
+                        new OrionRevision.Absent());
             }
-            OrionDocumentRevision snapshot = new OrionDocumentRevision(document, revision);
+            OrionDocumentRevision snapshot = new OrionDocumentRevision(Result.of(document), revision);
             Runnable callback = afterLoad;
             afterLoad = null;
             if (callback != null) {
                 callback.run();
             }
-            return new Result.Success<>(snapshot);
+            return snapshot;
         }
 
         @Override
-        public Result<OrionDocumentRevision> load(OrionRevision.Stored revision) {
-            Result<OrionDocumentRevision> result = load();
-            if (result instanceof Result.Success<OrionDocumentRevision> success
-                    && success.value().revision().equals(revision)) return result;
-            return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
+        public OrionDocumentRevision load(OrionRevision.Stored revision) {
+            OrionDocumentRevision result = load();
+            if (!result.result().isFailure() && result.revision().equals(revision)) return result;
+            return new OrionDocumentRevision(
+                    new Result.Failure<>(Result.FailureCode.NOT_FOUND), new OrionRevision.Absent());
         }
 
         @Override
@@ -1249,8 +1259,8 @@ class BootstrapContextTest {
                         .isEqualTo(RUNNING);
                 var storage = new NativeGitOrionConfigurationStorage(context.repositoryFactory(),
                         configuration.getBootstrap().getAccessControl());
-                var snapshot = storage.load().valueOrFailure("runtime configuration");
-                assertThat(snapshot.document()
+                var snapshot = storage.load();
+                assertThat(snapshot.result().valueOrFailure("Cannot read configuration document")
                         .system().proxies()).isEmpty();
                 assertThatThrownBy(() -> context.repositoryFactory().adoptProvisional(
                         OrionDocument.withAccessControl(new AccessControl()), component.configurationSecrets()))
@@ -1402,7 +1412,8 @@ class BootstrapContextTest {
                 String invalidB = source.refs().get("refs/heads/main");
 
                 EVENTS.await();
-                assertThat(component.orionAccessControlService().configuration().document()).isEqualTo(first);
+                assertThat(component.orionAccessControlService().configuration().result()
+                        .valueOrFailure("Cannot read configuration document")).isEqualTo(first);
                 assertThat(source.refs().get("refs/heads/main")).isEqualTo(invalidB);
                 assertThat(context.repositoryProvider().isPublicRepositoryName(cache)).isFalse();
 
@@ -1464,8 +1475,10 @@ class BootstrapContextTest {
                         new NativeGitOrionConfigurationStorage(
                                 context.repositoryFactory(),
                                 configuration.getBootstrap().getAccessControl());
-                assertThat(local.load().valueOrFailure("published configuration").document()
-                        .system().proxies()).hasSize(remoteMaterial ? 1 : 0);
+                assertThat(
+                                local.load()
+                                        .result().valueOrFailure("Cannot read configuration document")
+                                        .system().proxies()).hasSize(remoteMaterial ? 1 : 0);
                 assertThatThrownBy(() -> context.repositoryFactory().adoptProvisional(
                         OrionDocument.withAccessControl(new AccessControl()), component.configurationSecrets()))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("provisional phase");
@@ -1520,21 +1533,23 @@ class BootstrapContextTest {
     }
 
     private static OrionDocument adopt(BootstrapContext context, OrionVersionedConfigurationStorage storage) {
-        return adoptApproved(context, storage, approved(storage)).orElseThrow();
+        return adoptApproved(context, storage, approved(storage)).orElseThrow().result()
+                .valueOrFailure("Cannot read configuration document");
     }
 
-    private static Optional<OrionDocument> adoptApproved(
+    private static Optional<OrionDocumentRevision> adoptApproved(
             BootstrapContext context,
             OrionVersionedConfigurationStorage storage,
             OrionDocumentRevision approved) {
         return BootstrapContext.adoptProxies(
-                storage, new OrionConfigurationEditor(storage,
-                new BootstrapConfiguration(), context.configurationCipher(), context.configurationMaterial()),
+                new OrionConfigurationEditor(
+                        storage,
+                        new BootstrapConfiguration(), context.configurationCipher(), context.configurationMaterial()),
                 context.repositoryFactory(), context.configurationCipher(), approved);
     }
 
     private static OrionDocumentRevision approved(OrionVersionedConfigurationStorage storage) {
-        return storage.load().valueOrFailure("configuration for adoption");
+        return storage.load();
     }
 
     private static OrionComponent runtimeComponent(

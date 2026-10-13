@@ -42,7 +42,6 @@ import pro.deta.orion.schema.orion.v2.RemoteAlias;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.config.ConfigurationChanged;
 import pro.deta.orion.config.OrionDocumentRevision;
-import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.internal.ChangeMetadata;
 import java.io.*;
 import java.lang.reflect.InvocationHandler;
@@ -78,7 +77,7 @@ class OrionAdminProxyMutationTest {
             assertThat(f.decisions.list(OPERATOR)).isEmpty();
             String repository =
                     f.acl.configuration()
-                            .document()
+                            .result().valueOrFailure("Cannot read configuration document")
                             .system()
                             .proxies()
                             .getFirst()
@@ -98,17 +97,21 @@ class OrionAdminProxyMutationTest {
             f.answer(f.decisions.list(OPERATOR).getFirst(), "1");
             f.work.remove().run();
             EVENTS.await();
-            f.provider.activate(() -> f.acl.configuration().document(), f.secrets);
+            f.provider.activate(() -> f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document"), f.secrets);
             assertThat(f.decisions.list(OPERATOR)).hasSize(1);
             assertThat(
                             f.provider
                                     .syncObservation(
                                             f.acl.configuration()
-                                                    .document()
+                                                    .result()
+                                                            .valueOrFailure("Cannot read configuration document")
                                                     .system()
                                                     .proxies()
                                                     .getFirst(),
-                                            f.acl.configuration().document().system())
+                                            f.acl.configuration().result()
+                                                    .valueOrFailure("Cannot read configuration document")
+                                                    .system())
                                     .status())
                     .isEqualTo(NativeGitRepositoryFactory.SyncStatus.UNAVAILABLE);
         }
@@ -134,7 +137,8 @@ class OrionAdminProxyMutationTest {
             Decision unrelated = new Decision(UUID.randomUUID(), Optional.empty(), "Other operation", "",
                     List.of(new DecisionAction("Confirm", false, actor -> Result.of(null))));
             f.decisions.register(unrelated).valueOrFailure("fill queue");
-            assertThatThrownBy(() -> f.provider.activate(() -> f.acl.configuration().document(), f.secrets))
+            assertThatThrownBy(() -> f.provider.activate(() -> f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document"), f.secrets))
                     .isInstanceOf(IllegalStateException.class).hasCauseInstanceOf(RejectedExecutionException.class);
             assertThat(f.decisions.list(OPERATOR)).containsExactly(unrelated.request());
         }
@@ -191,15 +195,21 @@ class OrionAdminProxyMutationTest {
             assertThat(f.storage.saves).isEqualTo(saves + 1);
             f.acl.onStop();
             f.acl.onStart();
-            var binding = f.acl.configuration().document().system().proxies().getFirst();
-            assertThat(binding.knownHosts(f.acl.configuration().document().system()))
+            var binding = f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().proxies().getFirst();
+            assertThat(binding.knownHosts(f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system()))
                     .containsExactlyInAnyOrder(previous, f.hostKey());
             assertThat(f.sshAuthentications).hasValue(0);
             assertThat(f.post(f.command("retry", "cluster", null, null)).json.at("/alias/status").asText())
                     .isEqualTo("success");
             assertThat(f.storage.saves).isEqualTo(saves + 1);
             assertThat(f.provider.syncObservation(binding,
-                    f.acl.configuration().document().system()).status().name()).isEqualTo("SUCCESS");
+                    f.acl.configuration().result()
+                            .valueOrFailure("Cannot read configuration document")
+                            .system()).status().name()).isEqualTo("SUCCESS");
             assertThat(f.sshAuthentications.get()).isPositive();
             assertThat(f.decisions.list(OPERATOR)).isEmpty();
             assertThat(f.audit).anySatisfy(record -> {
@@ -254,11 +264,13 @@ class OrionAdminProxyMutationTest {
             assertThat(f.sshAuthentications).hasValue(0);
             assertThat(
                             f.acl.configuration()
-                                    .document()
+                                    .result().valueOrFailure("Cannot read configuration document")
                                     .system()
                                     .proxies()
                                     .getFirst()
-                                    .knownHosts(f.acl.configuration().document().system()))
+                                    .knownHosts(f.acl.configuration().result()
+                                            .valueOrFailure("Cannot read configuration document")
+                                            .system()))
                     .isEmpty();
             assertThat(f.audit).extracting(CommandAuditRecord::resultCode).contains("configuration-conflict");
         }
@@ -277,11 +289,13 @@ class OrionAdminProxyMutationTest {
             assertThat(f.sshAuthentications).hasValue(0);
             assertThat(
                             f.acl.configuration()
-                                    .document()
+                                    .result().valueOrFailure("Cannot read configuration document")
                                     .system()
                                     .proxies()
                                     .getFirst()
-                                    .knownHosts(f.acl.configuration().document().system()))
+                                    .knownHosts(f.acl.configuration().result()
+                                            .valueOrFailure("Cannot read configuration document")
+                                            .system()))
                     .isEmpty();
             assertThat(f.audit).extracting(CommandAuditRecord::resultCode).contains("operation-failed");
             DecisionRequest failed = f.decisions.list(OPERATOR).getFirst();
@@ -298,11 +312,13 @@ class OrionAdminProxyMutationTest {
             assertThat(f.storage.saves).isEqualTo(saves + 1);
             assertThat(
                             f.acl.configuration()
-                                    .document()
+                                    .result().valueOrFailure("Cannot read configuration document")
                                     .system()
                                     .proxies()
                                     .getFirst()
-                                    .knownHosts(f.acl.configuration().document().system()))
+                                    .knownHosts(f.acl.configuration().result()
+                                            .valueOrFailure("Cannot read configuration document")
+                                            .system()))
                     .contains(f.hostKey());
             assertThat(f.sshAuthentications).hasValue(0);
         }
@@ -338,11 +354,13 @@ class OrionAdminProxyMutationTest {
             assertThat(f.sshAuthentications).hasValue(0);
             assertThat(
                             f.acl.configuration()
-                                    .document()
+                                    .result().valueOrFailure("Cannot read configuration document")
                                     .system()
                                     .proxies()
                                     .getFirst()
-                                    .knownHosts(f.acl.configuration().document().system()))
+                                    .knownHosts(f.acl.configuration().result()
+                                            .valueOrFailure("Cannot read configuration document")
+                                            .system()))
                     .isEmpty();
         }
     }
@@ -363,42 +381,50 @@ class OrionAdminProxyMutationTest {
             assertThat(f.post(create).status).isEqualTo(201);
             assertThat(
                             f.acl.configuration()
-                                    .document()
+                                    .result().valueOrFailure("Cannot read configuration document")
                                     .system()
                                     .proxies()
                                     .getFirst()
-                                    .knownHosts(f.acl.configuration().document().system()))
+                                    .knownHosts(f.acl.configuration().result()
+                                            .valueOrFailure("Cannot read configuration document")
+                                            .system()))
                     .containsExactlyInAnyOrder(firstKey, secondKey);
             assertThat(f.post(f.command("update", "cluster", null, null)).status).isEqualTo(200);
             assertThat(
                             f.acl.configuration()
-                                    .document()
+                                    .result().valueOrFailure("Cannot read configuration document")
                                     .system()
                                     .proxies()
                                     .getFirst()
-                                    .knownHosts(f.acl.configuration().document().system()))
+                                    .knownHosts(f.acl.configuration().result()
+                                            .valueOrFailure("Cannot read configuration document")
+                                            .system()))
                     .hasSize(2);
             Map<String, Object> update = f.command("update", "cluster", null, null);
             update.put("upstream", upstream + "-other");
             assertThat(f.post(update).status).isEqualTo(200);
             assertThat(
                             f.acl.configuration()
-                                    .document()
+                                    .result().valueOrFailure("Cannot read configuration document")
                                     .system()
                                     .proxies()
                                     .getFirst()
-                                    .knownHosts(f.acl.configuration().document().system()))
+                                    .knownHosts(f.acl.configuration().result()
+                                            .valueOrFailure("Cannot read configuration document")
+                                            .system()))
                     .containsExactlyInAnyOrder(firstKey, secondKey);
             Map<String, Object> endpoint = f.command("update", "cluster", null, null);
             endpoint.put("upstream", upstream.replace("127.0.0.1", "localhost"));
             assertThat(f.post(endpoint).status).isEqualTo(200);
             assertThat(
                             f.acl.configuration()
-                                    .document()
+                                    .result().valueOrFailure("Cannot read configuration document")
                                     .system()
                                     .proxies()
                                     .getFirst()
-                                    .knownHosts(f.acl.configuration().document().system()))
+                                    .knownHosts(f.acl.configuration().result()
+                                            .valueOrFailure("Cannot read configuration document")
+                                            .system()))
                     .isEmpty();
         }
     }
@@ -412,14 +438,18 @@ class OrionAdminProxyMutationTest {
             assertThat(created.json.at("/alias/status").asText()).isEqualTo("authentication-failed");
             String secret =
                     f.acl.configuration()
-                            .document()
+                            .result().valueOrFailure("Cannot read configuration document")
                             .system()
                             .proxies()
                             .getFirst()
-                            .secret(f.acl.configuration().document().system())
+                            .secret(f.acl.configuration().result()
+                                    .valueOrFailure("Cannot read configuration document")
+                                    .system())
                             .orElseThrow();
             assertThat(f.secrets.resolveSystem(secret)).isEqualTo("first-private-token".toCharArray());
-            assertThat(f.storage.snapshot.document().toString())
+            assertThat(f.storage.snapshot.result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .toString())
                     .doesNotContain("first-private-token");
             Reply replaced = f.post(f.command("replace-credential", "credential", null, "second-private-token"));
             assertThat(replaced.status).isEqualTo(200);
@@ -442,11 +472,13 @@ class OrionAdminProxyMutationTest {
                     .isEqualTo(201);
             String original =
                     f.acl.configuration()
-                            .document()
+                            .result().valueOrFailure("Cannot read configuration document")
                             .system()
                             .proxies()
                             .getFirst()
-                            .secret(f.acl.configuration().document().system())
+                            .secret(f.acl.configuration().result()
+                                    .valueOrFailure("Cannot read configuration document")
+                                    .system())
                             .orElseThrow();
             var metadata = f.command("update", "first", null, null);
             metadata.put("ref", "other");
@@ -479,19 +511,29 @@ class OrionAdminProxyMutationTest {
 
             assertThat(f.post(f.command("replace-credential", "first", null, "new-private-token")).status)
                     .isEqualTo(200);
-            var bindings = f.acl.configuration().document().system().proxies();
-            assertThat(bindings.get(0).secret(f.acl.configuration().document().system())).isNotEqualTo(bindings
-                    .get(1).secret(f.acl.configuration().document().system()));
+            var bindings = f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().proxies();
+            assertThat(bindings.get(0).secret(f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system())).isNotEqualTo(bindings
+                    .get(1).secret(f.acl.configuration().result()
+                            .valueOrFailure("Cannot read configuration document")
+                            .system()));
             assertThat(
                             f.secrets.resolveSystem(
                                     bindings.get(0)
-                                            .secret(f.acl.configuration().document().system())
+                                            .secret(f.acl.configuration().result()
+                                                    .valueOrFailure("Cannot read configuration document")
+                                                    .system())
                                             .orElseThrow()))
                     .isEqualTo("new-private-token".toCharArray());
             assertThat(
                             f.secrets.resolveSystem(
                                     bindings.get(1)
-                                            .secret(f.acl.configuration().document().system())
+                                            .secret(f.acl.configuration().result()
+                                                    .valueOrFailure("Cannot read configuration document")
+                                                    .system())
                                             .orElseThrow()))
                     .isEqualTo("shared-private-token".toCharArray());
         }
@@ -503,7 +545,8 @@ class OrionAdminProxyMutationTest {
             var old = f.command("create", "credential", f.upstream(), "private-token");
             f.storage.snapshot =
                     new OrionDocumentRevision(
-                            f.storage.snapshot.document(), new OrionRevision.Stored("external"));
+                            Result.of(f.storage.snapshot.result()
+                                    .valueOrFailure("Cannot read configuration document")), new OrionRevision.Stored("external"));
             EVENTS.manager().publishAndWait(new ConfigurationChanged(f.storage, f.storage.snapshot));
             assertThat(f.post(old).status).isEqualTo(409);
             Reply listing = f.request("GET", Map.of(), true);
@@ -527,11 +570,13 @@ class OrionAdminProxyMutationTest {
             assertThat(race.json.get("status").asText()).isEqualTo("configuration-conflict");
             String id =
                     f.acl.configuration()
-                            .document()
+                            .result().valueOrFailure("Cannot read configuration document")
                             .system()
                             .proxies()
                             .getFirst()
-                            .secret(f.acl.configuration().document().system())
+                            .secret(f.acl.configuration().result()
+                                    .valueOrFailure("Cannot read configuration document")
+                                    .system())
                             .orElseThrow();
             assertThat(f.secrets.resolveSystem(id)).isEqualTo("private-token".toCharArray());
         }
@@ -629,13 +674,15 @@ class OrionAdminProxyMutationTest {
                             })
                     .apply();
                     EVENTS.await();
-            OrionDocument original = f.acl.configuration().document();
+            OrionDocument original = f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document");
             String upstream = original.system().proxies().getFirst().upstream(original.system()).toString();
             Map<String, Object> path = f.command("update", "cluster", upstream.replace("/repo", "/changed"), null);
             path.put("credentialKind", "PASSWORD");
             path.put("ref", "other");
             assertThat(f.post(path).status).isEqualTo(200);
-            OrionDocument before = f.acl.configuration().document();
+            OrionDocument before = f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document");
             assertThat(before.system().connections()).isEqualTo(original.system().connections());
             assertThat(before.system().proxies().getFirst().upstream(before.system()).getPath()).isEqualTo("/changed");
             assertThat(before.system().proxies().getFirst().ref()).isEqualTo("refs/heads/other");
@@ -648,11 +695,13 @@ class OrionAdminProxyMutationTest {
             Reply moved = f.post(endpoint);
             assertThat(moved.status).isEqualTo(400);
             assertThat(moved.json.get("status").asText()).isEqualTo("shared-connection-requires-explicit-edit");
-            assertThat(f.acl.configuration().document()).isEqualTo(before);
+            assertThat(f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")).isEqualTo(before);
             Reply rejected = f.post(f.command("replace-credential", "cluster", null, "replacement-password"));
             assertThat(rejected.status).isEqualTo(400);
             assertThat(rejected.json.get("status").asText()).isEqualTo("shared-connection-requires-explicit-edit");
-            assertThat(f.acl.configuration().document()).isEqualTo(before);
+            assertThat(f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")).isEqualTo(before);
             String reference = before.system().proxies().getFirst().secret(before.system()).orElseThrow();
             assertThat(f.secrets.resolveSystem(reference)).isEqualTo("ssh-private-password".toCharArray());
         }
@@ -724,13 +773,15 @@ class OrionAdminProxyMutationTest {
             acl.onStart();
             secrets =
                     new ConfigurationSecrets(
-                            () -> acl.configuration().document(), material.configurationCipher());
+                            () -> acl.configuration().result()
+                                    .valueOrFailure("Cannot read configuration document"), material.configurationCipher());
             if (bootstrapSource != null) {
                 provider.resolveProvisional(NativeGitRepositoryFactory.MATERIAL_SOURCE, bootstrapSource, false);
             }
             provider.connectionFailures(OrionRuntimeModule.connectionFailures(decisions),
                     OrionRuntimeModule.proxyHostKeyDecisions(acl, editor, audit::add));
-            provider.activate(() -> acl.configuration().document(), secrets, bootstrapSource != null);
+            provider.activate(() -> acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document"), secrets, bootstrapSource != null);
             routes();
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             server.createContext("/repository.git", exchange -> {
@@ -842,16 +893,23 @@ class OrionAdminProxyMutationTest {
 
     private static final class MemoryStorage implements OrionVersionedConfigurationStorage {
         OrionDocumentRevision snapshot = new OrionDocumentRevision(
-                OrionDocument.withAccessControl(new AccessControl()), new OrionRevision.Stored("0"));
+                Result.of(OrionDocument.withAccessControl(new AccessControl())), new OrionRevision.Stored("0"));
         int saves;
         boolean conflict;
         boolean failSave;
 
-        @Override public Result<OrionDocumentRevision> load() { return Result.of(snapshot); }
-        @Override public Result<OrionDocumentRevision> load(OrionRevision.Stored revision) {
+        @Override
+        public OrionDocumentRevision load() {
+            return snapshot;
+        }
+
+        @Override
+        public OrionDocumentRevision load(OrionRevision.Stored revision) {
             return snapshot.revision().equals(revision)
                     ? load()
-                    : new Result.Failure<>(Result.FailureCode.NOT_FOUND);
+                    : new OrionDocumentRevision(
+                            new Result.Failure<>(Result.FailureCode.NOT_FOUND),
+                            new OrionRevision.Absent());
         }
         @Override public synchronized OrionRevision save(OrionRevision expected,
                 OrionDocument document, ChangeMetadata metadata) {
@@ -859,8 +917,11 @@ class OrionAdminProxyMutationTest {
             if (conflict || !snapshot.revision().equals(expected)) {
                 throw new OrionConfigurationConcurrentUpdateException("configuration conflict", null);
             }
-            if (snapshot.document().equals(document)) return snapshot.revision();
-            snapshot = new OrionDocumentRevision(document, new OrionRevision.Stored(Integer.toString(++saves)));
+            if (snapshot.result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .equals(document)) return snapshot.revision();
+            snapshot = new OrionDocumentRevision(
+                    Result.of(document), new OrionRevision.Stored(Integer.toString(++saves)));
             EVENTS.manager().publish(new ConfigurationChanged(this, snapshot));
             return snapshot.revision();
         }

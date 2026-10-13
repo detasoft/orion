@@ -83,7 +83,8 @@ class ConfiguredStorageManagementTest {
         acl.onStart();
         management = new ConfiguredStorageManagement(acl, editor, cipher, repositories);
         actor = SecurityContext.createContext().withUserIdentity(
-                new InternalUserImpl("alice", organization, () -> acl.configuration().document()));
+                new InternalUserImpl("alice", organization, () -> acl.configuration().result()
+                        .valueOrFailure("Cannot read configuration document")));
     }
 
     @AfterEach
@@ -97,11 +98,12 @@ class ConfiguredStorageManagementTest {
         EVENTS.await();
         assertThat(result).isInstanceOf(StorageManagement.Success.class);
         assertThat(secret).containsOnly('\0');
-        assertThat(storage.snapshot.document().toString())
+        assertThat(storage.snapshot.result().valueOrFailure("Cannot read configuration document").toString())
                 .doesNotContain("private-access-secret");
         Connection.S3 connection = (Connection.S3) activeDocument().organizations()
                 .getFirst().connections().getFirst();
-        char[] resolved = new ConfigurationSecrets(() -> acl.configuration().document(), cipher)
+        char[] resolved = new ConfigurationSecrets(() -> acl.configuration().result()
+                .valueOrFailure("Cannot read configuration document"), cipher)
                 .resolveOrganization(activeDocument(), organization, connection.secretKey().orElseThrow());
         assertThat(resolved).isEqualTo("private-access-secret".toCharArray());
         Arrays.fill(resolved, '\0');
@@ -478,7 +480,7 @@ class ConfiguredStorageManagementTest {
 
     private OrionDocument activeDocument() {
         EVENTS.await();
-        return acl.configuration().document();
+        return acl.configuration().result().valueOrFailure("Cannot read configuration document");
     }
 
     private StorageManagement.S3Input input(char[] secret) {
@@ -509,7 +511,7 @@ class ConfiguredStorageManagementTest {
         void set(OrionDocument document, boolean publish) {
             snapshot =
                     new OrionDocumentRevision(
-                            document, new OrionRevision.Stored("fixture-" + replacements++));
+                            Result.of(document), new OrionRevision.Stored("fixture-" + replacements++));
             if (publish) publish();
         }
 
@@ -518,13 +520,17 @@ class ConfiguredStorageManagementTest {
         }
 
         @Override
-        public Result<OrionDocumentRevision> load() { return Result.of(snapshot); }
+        public OrionDocumentRevision load() {
+            return snapshot;
+        }
 
         @Override
-        public Result<OrionDocumentRevision> load(OrionRevision.Stored revision) {
+        public OrionDocumentRevision load(OrionRevision.Stored revision) {
             return snapshot.revision().equals(revision)
                     ? load()
-                    : new Result.Failure<>(Result.FailureCode.NOT_FOUND);
+                    : new OrionDocumentRevision(
+                            new Result.Failure<>(Result.FailureCode.NOT_FOUND),
+                            new OrionRevision.Absent());
         }
 
         @Override
@@ -533,8 +539,10 @@ class ConfiguredStorageManagementTest {
             if (!snapshot.revision().equals(expected)) {
                 throw new OrionConfigurationConcurrentUpdateException("Changed", null);
             }
-            if (snapshot.document().equals(document)) return snapshot.revision();
-            snapshot = new OrionDocumentRevision(document, new OrionRevision.Stored("v" + ++saves));
+            if (snapshot.result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .equals(document)) return snapshot.revision();
+            snapshot = new OrionDocumentRevision(Result.of(document), new OrionRevision.Stored("v" + ++saves));
             EVENTS.manager().publish(new ConfigurationChanged(this, snapshot));
             return snapshot.revision();
         }

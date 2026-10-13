@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.util.Result;
 import pro.deta.orion.internal.ChangeMetadata;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
@@ -65,7 +66,9 @@ public final class AcmeConfigurationService {
     }
 
     private View view(OrionDocumentRevision snapshot) {
-        OrionAcmeConfiguration acme = snapshot.document().system().https()
+        OrionAcmeConfiguration acme = snapshot.result()
+                .valueOrFailure("Cannot read configuration document")
+                .system().https()
                 .flatMap(OrionHttpsConfiguration::acme).orElse(null);
         String directory = acme == null ? PRESETS.getFirst().directoryUrl() : directoryUrl(acme.directoryUrl());
         String provider = "custom";
@@ -95,7 +98,7 @@ public final class AcmeConfigurationService {
                 });
                 OrionDocument updated = edit.document();
                 edit.apply();
-                return view(new OrionDocumentRevision(updated, edit.revision()));
+                return view(new OrionDocumentRevision(Result.of(updated), edit.revision()));
             } finally {
                 edit.discard();
             }

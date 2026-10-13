@@ -76,7 +76,9 @@ class OrionOidcOnboardingTest {
                     List.of(new Credential(CredentialType.OPENSSH_PUBLIC_KEY, "retained-key")),
                     List.of(), user.grants());
             f.configureSystem(List.of(existing));
-            User before = f.acl.configuration().document().system().accessControl().users().getFirst();
+            User before = f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().accessControl().users().getFirst();
             Reply listed = f.request("GET", "/api/admin/users", Map.of(), Map.of(), null, f.admin);
             assertThat(listed.status).isEqualTo(200);
             assertThat(listed.json.toString()).doesNotContain("retained-key");
@@ -85,7 +87,9 @@ class OrionOidcOnboardingTest {
                     List.of(Map.of("issuer", f.issuer.toString(), "subject", "external-alice")));
             Reply saved = f.request("POST", "/api/admin/users", input, Map.of(), null, f.admin);
             assertThat(saved.status).isEqualTo(200);
-            User after = f.acl.configuration().document().system().accessControl().users().getFirst();
+            User after = f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().accessControl().users().getFirst();
             assertThat(after.first()).isEqualTo(before.first());
             assertThat(after.last()).isEqualTo(before.last());
             assertThat(after.grants()).isEqualTo(before.grants());
@@ -97,7 +101,9 @@ class OrionOidcOnboardingTest {
                     "revision", f.revision(), "bindings", List.of());
             assertThat(f.request("POST", "/api/admin/users", unknown, Map.of(), null, f.admin).status)
                     .isEqualTo(400);
-            assertThat(f.acl.configuration().document().system().accessControl().users())
+            assertThat(f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().accessControl().users())
                     .containsExactly(after);
         }
     }
@@ -178,7 +184,9 @@ class OrionOidcOnboardingTest {
         try (Fixture f = new Fixture()) {
             User user = f.systemUser("operator", "external-alice", false);
             f.configureSystem(List.of(user));
-            List<User> existingUsers = f.acl.configuration().document().system().accessControl().users();
+            List<User> existingUsers = f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().accessControl().users();
             Reply result = f.signInSystem();
             assertThat(result.status).isEqualTo(200);
             assertThat(result.json.path("scope").asText()).isEqualTo("system");
@@ -194,7 +202,9 @@ class OrionOidcOnboardingTest {
                     ApplicationAdminResource.applicationAdmin()).allowed()).isFalse();
             assertThat(RepositoryAccessRules.read().evaluate(context,
                     RepositoryResource.of("acme/team/repository")).allowed()).isTrue();
-            assertThat(f.acl.configuration().document().system().accessControl().users())
+            assertThat(f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .system().accessControl().users())
                     .isEqualTo(existingUsers);
             f.restart();
             assertThat(f.post("refresh", Map.of("scope", "system"), null).status).isEqualTo(200);
@@ -214,11 +224,15 @@ class OrionOidcOnboardingTest {
                     List.of(f.systemUser("first", "external-alice", true),
                             f.systemUser("second", "external-alice", false)))) {
                 f.configureSystem(users);
-                List<User> existingUsers = f.acl.configuration().document().system().accessControl().users();
+                List<User> existingUsers = f.acl.configuration().result()
+                        .valueOrFailure("Cannot read configuration document")
+                        .system().accessControl().users();
                 Login login = f.startSystem();
                 Reply callback = f.callbackReply(login);
                 assertThat(callback.status).isEqualTo(400);
-                assertThat(f.acl.configuration().document().system().accessControl().users())
+                assertThat(f.acl.configuration().result()
+                        .valueOrFailure("Cannot read configuration document")
+                        .system().accessControl().users())
                         .isEqualTo(existingUsers);
             }
         }
@@ -270,7 +284,8 @@ class OrionOidcOnboardingTest {
             assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(200);
             assertThat(
                             f.secrets.resolveOrganization(
-                                    f.acl.configuration().document(),
+                                    f.acl.configuration().result()
+                                            .valueOrFailure("Cannot read configuration document"),
                                     new OrganizationId("acme"),
                                     "oidc"))
                     .isEqualTo("secret".toCharArray());
@@ -324,7 +339,8 @@ class OrionOidcOnboardingTest {
             assertThat(settings.json.toString()).doesNotContain("system-secret", "clientSecret");
             assertThat(f.accounts.organization(new OrganizationId("acme")).oidcProviders())
                     .extracting(OidcProvider::id).containsExactly("corporate");
-            assertThat(f.secrets.resolveOrganization(f.acl.configuration().document(),
+            assertThat(f.secrets.resolveOrganization(f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document"),
                     new OrganizationId("acme"), "oidc")).isEqualTo("secret".toCharArray());
         }
     }
@@ -645,7 +661,9 @@ class OrionOidcOnboardingTest {
             Reply listing = f.request("GET", "/api/admin/invitations", Map.of(), Map.of(), null, f.admin);
             assertThat(listing.json.path("organizations")).hasSize(2);
             String invitation = f.invite("acme");
-            assertThat(f.storage.snapshot.document().toString())
+            assertThat(f.storage.snapshot.result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .toString())
                     .doesNotContain(invitation);
             EVENTS.await();
             Login login = f.start("acme", invitation);
@@ -829,11 +847,15 @@ class OrionOidcOnboardingTest {
                 if (candidate.id().equals("google")) provider = candidate;
             }
             assertThat(provider).isNotNull();
-            ConfigurationSecrets secrets = new ConfigurationSecrets(() -> f.acl.configuration().document(),
+            ConfigurationSecrets secrets = new ConfigurationSecrets(() -> f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document"),
                     f.material.configurationCipher());
-            assertThat(secrets.resolveOrganization(f.acl.configuration().document(), id, provider.secret()))
+            assertThat(secrets.resolveOrganization(f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document"), id, provider.secret()))
                     .isEqualTo("private-google-secret".toCharArray());
-            assertThat(f.storage.snapshot.document().toString())
+            assertThat(f.storage.snapshot.result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .toString())
                     .doesNotContain("private-google-secret");
             assertThat(f.accounts.invitation(id, invite)).isNotNull();
             assertThat(f.accounts.organization(new OrganizationId("default")).oidcProviders()).hasSize(1);
@@ -843,7 +865,8 @@ class OrionOidcOnboardingTest {
             input.put("revision", listing.json.path("revision").asText());
             input.put("clientSecret", "");
             assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null, f.admin).status).isEqualTo(200);
-            assertThat(secrets.resolveOrganization(f.acl.configuration().document(), id, provider.secret()))
+            assertThat(secrets.resolveOrganization(f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document"), id, provider.secret()))
                     .isEqualTo("private-google-secret".toCharArray());
             input.put("revision", f.revision());
             input.put("issuer", "https://other.example.test");
@@ -852,7 +875,8 @@ class OrionOidcOnboardingTest {
             input.put("clientSecret", "rotated-secret");
             assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null, f.admin).status).isEqualTo(200);
             EVENTS.await();
-            assertThat(secrets.resolveOrganization(f.acl.configuration().document(), id, provider.secret()))
+            assertThat(secrets.resolveOrganization(f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document"), id, provider.secret()))
                     .isEqualTo("rotated-secret".toCharArray());
         }
     }
@@ -945,7 +969,8 @@ class OrionOidcOnboardingTest {
                     "issuer", f.issuer.toString(), "clientId", "client", "clientSecret", "new-secret",
                     "revision", f.revision());
             SecurityContext scoped = SecurityContext.createContext().withUserIdentity(new InternalUserImpl("root",
-                    new OrganizationId("acme"), () -> f.acl.configuration().document()));
+                    new OrganizationId("acme"), () -> f.acl.configuration().result()
+                            .valueOrFailure("Cannot read configuration document")));
             assertThat(f.request("GET", "/api/admin/oidc", Map.of(), Map.of(), null, scoped).status).isEqualTo(403);
             assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null, scoped).status).isEqualTo(403);
             f.storage.conflict = true;
@@ -953,11 +978,13 @@ class OrionOidcOnboardingTest {
             assertThat(f.accounts.organization(new OrganizationId("acme")).secrets()).hasSize(1);
             f.storage.conflict = false;
             assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null, f.admin).status).isEqualTo(200);
-            ConfigurationSecrets secrets = new ConfigurationSecrets(() -> f.acl.configuration().document(),
+            ConfigurationSecrets secrets = new ConfigurationSecrets(() -> f.acl.configuration().result()
+                    .valueOrFailure("Cannot read configuration document"),
                     f.material.configurationCipher());
             for (String org : List.of("acme", "default")) {
                 OrganizationId id = new OrganizationId(org);
-                assertThat(secrets.resolveOrganization(f.acl.configuration().document(), id, "oidc"))
+                assertThat(secrets.resolveOrganization(f.acl.configuration().result()
+                        .valueOrFailure("Cannot read configuration document"), id, "oidc"))
                         .isEqualTo("secret".toCharArray());
                 if (connectionConsumer) {
                     assertThat(f.accounts.organization(id).connections()).hasSize(1);
@@ -968,7 +995,8 @@ class OrionOidcOnboardingTest {
                             ? "new-secret" : "secret";
                     assertThat(
                                     secrets.resolveOrganization(
-                                            f.acl.configuration().document(),
+                                            f.acl.configuration().result()
+                                                    .valueOrFailure("Cannot read configuration document"),
                                             id,
                                             provider.secret()))
                             .isEqualTo(expected.toCharArray());
@@ -1078,7 +1106,11 @@ class OrionOidcOnboardingTest {
                     OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), Optional.empty());
             OrionDocument.Repository repository = new OrionDocument.Repository("repository", "",
                     OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
-                    List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
+                            List.of(),
+                            List.of(),
+                            List.of(),
+                            List.of(),
+                            Optional.empty());
             OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
                     List.of(repository));
             List<OrionDocument.Organization> organizations = new ArrayList<>();
@@ -1097,7 +1129,7 @@ class OrionOidcOnboardingTest {
             }
             ByteArrayOutputStream xml = new ByteArrayOutputStream();
             OrionXml.write(document, xml);
-            storage.snapshot = new OrionDocumentRevision(document, new OrionRevision.Stored("0"));
+            storage.snapshot = new OrionDocumentRevision(Result.of(document), new OrionRevision.Stored("0"));
             editor = new OrionConfigurationEditor(storage,
                 new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
                 material.configurationCipher(),
@@ -1314,7 +1346,7 @@ class OrionOidcOnboardingTest {
         }
 
         OrionDocument document() {
-            return acl.configuration().document();
+            return acl.configuration().result().valueOrFailure("Cannot read configuration document");
         }
 
         String revision() {
@@ -1352,13 +1384,17 @@ class OrionOidcOnboardingTest {
         boolean conflict;
 
         @Override
-        public Result<OrionDocumentRevision> load() { return Result.of(snapshot); }
+        public OrionDocumentRevision load() {
+            return snapshot;
+        }
 
         @Override
-        public Result<OrionDocumentRevision> load(OrionRevision.Stored revision) {
+        public OrionDocumentRevision load(OrionRevision.Stored revision) {
             return snapshot.revision().equals(revision)
                     ? load()
-                    : new Result.Failure<>(Result.FailureCode.NOT_FOUND);
+                    : new OrionDocumentRevision(
+                            new Result.Failure<>(Result.FailureCode.NOT_FOUND),
+                            new OrionRevision.Absent());
         }
 
         @Override
@@ -1367,8 +1403,11 @@ class OrionOidcOnboardingTest {
             if (conflict || !snapshot.revision().equals(expected)) {
                 throw new OrionConfigurationConcurrentUpdateException("configuration conflict", null);
             }
-            if (snapshot.document().equals(document)) return snapshot.revision();
-            snapshot = new OrionDocumentRevision(document, new OrionRevision.Stored(Integer.toString(++saves)));
+            if (snapshot.result()
+                    .valueOrFailure("Cannot read configuration document")
+                    .equals(document)) return snapshot.revision();
+            snapshot = new OrionDocumentRevision(
+                    Result.of(document), new OrionRevision.Stored(Integer.toString(++saves)));
             EVENTS.manager().publish(new ConfigurationChanged(this, snapshot));
             return snapshot.revision();
         }
