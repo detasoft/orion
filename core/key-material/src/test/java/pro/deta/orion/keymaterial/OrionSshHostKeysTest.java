@@ -1,32 +1,18 @@
-package pro.deta.orion.transport.git;
+package pro.deta.orion.keymaterial;
 
-import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
-import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialAlias;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
-import pro.deta.orion.keymaterial.KeyMaterialOptions;
-import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialScope;
-import pro.deta.orion.keymaterial.KeyMaterialVersion;
-import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.keymaterial.SigningMaterialSet;
-import pro.deta.orion.keymaterial.SshHostKeyCapability;
-import pro.deta.orion.keymaterial.SshHostKeyReference;
 
-import pro.deta.orion.keymaterial.KeyMaterialService;
 import java.security.GeneralSecurityException;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class SshHostKeyLifecycleTest {
+class OrionSshHostKeysTest {
     private static final KeyMaterialScope.Cluster CLUSTER = new KeyMaterialScope.Cluster("orion-prod");
 
     @Test
-    void createsDefaultsOnFirstTransportInitializationAndReloadsThem() throws Exception {
+    void createsDefaultsOnFirstAccessAndReloadsThem() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         List<byte[]> publicKeys;
 
@@ -57,7 +43,6 @@ class SshHostKeyLifecycleTest {
 
         seed(store, List.of(first, latest, other));
         try (OrionKeyMaterial material = open(store)) {
-
             assertThat(material.sshHostKeys(List.of(new SshHostKeyReference("node-a-rsa")))
                     .descriptors()).containsExactly(latest);
             assertThat(material.sshHostKeys(List.of(new SshHostKeyReference("node-a-rsa-v1")))
@@ -83,7 +68,6 @@ class SshHostKeyLifecycleTest {
 
         seed(store, List.of(nestedLogicalAlias));
         try (OrionKeyMaterial material = open(store)) {
-
             assertThatThrownBy(() -> material.sshHostKeys(List.of(new SshHostKeyReference("node-a-rsa-v1"))))
                     .isInstanceOf(GeneralSecurityException.class)
                     .hasMessageContaining("node-a-rsa-v1");
@@ -95,8 +79,9 @@ class SshHostKeyLifecycleTest {
         try (KeyMaterialService material = KeyMaterialService.open(store,
                 KeyMaterialOptions.pkcs12("test-password".toCharArray()))) {
             material.generateKeyIfMissing(serverSigning(), 2_048);
-            for (KeyMaterialDescriptor descriptor : descriptors)
+            for (KeyMaterialDescriptor descriptor : descriptors) {
                 material.generateKeyIfMissing(descriptor, 2_048);
+            }
             material.save();
         }
     }
