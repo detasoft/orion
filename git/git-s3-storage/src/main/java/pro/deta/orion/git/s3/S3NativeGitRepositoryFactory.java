@@ -336,7 +336,7 @@ public final class S3NativeGitRepositoryFactory implements NativeGitRepositoryBa
     }
 
     private static Optional<AwsCredentialsProvider> credentials(
-            Map<String, String> auth, Map<String, String> environment, OrionEventManager events) {
+            Map<String, String> auth, Map<String, String> environment) {
         if (!auth.containsKey("accessKeyId") && !auth.containsKey("secretAccessKey")
                 && !auth.containsKey("sessionToken")) {
             return Optional.empty();
