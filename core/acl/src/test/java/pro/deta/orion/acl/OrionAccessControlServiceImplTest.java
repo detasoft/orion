@@ -1903,7 +1903,7 @@ class OrionAccessControlServiceImplTest {
         }
 
         @Override
-        public OrionRevision save(
+        public OrionRevision.Stored save(
                 OrionRevision expectedRevision, OrionDocument document, ChangeMetadata metadata) {
             if (blockCredentialRemoval && metadata.message().startsWith("remove SSH credential")) {
                 credentialRemovalSaveEntered.countDown();
@@ -1925,7 +1925,7 @@ class OrionAccessControlServiceImplTest {
             if (concurrentOnSave || snapshot != null && !snapshot.revision().equals(expectedRevision)) {
                 throw new OrionConfigurationConcurrentUpdateException("simulated race", null);
             }
-            OrionRevision revision = new OrionRevision.Stored("saved-" + ++saveCount);
+            OrionRevision.Stored revision = new OrionRevision.Stored("saved-" + ++saveCount);
             snapshot = new OrionDocumentRevision(Result.of(document), revision);
             events.publish(new ConfigurationChanged(this, snapshot));
             return revision;
@@ -1971,7 +1971,7 @@ class OrionAccessControlServiceImplTest {
         }
 
         @Override
-        public OrionRevision save(
+        public OrionRevision.Stored save(
                 OrionRevision expectedRevision, OrionDocument document, ChangeMetadata metadata) {
             saved = true;
             if (failSave) throw new IllegalStateException("simulated save failure");

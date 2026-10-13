@@ -523,8 +523,8 @@ class OrionSshAuthenticatorTest {
                     new OrionConfigurationModification(
                             configuration(),
                             document ->
-                                    revision instanceof OrionRevision.Stored
-                                            ? revision
+                                    revision instanceof OrionRevision.Stored stored
+                                            ? stored
                                             : new OrionRevision.Stored("saved")),
                     new OrionPasswordHashingService()) {
 

@@ -1203,7 +1203,7 @@ class BootstrapContextTest {
         }
 
         @Override
-        public OrionRevision save(OrionRevision expected, OrionDocument document, ChangeMetadata metadata) {
+        public OrionRevision.Stored save(OrionRevision expected, OrionDocument document, ChangeMetadata metadata) {
             assertThat(expected).isEqualTo(new OrionRevision.Stored(Integer.toString(version)));
             saves++;
             if (mode == Mode.FAIL_SAVE) {

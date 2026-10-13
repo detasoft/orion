@@ -113,7 +113,7 @@ public final class NativeGitOrionConfigurationStorage
     }
 
     @Override
-    public synchronized OrionRevision save(OrionRevision expectedRevision, OrionDocument document,
+    public synchronized OrionRevision.Stored save(OrionRevision expectedRevision, OrionDocument document,
             ChangeMetadata metadata) {
         Objects.requireNonNull(expectedRevision, "expectedRevision");
         Objects.requireNonNull(document, "document");
@@ -130,7 +130,7 @@ public final class NativeGitOrionConfigurationStorage
                     metadata.message());
             NativeGitRepository repository = repositoryProvider.openForWrite(repositoryName)
                     .valueOrFailure("Cannot open native repository " + repositoryName);
-            CheckedFunction<GitFileAccess, OrionRevision> update = access -> {
+            CheckedFunction<GitFileAccess, OrionRevision.Stored> update = access -> {
                 byte[] previous = null;
                 if (revision != null) {
                     try {
@@ -143,7 +143,7 @@ public final class NativeGitOrionConfigurationStorage
                 if (!Arrays.equals(content, previous)) {
                     access.write(path, content);
                 }
-                OrionRevision savedRevision = storedRevision(
+                OrionRevision.Stored savedRevision = storedRevision(
                         access.refUpdates().getFirst().newId().orElseThrow());
                 access.apply();
                 return savedRevision;

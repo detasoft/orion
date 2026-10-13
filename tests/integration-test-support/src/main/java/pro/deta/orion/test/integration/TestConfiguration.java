@@ -141,15 +141,15 @@ public final class TestConfiguration implements AutoCloseable {
         }
 
         @Override
-        public synchronized OrionRevision save(
+        public synchronized OrionRevision.Stored save(
                 OrionRevision expected, OrionDocument document, ChangeMetadata metadata) {
             if (!snapshot.revision().equals(expected)) {
                 throw new OrionConfigurationConcurrentUpdateException("Configuration changed", null);
             }
-            if (snapshot.result()
+            if (snapshot.revision() instanceof OrionRevision.Stored stored && snapshot.result()
                     .valueOrFailure("Cannot read configuration document")
-                    .equals(document)) return snapshot.revision();
-            OrionRevision saved = new OrionRevision.Stored("saved-" + ++revision);
+                    .equals(document)) return stored;
+            OrionRevision.Stored saved = new OrionRevision.Stored("saved-" + ++revision);
             snapshot = new OrionDocumentRevision(Result.of(document), saved);
             events.manager().publish(new ConfigurationChanged(this, snapshot));
             return saved;

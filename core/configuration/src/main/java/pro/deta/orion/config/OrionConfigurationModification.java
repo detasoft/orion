@@ -9,13 +9,13 @@ import java.util.function.UnaryOperator;
 
 /** Owns a configuration candidate and completes it through a single persistence callback. */
 public class OrionConfigurationModification implements Modification {
-    private final Function<OrionDocument, OrionRevision> onSave;
+    private final Function<OrionDocument, OrionRevision.Stored> onSave;
     private OrionDocument document;
     private OrionRevision revision;
     private boolean finished;
 
     public OrionConfigurationModification(OrionDocumentRevision snapshot,
-            Function<OrionDocument, OrionRevision> onSave) {
+            Function<OrionDocument, OrionRevision.Stored> onSave) {
         Objects.requireNonNull(snapshot, "snapshot");
         this.document = Objects.requireNonNull(snapshot.result()
                 .valueOrFailure("Cannot read configuration document"), "document");

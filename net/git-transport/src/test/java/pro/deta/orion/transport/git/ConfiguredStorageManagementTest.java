@@ -533,17 +533,18 @@ class ConfiguredStorageManagementTest {
         }
 
         @Override
-        public synchronized OrionRevision save(
+        public synchronized OrionRevision.Stored save(
                 OrionRevision expected, OrionDocument document, ChangeMetadata metadata) {
             if (!snapshot.revision().equals(expected)) {
                 throw new OrionConfigurationConcurrentUpdateException("Changed", null);
             }
-            if (snapshot.result()
+            if (snapshot.revision() instanceof OrionRevision.Stored stored && snapshot.result()
                     .valueOrFailure("Cannot read configuration document")
-                    .equals(document)) return snapshot.revision();
-            snapshot = new OrionDocumentRevision(Result.of(document), new OrionRevision.Stored("v" + ++saves));
+                    .equals(document)) return stored;
+            OrionRevision.Stored saved = new OrionRevision.Stored("v" + ++saves);
+            snapshot = new OrionDocumentRevision(Result.of(document), saved);
             EVENTS.manager().publish(new ConfigurationChanged(this, snapshot));
-            return snapshot.revision();
+            return saved;
         }
     }
 }

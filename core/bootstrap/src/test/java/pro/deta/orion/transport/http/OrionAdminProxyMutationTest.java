@@ -910,19 +910,19 @@ class OrionAdminProxyMutationTest {
                             new Result.Failure<>(Result.FailureCode.NOT_FOUND),
                             new OrionRevision.Absent());
         }
-        @Override public synchronized OrionRevision save(OrionRevision expected,
+        @Override public synchronized OrionRevision.Stored save(OrionRevision expected,
                 OrionDocument document, ChangeMetadata metadata) {
             if (failSave) throw new IllegalStateException("storage unavailable");
             if (conflict || !snapshot.revision().equals(expected)) {
                 throw new OrionConfigurationConcurrentUpdateException("configuration conflict", null);
             }
-            if (snapshot.result()
+            if (snapshot.revision() instanceof OrionRevision.Stored stored && snapshot.result()
                     .valueOrFailure("Cannot read configuration document")
-                    .equals(document)) return snapshot.revision();
-            snapshot = new OrionDocumentRevision(
-                    Result.of(document), new OrionRevision.Stored(Integer.toString(++saves)));
+                    .equals(document)) return stored;
+            OrionRevision.Stored saved = new OrionRevision.Stored(Integer.toString(++saves));
+            snapshot = new OrionDocumentRevision(Result.of(document), saved);
             EVENTS.manager().publish(new ConfigurationChanged(this, snapshot));
-            return snapshot.revision();
+            return saved;
         }
     }
 

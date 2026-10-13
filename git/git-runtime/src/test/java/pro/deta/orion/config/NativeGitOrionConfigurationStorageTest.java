@@ -144,7 +144,7 @@ class NativeGitOrionConfigurationStorageTest {
         assertThat(((Result.Failure<?>) storage.load().result()).code())
                 .isEqualTo(Result.FailureCode.NOT_FOUND);
 
-        storage.save(
+        OrionRevision.Stored saved = storage.save(
                 new OrionRevision.Absent(),
                 document("initial acl"),
                 new ChangeMetadata(useDefaults ? UserEmail.EMPTY : new UserEmail("root", "root@example.test"),
@@ -153,13 +153,13 @@ class NativeGitOrionConfigurationStorageTest {
         OrionDocumentRevision snapshot = storage.load();
         assertThat(snapshot.result()
                 .valueOrFailure("Cannot read configuration document")).isEqualTo(document("initial acl"));
-        assertThat(snapshot.revision()).isInstanceOf(OrionRevision.Stored.class);
+        assertThat(snapshot.revision()).isEqualTo(saved);
         assertThat(provider.repositoryNames()).containsExactly("internal/configuration");
         NativeGitRepository repository = provider.find("internal/configuration").valueOrFailure("repository");
         byte[] commit =
                 repository
                         .readObject(
-                                new ObjectId(((OrionRevision.Stored) snapshot.revision()).value()))
+                                new ObjectId(saved.value()))
                         .orElseThrow()
                         .data();
         String identity = useDefaults ? "orion <orion@localhost>" : "root <root@example.test>";

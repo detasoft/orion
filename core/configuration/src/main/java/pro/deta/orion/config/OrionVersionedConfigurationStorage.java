@@ -12,5 +12,5 @@ public interface OrionVersionedConfigurationStorage {
 
     OrionDocumentRevision load(OrionRevision.Stored revision);
 
-    OrionRevision save(OrionRevision expectedRevision, OrionDocument document, ChangeMetadata metadata);
+    OrionRevision.Stored save(OrionRevision expectedRevision, OrionDocument document, ChangeMetadata metadata);
 }
