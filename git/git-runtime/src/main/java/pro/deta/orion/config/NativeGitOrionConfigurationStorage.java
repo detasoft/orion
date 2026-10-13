@@ -1,5 +1,7 @@
 package pro.deta.orion.config;
 
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.util.Subscription;
 import pro.deta.orion.event.OrionEventManager;
@@ -123,8 +125,9 @@ public final class NativeGitOrionConfigurationStorage
             case OrionRevision.Stored stored -> stored.value();
         };
         try {
-            GitCommitAuthor commitAuthor = new GitCommitAuthor(
-                    metadata.author().getUsername(), metadata.author().getEmail(), metadata.message());
+            GitCommitMetadata commitMetadata = new GitCommitMetadata(
+                    new GitCommitAuthor(metadata.author().getUsername(), metadata.author().getEmail()),
+                    metadata.message());
             NativeGitRepository repository = repositoryProvider.openForWrite(repositoryName)
                     .valueOrFailure("Cannot open native repository " + repositoryName);
             CheckedFunction<GitFileAccess, OrionRevision> update = access -> {
@@ -145,7 +148,7 @@ public final class NativeGitOrionConfigurationStorage
                 access.apply();
                 return savedRevision;
             };
-            return repository.files().withAccess(configurationRef, revision, commitAuthor, update);
+            return repository.files().withAccess(configurationRef, revision, commitMetadata, update);
         } catch (GitRefConflictException error) {
             throw new OrionConfigurationConcurrentUpdateException("Orion configuration changed concurrently", error);
         } catch (Exception error) {

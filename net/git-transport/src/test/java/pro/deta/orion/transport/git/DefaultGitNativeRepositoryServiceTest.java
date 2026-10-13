@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.git;
 
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -189,7 +191,7 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
                         fileAccess -> {
                             fileAccess.write("a", new byte[] {0});
                             fileAccess.apply();
@@ -280,7 +282,7 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "first"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "first"),
                         fileAccess -> {
                             fileAccess.write("a", new byte[] {1});
                             fileAccess.apply();
@@ -359,7 +361,7 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "allowed"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "allowed"),
                         fileAccess -> {
                             fileAccess.write("a", new byte[] {1});
                             fileAccess.apply();
@@ -369,7 +371,7 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
                 .files()
                 .withAccess(
                         "secret",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "denied"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "denied"),
                         fileAccess -> {
                             fileAccess.write("a", new byte[] {2});
                             fileAccess.apply();
@@ -439,7 +441,7 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
                         fileAccess -> {
                             fileAccess.write("a", new byte[] {1});
                             fileAccess.apply();
@@ -494,7 +496,7 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
                         fileAccess -> {
                             fileAccess.write("a", new byte[] {1});
                             fileAccess.apply();

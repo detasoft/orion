@@ -1,5 +1,9 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.fileapi.GitCommitAuthor;
+
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.parser.v2.data.FileMode;
 
@@ -26,7 +30,7 @@ class GitFileTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
                             access -> {
                                 access.write("run", FileMode.EXECUTABLE_FILE, content);
                                 content[0] = 3;
@@ -52,8 +56,7 @@ class GitFileTest {
                                                 .files()
                                                 .withAccess(
                                                         "main",
-                                                        new pro.deta.orion.git.fileapi
-                                                                .GitCommitAuthor("", "", "invalid"),
+                                                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "invalid"),
                                                         access -> {
                                                             access.write("file", mode, new byte[0]);
                                                             access.apply();

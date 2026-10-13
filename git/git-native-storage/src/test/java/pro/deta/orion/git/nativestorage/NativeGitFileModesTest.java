@@ -1,5 +1,9 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.fileapi.GitCommitAuthor;
+
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import org.eclipse.jgit.internal.storage.dfs.DfsRepositoryDescription;
 import org.eclipse.jgit.internal.storage.dfs.InMemoryRepository;
 import org.eclipse.jgit.lib.Constants;
@@ -58,7 +62,7 @@ class NativeGitFileModesTest {
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "create"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "create"),
                         fileAccess -> {
                             fileAccess.write("run.sh", EXECUTABLE_FILE, script);
                             fileAccess.write("next.sh", script);
@@ -76,7 +80,7 @@ class NativeGitFileModesTest {
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "update"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "update"),
                         fileAccess -> {
                             fileAccess.write("run.sh", bytes("updated"));
                             fileAccess.write("next.sh", EXECUTABLE_FILE, script);
@@ -142,8 +146,7 @@ class NativeGitFileModesTest {
                                         .files()
                                         .withAccess(
                                                 "main",
-                                                new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                                        "", "", "update"),
+                                                new GitCommitMetadata(GitCommitAuthor.EMPTY, "update"),
                                                 fileAccess -> {
                                                     fileAccess.write(
                                                             "config.txt", bytes("updated"));
@@ -190,7 +193,7 @@ class NativeGitFileModesTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "create"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "create"),
                             fileAccess -> {
                                 for (Map.Entry<String, byte[]> fileEntry : files.entrySet()) {
                                     pro.deta.orion.git.parser.v2.data.FileMode mode =
@@ -214,7 +217,7 @@ class NativeGitFileModesTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "update"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "update"),
                             fileAccess -> {
                                 fileAccess.write("a/x", updated);
                                 fileAccess.apply();
@@ -266,7 +269,7 @@ class NativeGitFileModesTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "update"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "update"),
                             fileAccess -> {
                                 fileAccess.write("config.txt", configuration);
                                 fileAccess.apply();

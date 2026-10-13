@@ -81,13 +81,13 @@ public final class GitFileApi {
         return readFile(commitId, path, (type, size, base, input) -> input.newInputStream().readAllBytes());
     }
 
-    public <T> T withAccess(String branch, GitCommitAuthor author,
+    public <T> T withAccess(String branch, GitCommitMetadata metadata,
                             CheckedFunction<GitFileAccess, T> operation) throws Exception {
         Objects.requireNonNull(operation, "operation");
         RefId ref = new RefId(branchRefName(branch));
         Head head = repository.index().getHEAD();
         return repository.index().withAccess(writableRefs(ref, head), Optional.of(PackId.create()),
-                index -> run(index, branch, index.findRef(ref), author, head, operation));
+                index -> run(index, branch, index.findRef(ref), metadata, head, operation));
     }
 
     private Set<RefId> writableRefs(RefId ref, Head head) {
@@ -99,21 +99,21 @@ public final class GitFileApi {
         return refs;
     }
 
-    public <T> T withAccess(String branch, String expectedRevision, GitCommitAuthor author,
+    public <T> T withAccess(String branch, String expectedRevision, GitCommitMetadata metadata,
                             CheckedFunction<GitFileAccess, T> operation) throws Exception {
         Objects.requireNonNull(operation, "operation");
         RefId ref = new RefId(branchRefName(branch));
         Optional<ObjectId> expected = Optional.ofNullable(expectedRevision).map(ObjectId::new);
         Head head = repository.index().getHEAD();
         return repository.index().withAccess(writableRefs(ref, head), Optional.of(PackId.create()),
-                index -> run(index, branch, expected, author, head, operation));
+                index -> run(index, branch, expected, metadata, head, operation));
     }
 
     private <T> T run(GitIndexAccess index, String branch, Optional<ObjectId> parent,
-                      GitCommitAuthor author, Head head,
+                      GitCommitMetadata metadata, Head head,
                       CheckedFunction<GitFileAccess, T> operation) throws Exception {
         GitFileAccess access = new GitFileAccess(
-                repository, index, branch, parent, author, initializeHead, head);
+                repository, index, branch, parent, metadata, initializeHead, head);
         Throwable primary = null;
         try {
             return operation.apply(access);

@@ -1,5 +1,7 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -54,7 +56,7 @@ class ProxyNativeGitRepositoryTest {
                 .files()
                 .withAccess(
                         location.refName(),
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "first"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "first"),
                         fileAccess -> {
                             fileAccess.write("orion.xml", "first".getBytes());
                             fileAccess.apply();
@@ -93,7 +95,7 @@ class ProxyNativeGitRepositoryTest {
                 .files()
                 .withAccess(
                         location.refName(),
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "first"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "first"),
                         fileAccess -> {
                             fileAccess.write("file", new byte[] {1});
                             fileAccess.apply();

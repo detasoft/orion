@@ -1,5 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import pro.deta.orion.git.parser.v2.id.RefId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -45,7 +47,7 @@ class NativeGitRepositoryTest {
                     .files()
                     .withAccess(
                             "topic",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "create"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "create"),
                             fileAccess -> {
                                 fileAccess.write("./каталог//файл.txt", file);
                                 fileAccess.apply();
@@ -68,7 +70,7 @@ class NativeGitRepositoryTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "create"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "create"),
                             fileAccess -> {
                                 fileAccess.write("file", file);
                                 fileAccess.apply();
@@ -82,8 +84,7 @@ class NativeGitRepositoryTest {
                                             .files()
                                             .withAccess(
                                                     "main",
-                                                    new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                                            "", "", "invalid"),
+                                                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "invalid"),
                                                     fileAccess -> {
                                                         fileAccess.write(path, file);
                                                         fileAccess.apply();
@@ -212,7 +213,7 @@ class NativeGitRepositoryTest {
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial acl"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial acl"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "initial acl".getBytes(StandardCharsets.UTF_8));
@@ -256,7 +257,7 @@ class NativeGitRepositoryTest {
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial acl"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial acl"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "initial acl".getBytes(StandardCharsets.UTF_8));
@@ -271,7 +272,7 @@ class NativeGitRepositoryTest {
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "updated acl"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "updated acl"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "updated acl".getBytes(StandardCharsets.UTF_8));
@@ -294,7 +295,7 @@ class NativeGitRepositoryTest {
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "version one"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "version one"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "version one".getBytes(StandardCharsets.UTF_8));
@@ -311,7 +312,7 @@ class NativeGitRepositoryTest {
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "version two"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "version two"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "version two".getBytes(StandardCharsets.UTF_8));
@@ -345,7 +346,7 @@ class NativeGitRepositoryTest {
         first.files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "version one"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "version one"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "version one".getBytes(StandardCharsets.UTF_8));
@@ -364,7 +365,7 @@ class NativeGitRepositoryTest {
         first.files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "version two"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "version two"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "version two".getBytes(StandardCharsets.UTF_8));
@@ -399,7 +400,7 @@ class NativeGitRepositoryTest {
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "version one"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "version one"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "version one".getBytes(StandardCharsets.UTF_8));
@@ -436,7 +437,7 @@ class NativeGitRepositoryTest {
                 .files()
                 .withAccess(
                         "master",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial acl"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial acl"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "initial acl".getBytes(StandardCharsets.UTF_8));

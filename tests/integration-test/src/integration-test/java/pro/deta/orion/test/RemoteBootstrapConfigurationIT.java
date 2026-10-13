@@ -1,5 +1,9 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.git.fileapi.GitCommitAuthor;
+
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
@@ -66,8 +70,7 @@ class RemoteBootstrapConfigurationIT {
                     .files()
                     .withAccess(
                             "refs/heads/bootstrap",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                    "", "", "seed remote bootstrap inputs"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed remote bootstrap inputs"),
                             fileAccess -> {
                                 fileAccess.write("config/acl.xml", xml);
                                 fileAccess.write("keys/server.p12", material);
@@ -211,8 +214,7 @@ class RemoteBootstrapConfigurationIT {
                     .files()
                     .withAccess(
                             acl.getRef(),
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                    "", "", "seed configuration"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed configuration"),
                             fileAccess -> {
                                 fileAccess.write(
                                         acl.getPath(),
@@ -225,7 +227,7 @@ class RemoteBootstrapConfigurationIT {
                     .files()
                     .withAccess(
                             material.getRef(),
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "seed material"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed material"),
                             fileAccess -> {
                                 fileAccess.write(
                                         material.getPath(), materialBytes(target, environment));
@@ -278,8 +280,8 @@ class RemoteBootstrapConfigurationIT {
                                     .files()
                                     .withAccess(
                                             acl.getRef(),
-                                            new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                                    "", "", "write configuration upstream"),
+                                            new GitCommitMetadata(
+                                                    GitCommitAuthor.EMPTY, "write configuration upstream"),
                                             fileAccess -> {
                                                 fileAccess.write("configuration-marker", payload);
                                                 fileAccess.apply();
@@ -294,8 +296,8 @@ class RemoteBootstrapConfigurationIT {
                                     .files()
                                     .withAccess(
                                             material.getRef(),
-                                            new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                                    "", "", "write material upstream"),
+                                            new GitCommitMetadata(
+                                                    GitCommitAuthor.EMPTY, "write material upstream"),
                                             fileAccess -> {
                                                 fileAccess.write("material-marker", payload);
                                                 fileAccess.apply();

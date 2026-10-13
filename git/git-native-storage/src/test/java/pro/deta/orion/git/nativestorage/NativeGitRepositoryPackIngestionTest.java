@@ -1,5 +1,9 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.fileapi.GitCommitAuthor;
+
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import pro.deta.orion.git.parser.v2.id.RefId;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.parser.v2.id.PackId;
@@ -95,7 +99,7 @@ class NativeGitRepositoryPackIngestionTest {
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
                         access -> {
                             access.write("file", new byte[] {1});
                             ByteArrayOutputStream output = new ByteArrayOutputStream();

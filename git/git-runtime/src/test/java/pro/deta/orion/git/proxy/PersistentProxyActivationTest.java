@@ -1,5 +1,9 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.fileapi.GitCommitAuthor;
+
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import com.sun.net.httpserver.HttpServer;
@@ -107,7 +111,7 @@ class PersistentProxyActivationTest {
             retained.files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "save"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "save"),
                             fileAccess -> {
                                 fileAccess.write("orion.xml", new byte[] {1});
                                 fileAccess.apply();
@@ -272,8 +276,7 @@ class PersistentProxyActivationTest {
                                     retained.files()
                                             .withAccess(
                                                     "main",
-                                                    new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                                            "", "", "save"),
+                                                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "save"),
                                                     fileAccess -> {
                                                         fileAccess.write("file", new byte[] {1});
                                                         fileAccess.apply();

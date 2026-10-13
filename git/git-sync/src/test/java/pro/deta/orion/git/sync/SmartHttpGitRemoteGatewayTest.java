@@ -1,5 +1,7 @@
 package pro.deta.orion.git.sync;
 
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import pro.deta.orion.git.parser.v2.id.RefId;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.ObjectId;
@@ -87,8 +89,8 @@ class SmartHttpGitRemoteGatewayTest {
 
                 assertThat(local.updateRef("refs/heads/main", NULL_ID, seed.main()).status())
                         .isEqualTo(RefUpdateResult.Status.APPLIED);
-                local.files().withAccess("main", new GitCommitAuthor("Orion",
-                        "orion@example.invalid", "Orion outbound"), fileAccess -> {
+                local.files().withAccess("main", new GitCommitMetadata(
+                        new GitCommitAuthor("Orion", "orion@example.invalid"), "Orion outbound"), fileAccess -> {
                     fileAccess.write("orion.txt", "outbound\n".getBytes());
                     fileAccess.apply();
                     return null;
@@ -140,8 +142,8 @@ class SmartHttpGitRemoteGatewayTest {
                 gateway.fetchHeads(local);
                 assertThat(local.updateRef("refs/heads/main", NULL_ID, seed.main()).status())
                         .isEqualTo(RefUpdateResult.Status.APPLIED);
-                local.files().withAccess("main", new GitCommitAuthor("Orion",
-                        "orion@example.invalid", "Outbound"), fileAccess -> {
+                local.files().withAccess("main", new GitCommitMetadata(
+                        new GitCommitAuthor("Orion", "orion@example.invalid"), "Outbound"), fileAccess -> {
                     fileAccess.write("outbound.txt", "outbound\n".getBytes());
                     fileAccess.apply();
                     return null;

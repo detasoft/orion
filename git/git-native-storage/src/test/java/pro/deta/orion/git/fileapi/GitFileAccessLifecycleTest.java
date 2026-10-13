@@ -67,7 +67,7 @@ class GitFileAccessLifecycleTest {
             });
             NativeGitRepository repository = new NativeGitRepository("demo", observed, owner, EVENTS.manager());
             GitFileAccess access = new GitFileAccess(repository, index, "main", Optional.empty(),
-                    GitCommitAuthor.EMPTY, false, owner.getHEAD());
+                    GitCommitMetadata.EMPTY, false, owner.getHEAD());
             try {
                 if (failPack || failIndex) {
                     IOException expected = failPack ? packFailure : indexFailure;

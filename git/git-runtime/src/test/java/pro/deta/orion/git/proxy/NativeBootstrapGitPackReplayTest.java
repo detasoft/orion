@@ -1,5 +1,7 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import io.netty.buffer.ByteBuf;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.internal.storage.pack.DeltaEncoder;
@@ -139,7 +141,7 @@ class NativeBootstrapGitPackReplayTest {
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "local"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "local"),
                         fileAccess -> {
                             fileAccess.write("config.txt", new byte[] {1});
                             fileAccess.apply();

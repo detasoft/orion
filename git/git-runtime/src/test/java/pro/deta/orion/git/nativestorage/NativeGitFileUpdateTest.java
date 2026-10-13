@@ -1,5 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import org.eclipse.jgit.internal.storage.dfs.DfsRepositoryDescription;
 import org.eclipse.jgit.internal.storage.dfs.InMemoryRepository;
 import org.eclipse.jgit.lib.NullProgressMonitor;
@@ -48,7 +50,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
                             access -> {
                                 access.write("folder", bytes("original"));
                                 access.apply();
@@ -62,8 +64,7 @@ class NativeGitFileUpdateTest {
                                             .files()
                                             .withAccess(
                                                     "main",
-                                                    new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                                            "", "", "invalid"),
+                                                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "invalid"),
                                                     access -> {
                                                         access.write(
                                                                 "folder/child.txt", bytes("new"));
@@ -85,7 +86,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
                             access -> {
                                 access.write("folder/keep.txt", bytes("original"));
                                 access.apply();
@@ -99,8 +100,7 @@ class NativeGitFileUpdateTest {
                                             .files()
                                             .withAccess(
                                                     "main",
-                                                    new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                                            "", "", "invalid"),
+                                                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "invalid"),
                                                     access -> {
                                                         access.write(
                                                                 "folder", bytes("replacement"));
@@ -123,7 +123,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
                             access -> {
                                 access.write("left/config.txt", bytes("before"));
                                 access.write("right/keep.txt", bytes("keep"));
@@ -135,7 +135,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "update"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "update"),
                             access -> {
                                 access.write("left/config.txt", bytes("after"));
                                 assertThat(access.pack().objectCount()).isEqualTo(4);
@@ -156,7 +156,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
                             access -> {
                                 access.write("entry", bytes("file"));
                                 access.apply();
@@ -166,8 +166,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                    "", "", "file to directory"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "file to directory"),
                             access -> {
                                 access.delete("entry");
                                 access.write("entry/child", bytes("nested"));
@@ -180,8 +179,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                    "", "", "directory to file"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "directory to file"),
                             access -> {
                                 access.delete("entry/child");
                                 access.write("entry", bytes("file again"));
@@ -200,7 +198,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
                             fileAccess -> {
                                 fileAccess.write("nested/remove.txt", new byte[] {1});
                                 fileAccess.write("keep.txt", new byte[] {2});
@@ -227,8 +225,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                    "", "", "delete remaining files"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "delete remaining files"),
                             fileAccess -> {
                                 fileAccess.delete("keep.txt");
                                 fileAccess.delete("change.txt");
@@ -250,7 +247,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
                             fileAccess -> {
                                 fileAccess.write("config.txt", bytes("initial"));
                                 fileAccess.apply();
@@ -269,11 +266,8 @@ class NativeGitFileUpdateTest {
                                                                     .files()
                                                                     .withAccess(
                                                                             "main",
-                                                                            new pro.deta.orion.git
-                                                                                    .fileapi
-                                                                                    .GitCommitAuthor(
-                                                                                    "", "",
-                                                                                    "invalid"),
+                                                                            new GitCommitMetadata(
+                                                                                    GitCommitAuthor.EMPTY, "invalid"),
                                                                             fileAccess -> {
                                                                                 fileAccess.delete(
                                                                                         path);
@@ -303,7 +297,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "first"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "first"),
                             fileAccess -> {
                                 fileAccess.write("config.txt", bytes("first"));
                                 fileAccess.apply();
@@ -334,7 +328,7 @@ class NativeGitFileUpdateTest {
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "first"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "first"),
                         fileAccess -> {
                             fileAccess.write("config.txt", bytes("first"));
                             fileAccess.apply();
@@ -350,7 +344,7 @@ class NativeGitFileUpdateTest {
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "second"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "second"),
                         fileAccess -> {
                             fileAccess.write("config.txt", bytes("second"));
                             fileAccess.apply();

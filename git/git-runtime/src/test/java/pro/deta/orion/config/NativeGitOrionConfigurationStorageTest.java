@@ -1,5 +1,9 @@
 package pro.deta.orion.config;
 
+import pro.deta.orion.git.fileapi.GitCommitAuthor;
+
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -58,7 +62,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .files()
                 .withAccess(
                         "refs/heads/main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "seed"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed"),
                         fileAccess -> {
                             fileAccess.write(ACL_PATH, bytes("resolved acl"));
                             fileAccess.write(secondaryPath, bytes("resolved roles"));
@@ -91,7 +95,7 @@ class NativeGitOrionConfigurationStorageTest {
         selected.files()
                 .withAccess(
                         ref,
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "seed"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed"),
                         fileAccess -> {
                             fileAccess.write(ACL_PATH, bytes("selected ACL"));
                             fileAccess.apply();
@@ -197,7 +201,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .files()
                 .withAccess(
                         "refs/heads/configuration",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "add readme"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "add readme"),
                         fileAccess -> {
                             fileAccess.write("README.md", bytes("not an ACL"));
                             fileAccess.apply();
@@ -236,7 +240,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .files()
                 .withAccess(
                         "refs/heads/configuration",
-                        pro.deta.orion.git.fileapi.GitCommitAuthor.EMPTY,
+                        GitCommitMetadata.EMPTY,
                         access -> {
                             access.write("README.md", bytes("existing file"));
                             access.apply();
@@ -281,7 +285,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .files()
                 .withAccess(
                         "refs/heads/configuration",
-                        pro.deta.orion.git.fileapi.GitCommitAuthor.EMPTY,
+                        GitCommitMetadata.EMPTY,
                         access -> {
                             access.write(ACL_PATH, "<broken".getBytes(StandardCharsets.UTF_8));
                             access.apply();
@@ -314,7 +318,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .files()
                 .withAccess(
                         "refs/heads/configuration",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "add primary ACL"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "add primary ACL"),
                         fileAccess -> {
                             fileAccess.write(ACL_PATH, bytes("primary ACL"));
                             fileAccess.apply();
@@ -345,7 +349,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .files()
                 .withAccess(
                         "refs/heads/other",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "other branch"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "other branch"),
                         fileAccess -> {
                             fileAccess.write(ACL_PATH, bytes("other"));
                             fileAccess.apply();
@@ -381,7 +385,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .files()
                 .withAccess(
                         "refs/heads/configuration",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "version two"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "version two"),
                         fileAccess -> {
                             fileAccess.write(ACL_PATH, bytes("version two"));
                             fileAccess.write("winner.txt", bytes("winner"));
@@ -415,7 +419,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .files()
                 .withAccess(
                         "refs/heads/configuration",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "winner"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "winner"),
                         fileAccess -> {
                             fileAccess.write("winner.txt", bytes("winner"));
                             fileAccess.apply();
@@ -457,7 +461,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .files()
                 .withAccess(
                         "refs/heads/configuration",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "seed"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed"),
                         fileAccess -> {
                             fileAccess.write(ACL_PATH, bytes("provider acl"));
                             fileAccess.apply();

@@ -1,5 +1,7 @@
 package pro.deta.orion.git.workflow.orion;
 
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import org.eclipse.jgit.internal.storage.dfs.DfsRepositoryDescription;
 import org.eclipse.jgit.internal.storage.dfs.InMemoryRepository;
@@ -154,8 +156,8 @@ final class OrionGitWorkTree implements GitWorkTree {
         if (stagedPaths.isEmpty()) {
             throw new IllegalStateException("Orion native commit requires staged files");
         }
-        repository.files().withAccess(currentBranch, new GitCommitAuthor(
-                GitScenarioContext.IDENTITY_NAME, GitScenarioContext.IDENTITY_EMAIL, message), access -> {
+        repository.files().withAccess(currentBranch, new GitCommitMetadata(
+                new GitCommitAuthor(GitScenarioContext.IDENTITY_NAME, GitScenarioContext.IDENTITY_EMAIL), message), access -> {
             for (String path : stagedPaths) {
                 Path source = directory.resolve(path);
                 if (Files.isSymbolicLink(source)) {

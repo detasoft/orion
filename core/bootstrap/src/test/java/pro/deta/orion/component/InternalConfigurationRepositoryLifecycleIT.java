@@ -1,5 +1,7 @@
 package pro.deta.orion.component;
 
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.junit.jupiter.api.Test;
@@ -571,8 +573,7 @@ class InternalConfigurationRepositoryLifecycleIT {
                 .files()
                 .withAccess(
                         CONFIGURATION_REF,
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                "", "", "seed configuration and unrelated XML"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed configuration and unrelated XML"),
                         fileAccess -> {
                             fileAccess.write(ACL_PATH, primaryAcl);
                             fileAccess.write(secondaryPath, secondaryAcl);
@@ -652,8 +653,7 @@ class InternalConfigurationRepositoryLifecycleIT {
                     .files()
                     .withAccess(
                             CONFIGURATION_REF,
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                    "", "", "seed noncanonical root ACL"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed noncanonical root ACL"),
                             fileAccess -> {
                                 fileAccess.write(ACL_PATH, noncanonicalRootAclBytes());
                                 fileAccess.apply();
@@ -1022,7 +1022,8 @@ class InternalConfigurationRepositoryLifecycleIT {
             String candidateName,
             byte[] content) throws Exception {
         String candidateRef = "refs/heads/candidate-" + candidateName;
-        repository.files().withAccess(candidateRef, new GitCommitAuthor("", "", "candidate " + candidateName),
+        repository.files().withAccess(candidateRef, new GitCommitMetadata(
+                GitCommitAuthor.EMPTY, "candidate " + candidateName),
                 fileAccess -> {
             fileAccess.write(ACL_PATH, content);
             fileAccess.apply();

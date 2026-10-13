@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.git;
 
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -261,7 +263,7 @@ class GitBlockingWireSessionTest {
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
                         fileAccess -> {
                             fileAccess.write(
                                     "README.md", "payload".getBytes(StandardCharsets.US_ASCII));
@@ -467,7 +469,7 @@ class GitBlockingWireSessionTest {
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "base"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "base"),
                         fileAccess -> {
                             fileAccess.write(
                                     "README.md", "base".getBytes(StandardCharsets.US_ASCII));
@@ -479,7 +481,7 @@ class GitBlockingWireSessionTest {
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "next"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "next"),
                         fileAccess -> {
                             fileAccess.write(
                                     "README.md", "next".getBytes(StandardCharsets.US_ASCII));
@@ -515,7 +517,7 @@ class GitBlockingWireSessionTest {
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "first"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "first"),
                         fileAccess -> {
                             fileAccess.write("first", new byte[] {1});
                             fileAccess.apply();
@@ -525,7 +527,7 @@ class GitBlockingWireSessionTest {
                 .files()
                 .withAccess(
                         "second",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "second"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "second"),
                         fileAccess -> {
                             fileAccess.write("second", new byte[] {2});
                             fileAccess.apply();
@@ -563,7 +565,7 @@ class GitBlockingWireSessionTest {
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "base"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "base"),
                         fileAccess -> {
                             fileAccess.write(
                                     "README.md", "base".getBytes(StandardCharsets.US_ASCII));
@@ -575,7 +577,7 @@ class GitBlockingWireSessionTest {
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "next"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "next"),
                         fileAccess -> {
                             fileAccess.write(
                                     "README.md", "next".getBytes(StandardCharsets.US_ASCII));
@@ -717,7 +719,7 @@ class GitBlockingWireSessionTest {
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "root"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "root"),
                         fileAccess -> {
                             fileAccess.write(
                                     "README.md", "root".getBytes(StandardCharsets.US_ASCII));
@@ -728,7 +730,7 @@ class GitBlockingWireSessionTest {
                 .files()
                 .withAccess(
                         "main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "tip"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "tip"),
                         fileAccess -> {
                             fileAccess.write(
                                     "README.md", "tip".getBytes(StandardCharsets.US_ASCII));

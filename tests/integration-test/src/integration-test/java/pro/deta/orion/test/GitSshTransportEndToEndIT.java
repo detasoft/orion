@@ -1,5 +1,7 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.sshd.client.SshClient;
 import org.apache.sshd.client.auth.keyboard.UserAuthKeyboardInteractiveFactory;
@@ -1552,7 +1554,8 @@ class GitSshTransportEndToEndIT {
                 .create("orion")
                 .valueOrFailure("ACL repository should be created")
                 .files().withAccess("refs/heads/" + BRANCH,
-                        new GitCommitAuthor("E2E Test", "e2e@example.test", "seed e2e access control"), fileAccess -> {
+                        new GitCommitMetadata(
+                                new GitCommitAuthor("E2E Test", "e2e@example.test"), "seed e2e access control"), fileAccess -> {
             fileAccess.write("orion.xml", output.toByteArray());
             fileAccess.apply();
             return null;
@@ -1626,7 +1629,8 @@ class GitSshTransportEndToEndIT {
                 .create(repositoryName)
                 .valueOrFailure("Project repository should be created")
                 .files().withAccess("refs/heads/" + BRANCH,
-                        new GitCommitAuthor("E2E Test", "e2e@example.test", "seed " + repositoryName), fileAccess -> {
+                        new GitCommitMetadata(
+                                new GitCommitAuthor("E2E Test", "e2e@example.test"), "seed " + repositoryName), fileAccess -> {
             fileAccess.write("README.md", content.getBytes(StandardCharsets.UTF_8));
             fileAccess.apply();
             return null;

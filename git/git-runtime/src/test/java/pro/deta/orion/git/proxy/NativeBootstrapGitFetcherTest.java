@@ -1,5 +1,7 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectInserter;
@@ -199,7 +201,7 @@ class NativeBootstrapGitFetcherTest {
                 .files()
                 .withAccess(
                         "refs/heads/main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "local"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "local"),
                         fileAccess -> {
                             fileAccess.write("orion.xml", new byte[] {1});
                             fileAccess.apply();
@@ -209,7 +211,7 @@ class NativeBootstrapGitFetcherTest {
                 .files()
                 .withAccess(
                         "refs/heads/incoming",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "remote"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "remote"),
                         fileAccess -> {
                             fileAccess.write("orion.xml", new byte[] {2});
                             fileAccess.apply();

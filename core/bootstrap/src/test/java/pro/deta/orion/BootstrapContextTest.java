@@ -1,5 +1,7 @@
 package pro.deta.orion;
 
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.config.OrionConfigurationEditor;
 
@@ -237,7 +239,7 @@ class BootstrapContextTest {
                     .files()
                     .withAccess(
                             "refs/heads/main",
-                            new GitCommitAuthor("", "", "advance bootstrap source"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "advance bootstrap source"),
                             access -> {
                                 access.write(
                                         "configuration".equals(delayedInput)
@@ -1291,10 +1293,8 @@ class BootstrapContextTest {
                                 .files()
                                 .withAccess(
                                         "refs/heads/main",
-                                        new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                                "",
-                                                "",
-                                                "invalid update after bootstrap input load"),
+                                        new GitCommitMetadata(
+                                                GitCommitAuthor.EMPTY, "invalid update after bootstrap input load"),
                                         fileAccess -> {
                                             fileAccess.write("orion.xml", bytes("<not-valid-xml"));
                                             fileAccess.apply();
@@ -1305,10 +1305,8 @@ class BootstrapContextTest {
                                 .files()
                                 .withAccess(
                                         "refs/heads/main",
-                                        new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                                "",
-                                                "",
-                                                "remove primary configuration after bootstrap input load"),
+                                        new GitCommitMetadata(
+                                                GitCommitAuthor.EMPTY, "remove primary configuration after bootstrap input load"),
                                         fileAccess -> {
                                             fileAccess.delete("orion.xml");
                                             fileAccess.apply();
@@ -1352,8 +1350,8 @@ class BootstrapContextTest {
                     .files()
                     .withAccess(
                             "refs/heads/main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                    "", "", "valid update after bootstrap input load"),
+                            new GitCommitMetadata(
+                                    GitCommitAuthor.EMPTY, "valid update after bootstrap input load"),
                             fileAccess -> {
                                 fileAccess.write("orion.xml", output.toByteArray());
                                 fileAccess.apply();
@@ -1403,7 +1401,7 @@ class BootstrapContextTest {
             try {
                 assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
                 source.files().withAccess("refs/heads/main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "invalid B after activating A"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "invalid B after activating A"),
                         fileAccess -> {
                             fileAccess.write("orion.xml", bytes("<not-valid-xml"));
                             fileAccess.apply();
@@ -1432,8 +1430,7 @@ class BootstrapContextTest {
                 source.files()
                         .withAccess(
                                 "refs/heads/main",
-                                new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                        "", "", "valid C after invalid B"),
+                                new GitCommitMetadata(GitCommitAuthor.EMPTY, "valid C after invalid B"),
                                 fileAccess -> {
                                     fileAccess.write("orion.xml", output.toByteArray());
                                     fileAccess.apply();
@@ -1592,8 +1589,7 @@ class BootstrapContextTest {
                 .files()
                 .withAccess(
                         configuration.getBootstrap().getAccessControl().selectedRef(),
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                "", "", "seed bootstrap inputs"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed bootstrap inputs"),
                         fileAccess -> {
                             for (Map.Entry<String, byte[]> fileEntry : files.entrySet()) {
                                 fileAccess.write(fileEntry.getKey(), fileEntry.getValue());

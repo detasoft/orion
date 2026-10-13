@@ -63,7 +63,7 @@ public final class GitFileAccess implements Modification {
     private final Optional<ObjectId> parent;
     private final Map<String, TreeEntry> rootEntries;
     private final Optional<RefId> headToInitialize;
-    private final GitCommitAuthor author;
+    private final GitCommitMetadata metadata;
     private final Set<ObjectId> objects = new HashSet<>();
     private final Set<String> deleted = new HashSet<>();
     private final Map<String, TreeEntry> entries = new HashMap<>();
@@ -72,14 +72,14 @@ public final class GitFileAccess implements Modification {
     private boolean finished;
 
     GitFileAccess(NativeGitRepository repository, GitIndexAccess index, String branch, Optional<ObjectId> parent,
-                  GitCommitAuthor author, boolean initializeHead, Head head)
+                  GitCommitMetadata metadata, boolean initializeHead, Head head)
             throws IOException, GitOperationException {
         this.repository = repository;
         this.index = index;
         this.packId = index.packId().orElseThrow(() -> new IllegalArgumentException("Pack access required"));
         this.ref = new RefId(branchRefName(branch));
         this.parent = parent;
-        this.author = author;
+        this.metadata = metadata;
         if (!index.snapshotRefs(new RefSelection.Head()).head().equals(head)) {
             throw new IOException("Repository HEAD changed while opening file access");
         }
@@ -150,7 +150,7 @@ public final class GitFileAccess implements Modification {
             Set<String> changedPaths = new HashSet<>(entries.keySet());
             changedPaths.addAll(deleted);
             ObjectId tree = writeTree("", null, changedPaths).orElseThrow();
-            ObjectId commit = writeCommit(tree, parent.orElse(null), author);
+            ObjectId commit = writeCommit(tree, parent.orElse(null), metadata);
             List<RefUpdate> prepared = new ArrayList<>();
             prepared.add(new RefUpdate(ref, parent, Optional.of(commit)));
             headToInitialize.ifPresent(target ->
@@ -423,8 +423,9 @@ public final class GitFileAccess implements Modification {
     private ObjectId writeCommit(
             ObjectId treeId,
             ObjectId parent,
-            GitCommitAuthor author) throws IOException {
-        GitCommitAuthor commitAuthor = Objects.requireNonNullElse(author, GitCommitAuthor.EMPTY);
+            GitCommitMetadata metadata) throws IOException {
+        GitCommitMetadata commitMetadata = Objects.requireNonNullElse(metadata, GitCommitMetadata.EMPTY);
+        GitCommitAuthor commitAuthor = commitMetadata.author();
         String identity = commitAuthor.name() + " <" + commitAuthor.email() + "> 0 +0000";
         StringBuilder data = new StringBuilder()
                 .append("tree ")
@@ -436,7 +437,7 @@ public final class GitFileAccess implements Modification {
         data.append("author ").append(identity).append('\n')
                 .append("committer ").append(identity).append('\n')
                 .append('\n')
-                .append(commitMessage(commitAuthor.message()))
+                .append(commitMessage(commitMetadata.message()))
                 .append('\n');
         return writeObject(
                 GitObjectType.COMMIT,

@@ -1,5 +1,7 @@
 package pro.deta.orion;
 
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
@@ -75,7 +77,7 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
             NativeGitRepository repository = repositoryProvider.openForWrite(repositoryName)
                     .valueOrFailure("Cannot open key material repository");
             String revision = repository.files().withAccess(refName, observation.refRevision(),
-                    SAVE_MESSAGE, GitCommitAuthor.EMPTY, access -> {
+                    new GitCommitMetadata(GitCommitAuthor.EMPTY, SAVE_MESSAGE), access -> {
                         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
                             access.write(path, FileMode.REGULAR_FILE, bytes.length, input);
                         }

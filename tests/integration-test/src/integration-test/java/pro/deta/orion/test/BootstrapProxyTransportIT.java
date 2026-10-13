@@ -1,5 +1,7 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -66,8 +68,7 @@ class BootstrapProxyTransportIT {
                     .files()
                     .withAccess(
                             REF,
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                    "", "", "bootstrap inputs"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "bootstrap inputs"),
                             fileAccess -> {
                                 fileAccess.write("orion.xml", originalConfiguration);
                                 fileAccess.write(
@@ -133,8 +134,7 @@ class BootstrapProxyTransportIT {
                                 .files()
                                 .withAccess(
                                         REF,
-                                        new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                                "", "", "upstream edit"),
+                                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "upstream edit"),
                                         fileAccess -> {
                                             fileAccess.write("orion.xml", updatedConfiguration);
                                             fileAccess.apply();
@@ -170,8 +170,7 @@ class BootstrapProxyTransportIT {
                         retained.files()
                                 .withAccess(
                                         REF,
-                                        new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                                "", "", "proxy edit"),
+                                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "proxy edit"),
                                         fileAccess -> {
                                             fileAccess.write("marker.txt", bytes("proxy edit"));
                                             fileAccess.apply();
@@ -189,8 +188,7 @@ class BootstrapProxyTransportIT {
                                 .files()
                                 .withAccess(
                                         REF,
-                                        new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                                "", "", "concurrent edit"),
+                                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "concurrent edit"),
                                         fileAccess -> {
                                             fileAccess.write(
                                                     "marker.txt",

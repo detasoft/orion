@@ -1,5 +1,7 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import org.apache.sshd.client.SshClient;
 import org.apache.sshd.client.channel.ClientChannelEvent;
 import org.apache.sshd.client.channel.ChannelExec;
@@ -45,8 +47,8 @@ class PlaywrightTransportTest {
 
             orion.repositoryProvider().create("transport-check")
                     .valueOrFailure("test Git repository")
-                    .files().withAccess("refs/heads/main", new GitCommitAuthor("Test",
-                            "test@orion.test", "seed transport check"), fileAccess -> {
+                    .files().withAccess("refs/heads/main", new GitCommitMetadata(
+                            new GitCommitAuthor("Test", "test@orion.test"), "seed transport check"), fileAccess -> {
                 fileAccess.write("README.md", "transport check\n".getBytes(StandardCharsets.UTF_8));
                 fileAccess.apply();
                 return null;

@@ -1,5 +1,9 @@
 package pro.deta.orion;
 
+import pro.deta.orion.git.fileapi.GitCommitAuthor;
+
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -59,8 +63,7 @@ class NativeGitKeyMaterialContentStoreTest {
                 .files()
                 .withAccess(
                         REF,
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                "", "", "configuration update"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "configuration update"),
                         fileAccess -> {
                             fileAccess.write("orion.xml", bytes("new config"));
                             fileAccess.apply();
@@ -99,7 +102,7 @@ class NativeGitKeyMaterialContentStoreTest {
                 .files()
                 .withAccess(
                         REF,
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "seed repository"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed repository"),
                         fileAccess -> {
                             fileAccess.write(MATERIAL_PATH, bytes("initial"));
                             fileAccess.apply();
@@ -115,8 +118,8 @@ class NativeGitKeyMaterialContentStoreTest {
                                         .files()
                                         .withAccess(
                                                 REF,
-                                                new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                                        "", "", "concurrent update"),
+                                                new GitCommitMetadata(
+                                                        GitCommitAuthor.EMPTY, "concurrent update"),
                                                 fileAccess -> {
                                                     fileAccess.write(
                                                             "orion.xml",
@@ -192,7 +195,7 @@ class NativeGitKeyMaterialContentStoreTest {
                 .files()
                 .withAccess(
                         REF,
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "seed repository"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed repository"),
                         fileAccess -> {
                             for (Map.Entry<String, byte[]> fileEntry : initialFiles.entrySet()) {
                                 fileAccess.write(fileEntry.getKey(), fileEntry.getValue());

@@ -1,5 +1,9 @@
 package pro.deta.orion.config;
 
+import pro.deta.orion.git.fileapi.GitCommitAuthor;
+
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.acl.AccessControlAccess;
@@ -57,7 +61,7 @@ class NativeSshCredentialPersistenceTest {
                 .files()
                 .withAccess(
                         "refs/heads/main",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "seed"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed"),
                         access -> {
                             access.write("users.xml", users.toByteArray());
                             access.write("roles.xml", unchanged);

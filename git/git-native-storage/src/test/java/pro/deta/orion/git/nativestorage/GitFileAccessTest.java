@@ -1,5 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -20,6 +22,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 
@@ -39,6 +42,46 @@ class GitFileAccessTest {
     Path directory;
 
     @Test
+    void writesDifferentMessagesWithTheSameAuthor() throws Exception {
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        EVENTS.own(provider);
+        NativeGitRepository repository = provider.create("metadata").valueOrFailure("repository");
+        GitCommitAuthor author = new GitCommitAuthor("Ирина", "irina@example.test");
+        for (String message : List.of("first commit", "обновление\nвторая строка")) {
+            String revision = repository.files().withAccess("main", new GitCommitMetadata(author, message), access -> {
+                access.write("file", message.getBytes(StandardCharsets.UTF_8));
+                String next = access.refUpdates().getFirst().newId().orElseThrow().toHex();
+                access.apply();
+                return next;
+            });
+            String commit = new String(repository.readObject(new ObjectId(revision)).orElseThrow().data(),
+                    StandardCharsets.UTF_8);
+            assertThat(commit).contains("author Ирина <irina@example.test> 0 +0000\n",
+                    "committer Ирина <irina@example.test> 0 +0000\n");
+            assertThat(commit).endsWith("\n\n" + message + "\n");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " \t"})
+    void preservesDefaultCommitIdentityAndMessage(String message) throws Exception {
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        EVENTS.own(provider);
+        NativeGitRepository repository = provider.create("metadata").valueOrFailure("repository");
+        String revision = repository.files().withAccess("main", new GitCommitMetadata(null, message), access -> {
+            access.write("file", new byte[]{1});
+            String next = access.refUpdates().getFirst().newId().orElseThrow().toHex();
+            access.apply();
+            return next;
+        });
+        String commit = new String(repository.readObject(new ObjectId(revision)).orElseThrow().data(),
+                StandardCharsets.UTF_8);
+        assertThat(commit).contains("author orion <orion@localhost> 0 +0000\n",
+                "committer orion <orion@localhost> 0 +0000\n");
+        assertThat(commit).endsWith("\n\nupdate files\n");
+    }
+
+    @Test
     void initializesCurrentSymbolicHeadButNotDetachedHead() throws Exception {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
                 .create("demo").valueOrFailure("repository")) {
@@ -53,7 +96,7 @@ class GitFileAccessTest {
                     .files()
                     .withAccess(
                             "topic",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "first"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "first"),
                             access -> {
                                 access.write("file", new byte[] {1});
                                 access.apply();
@@ -73,7 +116,7 @@ class GitFileAccessTest {
                     .files()
                     .withAccess(
                             "other",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "second"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "second"),
                             access -> {
                                 access.write("file", new byte[] {2});
                                 access.apply();
@@ -93,7 +136,7 @@ class GitFileAccessTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
                             fileAccess -> {
                                 fileAccess.write("nested/keep", new byte[] {7});
                                 fileAccess.apply();
@@ -103,7 +146,7 @@ class GitFileAccessTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "config"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "config"),
                             access -> {
                                 access.write("orion.xml", FileMode.REGULAR_FILE, 3, input(1, 2, 3));
                                 assertThat(access.pack().objectCount()).isEqualTo(3);
@@ -132,8 +175,7 @@ class GitFileAccessTest {
                                             .files()
                                             .withAccess(
                                                     "main",
-                                                    new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                                            "", "", "config"),
+                                                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "config"),
                                                     access -> {
                                                         access.write(
                                                                 "orion.xml",
@@ -159,14 +201,14 @@ class GitFileAccessTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "stale"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "stale"),
                             access -> {
                                 access.write("orion.xml", FileMode.REGULAR_FILE, 1, input(1));
                                 repository
                                         .files()
                                         .withAccess(
                                                 "main",
-                                                new GitCommitAuthor("", "", "winner"),
+                                                new GitCommitMetadata(GitCommitAuthor.EMPTY, "winner"),
                                                 fileAccess -> {
                                                     fileAccess.write("orion.xml", new byte[] {2});
                                                     fileAccess.apply();
@@ -190,8 +232,7 @@ class GitFileAccessTest {
                                             .files()
                                             .withAccess(
                                                     "main",
-                                                    new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                                            "", "", "config"),
+                                                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "config"),
                                                     access -> {
                                                         access.write(
                                                                 "orion.xml",
@@ -225,7 +266,7 @@ class GitFileAccessTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "stream"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "stream"),
                             access -> {
                                 for (String name : List.of("first", "second")) {
                                     try (BufferedByteInputV2 input =
@@ -256,7 +297,7 @@ class GitFileAccessTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "winner"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "winner"),
                             access -> {
                                 access.write("orion.xml", FileMode.REGULAR_FILE, 1, input(1));
                                 access.apply();
@@ -264,7 +305,7 @@ class GitFileAccessTest {
                             });
             String winner = repository.refs().get("refs/heads/main");
             repository.files().withAccess("main", null,
-                    new GitCommitAuthor("", "", "creation"), access -> {
+                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "creation"), access -> {
                 access.write("orion.xml", FileMode.REGULAR_FILE, 1, input(2));
                 assertThatThrownBy(access::apply).isInstanceOf(GitRefConflictException.class);
                 return null;
@@ -279,7 +320,7 @@ class GitFileAccessTest {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
                 .create("demo").valueOrFailure("repository")) {
             repository.files().withAccess(branch, null,
-                    new GitCommitAuthor("", "", "creation"), access -> {
+                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "creation"), access -> {
                 access.write("material.p12", FileMode.REGULAR_FILE, 1, input(1));
                 assertThat(access.refUpdates().getFirst().expectedOld()).isEmpty();
                 assertThat(access.refUpdates().getFirst().newId()).isPresent();
@@ -303,7 +344,7 @@ class GitFileAccessTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "first"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "first"),
                             access -> {
                                 access.write("orion.xml", FileMode.REGULAR_FILE, 3, input(1, 2, 3));
                                 access.apply();
@@ -314,7 +355,7 @@ class GitFileAccessTest {
                     .files()
                     .withAccess(
                             "main",
-                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "second"),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "second"),
                             access -> {
                                 access.write("orion.xml", FileMode.REGULAR_FILE, 1, input(4));
                                 access.apply();
@@ -343,8 +384,7 @@ class GitFileAccessTest {
                             .files()
                             .withAccess(
                                     "main",
-                                    new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                            "", "", "discard"),
+                                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "discard"),
                                     access -> {
                                         try (BufferedByteInputV2 input = input(1)) {
                                             access.write(

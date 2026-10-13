@@ -1,5 +1,9 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.git.fileapi.GitCommitAuthor;
+
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import org.junit.jupiter.api.Test;
@@ -107,8 +111,7 @@ class S3BootstrapProxyColdStartIT {
                         .files()
                         .withAccess(
                                 REF,
-                                new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                        "", "", "Seed remote bootstrap inputs"),
+                                new GitCommitMetadata(GitCommitAuthor.EMPTY, "Seed remote bootstrap inputs"),
                                 access -> {
                                     access.write(CONFIGURATION_PATH, xml);
                                     access.write(MATERIAL_PATH, material);
@@ -152,8 +155,8 @@ class S3BootstrapProxyColdStartIT {
                                 .files()
                                 .withAccess(
                                         REF,
-                                        new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                                "", "", "Change upstream after cold start"),
+                                        new GitCommitMetadata(
+                                                GitCommitAuthor.EMPTY, "Change upstream after cold start"),
                                         access -> {
                                             access.write("marker.txt", marker);
                                             access.apply();

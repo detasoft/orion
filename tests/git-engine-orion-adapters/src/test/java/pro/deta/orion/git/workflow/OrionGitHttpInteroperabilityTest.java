@@ -1,5 +1,7 @@
 package pro.deta.orion.git.workflow;
 
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -115,7 +117,8 @@ class OrionGitHttpInteroperabilityTest {
             if (divergence > 0) {
                 for (int number = 0; number < 64; number++) {
                     String version = "history " + number;
-                    repository.files().withAccess("main", new GitCommitAuthor("", "", "history " + number),
+                    repository.files().withAccess("main", new GitCommitMetadata(
+                            GitCommitAuthor.EMPTY, "history " + number),
                             fileAccess -> {
                         fileAccess.write("README.md", version.getBytes(
                                     StandardCharsets.UTF_8));
@@ -133,7 +136,7 @@ class OrionGitHttpInteroperabilityTest {
                         .files()
                         .withAccess(
                                 "main",
-                                new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "update"),
+                                new GitCommitMetadata(GitCommitAuthor.EMPTY, "update"),
                                 fileAccess -> {
                                     fileAccess.write(
                                             "README.md", content.getBytes(StandardCharsets.UTF_8));

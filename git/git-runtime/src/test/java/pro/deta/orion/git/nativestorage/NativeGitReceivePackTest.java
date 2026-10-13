@@ -1,5 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
@@ -100,7 +102,7 @@ class NativeGitReceivePackTest {
                 .files()
                 .withAccess(
                         MAIN,
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
                         fileAccess -> {
                             fileAccess.write("config.txt", bytes("initial"));
                             fileAccess.apply();
@@ -111,7 +113,7 @@ class NativeGitReceivePackTest {
                 .files()
                 .withAccess(
                         MAIN,
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "concurrent"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "concurrent"),
                         fileAccess -> {
                             fileAccess.write("config.txt", bytes("concurrent"));
                             fileAccess.apply();
@@ -146,7 +148,7 @@ class NativeGitReceivePackTest {
                 .files()
                 .withAccess(
                         MAIN,
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
                         fileAccess -> {
                             fileAccess.write("config.txt", bytes("initial"));
                             fileAccess.apply();
@@ -155,7 +157,7 @@ class NativeGitReceivePackTest {
         String initial = repository.refs().get(MAIN);
         for (int index = 0; index < 8; index++) {
             String next = "next" + index;
-            repository.files().withAccess(MAIN, new GitCommitAuthor("", "", "next" + index), fileAccess -> {
+            repository.files().withAccess(MAIN, new GitCommitMetadata(GitCommitAuthor.EMPTY, "next" + index), fileAccess -> {
                 fileAccess.write("config.txt", bytes(next));
                 fileAccess.apply();
                 return null;
@@ -166,7 +168,7 @@ class NativeGitReceivePackTest {
                 .files()
                 .withAccess(
                         "side",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "side"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "side"),
                         fileAccess -> {
                             fileAccess.write("config.txt", bytes("side"));
                             fileAccess.apply();
@@ -215,7 +217,7 @@ class NativeGitReceivePackTest {
                 .files()
                 .withAccess(
                         MAIN,
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
                         fileAccess -> {
                             fileAccess.write("config.txt", bytes("initial"));
                             fileAccess.apply();
@@ -227,7 +229,7 @@ class NativeGitReceivePackTest {
                 .files()
                 .withAccess(
                         "side",
-                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "concurrent"),
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "concurrent"),
                         fileAccess -> {
                             fileAccess.write("config.txt", bytes("concurrent"));
                             fileAccess.apply();

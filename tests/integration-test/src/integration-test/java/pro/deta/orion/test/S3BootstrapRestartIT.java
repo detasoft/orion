@@ -1,5 +1,9 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.git.fileapi.GitCommitAuthor;
+
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
@@ -95,8 +99,7 @@ class S3BootstrapRestartIT {
                         .files()
                         .withAccess(
                                 CONFIGURATION_REF,
-                                new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                        "", "", "Seed bootstrap configuration"),
+                                new GitCommitMetadata(GitCommitAuthor.EMPTY, "Seed bootstrap configuration"),
                                 access -> {
                                     access.write(CONFIGURATION_PATH, xml);
                                     access.apply();
@@ -106,8 +109,7 @@ class S3BootstrapRestartIT {
                         .files()
                         .withAccess(
                                 MATERIAL_REF,
-                                new pro.deta.orion.git.fileapi.GitCommitAuthor(
-                                        "", "", "Seed bootstrap key material"),
+                                new GitCommitMetadata(GitCommitAuthor.EMPTY, "Seed bootstrap key material"),
                                 access -> {
                                     access.write(MATERIAL_PATH, material);
                                     access.apply();
