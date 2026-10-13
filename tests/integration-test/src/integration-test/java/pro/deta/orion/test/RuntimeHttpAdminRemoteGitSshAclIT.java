@@ -91,8 +91,10 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
 
             var http = configuration.getTransport().getHttp();
             for (int launch = 0; launch < 2; launch++) {
-                try (var bootstrap = BootstrapContext.open(configuration, environment)) {
-                    var component = runtimeComponent(configuration, bootstrap);
+                pro.deta.orion.event.OrionEventManager bootstrapEvents1 =
+                        new pro.deta.orion.event.OrionEventManager();
+                try (var bootstrap = BootstrapContext.open(configuration, environment, bootstrapEvents1)) {
+                    var component = runtimeComponent(configuration, bootstrap, bootstrapEvents1);
                     var lifecycle = component.orionApplicationLifecycle();
                     try {
                         assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
@@ -118,10 +120,13 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
                             var updated = current.replaceAccessControl(
                                     defaultAccessControlWithUsers("remote-git-updated-user"));
                             byte[] materialBeforeUpdate = readFileFromRepository(remoteAclRepository, "material.p12");
-                            component.configurationEditor().edit(
-                                    initialAcl.etag().replace("\"", ""), "Update remote configuration",
-                                    UserEmail.EMPTY)
-                                .update(ignored -> updated).apply();
+                            TestRuntimeBootstrap.updateConfiguration(
+                                    component,
+                                    new pro.deta.orion.config.OrionRevision.Stored(
+                                            initialAcl.etag().replace("\"", "")),
+                                    new pro.deta.orion.internal.ChangeMetadata(
+                                            UserEmail.EMPTY, "Update remote configuration"),
+                                    ignored -> updated);
                             assertUserAuthenticates(component.orionAccessControlService(), "remote-git-updated-user");
                             assertThat(readFileFromRepository(remoteAclRepository, "material.p12"))
                                     .isEqualTo(materialBeforeUpdate);

@@ -16,6 +16,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class NativeGitReceivePackTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private static final String ZERO = "0".repeat(40);
     private static final String MAIN = "refs/heads/main";
     private static final String PROTECTED = "refs/heads/protected";
@@ -88,17 +96,27 @@ class NativeGitReceivePackTest {
     @Test
     void allowAllStillRejectsAStaleOldId() throws Exception {
         NativeGitRepository repository = repository();
-        repository.files().withAccess(MAIN, "initial", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("config.txt", bytes("initial"));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        MAIN,
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                        fileAccess -> {
+                            fileAccess.write("config.txt", bytes("initial"));
+                            fileAccess.apply();
+                            return null;
+                        });
         FileTestSupport.Prepared stale = prepare(repository, "stale");
-        repository.files().withAccess(MAIN, "concurrent", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("config.txt", bytes("concurrent"));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        MAIN,
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "concurrent"),
+                        fileAccess -> {
+                            fileAccess.write("config.txt", bytes("concurrent"));
+                            fileAccess.apply();
+                            return null;
+                        });
         String current = repository.refs().get(MAIN);
 
         assertThat(repository.publishPack(stale.pack(), stale.refUpdates(), true,
@@ -124,26 +142,36 @@ class NativeGitReceivePackTest {
     @Test
     void checksAllCommitParentsAndRejectsForcedRewrites() throws Exception {
         NativeGitRepository repository = repository();
-        repository.files().withAccess(MAIN, "initial", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("config.txt", bytes("initial"));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        MAIN,
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                        fileAccess -> {
+                            fileAccess.write("config.txt", bytes("initial"));
+                            fileAccess.apply();
+                            return null;
+                        });
         String initial = repository.refs().get(MAIN);
         for (int index = 0; index < 8; index++) {
             String next = "next" + index;
-            repository.files().withAccess(MAIN, "next" + index, GitCommitAuthor.EMPTY, fileAccess -> {
+            repository.files().withAccess(MAIN, new GitCommitAuthor("", "", "next" + index), fileAccess -> {
                 fileAccess.write("config.txt", bytes(next));
                 fileAccess.apply();
                 return null;
             });
         }
         String descendant = repository.refs().get(MAIN);
-        repository.files().withAccess("side", "side", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("config.txt", bytes("side"));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "side",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "side"),
+                        fileAccess -> {
+                            fileAccess.write("config.txt", bytes("side"));
+                            fileAccess.apply();
+                            return null;
+                        });
         String side = repository.refs().get("refs/heads/side");
         String treeLine = new String(repository.readObject(new ObjectId(descendant)).orElseThrow().data(),
                 java.nio.charset.StandardCharsets.UTF_8).split("\n")[0];
@@ -183,18 +211,28 @@ class NativeGitReceivePackTest {
     @Test
     void comparesOldIdAgainAfterAuthorization() throws Exception {
         NativeGitRepository repository = repository();
-        repository.files().withAccess(MAIN, "initial", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("config.txt", bytes("initial"));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        MAIN,
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                        fileAccess -> {
+                            fileAccess.write("config.txt", bytes("initial"));
+                            fileAccess.apply();
+                            return null;
+                        });
         FileTestSupport.Prepared prepared = prepare(repository, "prepared");
         String expected = repository.refs().get(MAIN);
-        repository.files().withAccess("side", "concurrent", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("config.txt", bytes("concurrent"));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "side",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "concurrent"),
+                        fileAccess -> {
+                            fileAccess.write("config.txt", bytes("concurrent"));
+                            fileAccess.apply();
+                            return null;
+                        });
         String concurrent = repository.refs().get("refs/heads/side");
         GitNativeRepositoryAccessHook hook = new GitNativeRepositoryAccessHook() {
             @Override
@@ -210,7 +248,9 @@ class NativeGitReceivePackTest {
     }
 
     private static NativeGitRepository repository() {
-        return NativeGitRepositoryProvider.inMemory().create("demo").valueOrFailure("repository");
+        return NativeGitRepositoryProvider.inMemory(EVENTS.manager())
+                .create("demo")
+                .valueOrFailure("repository");
     }
 
     private static FileTestSupport.Prepared prepare(NativeGitRepository repository, String value)

@@ -1,7 +1,6 @@
 package pro.deta.orion.transport;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -17,6 +16,7 @@ import pro.deta.orion.transport.git.GitSshTransportStateMachine;
 import pro.deta.orion.transport.http.JettyHTTPServer;
 import pro.deta.orion.transport.http.JettyHTTPServerStateMachine;
 
+import pro.deta.orion.test.integration.TestConfiguration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -30,6 +30,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.*;
 
 class TransportLifecycleStateMachineTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @Test
     void transportAggregateIsStartedDirectlyByParentMachine() {
         BootstrapConfiguration configuration = configuration(true, true, true);
@@ -154,13 +162,13 @@ class TransportLifecycleStateMachineTest {
     private static JettyHTTPServerStateMachine disabledHttpMachine() {
         BootstrapConfiguration disabled = new BootstrapConfiguration();
         disabled.getTransport().getHttp().setEnabled(false);
-        OrionDesiredState desiredState = new OrionDesiredState();
+        TestConfiguration desiredState = new TestConfiguration(EVENTS);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of(), List.of(),
                 List.of()),
                 List.of()), Optional.of("test-revision"));
         return new JettyHTTPServerStateMachine(() -> new JettyHTTPServer(
-                disabled, desiredState, TlsCapability.unavailable(), null, null, null),
+                disabled, desiredState.acl(), TlsCapability.unavailable(), null, null, null),
                 () -> { throw new AssertionError("Disabled HTTP must not start ACME maintenance"); },
                 () -> { throw new AssertionError("Disabled HTTP must not start Git cleanup"); });
     }
@@ -184,7 +192,7 @@ class TransportLifecycleStateMachineTest {
             super(
                     configuration.getTransport().getGit(),
                     new DefaultGitNativeRepositoryService(
-                            NativeGitRepositoryProvider.inMemory()));
+                            NativeGitRepositoryProvider.inMemory(EVENTS.manager())));
             enabled = configuration.getTransport().getGit().isEnabled();
         }
 

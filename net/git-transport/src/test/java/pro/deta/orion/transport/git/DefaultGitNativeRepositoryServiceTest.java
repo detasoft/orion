@@ -1,7 +1,6 @@
 package pro.deta.orion.transport.git;
 
 import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
-import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -25,7 +24,6 @@ import pro.deta.orion.git.parser.v2.fetch.FetchNegotiatorIterator;
 import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
 import pro.deta.orion.git.parser.v2.fetch.FetchRequest;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationMessage;
-import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
@@ -35,6 +33,7 @@ import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.util.Result;
 
+import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -43,7 +42,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -54,13 +52,25 @@ import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
         implements GitNativeRepositoryAccessHook {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
+    DefaultGitNativeRepositoryServiceTest() {
+        super(pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager()));
+    }
+
     @Override
     public void close() {
         backend.close();
         if (replacement != null) replacement.close();
     }
 
-    private NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory();
+    private NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
     private NativeGitRepositoryProvider replacement;
     private final List<String> calls = new ArrayList<>();
     private final DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(this);
@@ -173,13 +183,18 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
 
     @Test
     void keepsPersistedPackWhenAtomicRefTransactionIsStale(@TempDir Path directory) throws Exception {
-        backend = NativeGitRepositoryProvider.file(directory);
+        backend = NativeGitRepositoryProvider.file(directory, EVENTS.manager());
         NativeGitRepository repository = createRepository(backend, "demo");
-        repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("a", new byte[]{0});
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                        fileAccess -> {
+                            fileAccess.write("a", new byte[] {0});
+                            fileAccess.apply();
+                            return null;
+                        });
         String initial = repository.refs().get("refs/heads/main");
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "update",
                 GitCommitAuthor.EMPTY, fileAccess -> {
@@ -195,7 +210,8 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
         } finally {
             backend.close();
         }
-        try (NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(directory)) {
+        try (NativeGitRepositoryProvider provider =
+                NativeGitRepositoryProvider.file(directory, EVENTS.manager())) {
             NativeGitRepository reopened = provider.find("demo").valueOrFailure("repository");
             assertThat(reopened.refs()).containsEntry("refs/heads/main", initial);
             reopened.index().withAccess(access2 -> {
@@ -233,7 +249,7 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
     @Test
     void retainsRepositoryOpenedBeforeRefAuthorization() throws Exception {
         NativeGitRepository original = createRepository(backend, "demo");
-        replacement = NativeGitRepositoryProvider.inMemory();
+        replacement = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository other = createRepository(replacement, "demo");
         try (GitRepositoryContext context = service.open(receiveRequest("demo"), this)) {
             List<RefUpdateResult> results = context.publish(Optional.empty(),
@@ -260,11 +276,16 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
     @Test
     void distinguishesFastForwardAndForcedUpdatesForAuthorization() throws Exception {
         NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
-        repository.files().withAccess("main", "first", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("a", new byte[]{1});
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "first"),
+                        fileAccess -> {
+                            fileAccess.write("a", new byte[] {1});
+                            fileAccess.apply();
+                            return null;
+                        });
         String first = repository.refs().get("refs/heads/main");
         FileTestSupport.Prepared next = FileTestSupport.prepared(repository.files(), "main", "next",
                 GitCommitAuthor.EMPTY, fileAccess -> {
@@ -334,16 +355,26 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
     void keepsAuthorizedTargetWhenWantedRefMovesDuringAccessCheck(String wantedRef, boolean detached)
             throws Exception {
         NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
-        repository.files().withAccess("main", "allowed", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("a", new byte[]{1});
-            fileAccess.apply();
-            return null;
-        });
-        repository.files().withAccess("secret", "denied", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("a", new byte[]{2});
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "allowed"),
+                        fileAccess -> {
+                            fileAccess.write("a", new byte[] {1});
+                            fileAccess.apply();
+                            return null;
+                        });
+        repository
+                .files()
+                .withAccess(
+                        "secret",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "denied"),
+                        fileAccess -> {
+                            fileAccess.write("a", new byte[] {2});
+                            fileAccess.apply();
+                            return null;
+                        });
         ObjectId allowed = new ObjectId(repository.refs().get("refs/heads/main"));
         ObjectId denied = new ObjectId(repository.refs().get("refs/heads/secret"));
         if (!wantedRef.equals("HEAD")) {
@@ -404,11 +435,16 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
     @ValueSource(booleans = {false, true})
     void authorizesNestedTagByItsTargetAndPreservesAccessDenial(boolean v2) throws Exception {
         NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
-        repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("a", new byte[]{1});
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                        fileAccess -> {
+                            fileAccess.write("a", new byte[] {1});
+                            fileAccess.apply();
+                            return null;
+                        });
         String target = repository.refs().get("refs/heads/main");
         ObjectId inner = repository.writeObject(GitObjectType.TAG,
                 ("object " + target + "\ntype commit\ntag inner\n\nmessage\n")
@@ -454,11 +490,16 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
     @CsvSource({"false,main", "true,main", "false,tag", "false,HEAD"})
     void authorizesReachableBlobsAndPreservesAccessDenial(boolean v2, String ref) throws Exception {
         NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
-        repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("a", new byte[]{1});
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                        fileAccess -> {
+                            fileAccess.write("a", new byte[] {1});
+                            fileAccess.apply();
+                            return null;
+                        });
         if (!ref.equals("main")) {
             String tip = repository.refs().get("refs/heads/main");
             if (ref.equals("tag")) {

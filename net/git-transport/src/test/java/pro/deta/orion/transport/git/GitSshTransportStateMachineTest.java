@@ -1,7 +1,5 @@
 package pro.deta.orion.transport.git;
 import pro.deta.orion.acl.AccessControlAccess;
-import pro.deta.orion.config.ConfigurationFile;
-import pro.deta.orion.config.OrionConfigurationEdit;
 import org.apache.sshd.client.SshClient;
 import org.apache.sshd.client.auth.password.UserAuthPasswordFactory;
 import org.apache.sshd.client.auth.pubkey.UserAuthPublicKeyFactory;
@@ -38,6 +36,9 @@ import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
 import pro.deta.orion.transport.git.command.SshCredentialCommandCatalog;
 import pro.deta.orion.transport.git.ssh.SshCommandFactory;
+import pro.deta.orion.config.OrionDocumentRevision;
+import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.internal.ChangeMetadata;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PipedInputStream;
@@ -264,8 +265,7 @@ class GitSshTransportStateMachineTest {
         };
         CommandDispatcher dispatcher = new DefaultCommandDispatcher(
                 new CommandLineParser(),
-                new SshCredentialCommandCatalog(accessControlService,
-                        pro.deta.orion.transport.git.TestConfigurationEditor.create()).commandTree(),
+                new SshCredentialCommandCatalog(accessControlService).commandTree(),
                 new pro.deta.orion.command.CommandRowQuery());
         executor = new OrionExecutor(2, new OrionThreadFactory());
         SshCommandFactory commandFactory = new SshCommandFactory(executor,
@@ -273,14 +273,12 @@ class GitSshTransportStateMachineTest {
                 new PlainCommandRenderer(),
                 null,
                 null,
-                accessControlService,
-                pro.deta.orion.transport.git.TestConfigurationEditor.create());
+                accessControlService);
         OrionShell shell = new OrionShell(
                 dispatcher,
                 new CommandNavigator(CommandNode.builder().build()),
                 executor);
-        OrionSshAuthenticator authenticator = new OrionSshAuthenticator(accessControlService,
-                pro.deta.orion.transport.git.TestConfigurationEditor.create());
+        OrionSshAuthenticator authenticator = new OrionSshAuthenticator(accessControlService);
         return new GitSshTransportService(
                 configuration,
                 commandFactory,
@@ -346,7 +344,7 @@ class GitSshTransportStateMachineTest {
         }
 
         @Override
-        public AccessControlAccess createAccess(OrionConfigurationEdit edit) {
+        public AccessControlAccess createAccess(OrionRevision revision, ChangeMetadata metadata) {
             throw new UnsupportedOperationException();
         }
         @Override
@@ -404,8 +402,11 @@ class GitSshTransportStateMachineTest {
         }
 
         @Override
-        public ConfigurationFile accessControlConfigurationFile() {
-            throw new UnsupportedOperationException();
+        public OrionDocumentRevision configuration() {
+            return new OrionDocumentRevision(
+                    pro.deta.orion.schema.orion.v2.OrionDocument.withAccessControl(
+                            new pro.deta.orion.schema.acl.AccessControl()),
+                    pro.deta.orion.config.OrionRevision.INITIAL);
         }
 
         private boolean keyMatches(byte[] encodedPublicKey) {

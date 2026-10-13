@@ -25,6 +25,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitFileAccessLifecycleTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @ParameterizedTest
     @CsvSource({"false, false", "true, false", "false, true", "true, true"})
     void discardsStorageBeforeIndexAndPreservesCleanupFailures(boolean failPack, boolean failIndex) throws Exception {
@@ -57,9 +65,9 @@ class GitFileAccessLifecycleTest {
                     return invoke(delegateStorage, accessMethod, accessArgs);
                 });
             });
-            NativeGitRepository repository = new NativeGitRepository("demo", observed, owner);
+            NativeGitRepository repository = new NativeGitRepository("demo", observed, owner, EVENTS.manager());
             GitFileAccess access = new GitFileAccess(repository, index, "main", Optional.empty(),
-                    "discard", GitCommitAuthor.EMPTY, false, owner.getHEAD());
+                    GitCommitAuthor.EMPTY, false, owner.getHEAD());
             try {
                 if (failPack || failIndex) {
                     IOException expected = failPack ? packFailure : indexFailure;

@@ -1,7 +1,5 @@
 package pro.deta.orion.transport.http;
 import pro.deta.orion.acl.AccessControlAccess;
-import pro.deta.orion.config.ConfigurationFile;
-import pro.deta.orion.config.OrionConfigurationEdit;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletInputStream;
@@ -21,6 +19,9 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.TokenRefreshResult;
+import pro.deta.orion.config.OrionDocumentRevision;
+import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.internal.ChangeMetadata;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.lang.reflect.InvocationHandler;
@@ -219,7 +220,7 @@ class OrionAuthorizationFilterTest {
         private boolean adminGrant = true;
 
         @Override
-        public AccessControlAccess createAccess(OrionConfigurationEdit edit) {
+        public AccessControlAccess createAccess(OrionRevision revision, ChangeMetadata metadata) {
             throw new UnsupportedOperationException();
         }
 
@@ -274,8 +275,11 @@ class OrionAuthorizationFilterTest {
         }
 
         @Override
-        public ConfigurationFile accessControlConfigurationFile() {
-            throw new UnsupportedOperationException();
+        public OrionDocumentRevision configuration() {
+            return new OrionDocumentRevision(
+                    pro.deta.orion.schema.orion.v2.OrionDocument.withAccessControl(
+                            new pro.deta.orion.schema.acl.AccessControl()),
+                    pro.deta.orion.config.OrionRevision.INITIAL);
         }
 
     }

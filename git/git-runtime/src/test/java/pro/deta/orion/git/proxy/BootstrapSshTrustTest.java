@@ -17,7 +17,6 @@ import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitClientService;
 import pro.deta.orion.git.client.GitClientTransportSession;
-import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialAlias;
@@ -47,6 +46,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class BootstrapSshTrustTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @ParameterizedTest
     @CsvSource({"configuration,accessControl", "material,keyMaterial"})
     void acceptsUnconfiguredKeyAndPrintsYamlForItsSource(String sourceId, String section) throws Exception {
@@ -182,7 +189,7 @@ class BootstrapSshTrustTest {
             });
             server.setCommandFactory((channel, command) -> new UnknownCommand(command));
             server.start();
-            provider = new NativeGitRepositoryFactory(NativeGitRepositoryBackend.inMemory(),
+            provider = new NativeGitRepositoryFactory(NativeGitRepositoryBackend.inMemory(EVENTS.manager()),
                     new BootstrapSecretResolver(Map.of("SSH_PASSWORD", "secret-password")),
                     (location, transport, repository) -> {
                         try (GitClientTransportSession session = transport.open(GitClientService.UPLOAD_PACK,

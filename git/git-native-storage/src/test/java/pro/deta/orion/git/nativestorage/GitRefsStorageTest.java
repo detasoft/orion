@@ -9,7 +9,6 @@ import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
-import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
@@ -17,6 +16,7 @@ import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.index.RefSelection;
 import pro.deta.orion.schema.orion.v2.RepositoryName;
 
+import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -35,6 +35,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
 
 class GitRefsStorageTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private static final RefId MAIN = new RefId("refs/heads/main");
     private static final RefId OTHER = new RefId("refs/heads/other");
     private static final ObjectId MISSING = new ObjectId("f".repeat(40));
@@ -47,7 +55,7 @@ class GitRefsStorageTest {
     @BeforeEach
     void openRepository() {
         nativeRepository = NativeGitRepository.openLocal(
-                RepositoryName.parse("test"), repository, MAIN.value());
+                RepositoryName.parse("test"), repository, MAIN.value(), EVENTS.manager());
         factory = nativeRepository.index();
     }
 

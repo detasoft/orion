@@ -27,17 +27,30 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class NativeGitRepositoryTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private static final String NULL_ID = "0".repeat(40);
 
     @Test
     void normalizesNestedUnicodePathsForReadingAndSaving() throws Exception {
         try (NativeGitRepository repository = repository()) {
             byte[] file = "content".getBytes(StandardCharsets.UTF_8);
-            repository.files().withAccess("topic", "create", GitCommitAuthor.EMPTY, fileAccess -> {
-                fileAccess.write("./каталог//файл.txt", file);
-                fileAccess.apply();
-                return null;
-            });
+            repository
+                    .files()
+                    .withAccess(
+                            "topic",
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "create"),
+                            fileAccess -> {
+                                fileAccess.write("./каталог//файл.txt", file);
+                                fileAccess.apply();
+                                return null;
+                            });
             assertThat(repository.files().readBytes("refs/heads/topic", "каталог/./файл.txt")).isEqualTo(file);
             assertThatThrownBy(() -> repository.files().readBytes("topic", "missing"))
                     .isInstanceOf(GitRepositoryFileNotFoundException.class);
@@ -51,19 +64,31 @@ class NativeGitRepositoryTest {
     void rejectsInvalidPathsForReadingAndSaving(String path) throws Exception {
         try (NativeGitRepository repository = repository()) {
             byte[] file = new byte[]{1};
-            repository.files().withAccess("main", "create", GitCommitAuthor.EMPTY, fileAccess -> {
-                fileAccess.write("file", file);
-                fileAccess.apply();
-                return null;
-            });
+            repository
+                    .files()
+                    .withAccess(
+                            "main",
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "create"),
+                            fileAccess -> {
+                                fileAccess.write("file", file);
+                                fileAccess.apply();
+                                return null;
+                            });
             assertThatThrownBy(() -> repository.files().readBytes("main", path))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> repository.files().withAccess("main", "invalid", GitCommitAuthor.EMPTY,
-                    fileAccess -> {
-                fileAccess.write(path, file);
-                fileAccess.apply();
-                return null;
-            }))
+            assertThatThrownBy(
+                            () ->
+                                    repository
+                                            .files()
+                                            .withAccess(
+                                                    "main",
+                                                    new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                                            "", "", "invalid"),
+                                                    fileAccess -> {
+                                                        fileAccess.write(path, file);
+                                                        fileAccess.apply();
+                                                        return null;
+                                                    }))
                     .isInstanceOf(IllegalArgumentException.class);
         }
     }
@@ -123,11 +148,9 @@ class NativeGitRepositoryTest {
     void reportsDirectAndPackRefUpdatesAfterPublication() throws Exception {
         try (NativeGitRepository repository = repository()) {
             ObjectId blob = repository.writeObject(GitObjectType.BLOB, "first".getBytes(StandardCharsets.UTF_8));
-            List<RefUpdateResult> updates = new ArrayList<>();
-            repository.onRefUpdate(result -> {
-                assertThat(repository.refs()).containsEntry(result.update().ref().value(),
-                        result.update().newId().orElseThrow().toHex());
-                updates.add(result);
+            List<RefUpdate> updates = new ArrayList<>();
+            EVENTS.manager().subscribe(RepositoryRefChanged.class, event -> {
+                if (event.repository() == repository) updates.add(event.update());
             });
             repository.updateRef("refs/heads/main", NULL_ID, blob.toHex());
             FileTestSupport.Prepared prepared = FileTestSupport.prepared(repository.files(), "configuration",
@@ -137,7 +160,8 @@ class NativeGitRepositoryTest {
             });
             repository.publishPack(prepared.pack(), prepared.refUpdates(), true,
                     GitNativeRepositoryAccessHook.ALLOW_ALL);
-            assertThat(updates).extracting(result -> result.update().ref().value())
+            EVENTS.await();
+            assertThat(updates).extracting(update -> update.ref().value())
                     .containsExactly("refs/heads/main", "refs/heads/configuration");
         }
     }
@@ -147,13 +171,19 @@ class NativeGitRepositoryTest {
         try (NativeGitRepository repository = repository()) {
             ObjectId blob = repository.writeObject(GitObjectType.BLOB, new byte[]{1});
             repository.updateRef("refs/heads/main", NULL_ID, blob.toHex());
-            List<RefUpdateResult> updates = new ArrayList<>();
-            repository.onRefUpdate(updates::add);
+            EVENTS.await();
+            List<RefUpdate> updates = new ArrayList<>();
+            EVENTS.manager().subscribe(RepositoryRefChanged.class, event -> {
+                if (event.repository() == repository) {
+                    updates.add(event.update());
+                }
+            });
             List<RefUpdateResult> result = repository.publishRefs(List.of(
                     RefUpdate.fromWire("refs/heads/topic", NULL_ID, blob.toHex()),
                     RefUpdate.fromWire("refs/heads/main", "3".repeat(40), blob.toHex())), true);
             assertThat(result).extracting(RefUpdateResult::status).containsExactly(
                     RefUpdateResult.Status.ATOMIC_ABORTED, RefUpdateResult.Status.EXPECTED_OLD_MISMATCH);
+            EVENTS.await();
             assertThat(updates).isEmpty();
             assertThat(repository.refs()).doesNotContainKey("refs/heads/topic");
         }
@@ -176,13 +206,19 @@ class NativeGitRepositoryTest {
     void repositorySavesFilesToNewBranchAndLoadsThemBack() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")));
+                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), EVENTS.manager());
 
-        repository.files().withAccess("main", "initial acl", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("orion.xml", "initial acl".getBytes(StandardCharsets.UTF_8));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial acl"),
+                        fileAccess -> {
+                            fileAccess.write(
+                                    "orion.xml", "initial acl".getBytes(StandardCharsets.UTF_8));
+                            fileAccess.apply();
+                            return null;
+                        });
 
         assertThat(repository.files().readBytes("main", "orion.xml"))
                 .isEqualTo("initial acl".getBytes(StandardCharsets.UTF_8));
@@ -194,7 +230,7 @@ class NativeGitRepositoryTest {
     void preparedFileUpdateDoesNotMoveRefUntilPublished() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")));
+                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), EVENTS.manager());
 
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "prepared acl",
                 GitCommitAuthor.EMPTY, fileAccess -> {
@@ -214,20 +250,34 @@ class NativeGitRepositoryTest {
     void repositorySavesFilesOverExistingBranchContent() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")));
+                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), EVENTS.manager());
 
-        repository.files().withAccess("main", "initial acl", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("orion.xml", "initial acl".getBytes(StandardCharsets.UTF_8));
-            fileAccess.write("nested/acl.xml", "nested acl".getBytes(StandardCharsets.UTF_8));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial acl"),
+                        fileAccess -> {
+                            fileAccess.write(
+                                    "orion.xml", "initial acl".getBytes(StandardCharsets.UTF_8));
+                            fileAccess.write(
+                                    "nested/acl.xml",
+                                    "nested acl".getBytes(StandardCharsets.UTF_8));
+                            fileAccess.apply();
+                            return null;
+                        });
 
-        repository.files().withAccess("main", "updated acl", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("orion.xml", "updated acl".getBytes(StandardCharsets.UTF_8));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "updated acl"),
+                        fileAccess -> {
+                            fileAccess.write(
+                                    "orion.xml", "updated acl".getBytes(StandardCharsets.UTF_8));
+                            fileAccess.apply();
+                            return null;
+                        });
 
         assertThat(repository.files().readBytes("main", "orion.xml"))
                 .isEqualTo("updated acl".getBytes(StandardCharsets.UTF_8));
@@ -239,24 +289,37 @@ class NativeGitRepositoryTest {
     void conditionalFileSaveRejectsAStaleVersionWithoutReplacingWinningContent() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")));
-        repository.files().withAccess("main", "version one", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("orion.xml", "version one".getBytes(StandardCharsets.UTF_8));
-            fileAccess.apply();
-            return null;
-        });
+                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), EVENTS.manager());
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "version one"),
+                        fileAccess -> {
+                            fileAccess.write(
+                                    "orion.xml", "version one".getBytes(StandardCharsets.UTF_8));
+                            fileAccess.apply();
+                            return null;
+                        });
         String versionOne = repository.refs().get("refs/heads/main");
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", versionOne,
                 "stale", GitCommitAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", "stale".getBytes(StandardCharsets.UTF_8));
             return null;
         });
-        repository.files().withAccess("main", "version two", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("orion.xml", "version two".getBytes(StandardCharsets.UTF_8));
-            fileAccess.write("winner.txt", "winner".getBytes(StandardCharsets.UTF_8));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "version two"),
+                        fileAccess -> {
+                            fileAccess.write(
+                                    "orion.xml", "version two".getBytes(StandardCharsets.UTF_8));
+                            fileAccess.write(
+                                    "winner.txt", "winner".getBytes(StandardCharsets.UTF_8));
+                            fileAccess.apply();
+                            return null;
+                        });
         String versionTwo = repository.refs().get("refs/heads/main");
 
         List<RefUpdateResult> results = repository.publishPack(
@@ -276,14 +339,21 @@ class NativeGitRepositoryTest {
 
     @Test
     void conditionalFileSaveRejectsStaleVersionAcrossProviders(@TempDir Path rootDirectory) throws Exception {
-        NativeGitRepositoryProvider firstProvider = NativeGitRepositoryProvider.file(rootDirectory);
+        NativeGitRepositoryProvider firstProvider =
+                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
         NativeGitRepository first = firstProvider.create("demo").valueOrFailure("repository");
-        first.files().withAccess("main", "version one", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("orion.xml", "version one".getBytes(StandardCharsets.UTF_8));
-            fileAccess.apply();
-            return null;
-        });
-        NativeGitRepositoryProvider secondProvider = NativeGitRepositoryProvider.file(rootDirectory);
+        first.files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "version one"),
+                        fileAccess -> {
+                            fileAccess.write(
+                                    "orion.xml", "version one".getBytes(StandardCharsets.UTF_8));
+                            fileAccess.apply();
+                            return null;
+                        });
+        NativeGitRepositoryProvider secondProvider =
+                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
         NativeGitRepository second = secondProvider.find("demo").valueOrFailure("repository");
         String versionOne = second.refs().get("refs/heads/main");
         FileTestSupport.Prepared update = FileTestSupport.prepared(second.files(), "main", versionOne, "stale",
@@ -291,12 +361,18 @@ class NativeGitRepositoryTest {
             fileAccess.write("orion.xml", "stale".getBytes(StandardCharsets.UTF_8));
             return null;
         });
-        first.files().withAccess("main", "version two", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("orion.xml", "version two".getBytes(StandardCharsets.UTF_8));
-            fileAccess.write("winner.txt", "winner".getBytes(StandardCharsets.UTF_8));
-            fileAccess.apply();
-            return null;
-        });
+        first.files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "version two"),
+                        fileAccess -> {
+                            fileAccess.write(
+                                    "orion.xml", "version two".getBytes(StandardCharsets.UTF_8));
+                            fileAccess.write(
+                                    "winner.txt", "winner".getBytes(StandardCharsets.UTF_8));
+                            fileAccess.apply();
+                            return null;
+                        });
         String versionTwo = first.refs().get("refs/heads/main");
 
         List<RefUpdateResult> results = second.publishPack(
@@ -318,13 +394,20 @@ class NativeGitRepositoryTest {
     void conditionalFileSaveBuildsFromExpectedVersionAndPreservesItsOtherFiles() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")));
-        repository.files().withAccess("main", "version one", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("orion.xml", "version one".getBytes(StandardCharsets.UTF_8));
-            fileAccess.write("preserved.txt", "preserved".getBytes(StandardCharsets.UTF_8));
-            fileAccess.apply();
-            return null;
-        });
+                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), EVENTS.manager());
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "version one"),
+                        fileAccess -> {
+                            fileAccess.write(
+                                    "orion.xml", "version one".getBytes(StandardCharsets.UTF_8));
+                            fileAccess.write(
+                                    "preserved.txt", "preserved".getBytes(StandardCharsets.UTF_8));
+                            fileAccess.apply();
+                            return null;
+                        });
         String expectedVersion = repository.refs().get("refs/heads/main");
 
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", expectedVersion,
@@ -347,13 +430,19 @@ class NativeGitRepositoryTest {
     void repositoryPopulatesDefaultHeadWhenSavingDifferentFirstBranch() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")));
+                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), EVENTS.manager());
 
-        repository.files().withAccess("master", "initial acl", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("orion.xml", "initial acl".getBytes(StandardCharsets.UTF_8));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "master",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial acl"),
+                        fileAccess -> {
+                            fileAccess.write(
+                                    "orion.xml", "initial acl".getBytes(StandardCharsets.UTF_8));
+                            fileAccess.apply();
+                            return null;
+                        });
 
         assertThat(repository.refs().get("refs/heads/main"))
                 .isEqualTo(repository.refs().get("refs/heads/master"));
@@ -361,6 +450,10 @@ class NativeGitRepositoryTest {
 
     private static NativeGitRepository repository() {
         InMemoryStorage storage = new InMemoryStorage();
-        return new NativeGitRepository("demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")));
+        return new NativeGitRepository(
+                "demo.git",
+                storage,
+                new InMemoryIndex(new RefId("refs/heads/main")),
+                EVENTS.manager());
     }
 }

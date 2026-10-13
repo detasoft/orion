@@ -161,7 +161,7 @@ class OrionDocumentTest {
 
     private static OrionDocument.Repository repository(String id, String displayName) {
         return new OrionDocument.Repository(
-                new RepositoryId(id),
+                id,
                 displayName,
                 "refs/heads/main",
                 RepositoryPolicy.safeDefaults(),

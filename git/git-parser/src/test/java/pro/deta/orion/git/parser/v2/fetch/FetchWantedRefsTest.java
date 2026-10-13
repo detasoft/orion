@@ -5,12 +5,11 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
-import pro.deta.orion.git.parser.v2.fetch.FetchTestSupport;
-import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 
+import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;

@@ -16,7 +16,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
@@ -35,40 +34,58 @@ import static pro.deta.orion.git.parser.v2.data.FileMode.EXECUTABLE_FILE;
 import static pro.deta.orion.git.parser.v2.data.FileMode.SYMLINK;
 
 class NativeGitFileModesTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @TempDir
     Path directory;
 
     @Test
     void savesExplicitModesForNewFilesAndUpdatesIncludingModeOnlyChanges() throws Exception {
-        NativeGitRepository repository = NativeGitRepositoryProvider.file(directory)
+        NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
                 .create("demo").valueOrFailure("repository");
         byte[] script = bytes("#!/bin/sh\nexit 0\n");
         Map<String, byte[]> initial = Map.of(
                 "run.sh", script,
                 "next.sh", script,
                 "link", bytes("run.sh"));
-        repository.files().withAccess("main", "create", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("run.sh", EXECUTABLE_FILE, script);
-            fileAccess.write("next.sh", script);
-            fileAccess.write("link", SYMLINK, bytes("run.sh"));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "create"),
+                        fileAccess -> {
+                            fileAccess.write("run.sh", EXECUTABLE_FILE, script);
+                            fileAccess.write("next.sh", script);
+                            fileAccess.write("link", SYMLINK, bytes("run.sh"));
+                            fileAccess.apply();
+                            return null;
+                        });
         assertContents(repository, initial);
 
         Map<String, byte[]> updated = Map.of(
                 "run.sh", bytes("updated"),
                 "next.sh", script,
                 "link", bytes("next.sh"));
-        repository.files().withAccess("main", "update", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("run.sh", bytes("updated"));
-            fileAccess.write("next.sh", EXECUTABLE_FILE, script);
-            fileAccess.write("link", SYMLINK, bytes("next.sh"));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "update"),
+                        fileAccess -> {
+                            fileAccess.write("run.sh", bytes("updated"));
+                            fileAccess.write("next.sh", EXECUTABLE_FILE, script);
+                            fileAccess.write("link", SYMLINK, bytes("next.sh"));
+                            fileAccess.apply();
+                            return null;
+                        });
 
-        NativeGitRepository reopened = NativeGitRepositoryProvider.file(directory)
+        NativeGitRepository reopened = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
                 .find("demo").valueOrFailure("repository");
         assertContents(reopened, updated);
         try (InMemoryRepository observed = new InMemoryRepository(new DfsRepositoryDescription())) {
@@ -99,7 +116,7 @@ class NativeGitFileModesTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void preservesUntouchedModesAndIdsAcrossFileSaveAndReopen(boolean withGitlink) throws Exception {
-        NativeGitRepository repository = NativeGitRepositoryProvider.file(directory)
+        NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
                 .create("demo").valueOrFailure("repository");
         ObjectId executable = write(repository, GitObjectType.BLOB, bytes("#!/bin/sh\nexit 0\n"));
         ObjectId link = write(repository, GitObjectType.BLOB, bytes("run.sh"));
@@ -119,14 +136,23 @@ class NativeGitFileModesTest {
         assertThat(repository.updateRef("refs/heads/main", "0".repeat(40), initial.name()).status())
                 .isEqualTo(RefUpdateResult.Status.APPLIED);
 
-        assertThatCode(() -> repository.files().withAccess("main", "update", GitCommitAuthor.EMPTY,
-                fileAccess -> {
-            fileAccess.write("config.txt", bytes("updated"));
-            fileAccess.apply();
-            return null;
-        })).doesNotThrowAnyException();
+        assertThatCode(
+                        () ->
+                                repository
+                                        .files()
+                                        .withAccess(
+                                                "main",
+                                                new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                                        "", "", "update"),
+                                                fileAccess -> {
+                                                    fileAccess.write(
+                                                            "config.txt", bytes("updated"));
+                                                    fileAccess.apply();
+                                                    return null;
+                                                }))
+                .doesNotThrowAnyException();
 
-        NativeGitRepository reopened = NativeGitRepositoryProvider.file(directory)
+        NativeGitRepository reopened = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
                 .find("demo").valueOrFailure("repository");
         try (InMemoryRepository observed = new InMemoryRepository(new DfsRepositoryDescription())) {
             copyPacks(reopened, observed);
@@ -158,33 +184,47 @@ class NativeGitFileModesTest {
         expected.put("a/x", updated);
         Map<String, FileMode> modes = Map.of("\uE000", FileMode.EXECUTABLE_FILE,
                 "nested/\uD800\uDC00", FileMode.SYMLINK);
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory)
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
                 .create("demo").valueOrFailure("repository")) {
-            repository.files().withAccess("main", "create", GitCommitAuthor.EMPTY, fileAccess -> {
-                for (Map.Entry<String, byte[]> fileEntry : files.entrySet()) {
-                    pro.deta.orion.git.parser.v2.data.FileMode mode = switch (fileEntry.getKey()) {
-                        case "\uE000" -> EXECUTABLE_FILE;
-                        case "nested/\uD800\uDC00" -> SYMLINK;
-                        default -> pro.deta.orion.git.parser.v2.data.FileMode.REGULAR_FILE;
-                    };
-                    fileAccess.write(fileEntry.getKey(), mode, fileEntry.getValue());
-                }
-                fileAccess.apply();
-                return null;
-            });
+            repository
+                    .files()
+                    .withAccess(
+                            "main",
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "create"),
+                            fileAccess -> {
+                                for (Map.Entry<String, byte[]> fileEntry : files.entrySet()) {
+                                    pro.deta.orion.git.parser.v2.data.FileMode mode =
+                                            switch (fileEntry.getKey()) {
+                                                case "\uE000" -> EXECUTABLE_FILE;
+                                                case "nested/\uD800\uDC00" -> SYMLINK;
+                                                default ->
+                                                        pro.deta.orion.git.parser.v2.data.FileMode
+                                                                .REGULAR_FILE;
+                                            };
+                                    fileAccess.write(
+                                            fileEntry.getKey(), mode, fileEntry.getValue());
+                                }
+                                fileAccess.apply();
+                                return null;
+                            });
             assertGitTreeOrdering(repository);
             assertContents(repository, files, modes);
 
-            repository.files().withAccess("main", "update", GitCommitAuthor.EMPTY, fileAccess -> {
-                fileAccess.write("a/x", updated);
-                fileAccess.apply();
-                return null;
-            });
+            repository
+                    .files()
+                    .withAccess(
+                            "main",
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "update"),
+                            fileAccess -> {
+                                fileAccess.write("a/x", updated);
+                                fileAccess.apply();
+                                return null;
+                            });
             assertGitTreeOrdering(repository);
             assertContents(repository, expected, modes);
         }
 
-        try (NativeGitRepository reopened = NativeGitRepositoryProvider.file(directory)
+        try (NativeGitRepository reopened = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
                 .find("demo").valueOrFailure("repository")) {
             assertContents(reopened, expected, modes);
         }
@@ -203,7 +243,7 @@ class NativeGitFileModesTest {
         Map<String, FileMode> modes = Map.of(
                 "\uE000", FileMode.EXECUTABLE_FILE, "nested/\uE000", FileMode.EXECUTABLE_FILE,
                 "\uD800\uDC00", FileMode.SYMLINK, "nested/\uD800\uDC00", FileMode.SYMLINK);
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory)
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
                 .create("demo").valueOrFailure("repository")) {
             ObjectId executableId = write(repository, GitObjectType.BLOB, executable);
             ObjectId linkId = write(repository, GitObjectType.BLOB, link);
@@ -222,16 +262,21 @@ class NativeGitFileModesTest {
                     .isEqualTo(RefUpdateResult.Status.APPLIED);
             assertContents(repository, files, modes);
 
-            repository.files().withAccess("main", "update", GitCommitAuthor.EMPTY, fileAccess -> {
-                fileAccess.write("config.txt", configuration);
-                fileAccess.apply();
-                return null;
-            });
+            repository
+                    .files()
+                    .withAccess(
+                            "main",
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "update"),
+                            fileAccess -> {
+                                fileAccess.write("config.txt", configuration);
+                                fileAccess.apply();
+                                return null;
+                            });
             assertGitTreeOrdering(repository);
             assertContents(repository, expected, modes);
         }
 
-        try (NativeGitRepository reopened = NativeGitRepositoryProvider.file(directory)
+        try (NativeGitRepository reopened = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
                 .find("demo").valueOrFailure("repository")) {
             assertContents(reopened, expected, modes);
         }

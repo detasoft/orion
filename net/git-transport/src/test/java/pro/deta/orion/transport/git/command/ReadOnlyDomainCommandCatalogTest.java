@@ -4,7 +4,6 @@ import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.TeamId;
-import pro.deta.orion.schema.orion.v2.RepositoryId;
 import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.InternalUserImpl;
@@ -38,9 +37,9 @@ import pro.deta.orion.transport.git.command.read.OperatorDomainViews;
 import pro.deta.orion.transport.git.command.read.OperatorQueryResult;
 
 import pro.deta.orion.git.parser.v2.data.Head;
-import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 
+import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -61,7 +60,7 @@ class ReadOnlyDomainCommandCatalogTest {
     private static OrionDocument organizationDocument() {
         User user = new User("operator", null, null, null, List.of(), List.of(),
                 DefaultAccessControl.create("unused").grants());
-        OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
+        OrionDocument.Repository repository = new OrionDocument.Repository("repo", "",
                 OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
                 List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),

@@ -1548,11 +1548,11 @@ class GitSshTransportEndToEndIT {
          */
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         OrionXml.write(OrionDocument.withAccessControl(accessControl), output);
-        NativeGitRepositoryProvider.file(orionRoot.resolve("repos"))
+        NativeGitRepositoryProvider.file(orionRoot.resolve("repos"), new pro.deta.orion.event.OrionEventManager())
                 .create("orion")
                 .valueOrFailure("ACL repository should be created")
-                .files().withAccess("refs/heads/" + BRANCH, "seed e2e access control",
-                        new GitCommitAuthor("E2E Test", "e2e@example.test"), fileAccess -> {
+                .files().withAccess("refs/heads/" + BRANCH,
+                        new GitCommitAuthor("E2E Test", "e2e@example.test", "seed e2e access control"), fileAccess -> {
             fileAccess.write("orion.xml", output.toByteArray());
             fileAccess.apply();
             return null;
@@ -1622,11 +1622,11 @@ class GitSshTransportEndToEndIT {
     }
 
     private static void seedProjectRepository(Path orionRoot, String repositoryName, String content) throws Exception {
-        NativeGitRepositoryProvider.file(orionRoot.resolve("repos"))
+        NativeGitRepositoryProvider.file(orionRoot.resolve("repos"), new pro.deta.orion.event.OrionEventManager())
                 .create(repositoryName)
                 .valueOrFailure("Project repository should be created")
-                .files().withAccess("refs/heads/" + BRANCH, "seed " + repositoryName,
-                        new GitCommitAuthor("E2E Test", "e2e@example.test"), fileAccess -> {
+                .files().withAccess("refs/heads/" + BRANCH,
+                        new GitCommitAuthor("E2E Test", "e2e@example.test", "seed " + repositoryName), fileAccess -> {
             fileAccess.write("README.md", content.getBytes(StandardCharsets.UTF_8));
             fileAccess.apply();
             return null;

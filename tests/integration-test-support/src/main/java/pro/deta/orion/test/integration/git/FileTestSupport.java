@@ -17,7 +17,7 @@ public final class FileTestSupport {
 
     public static Prepared prepared(GitFileApi files, String branch, String message, GitCommitAuthor author,
             CheckedFunction<GitFileAccess, Void> changes) throws Exception {
-        return files.withAccess(branch, message, author, access -> {
+        return files.withAccess(branch, new GitCommitAuthor(author.name(), author.email(), message), access -> {
             changes.apply(access);
             return prepared(access);
         });
@@ -25,7 +25,8 @@ public final class FileTestSupport {
 
     public static Prepared prepared(GitFileApi files, String branch, String revision,
             String message, GitCommitAuthor author, CheckedFunction<GitFileAccess, Void> changes) throws Exception {
-        return files.withAccess(branch, revision, message, author, access -> {
+        return files.withAccess(branch, revision,
+                new GitCommitAuthor(author.name(), author.email(), message), access -> {
             changes.apply(access);
             return prepared(access);
         });

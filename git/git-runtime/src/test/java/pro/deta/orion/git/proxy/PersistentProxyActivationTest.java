@@ -7,8 +7,6 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitUploadPackClient;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialAlias;
@@ -40,6 +38,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PersistentProxyActivationTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @Test
     void movedBootstrapSourceKeepsYamlConnectionUntilConfigurationIsReconciled() throws Exception {
         try (Fixture fixture = new Fixture()) {
@@ -98,11 +104,15 @@ class PersistentProxyActivationTest {
 
             provider.activate(fixture.current::get, fixture.secrets);
             fixture.authorization.clear();
-            retained.files().withAccess("main", "save", GitCommitAuthor.EMPTY, fileAccess -> {
-                fileAccess.write("orion.xml", new byte[]{1});
-                fileAccess.apply();
-                return null;
-            });
+            retained.files()
+                    .withAccess(
+                            "main",
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "save"),
+                            fileAccess -> {
+                                fileAccess.write("orion.xml", new byte[] {1});
+                                fileAccess.apply();
+                                return null;
+                            });
             assertThat(fixture.authorization).containsExactly("Bearer stored-token", "Bearer stored-token");
 
             fixture.rotate("rotated-token");
@@ -257,12 +267,19 @@ class PersistentProxyActivationTest {
 
             assertThat(provider.provider().openForRead(name)).isInstanceOf(Result.Failure.class);
             assertThatThrownBy(retained::refs).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> retained.files().withAccess("main", "save", GitCommitAuthor.EMPTY,
-                    fileAccess -> {
-                fileAccess.write("file", new byte[]{1});
-                fileAccess.apply();
-                return null;
-            })).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(
+                            () ->
+                                    retained.files()
+                                            .withAccess(
+                                                    "main",
+                                                    new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                                            "", "", "save"),
+                                                    fileAccess -> {
+                                                        fileAccess.write("file", new byte[] {1});
+                                                        fileAccess.apply();
+                                                        return null;
+                                                    }))
+                    .isInstanceOf(IllegalStateException.class);
             assertThat(provider.provider().repositoryNames()).doesNotContain(name);
             assertThat(provider.provider().isPublicRepositoryName(name)).isFalse();
         }
@@ -312,7 +329,7 @@ class PersistentProxyActivationTest {
         }
 
         NativeGitRepositoryFactory provider() {
-            return new NativeGitRepositoryFactory(NativeGitRepositoryBackend.inMemory(),
+            return new NativeGitRepositoryFactory(NativeGitRepositoryBackend.inMemory(EVENTS.manager()),
                     new BootstrapSecretResolver(Map.of("TOKEN", "external-token")),
                     (location, transport, repository) -> {
                         if (location.remoteUri().equals(unavailable.get())) {

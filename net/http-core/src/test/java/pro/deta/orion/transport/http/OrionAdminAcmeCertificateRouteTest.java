@@ -5,10 +5,10 @@ import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 
+import pro.deta.orion.test.integration.TestConfiguration;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.lang.reflect.Proxy;
@@ -25,6 +25,14 @@ import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionAdminAcmeCertificateRouteTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @Test
     void returnsTheSavedPublicCertificateChainWithoutPrivateMaterial() throws Exception {
         IssuedAcmeCertificate certificate = certificate("saved.example");
@@ -163,7 +171,7 @@ class OrionAdminAcmeCertificateRouteTest {
                 Optional<IssuedAcmeCertificate> saved) {
             super(
                     new BootstrapConfiguration(),
-                    new OrionDesiredState(),
+                    new TestConfiguration(EVENTS).acl(),
                     AcmeKeyMaterialCapability.unavailable(),
                     new AcmeCertificateIssuer(null), null);
             this.issued = issued;
@@ -185,7 +193,7 @@ class OrionAdminAcmeCertificateRouteTest {
         private BusyAcmeCertificateService() {
             super(
                     new BootstrapConfiguration(),
-                    new OrionDesiredState(),
+                    new TestConfiguration(EVENTS).acl(),
                     AcmeKeyMaterialCapability.unavailable(),
                     new AcmeCertificateIssuer(null), null);
         }

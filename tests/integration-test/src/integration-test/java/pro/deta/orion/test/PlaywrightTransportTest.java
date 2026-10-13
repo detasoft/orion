@@ -45,8 +45,8 @@ class PlaywrightTransportTest {
 
             orion.repositoryProvider().create("transport-check")
                     .valueOrFailure("test Git repository")
-                    .files().withAccess("refs/heads/main", "seed transport check", new GitCommitAuthor("Test",
-                            "test@orion.test"), fileAccess -> {
+                    .files().withAccess("refs/heads/main", new GitCommitAuthor("Test",
+                            "test@orion.test", "seed transport check"), fileAccess -> {
                 fileAccess.write("README.md", "transport check\n".getBytes(StandardCharsets.UTF_8));
                 fileAccess.apply();
                 return null;

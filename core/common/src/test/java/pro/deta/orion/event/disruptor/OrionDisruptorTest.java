@@ -16,7 +16,7 @@ class OrionDisruptorTest {
 
         assertThatThrownBy(() -> disruptor.publish(new ApplicationShutdownRequestedEvent("test")))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("before event disruptor is started");
+                .hasMessageContaining("event disruptor is stopped");
     }
 
     @Test

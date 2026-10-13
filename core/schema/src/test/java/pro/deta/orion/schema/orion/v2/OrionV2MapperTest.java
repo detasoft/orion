@@ -290,7 +290,7 @@ class OrionV2MapperTest {
                 RemoteProvider.GITHUB,
                 List.of(RemoteRefMapping.allBranches()));
         OrionDocument.Repository repository = new OrionDocument.Repository(
-                new RepositoryId("api"),
+                "api",
                 "API",
                 "refs/heads/trunk",
                 new RepositoryPolicy(true, false, true),
@@ -349,7 +349,7 @@ class OrionV2MapperTest {
         RepositoryRemote zeta = remote("zeta", RemoteRole.OUTBOUND_ONLY, RemoteProvider.GENERIC, mappings);
         RepositoryRemote alpha = remote("alpha", RemoteRole.OUTBOUND_ONLY, RemoteProvider.GENERIC, mappings);
         OrionDocument.Repository repository = new OrionDocument.Repository(
-                new RepositoryId("api"),
+                "api",
                 null,
                 "refs/heads/main",
                 RepositoryPolicy.safeDefaults(),
@@ -380,7 +380,7 @@ class OrionV2MapperTest {
         RepositoryRemote zeta = remote("zeta", RemoteRole.OUTBOUND_ONLY, RemoteProvider.GENERIC, mappings);
         RepositoryRemote alpha = remote("alpha", RemoteRole.OUTBOUND_ONLY, RemoteProvider.GENERIC, mappings);
         OrionDocument.Repository repository = new OrionDocument.Repository(
-                new RepositoryId("api"),
+                "api",
                 null,
                 OrionDocument.Repository.DEFAULT_BRANCH,
                 RepositoryPolicy.safeDefaults(),
@@ -733,7 +733,7 @@ class OrionV2MapperTest {
             List<ScopedGrant> grants,
             List<ScopedRole> roles) {
         return new OrionDocument.Repository(
-                new RepositoryId(id), id + " name", OrionDocument.Repository.DEFAULT_BRANCH,
+                id, id + " name", OrionDocument.Repository.DEFAULT_BRANCH,
                 RepositoryPolicy.safeDefaults(), List.of(), grants, roles,
                 List.of(), java.util.Optional.empty());
     }
@@ -786,7 +786,7 @@ class OrionV2MapperTest {
 
     private static OrionDocument.Repository repository(String id) {
         return new OrionDocument.Repository(
-                new RepositoryId(id),
+                id,
                 id + " name",
                 "refs/heads/main",
                 RepositoryPolicy.safeDefaults(),

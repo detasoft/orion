@@ -62,7 +62,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -80,6 +79,14 @@ import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICA
 
 @Timeout(10)
 class OrionShellTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private final OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
 
     @AfterEach
@@ -140,7 +147,7 @@ class OrionShellTest {
     @Test
     void interactiveShellDispatchesTheReadOnlyWhoamiCommand() throws Exception {
         DefaultOperatorDomainSource source = new DefaultOperatorDomainSource(
-                NativeGitRepositoryProvider.inMemory(),
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager()),
                 new AggregateStateMachine(StateMachineDefinition.define().name("runtime").build()),
                 () -> new OperatorDomainViews.SystemResourceView(1, 0, 0, 0));
         CommandNode tree = new ReadOnlyDomainCommandCatalog(source).commandTree();

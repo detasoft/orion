@@ -29,7 +29,6 @@ import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
@@ -44,6 +43,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static pro.deta.orion.git.client.GitTransportScheme.*;
 
 class RawPackInteroperabilityTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @TempDir
     Path directory;
 
@@ -83,7 +90,8 @@ class RawPackInteroperabilityTest {
             GitRemoteRepository remote = server.createRemoteRepository(directory.resolve("server"), "project.git");
             source.addRemote("origin", remote);
             source.push("origin", "main");
-            NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(directory.resolve("copy"));
+            NativeGitRepositoryProvider provider =
+                    NativeGitRepositoryProvider.file(directory.resolve("copy"), EVENTS.manager());
             try (NativeGitRepository copy = provider.create("project").valueOrFailure("repository")) {
                 fetch(client, remote, common, List.of(), copy);
                 source.writeFile("README.md", "updated\n");

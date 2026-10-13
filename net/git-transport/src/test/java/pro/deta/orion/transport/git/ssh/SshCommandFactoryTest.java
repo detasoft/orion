@@ -23,7 +23,6 @@ import pro.deta.orion.auth.SshConnectionCredentials;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.acl.AccessControlAccess;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
-import pro.deta.orion.config.OrionConfigurationEdit;
 import pro.deta.orion.auth.SshKeyEnrollmentResult;
 import pro.deta.orion.command.CommandDispatcher;
 import pro.deta.orion.command.CommandCompletion;
@@ -51,6 +50,10 @@ import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.transport.git.auth.RootSshKeyEnrollmentSession;
 import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
 
+import pro.deta.orion.config.OrionConfigurationModification;
+import pro.deta.orion.config.OrionDocumentRevision;
+import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.internal.ChangeMetadata;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -76,6 +79,14 @@ import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICA
 
 @Timeout(5)
 class SshCommandFactoryTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private final List<OrionExecutor> executors = new java.util.ArrayList<>();
 
     @AfterEach
@@ -122,7 +133,7 @@ class SshCommandFactoryTest {
     @Test
     void readOnlyDomainExecRendersPlainOutputWithoutPromptOrAnsi() throws Exception {
         DefaultOperatorDomainSource source = new DefaultOperatorDomainSource(
-                NativeGitRepositoryProvider.inMemory(),
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager()),
                 new AggregateStateMachine(StateMachineDefinition.define().name("runtime").build()),
                 () -> new OperatorDomainViews.SystemResourceView(1, 0, 0, 0));
         DefaultCommandDispatcher dispatcher = new DefaultCommandDispatcher(
@@ -402,17 +413,23 @@ class SshCommandFactoryTest {
     void recoverySessionRejectsNormalCommandsAndCompletesExactEnrollmentCommand() throws Exception {
         AtomicInteger dispatches = new AtomicInteger();
         AtomicInteger enrollments = new AtomicInteger();
-        OrionAccessControlService accessControl = (OrionAccessControlService) Proxy.newProxyInstance(
-                OrionAccessControlService.class.getClassLoader(),
-                new Class<?>[]{OrionAccessControlService.class},
-                (proxy, method, args) -> {
-                    if (method.isDefault()) {
-                        return java.lang.reflect.InvocationHandler.invokeDefault(proxy, method, args);
+        OrionAccessControlService accessControl =
+                new OrionAccessControlService() {
+                    @Override
+                    public OrionDocumentRevision configuration() {
+                        return new OrionDocumentRevision(
+                                pro.deta.orion.schema.orion.v2.OrionDocument.withAccessControl(
+                                        new pro.deta.orion.schema.acl.AccessControl()),
+                                OrionRevision.INITIAL);
                     }
-                    if ("createAccess".equals(method.getName())) {
-                        OrionConfigurationEdit edit =
-                                (OrionConfigurationEdit) args[0];
-                        return new AccessControlAccess(edit, new OrionPasswordHashingService()) {
+
+                    @Override
+                    public AccessControlAccess createAccess(
+                            OrionRevision revision, ChangeMetadata metadata) {
+                        return new AccessControlAccess(
+                                new OrionConfigurationModification(
+                                        configuration(), document -> revision),
+                                new OrionPasswordHashingService()) {
                             @Override
                             public SshKeyEnrollmentResult completeRootSshKeyEnrollment(
                                     String generation, List<String> publicKeys) {
@@ -423,8 +440,48 @@ class SshCommandFactoryTest {
                             }
                         };
                     }
-                    return defaultValue(method.getReturnType());
-                });
+
+                    @Override
+                    public boolean userExists(String userName) {
+                        throw new UnsupportedOperationException();
+                    }
+
+                    @Override
+                    public pro.deta.orion.auth.AuthenticationResult authenticateUser(
+                            String user, byte[] credential) {
+                        throw new UnsupportedOperationException();
+                    }
+
+                    @Override
+                    public pro.deta.orion.auth.AuthenticationResult authenticateSshUser(
+                            String user, byte[] key) {
+                        throw new UnsupportedOperationException();
+                    }
+
+                    @Override
+                    public pro.deta.orion.auth.AuthenticationResult authenticateGitSshKey(
+                            byte[] key) {
+                        throw new UnsupportedOperationException();
+                    }
+
+                    @Override
+                    public pro.deta.orion.auth.TokenAuthenticationResult verifyToken(byte[] token) {
+                        throw new UnsupportedOperationException();
+                    }
+
+                    @Override
+                    public pro.deta.orion.auth.TokenIssueResult authenticateUserAndIssueToken(
+                            String user, byte[] credential, long expires) {
+                        throw new UnsupportedOperationException();
+                    }
+
+                    @Override
+                    public pro.deta.orion.auth.TokenRefreshResult refreshToken(
+                            pro.deta.orion.auth.AuthenticationResult.Success authority,
+                            long expires) {
+                        throw new UnsupportedOperationException();
+                    }
+                };
         SshCommandFactory factory = factory(request -> {
             dispatches.incrementAndGet();
             return new CommandResult.Message("wrong route");
@@ -489,8 +546,13 @@ class SshCommandFactoryTest {
         for (String service : List.of("git-upload-pack", "git-receive-pack")) {
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             ByteArrayOutputStream error = new ByteArrayOutputStream();
-            ExitOutcome exit = run(gitFactory(NativeGitRepositoryProvider.inMemory()), channel(true),
-                    service + " '/demo.git'", output, error);
+            ExitOutcome exit =
+                    run(
+                            gitFactory(NativeGitRepositoryProvider.inMemory(EVENTS.manager())),
+                            channel(true),
+                            service + " '/demo.git'",
+                            output,
+                            error);
 
             assertNotEquals(0, exit.code());
             assertEquals("", output.toString(StandardCharsets.UTF_8));
@@ -511,7 +573,8 @@ class SshCommandFactoryTest {
             IllegalStateException failure = new IllegalStateException("Repository unavailable");
             failure.setStackTrace(new StackTraceElement[]{
                     new StackTraceElement("Example", "method", "Example.java", 12)});
-            NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider() {
+            NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider(
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager())) {
                 @Override
                 public boolean isPublicRepositoryName(String repositoryName) {
                     throw failure;
@@ -541,7 +604,7 @@ class SshCommandFactoryTest {
 
     @Test
     void gitAuthenticationAndExecutorRejectionUseStderr() throws Exception {
-        SshCommandFactory factory = gitFactory(NativeGitRepositoryProvider.inMemory());
+        SshCommandFactory factory = gitFactory(NativeGitRepositoryProvider.inMemory(EVENTS.manager()));
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         ByteArrayOutputStream error = new ByteArrayOutputStream();
         ExitOutcome unauthenticated = run(factory, channel(false), "git-receive-pack '/demo.git'",
@@ -560,7 +623,7 @@ class SshCommandFactoryTest {
 
     @Test
     void gitFailureAfterAdvertisementPreservesProtocolOutput() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         provider.create("demo").valueOrFailure("repository");
         TestChannelSession channel = channel(true);
         Grant grant = new Grant("repository", List.of(
@@ -597,8 +660,13 @@ class SshCommandFactoryTest {
     @Test
     void gitStderrDeliveryFailureStillCompletesOnce() throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        ExitOutcome exit = run(gitFactory(NativeGitRepositoryProvider.inMemory()), channel(true),
-                "git-receive-pack '/demo.git'", output, new FailingOutputStream());
+        ExitOutcome exit =
+                run(
+                        gitFactory(NativeGitRepositoryProvider.inMemory(EVENTS.manager())),
+                        channel(true),
+                        "git-receive-pack '/demo.git'",
+                        output,
+                        new FailingOutputStream());
         assertNotEquals(0, exit.code());
         assertEquals("", output.toString(StandardCharsets.UTF_8));
     }
@@ -611,8 +679,7 @@ class SshCommandFactoryTest {
                 new PlainCommandRenderer(),
                 new DefaultGitNativeRepositoryService(provider),
                 null,
-                null,
-                pro.deta.orion.transport.git.TestConfigurationEditor.create());
+                null);
     }
 
     private static Environment environment(Map<String, String> values) {
@@ -643,8 +710,7 @@ class SshCommandFactoryTest {
                 new PlainCommandRenderer(),
                 null,
                 null,
-                accessControlService,
-                pro.deta.orion.transport.git.TestConfigurationEditor.create());
+                accessControlService);
     }
 
     private static ExitOutcome run(

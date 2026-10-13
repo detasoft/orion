@@ -41,6 +41,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class NativeBootstrapGitPackReplayTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private static final String ZERO = "0".repeat(40);
     private static final String REF = "refs/tags/payload";
 
@@ -52,10 +60,15 @@ class NativeBootstrapGitPackReplayTest {
     void replaysCompletedPackWithItsBaseRegardlessOfUpstreamHistory(boolean disk) throws Exception {
         for (boolean upstreamHasBase : List.of(true, false)) {
             Path bare = directory.resolve("upstream-" + upstreamHasBase + ".git");
-            NativeGitRepository repository = disk
-                    ? NativeGitRepositoryProvider.file(directory.resolve("cache-" + upstreamHasBase))
-                            .create("proxy").valueOrFailure("repository")
-                    : NativeGitRepository.createInMemory(RepositoryName.parse("proxy"));
+            NativeGitRepository repository =
+                    disk
+                            ? NativeGitRepositoryProvider.file(
+                                            directory.resolve("cache-" + upstreamHasBase),
+                                            EVENTS.manager())
+                                    .create("proxy")
+                                    .valueOrFailure("repository")
+                            : NativeGitRepository.createInMemory(
+                                    RepositoryName.parse("proxy"), EVENTS.manager());
             byte[] base = new byte[8192];
             new Random(37).nextBytes(base);
             byte[] target = base.clone();
@@ -120,12 +133,18 @@ class NativeBootstrapGitPackReplayTest {
 
     @Test
     void buildsMissingObjectsWhenIncomingPackDoesNotCoverTheRequestedCommit() throws Exception {
-        NativeGitRepository repository = NativeGitRepository.createInMemory(RepositoryName.parse("proxy"));
-        repository.files().withAccess("main", "local", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("config.txt", new byte[]{1});
-            fileAccess.apply();
-            return null;
-        });
+        NativeGitRepository repository =
+                NativeGitRepository.createInMemory(RepositoryName.parse("proxy"), EVENTS.manager());
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "local"),
+                        fileAccess -> {
+                            fileAccess.write("config.txt", new byte[] {1});
+                            fileAccess.apply();
+                            return null;
+                        });
         String commit = repository.refs().get("refs/heads/main");
         var unrelated = FileTestSupport.prepared(repository.files(), "other", "unrelated",
                 GitCommitAuthor.EMPTY, fileAccess -> {

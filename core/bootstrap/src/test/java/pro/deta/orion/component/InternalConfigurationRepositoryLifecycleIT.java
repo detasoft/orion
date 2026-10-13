@@ -1,6 +1,5 @@
 package pro.deta.orion.component;
 
-import pro.deta.orion.config.OrionConfigurationEdit;
 
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.junit.jupiter.api.Test;
@@ -48,6 +47,9 @@ import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 
+import pro.deta.orion.acl.AccessControlAccess;
+import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.internal.ChangeMetadata;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -73,6 +75,14 @@ import static pro.deta.orion.lifecycle.state.StandardStateDefinition.FIN;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 
 class InternalConfigurationRepositoryLifecycleIT {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private static final String REPOSITORY_NAME = "internal/configuration";
     private static final String CONFIGURATION_REF = "refs/heads/configuration";
     private static final String ACL_PATH = "config/orion.xml";
@@ -81,9 +91,8 @@ class InternalConfigurationRepositoryLifecycleIT {
     private Path tempDir;
 
     private static void updateUser(OrionComponent component, AccessControlUserUpdate user) {
-        component.orionAccessControlService().withAccess(component.configurationEditor().edit(
-                "createOrUpdateUser() " + user.id(),
-                new UserEmail(user.id(), user.email())), edit -> {
+        withAccess(component, new ChangeMetadata(new UserEmail(user.id(), user.email()),
+                "createOrUpdateUser() " + user.id()), edit -> {
             edit.createOrUpdateUser(user);
             edit.apply();
             return null;
@@ -92,23 +101,23 @@ class InternalConfigurationRepositoryLifecycleIT {
 
     private static SshKeyEnrollmentResult enroll(
             OrionComponent component, String generation, List<String> keys) {
-        return component.orionAccessControlService().withAccess(component.configurationEditor().edit(
-                "complete root SSH key enrollment",
-                UserEmail.EMPTY), edit -> {
-            SshKeyEnrollmentResult result =
-            edit
-                .completeRootSshKeyEnrollment(generation, keys);
-            if (result instanceof SshKeyEnrollmentResult.Success) {
-                edit.apply();
-            }
-            return result;
-        });
+        return withAccess(
+                component,
+                new ChangeMetadata(UserEmail.EMPTY, "complete root SSH key enrollment"),
+                edit -> {
+                    SshKeyEnrollmentResult result =
+                            edit.completeRootSshKeyEnrollment(generation, keys);
+                    if (result instanceof SshKeyEnrollmentResult.Success) {
+                        edit.apply();
+                    }
+                    return result;
+                });
     }
 
     private static SshCredentialUpdateResult addKeys(
             OrionComponent component, String user, List<String> keys) {
         return mutateKeys(component,
-        edit -> component.orionAccessControlService().createAccess(edit).addSshCredentials(user, keys));
+        edit -> edit.addSshCredentials(user, keys));
     }
 
     private static void addKey(OrionComponent component, String user, String key) {
@@ -124,22 +133,42 @@ class InternalConfigurationRepositoryLifecycleIT {
     private static SshCredentialUpdateResult removeKey(
             OrionComponent component, String user, String prefix, boolean force) {
         return mutateKeys(component,
-        edit -> component.orionAccessControlService().createAccess(edit)
-            .removeSshCredential(user, prefix, force));
+        edit -> edit.removeSshCredential(user, prefix, force));
     }
 
     private static SshCredentialUpdateResult mutateKeys(OrionComponent component,
-            java.util.function.Function<OrionConfigurationEdit,
+            java.util.function.Function<AccessControlAccess,
                     SshCredentialUpdateResult> operation) {
-        return OrionConfigurationEdit.withAccess(component.configurationEditor().edit(
-                "update test SSH credentials",
-                UserEmail.EMPTY), edit -> {
-            SshCredentialUpdateResult result = operation.apply(edit);
-            if (result instanceof SshCredentialUpdateResult.Success success && success.changed()) {
-                edit.apply();
-            }
+        return withAccess(
+                component,
+                new ChangeMetadata(UserEmail.EMPTY, "update test SSH credentials"),
+                edit -> {
+                    SshCredentialUpdateResult result = operation.apply(edit);
+                    if (result instanceof SshCredentialUpdateResult.Success success
+                            && success.changed()) {
+                        edit.apply();
+                    }
+                    return result;
+                });
+    }
+
+    private static <T> T withAccess(OrionComponent component, ChangeMetadata metadata,
+            java.util.function.Function<AccessControlAccess, T> operation) {
+        AccessControlAccess access = component.orionAccessControlService().createAccess(
+                component.orionAccessControlService().configuration().revision(), metadata);
+        try {
+            T result = operation.apply(access);
+            awaitConfiguration(component);
             return result;
-        });
+        } finally {
+            access.discard();
+        }
+    }
+
+    private static void awaitConfiguration(OrionComponent component) {
+        OrionRevision revision = new OrionRevision.Stored(repository(component).refs().get(CONFIGURATION_REF));
+        assertThat(pro.deta.orion.util.OrionUtils.waitForCondition(() ->
+                component.orionAccessControlService().configuration().revision().equals(revision))).isTrue();
     }
 
     @Test
@@ -229,8 +258,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             char[] rootPassword = component.orionAccessControlService()
                     .plainRootToken(PlainRootTokenAccessForTests.create());
             assertRecoveryPasswordOnly(component, new String(rootPassword));
-            AccessControl acl = OrionXml.read(new ByteArrayInputStream(
-                    component.orionAccessControlService().accessControlConfigurationFile().content()))
+            AccessControl acl = component.orionAccessControlService().configuration().document()
                             .system().accessControl();
             assertThat(acl.users().getFirst().credentials())
                     .singleElement()
@@ -273,8 +301,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             addKey(first, "alice", PublicKeyEntry.toString(aliceKey.getPublic()));
             oldRootToken = issueTokenForSshKey(first, "root", rootKey);
             aliceToken = issueTokenForSshKey(first, "alice", aliceKey);
-            AccessControl acl = OrionXml.read(new ByteArrayInputStream(
-                    first.orionAccessControlService().accessControlConfigurationFile().content()))
+            AccessControl acl = first.orionAccessControlService().configuration().document()
                             .system().accessControl();
             User root = acl.users().stream()
                     .filter(candidate -> "root".equalsIgnoreCase(candidate.id()))
@@ -300,12 +327,11 @@ class InternalConfigurationRepositoryLifecycleIT {
             OrionDocument replacement = OrionXml.read(
                     new ByteArrayInputStream(accessControlBytes(
                             new AccessControl(users, acl.roles(), acl.grants()))));
-            first.configurationEditor().edit(first.orionAccessControlService()
-                    .accessControlConfigurationFile().revision().orElseThrow(),
-                    "Prepare configuration", UserEmail.EMPTY)
+            first.configurationEditor().edit(first.orionAccessControlService().configuration().revision(),
+                    new ChangeMetadata(UserEmail.EMPTY, "Prepare configuration"))
                 .update(ignored -> replacement).apply();
-            beforeReset = OrionXml.read(new ByteArrayInputStream(
-                    first.orionAccessControlService().accessControlConfigurationFile().content()))
+            awaitConfiguration(first);
+            beforeReset = first.orionAccessControlService().configuration().document()
                             .system().accessControl();
             versionBeforeReset = repository(first).refs().get(CONFIGURATION_REF);
         } finally {
@@ -443,10 +469,10 @@ class InternalConfigurationRepositoryLifecycleIT {
         try {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
             OrionDocument replacement = OrionXml.read(new ByteArrayInputStream(missingRootAclBytes()));
-            first.configurationEditor().edit(first.orionAccessControlService()
-                    .accessControlConfigurationFile().revision().orElseThrow(),
-                    "Prepare configuration", UserEmail.EMPTY)
+            first.configurationEditor().edit(first.orionAccessControlService().configuration().revision(),
+                    new ChangeMetadata(UserEmail.EMPTY, "Prepare configuration"))
                 .update(ignored -> replacement).apply();
+            awaitConfiguration(first);
             assertThat(first.orionAccessControlService().userExists("root")).isFalse();
             assertAuthenticated(first, "alice", "alice-password");
         } finally {
@@ -466,8 +492,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             assertRecoveryPasswordOnly(reset, newPassword);
             assertAuthenticated(reset, "alice", "alice-password");
 
-            AccessControl recovered = OrionXml.read(new ByteArrayInputStream(
-                    reset.orionAccessControlService().accessControlConfigurationFile().content()))
+            AccessControl recovered = reset.orionAccessControlService().configuration().document()
                             .system().accessControl();
             assertThat(recovered.users())
                     .extracting(User::id)
@@ -537,13 +562,18 @@ class InternalConfigurationRepositoryLifecycleIT {
         NativeGitRepository repository = reset.nativeGitRepositoryProvider()
                 .openForWrite(REPOSITORY_NAME)
                 .valueOrFailure("configuration repository");
-        repository.files().withAccess(CONFIGURATION_REF, "seed configuration and unrelated XML", GitCommitAuthor.EMPTY,
-                fileAccess -> {
-            fileAccess.write(ACL_PATH, primaryAcl);
-            fileAccess.write(secondaryPath, secondaryAcl);
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        CONFIGURATION_REF,
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                "", "", "seed configuration and unrelated XML"),
+                        fileAccess -> {
+                            fileAccess.write(ACL_PATH, primaryAcl);
+                            fileAccess.write(secondaryPath, secondaryAcl);
+                            fileAccess.apply();
+                            return null;
+                        });
 
         OrionApplicationLifecycle lifecycle = reset.orionApplicationLifecycle();
         String newPassword;
@@ -613,12 +643,17 @@ class InternalConfigurationRepositoryLifecycleIT {
         String versionBeforeReset;
         try {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
-            repository(first).files().withAccess(CONFIGURATION_REF, "seed noncanonical root ACL",
-                    GitCommitAuthor.EMPTY, fileAccess -> {
-                fileAccess.write(ACL_PATH, noncanonicalRootAclBytes());
-                fileAccess.apply();
-                return null;
-            });
+            repository(first)
+                    .files()
+                    .withAccess(
+                            CONFIGURATION_REF,
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                    "", "", "seed noncanonical root ACL"),
+                            fileAccess -> {
+                                fileAccess.write(ACL_PATH, noncanonicalRootAclBytes());
+                                fileAccess.apply();
+                                return null;
+                            });
             versionBeforeReset = repository(first).refs().get(CONFIGURATION_REF);
         } finally {
             assertThat(firstLifecycle.shutdownApplication()).isEqualTo(FIN);
@@ -632,8 +667,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             System.setOut(new PrintStream(resetOutput, true, StandardCharsets.UTF_8));
             assertThat(resetLifecycle.runApplication()).isEqualTo(RUNNING);
             assertThat(repository(reset).refs().get(CONFIGURATION_REF)).isNotEqualTo(versionBeforeReset);
-            AccessControl recovered = OrionXml.read(new ByteArrayInputStream(
-                    reset.orionAccessControlService().accessControlConfigurationFile().content()))
+            AccessControl recovered = reset.orionAccessControlService().configuration().document()
                             .system().accessControl();
             assertThat(recovered.users())
                     .filteredOn(user -> "root".equalsIgnoreCase(user.id()))
@@ -660,10 +694,10 @@ class InternalConfigurationRepositoryLifecycleIT {
         try {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
             OrionDocument replacement = OrionXml.read(new ByteArrayInputStream(defaultAclBytes("legacy-password")));
-            first.configurationEditor().edit(first.orionAccessControlService()
-                    .accessControlConfigurationFile().revision().orElseThrow(),
-                    "Prepare configuration", UserEmail.EMPTY)
+            first.configurationEditor().edit(first.orionAccessControlService().configuration().revision(),
+                    new ChangeMetadata(UserEmail.EMPTY, "Prepare configuration"))
                 .update(ignored -> replacement).apply();
+            awaitConfiguration(first);
             assertSshAuthenticated(first, "root", oldIdentity);
         } finally {
             assertThat(firstLifecycle.shutdownApplication()).isEqualTo(FIN);
@@ -932,12 +966,13 @@ class InternalConfigurationRepositoryLifecycleIT {
             BootstrapConfiguration configuration,
             RootPasswordReset rootPasswordReset,
             ServerIdentityCapability serverIdentity) {
+        pro.deta.orion.event.OrionEventManager events = new pro.deta.orion.event.OrionEventManager();
         pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend backend =
                 pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.file(
-                        new ConfigurationContext(configuration).getFileGitStoragePath());
+                        new ConfigurationContext(configuration).getFileGitStoragePath(), events);
         S3Transport transport = new S3Transport();
         pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory configured =
-                new pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory(backend, transport);
+                new pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory(backend, transport, events);
         NativeGitRepositoryFactory provider = new NativeGitRepositoryFactory(configured);
         provider.resolveProvisional(
                 NativeGitRepositoryFactory.CONFIGURATION_SOURCE,
@@ -950,7 +985,7 @@ class InternalConfigurationRepositoryLifecycleIT {
                 .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
                 .configurationMaterialCapability(ConfigurationMaterialCapability.unavailable())
                 .keyMaterialAdministrationCapability(KeyMaterialAdministrationCapability.unavailable())
-                .initialConfiguration(java.util.Optional.empty())
+                .eventManager(events)
                 .configurationCipherCapability(ConfigurationCipherCapability.unavailable())
                 .tlsCapability(TlsCapability.unavailable())
                 .sshHostKeyCapability(SshHostKeyCapability.unavailable())
@@ -981,7 +1016,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             String candidateName,
             byte[] content) throws Exception {
         String candidateRef = "refs/heads/candidate-" + candidateName;
-        repository.files().withAccess(candidateRef, "candidate " + candidateName, GitCommitAuthor.EMPTY,
+        repository.files().withAccess(candidateRef, new GitCommitAuthor("", "", "candidate " + candidateName),
                 fileAccess -> {
             fileAccess.write(ACL_PATH, content);
             fileAccess.apply();
@@ -1146,8 +1181,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             OrionComponent component,
             String userId,
             String... expectedKeys) throws Exception {
-        AccessControl accessControl = OrionXml.read(new ByteArrayInputStream(
-                component.orionAccessControlService().accessControlConfigurationFile().content()))
+        AccessControl accessControl = component.orionAccessControlService().configuration().document()
                         .system().accessControl();
         User user = accessControl.users().stream()
                 .filter(candidate -> userId.equals(candidate.id()))

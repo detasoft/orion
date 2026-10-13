@@ -17,7 +17,6 @@ import pro.deta.orion.schema.orion.v2.GrantAddress;
 import pro.deta.orion.schema.orion.v2.GrantId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
-import pro.deta.orion.schema.orion.v2.RepositoryId;
 import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 import pro.deta.orion.schema.orion.v2.RoleId;
 import pro.deta.orion.schema.orion.v2.RoleAddress;
@@ -149,10 +148,10 @@ class HierarchicalAccessRulesTest {
         ScopedGrant force = grant("force", ScopedGrant.Effect.ALLOW, FORCE);
         ScopedRole local = new ScopedRole(new RoleId("local"), List.of(RoleAddress.parse("acme/developer")),
                 List.of(GrantAddress.parse("acme/team/repo/force")));
-        OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
+        OrionDocument.Repository repository = new OrionDocument.Repository("repo", "",
                 OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
                 List.of(), List.of(force), List.of(local), List.of(), java.util.Optional.empty());
-        OrionDocument.Repository sibling = new OrionDocument.Repository(new RepositoryId("sibling"), "",
+        OrionDocument.Repository sibling = new OrionDocument.Repository("sibling", "",
                 OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
                 List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         User user = new User("alice", null, null, null, List.of(),
@@ -236,7 +235,7 @@ class HierarchicalAccessRulesTest {
             references.add(new GrantAddress(ConfigurationScope.parse("acme"), grant.id()));
         }
         ScopedRole role = new ScopedRole(new RoleId("developer"), List.of(), references);
-        OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
+        OrionDocument.Repository repository = new OrionDocument.Repository("repo", "",
                 OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
                 List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),

@@ -2,7 +2,6 @@ package pro.deta.orion.transport.http;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.keymaterial.AcmeKeyMaterial;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
@@ -15,6 +14,7 @@ import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
 
+import pro.deta.orion.test.integration.TestConfiguration;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.URI;
@@ -36,6 +36,14 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class ACMECertificateChallengeTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @Test
     public void testChallengeHttp01() throws Exception {
         try (AcmeHttpTestServer server = startHttp()) {
@@ -53,7 +61,7 @@ public class ACMECertificateChallengeTest {
         WaitingChallengeIssuer issuer = new WaitingChallengeIssuer(challengeService);
         AcmeCertificateService service = new AcmeCertificateService(
                 bootstrap(),
-                desiredStateWithAcme(),
+                desiredStateWithAcme().acl(),
                 new TestAcmeKeyMaterial(),
                 issuer, null);
         try (AcmeHttpTestServer server = startHttp(
@@ -101,7 +109,7 @@ public class ACMECertificateChallengeTest {
                 new OrionHttpResponseWriter(new ObjectMapper()));
         JettyHTTPServer server = new JettyHTTPServer(
                 orionConfiguration,
-                desiredStateWithoutHttps(),
+                desiredStateWithoutHttps().acl(),
                 TlsCapability.unavailable(),
                 rootServlet,
                 null, null);
@@ -140,7 +148,7 @@ public class ACMECertificateChallengeTest {
                 new OrionHttpResponseWriter(new ObjectMapper()));
         JettyHTTPServer server = new JettyHTTPServer(
                 orionConfiguration,
-                desiredStateWithoutHttps(),
+                desiredStateWithoutHttps().acl(),
                 TlsCapability.unavailable(),
                 rootServlet,
                 null, null);
@@ -154,8 +162,8 @@ public class ACMECertificateChallengeTest {
         }
     }
 
-    private static OrionDesiredState desiredStateWithoutHttps() {
-        OrionDesiredState desiredState = new OrionDesiredState();
+    private static TestConfiguration desiredStateWithoutHttps() {
+        TestConfiguration desiredState = new TestConfiguration(EVENTS);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of(), List.of(),
                 List.of()),
@@ -169,7 +177,7 @@ public class ACMECertificateChallengeTest {
         return configuration;
     }
 
-    private static OrionDesiredState desiredStateWithAcme() {
+    private static TestConfiguration desiredStateWithAcme() {
         OrionAcmeConfiguration acme = new OrionAcmeConfiguration(
                 true,
                 URI.create("acme://example-ca"),
@@ -191,7 +199,7 @@ public class ACMECertificateChallengeTest {
                 OrionHttpsConfiguration.ClientAuthentication.DISABLED,
                 List.of(),
                 Optional.of(acme));
-        OrionDesiredState desiredState = new OrionDesiredState();
+        TestConfiguration desiredState = new TestConfiguration(EVENTS);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.of(https), List.of(), List.of(), List.of(),
                 List.of()),

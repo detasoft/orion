@@ -29,26 +29,48 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class NativeGitFileUpdateTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @TempDir
     private Path directory;
 
     @Test
     void nestedWriteCannotReplaceAnExistingFileWithADirectory() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
                 .create("demo").valueOrFailure("repository")) {
-            repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, access -> {
-                access.write("folder", bytes("original"));
-                access.apply();
-                return null;
-            });
+            repository
+                    .files()
+                    .withAccess(
+                            "main",
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                            access -> {
+                                access.write("folder", bytes("original"));
+                                access.apply();
+                                return null;
+                            });
             String initial = repository.refs().get("refs/heads/main");
 
-            assertThatThrownBy(() -> repository.files().withAccess("main", "invalid", GitCommitAuthor.EMPTY,
-                    access -> {
-                        access.write("folder/child.txt", bytes("new"));
-                        access.apply();
-                        return null;
-                    })).isInstanceOf(IOException.class);
+            assertThatThrownBy(
+                            () ->
+                                    repository
+                                            .files()
+                                            .withAccess(
+                                                    "main",
+                                                    new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                                            "", "", "invalid"),
+                                                    access -> {
+                                                        access.write(
+                                                                "folder/child.txt", bytes("new"));
+                                                        access.apply();
+                                                        return null;
+                                                    }))
+                    .isInstanceOf(IOException.class);
 
             assertThat(repository.refs()).containsEntry("refs/heads/main", initial);
             assertThat(repository.files().readBytes("main", "folder")).isEqualTo(bytes("original"));
@@ -57,21 +79,35 @@ class NativeGitFileUpdateTest {
 
     @Test
     void writingAFileCannotSilentlyReplaceAnExistingDirectory() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
                 .create("demo").valueOrFailure("repository")) {
-            repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, access -> {
-                access.write("folder/keep.txt", bytes("original"));
-                access.apply();
-                return null;
-            });
+            repository
+                    .files()
+                    .withAccess(
+                            "main",
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                            access -> {
+                                access.write("folder/keep.txt", bytes("original"));
+                                access.apply();
+                                return null;
+                            });
             String initial = repository.refs().get("refs/heads/main");
 
-            assertThatThrownBy(() -> repository.files().withAccess("main", "invalid", GitCommitAuthor.EMPTY,
-                    access -> {
-                        access.write("folder", bytes("replacement"));
-                        access.apply();
-                        return null;
-                    })).isInstanceOf(IOException.class);
+            assertThatThrownBy(
+                            () ->
+                                    repository
+                                            .files()
+                                            .withAccess(
+                                                    "main",
+                                                    new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                                            "", "", "invalid"),
+                                                    access -> {
+                                                        access.write(
+                                                                "folder", bytes("replacement"));
+                                                        access.apply();
+                                                        return null;
+                                                    }))
+                    .isInstanceOf(IOException.class);
 
             assertThat(repository.refs()).containsEntry("refs/heads/main", initial);
             assertThat(repository.files().readBytes("main", "folder/keep.txt"))
@@ -81,21 +117,31 @@ class NativeGitFileUpdateTest {
 
     @Test
     void nestedWritePreservesUntouchedSubtreeWithoutPackingItsObjects() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
                 .create("demo").valueOrFailure("repository")) {
-            repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, access -> {
-                access.write("left/config.txt", bytes("before"));
-                access.write("right/keep.txt", bytes("keep"));
-                access.apply();
-                return null;
-            });
+            repository
+                    .files()
+                    .withAccess(
+                            "main",
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                            access -> {
+                                access.write("left/config.txt", bytes("before"));
+                                access.write("right/keep.txt", bytes("keep"));
+                                access.apply();
+                                return null;
+                            });
 
-            repository.files().withAccess("main", "update", GitCommitAuthor.EMPTY, access -> {
-                access.write("left/config.txt", bytes("after"));
-                assertThat(access.pack().objectCount()).isEqualTo(4);
-                access.apply();
-                return null;
-            });
+            repository
+                    .files()
+                    .withAccess(
+                            "main",
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "update"),
+                            access -> {
+                                access.write("left/config.txt", bytes("after"));
+                                assertThat(access.pack().objectCount()).isEqualTo(4);
+                                access.apply();
+                                return null;
+                            });
 
             assertThat(repository.files().readBytes("main", "left/config.txt")).isEqualTo(bytes("after"));
             assertThat(repository.files().readBytes("main", "right/keep.txt")).isEqualTo(bytes("keep"));
@@ -104,42 +150,64 @@ class NativeGitFileUpdateTest {
 
     @Test
     void explicitChangesCanReplaceAFileWithADirectoryAndBack() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
                 .create("demo").valueOrFailure("repository")) {
-            repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, access -> {
-                access.write("entry", bytes("file"));
-                access.apply();
-                return null;
-            });
-            repository.files().withAccess("main", "file to directory", GitCommitAuthor.EMPTY, access -> {
-                access.delete("entry");
-                access.write("entry/child", bytes("nested"));
-                access.apply();
-                return null;
-            });
+            repository
+                    .files()
+                    .withAccess(
+                            "main",
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                            access -> {
+                                access.write("entry", bytes("file"));
+                                access.apply();
+                                return null;
+                            });
+            repository
+                    .files()
+                    .withAccess(
+                            "main",
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                    "", "", "file to directory"),
+                            access -> {
+                                access.delete("entry");
+                                access.write("entry/child", bytes("nested"));
+                                access.apply();
+                                return null;
+                            });
             assertThat(repository.files().readBytes("main", "entry/child")).isEqualTo(bytes("nested"));
 
-            repository.files().withAccess("main", "directory to file", GitCommitAuthor.EMPTY, access -> {
-                access.delete("entry/child");
-                access.write("entry", bytes("file again"));
-                access.apply();
-                return null;
-            });
+            repository
+                    .files()
+                    .withAccess(
+                            "main",
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                    "", "", "directory to file"),
+                            access -> {
+                                access.delete("entry/child");
+                                access.write("entry", bytes("file again"));
+                                access.apply();
+                                return null;
+                            });
             assertThat(repository.files().readBytes("main", "entry")).isEqualTo(bytes("file again"));
         }
     }
 
     @Test
     void deletionAndReplacementPublishTogetherAndPreserveOtherFiles() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory)
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
                 .create("demo").valueOrFailure("repository")) {
-            repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, fileAccess -> {
-                fileAccess.write("nested/remove.txt", new byte[]{1});
-                fileAccess.write("keep.txt", new byte[]{2});
-                fileAccess.write("change.txt", new byte[]{3});
-                fileAccess.apply();
-                return null;
-            });
+            repository
+                    .files()
+                    .withAccess(
+                            "main",
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                            fileAccess -> {
+                                fileAccess.write("nested/remove.txt", new byte[] {1});
+                                fileAccess.write("keep.txt", new byte[] {2});
+                                fileAccess.write("change.txt", new byte[] {3});
+                                fileAccess.apply();
+                                return null;
+                            });
             String initial = repository.refs().get("refs/heads/main");
             FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main",
                     "delete and replace", GitCommitAuthor.EMPTY, fileAccess -> {
@@ -155,13 +223,18 @@ class NativeGitFileUpdateTest {
             assertThat(repository.files().readBytes("main", "change.txt")).isEqualTo(new byte[]{4});
             assertThatThrownBy(() -> repository.files().readBytes("main", "nested/remove.txt"))
                     .isInstanceOf(GitOperationException.class);
-            repository.files().withAccess("main", "delete remaining files", GitCommitAuthor.EMPTY,
-                    fileAccess -> {
-                fileAccess.delete("keep.txt");
-                fileAccess.delete("change.txt");
-                fileAccess.apply();
-                return null;
-            });
+            repository
+                    .files()
+                    .withAccess(
+                            "main",
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                    "", "", "delete remaining files"),
+                            fileAccess -> {
+                                fileAccess.delete("keep.txt");
+                                fileAccess.delete("change.txt");
+                                fileAccess.apply();
+                                return null;
+                            });
             for (String path : List.of("keep.txt", "change.txt")) {
                 assertThatThrownBy(() -> repository.files().readBytes("main", path))
                         .isInstanceOf(GitOperationException.class);
@@ -171,41 +244,71 @@ class NativeGitFileUpdateTest {
 
     @Test
     void invalidOrConflictingDeletionDoesNotPublishAnything() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
                 .create("demo").valueOrFailure("repository")) {
-            repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, fileAccess -> {
-                fileAccess.write("config.txt", bytes("initial"));
-                fileAccess.apply();
-                return null;
-            });
+            repository
+                    .files()
+                    .withAccess(
+                            "main",
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                            fileAccess -> {
+                                fileAccess.write("config.txt", bytes("initial"));
+                                fileAccess.apply();
+                                return null;
+                            });
             Map<String, String> refs = repository.refs();
-            repository.index().withAccess(access1 -> {
-                Set<PackMetadata> packs = Set.copyOf(access1.packs());
-                for (String path : List.of("../config.txt", "./config.txt")) {
-                    assertThatThrownBy(() -> repository.files().withAccess("main", "invalid",
-                            GitCommitAuthor.EMPTY, fileAccess -> {
-                        fileAccess.delete(path);
-                        fileAccess.write("config.txt", bytes("changed"));
-                        fileAccess.apply();
-                        return null;
-                    })).isInstanceOf(IllegalArgumentException.class);
-                    assertThat(repository.refs()).isEqualTo(refs);
-                    assertThat(access1.packs()).containsExactlyInAnyOrderElementsOf(packs);
-                }
-                return null;
-            });
+            repository
+                    .index()
+                    .withAccess(
+                            access1 -> {
+                                Set<PackMetadata> packs = Set.copyOf(access1.packs());
+                                for (String path : List.of("../config.txt", "./config.txt")) {
+                                    assertThatThrownBy(
+                                                    () ->
+                                                            repository
+                                                                    .files()
+                                                                    .withAccess(
+                                                                            "main",
+                                                                            new pro.deta.orion.git
+                                                                                    .fileapi
+                                                                                    .GitCommitAuthor(
+                                                                                    "", "",
+                                                                                    "invalid"),
+                                                                            fileAccess -> {
+                                                                                fileAccess.delete(
+                                                                                        path);
+                                                                                fileAccess.write(
+                                                                                        "config.txt",
+                                                                                        bytes(
+                                                                                                "changed"));
+                                                                                fileAccess.apply();
+                                                                                return null;
+                                                                            }))
+                                            .isInstanceOf(IllegalArgumentException.class);
+                                    assertThat(repository.refs()).isEqualTo(refs);
+                                    assertThat(access1.packs())
+                                            .containsExactlyInAnyOrderElementsOf(packs);
+                                }
+                                return null;
+                            });
         }
     }
 
     @Test
     void fileSavePublishesAReadablePack() throws Exception {
-        try (NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(directory)) {
+        try (NativeGitRepositoryProvider provider =
+                NativeGitRepositoryProvider.file(directory, EVENTS.manager())) {
             NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
-            repository.files().withAccess("main", "first", GitCommitAuthor.EMPTY, fileAccess -> {
-                fileAccess.write("config.txt", bytes("first"));
-                fileAccess.apply();
-                return null;
-            });
+            repository
+                    .files()
+                    .withAccess(
+                            "main",
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "first"),
+                            fileAccess -> {
+                                fileAccess.write("config.txt", bytes("first"));
+                                fileAccess.apply();
+                                return null;
+                            });
             repository.index().withAccess(access -> {
                 assertThat(access.packs()).hasSize(1);
                 PackMetadata metadata = access.packs().getFirst();
@@ -216,7 +319,8 @@ class NativeGitFileUpdateTest {
                 return null;
             });
         }
-        try (NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(directory)) {
+        try (NativeGitRepositoryProvider provider =
+                NativeGitRepositoryProvider.file(directory, EVENTS.manager())) {
             NativeGitRepository reopened = provider.find("demo").valueOrFailure("repository");
             assertThat(reopened.files().readBytes("main", "config.txt")).isEqualTo(bytes("first"));
         }
@@ -224,24 +328,34 @@ class NativeGitFileUpdateTest {
 
     @Test
     void staleFileSaveRetainsValidatedPackWithoutChangingTheBranch() throws Exception {
-        NativeGitRepository repository = NativeGitRepositoryProvider.file(directory)
+        NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
                 .create("demo").valueOrFailure("repository");
-        repository.files().withAccess("main", "first", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("config.txt", bytes("first"));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "first"),
+                        fileAccess -> {
+                            fileAccess.write("config.txt", bytes("first"));
+                            fileAccess.apply();
+                            return null;
+                        });
         String expected = repository.refs().get("refs/heads/main");
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", expected,
                 "stale", GitCommitAuthor.EMPTY, fileAccess -> {
             fileAccess.write("config.txt", bytes("stale"));
             return null;
         });
-        repository.files().withAccess("main", "second", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("config.txt", bytes("second"));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "second"),
+                        fileAccess -> {
+                            fileAccess.write("config.txt", bytes("second"));
+                            fileAccess.apply();
+                            return null;
+                        });
         String current = repository.refs().get("refs/heads/main");
 
         List<RefUpdateResult> results = repository.publishPack(
@@ -264,7 +378,7 @@ class NativeGitFileUpdateTest {
 
     @Test
     void preparedPackIsIndependentOfItsReadersAndUnderstoodByJGit() throws Exception {
-        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
+        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
                 .create("demo").valueOrFailure("repository");
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "prepared",
                 GitCommitAuthor.EMPTY, fileAccess -> {
@@ -291,7 +405,7 @@ class NativeGitFileUpdateTest {
             }
         }
 
-        NativeGitRepository another = NativeGitRepositoryProvider.inMemory()
+        NativeGitRepository another = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
                 .create("another").valueOrFailure("repository");
         for (NativeGitRepository target : List.of(repository, another)) {
             assertThat(target.publishPack(update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
@@ -303,7 +417,7 @@ class NativeGitFileUpdateTest {
 
     @Test
     void corruptOrIncompletePackCannotPublishRefs() throws Exception {
-        NativeGitRepository repository = NativeGitRepositoryProvider.file(directory)
+        NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
                 .create("demo").valueOrFailure("repository");
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "prepared",
                 GitCommitAuthor.EMPTY, fileAccess -> {

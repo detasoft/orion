@@ -3,7 +3,6 @@ package pro.deta.orion.test;
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.internal.UserEmail;
 
-import pro.deta.orion.config.OrionConfigurationEdit;
 
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import pro.deta.orion.BootstrapContext;
@@ -16,7 +15,6 @@ import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.acl.RootPasswordReset;
-import pro.deta.orion.transport.git.SshHostKeyLifecycle;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -36,7 +34,8 @@ final class RemoteBootstrapTestSupport {
     }
 
     static OrionComponent runtimeComponent(
-            BootstrapConfiguration configuration, BootstrapContext context) {
+            BootstrapConfiguration configuration, BootstrapContext context,
+            pro.deta.orion.event.OrionEventManager events) throws java.io.IOException, java.security.GeneralSecurityException {
         return DaggerOrionComponent.builder()
                 .bootstrapConfiguration(configuration)
                 .rootPasswordReset(new RootPasswordReset(false))
@@ -44,9 +43,9 @@ final class RemoteBootstrapTestSupport {
                 .acmeKeyMaterialCapability(context.acmeKeyMaterial())
                 .configurationMaterialCapability(context.configurationMaterial())
                 .keyMaterialAdministrationCapability(context.keyMaterialAdministration())
-                .initialConfiguration(context.initialConfiguration())
+                .eventManager(events)
                 .tlsCapability(context.tlsKeyMaterial())
-                .sshHostKeyCapability(context.sshHostKeys())
+                .sshHostKeyCapability(context.sshHostKeys(List.of()))
                 .configurationCipherCapability(context.configurationCipher())
                 .nativeGitRepositoryProvider(context.repositoryFactory())
                 .configuredRepositoryFactory(context.storageFactory())
@@ -78,8 +77,8 @@ final class RemoteBootstrapTestSupport {
             if (((SshCredentialListResult.Success) listed).credentials().isEmpty()) {
                 TestBearerTokens.enrollRootKey(upstream.accessControlService(), upstream.component().configurationEditor(), key);
             } else {
-                upstream.accessControlService().withAccess(upstream.component().configurationEditor()
-                    .edit("add root test key", UserEmail.EMPTY), edit -> {
+                TestRuntimeBootstrap.withAccess(upstream.accessControlService(), upstream.component().configurationEditor(),
+                    new pro.deta.orion.internal.ChangeMetadata(UserEmail.EMPTY, "add root test key"), edit -> {
                     assertThat(edit
                         .addSshCredentials("root", List.of(PublicKeyEntry.toString(key.getPublic()))))
                             .isInstanceOf(SshCredentialUpdateResult.Success.class);
@@ -116,7 +115,7 @@ final class RemoteBootstrapTestSupport {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         try (var material = OrionKeyMaterialFactory.open(configuration, environment, store,
                 new KeyMaterialCreation(true))) {
-            SshHostKeyLifecycle.open(material.sshHostKeyMaterial(), List.of());
+            material.sshHostKeys(List.of());
         }
         return store.read().orElseThrow().bytes();
     }

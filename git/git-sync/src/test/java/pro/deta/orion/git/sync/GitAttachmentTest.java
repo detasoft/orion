@@ -20,6 +20,14 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class GitAttachmentTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private static final String NULL_ID = "0".repeat(40);
     private static final String A = objectId("A");
     private static final String B = objectId("B");
@@ -170,7 +178,9 @@ class GitAttachmentTest {
     }
 
     private static NativeGitRepository repository() {
-        NativeGitRepository repository = NativeGitRepository.createInMemory(RepositoryName.parse("project"));
+        NativeGitRepository repository =
+                NativeGitRepository.createInMemory(
+                        RepositoryName.parse("project"), EVENTS.manager());
         populate(repository);
         return repository;
     }
@@ -297,7 +307,7 @@ class GitAttachmentTest {
 
         private RacingRepository(InMemoryStorage storage, String racedRef,
                                  String expectedOldId, String concurrentId) {
-            super("project", storage, new InMemoryIndex(new RefId("refs/heads/main")));
+            super("project", storage, new InMemoryIndex(new RefId("refs/heads/main")), EVENTS.manager());
             populate(this);
             this.racedRef = racedRef;
             this.expectedOldId = expectedOldId;

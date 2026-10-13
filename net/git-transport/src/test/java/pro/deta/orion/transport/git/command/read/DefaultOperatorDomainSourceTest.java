@@ -9,18 +9,26 @@ import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.util.Result;
 
 import pro.deta.orion.git.parser.v2.data.Head;
-import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 
+import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class DefaultOperatorDomainSourceTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @Test
     void snapshotsRepositoriesWithStablePathSafeIdsAndOriginalNames() {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         provider.create("internal/configuration");
         provider.create("demo");
         DefaultOperatorDomainSource source = source(provider, emptyRuntime(), () -> resources());
@@ -43,7 +51,7 @@ class DefaultOperatorDomainSourceTest {
 
     @Test
     void readsCurrentSymbolicAndDetachedHeadFromTheIndex() throws Exception {
-        try (NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory()) {
+        try (NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager())) {
             NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
             DefaultOperatorDomainSource source = source(provider, emptyRuntime(), () -> resources());
             Head symbolic = new Head.Symbolic(new RefId("refs/heads/trunk"));
@@ -63,7 +71,8 @@ class DefaultOperatorDomainSourceTest {
 
     @Test
     void returnsOneFailureInsteadOfAPartialRepositorySnapshot() {
-        NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider() {
+        NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider(
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager())) {
         @Override
         public void close() {
 
@@ -84,7 +93,7 @@ class DefaultOperatorDomainSourceTest {
                 if (repositoryName.equals("broken")) {
                     return new Result.Failure<>(Result.FailureCode.GENERAL, "sensitive detail");
                 }
-                return NativeGitRepositoryProvider.inMemory().create(repositoryName);
+                return NativeGitRepositoryProvider.inMemory(EVENTS.manager()).create(repositoryName);
             }
 
             @Override
@@ -109,8 +118,11 @@ class DefaultOperatorDomainSourceTest {
                 .child("zeta", zeta)
                 .child("alpha", alpha)
                 .build());
-        DefaultOperatorDomainSource source = source(
-                NativeGitRepositoryProvider.inMemory(), runtime, DefaultOperatorDomainSourceTest::resources);
+        DefaultOperatorDomainSource source =
+                source(
+                        NativeGitRepositoryProvider.inMemory(EVENTS.manager()),
+                        runtime,
+                        DefaultOperatorDomainSourceTest::resources);
 
         assertThat(availableValue(source.systemResources()).value()).isEqualTo(resources());
         assertThat(availableSnapshot(source.services()).value())
@@ -135,7 +147,7 @@ class DefaultOperatorDomainSourceTest {
                 .build());
 
         assertThat(availableSnapshot(source(
-                NativeGitRepositoryProvider.inMemory(),
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager()),
                 runtime,
                 DefaultOperatorDomainSourceTest::resources).services()).value())
                 .extracting(OperatorDomainViews.ServiceView::id)
@@ -169,7 +181,7 @@ class DefaultOperatorDomainSourceTest {
                 .build());
 
         assertThat(availableSnapshot(source(
-                NativeGitRepositoryProvider.inMemory(),
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager()),
                 runtime,
                 DefaultOperatorDomainSourceTest::resources).services()).value())
                 .extracting(OperatorDomainViews.ServiceView::id, OperatorDomainViews.ServiceView::name)
@@ -184,7 +196,7 @@ class DefaultOperatorDomainSourceTest {
     @Test
     void leavesUnfinishedDomainSourcesExplicitlyUnavailable() {
         DefaultOperatorDomainSource source = source(
-                NativeGitRepositoryProvider.inMemory(),
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager()),
                 emptyRuntime(),
                 DefaultOperatorDomainSourceTest::resources);
 

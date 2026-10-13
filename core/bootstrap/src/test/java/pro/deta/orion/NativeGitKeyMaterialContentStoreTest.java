@@ -3,13 +3,8 @@ package pro.deta.orion;
 import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
-import pro.deta.orion.git.parser.v2.data.RefUpdate;
-import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
 import pro.deta.orion.keymaterial.KeyMaterialStoreConflictException;
@@ -19,14 +14,20 @@ import pro.deta.orion.util.Result;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class NativeGitKeyMaterialContentStoreTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private static final String REPOSITORY = "orion";
     private static final String REF = "refs/heads/main";
     private static final String MATERIAL_PATH = "material.p12";
@@ -54,12 +55,17 @@ class NativeGitKeyMaterialContentStoreTest {
                 "orion.xml", bytes("initial config")));
         NativeGitKeyMaterialContentStore store = fixture.store();
         String version = store.read().orElseThrow().version();
-        fixture.repository().files().withAccess(REF, "configuration update", GitCommitAuthor.EMPTY,
-                fileAccess -> {
-            fileAccess.write("orion.xml", bytes("new config"));
-            fileAccess.apply();
-            return null;
-        });
+        fixture.repository()
+                .files()
+                .withAccess(
+                        REF,
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                "", "", "configuration update"),
+                        fileAccess -> {
+                            fileAccess.write("orion.xml", bytes("new config"));
+                            fileAccess.apply();
+                            return null;
+                        });
 
         String saved = store.write(bytes("updated material"), version);
 
@@ -87,25 +93,41 @@ class NativeGitKeyMaterialContentStoreTest {
 
     @Test
     void rejectsAnUpdateCommittedBetweenPreparationAndPublication() throws Exception {
-        NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory();
+        NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository = backend.create(REPOSITORY).valueOrFailure("create repository");
-        repository.files().withAccess(REF, "seed repository", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write(MATERIAL_PATH, bytes("initial"));
-            fileAccess.apply();
-            return null;
-        });
-        InterleavingProvider provider = new InterleavingProvider(backend, () -> {
-            try {
-                backend.openForWrite(REPOSITORY).valueOrFailure("repository").files().withAccess(REF,
-                        "concurrent update", GitCommitAuthor.EMPTY, fileAccess -> {
-                    fileAccess.write("orion.xml", bytes("concurrent configuration"));
-                    fileAccess.apply();
-                    return null;
-                });
-            } catch (Exception failure) {
-                throw new IllegalStateException(failure);
-            }
-        });
+        repository
+                .files()
+                .withAccess(
+                        REF,
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "seed repository"),
+                        fileAccess -> {
+                            fileAccess.write(MATERIAL_PATH, bytes("initial"));
+                            fileAccess.apply();
+                            return null;
+                        });
+        InterleavingProvider provider =
+                new InterleavingProvider(
+                        backend,
+                        () -> {
+                            try {
+                                backend.openForWrite(REPOSITORY)
+                                        .valueOrFailure("repository")
+                                        .files()
+                                        .withAccess(
+                                                REF,
+                                                new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                                        "", "", "concurrent update"),
+                                                fileAccess -> {
+                                                    fileAccess.write(
+                                                            "orion.xml",
+                                                            bytes("concurrent configuration"));
+                                                    fileAccess.apply();
+                                                    return null;
+                                                });
+                            } catch (Exception failure) {
+                                throw new IllegalStateException(failure);
+                            }
+                        });
         NativeGitKeyMaterialContentStore store = new NativeGitKeyMaterialContentStore(
                 provider, REPOSITORY, REF, MATERIAL_PATH);
         String observedVersion = store.read().orElseThrow().version();
@@ -134,7 +156,7 @@ class NativeGitKeyMaterialContentStoreTest {
         }
 
         NativeGitRepositoryFactory factory = new NativeGitRepositoryFactory(
-                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory());
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager()));
         BootstrapSourceConfig source = new BootstrapSourceConfig();
         source.setLocation("git+" + bare.toUri());
         source.setRef(REF);
@@ -164,15 +186,20 @@ class NativeGitKeyMaterialContentStoreTest {
 
     private static Fixture fixture(Map<String, byte[]> initialFiles) throws Exception {
         NativeGitRepositoryFactory factory = new NativeGitRepositoryFactory(
-                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory());
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager()));
         NativeGitRepository repository = factory.provider().create(REPOSITORY).valueOrFailure("create repository");
-        repository.files().withAccess(REF, "seed repository", GitCommitAuthor.EMPTY, fileAccess -> {
-            for (Map.Entry<String, byte[]> fileEntry : initialFiles.entrySet()) {
-                fileAccess.write(fileEntry.getKey(), fileEntry.getValue());
-            }
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        REF,
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "seed repository"),
+                        fileAccess -> {
+                            for (Map.Entry<String, byte[]> fileEntry : initialFiles.entrySet()) {
+                                fileAccess.write(fileEntry.getKey(), fileEntry.getValue());
+                            }
+                            fileAccess.apply();
+                            return null;
+                        });
         return new Fixture(repository, factory.provider());
     }
 
@@ -199,6 +226,7 @@ class NativeGitKeyMaterialContentStoreTest {
         private boolean interleaved;
 
         private InterleavingProvider(NativeGitRepositoryProvider delegate, Runnable beforePublish) {
+            super(pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager()));
             this.delegate = delegate;
             this.beforePublish = beforePublish;
         }

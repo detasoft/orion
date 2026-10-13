@@ -6,10 +6,8 @@ import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.config.OrionConfigurationStorage;
 import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.decision.DecisionRequest;
@@ -35,6 +33,9 @@ import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.schema.orion.v2.RemoteAlias;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
+import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.config.OrionVersionedConfigurationStorage;
+import pro.deta.orion.internal.ChangeMetadata;
 import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -44,6 +45,14 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class BootstrapConnectionDecisionTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private static final PrincipalAddress ACTOR = PrincipalAddress.parse("system/operator");
     @TempDir Path directory;
 
@@ -52,17 +61,19 @@ class BootstrapConnectionDecisionTest {
         try (Fixture fixture = new Fixture(directory)) {
             fixture.start();
             DecisionRequest request = fixture.decisions.list(ACTOR).getFirst();
-            assertThat(request.description()).contains(fixture.previous.upstream(fixture.desired.current()
+            assertThat(request.description()).contains(fixture.previous.upstream(fixture.acl.configuration()
                     .document().system()).toString(),
                     fixture.upstream.toUri().toString());
-            assertThat(fixture.desired.current().document().system().proxies()).containsExactly(fixture.previous);
+            assertThat(fixture.acl.configuration().document().system().proxies())
+                    .containsExactly(fixture.previous);
             fixture.decisions.decide(request.id(), new DecisionAnswer(0, ACTOR)).valueOrFailure("approve");
-            assertThat(fixture.desired.current().document().system().proxies()).singleElement()
-                    .satisfies(binding -> assertThat(binding.upstream(fixture.desired.current().document()
+            EVENTS.await();
+            assertThat(fixture.acl.configuration().document().system().proxies()).singleElement()
+                    .satisfies(binding -> assertThat(binding.upstream(fixture.acl.configuration().document()
                             .system())).isEqualTo(fixture.upstream.toUri()));
             assertThat(fixture.decisions.list(ACTOR)).isEmpty();
             assertThat(fixture.storage.load().isFailure()).isFalse();
-            assertThat(fixture.provider.bootstrapChanges(fixture.desired.current().document())).isEmpty();
+            assertThat(fixture.provider.bootstrapChanges(fixture.acl.configuration().document())).isEmpty();
         }
     }
 
@@ -70,14 +81,15 @@ class BootstrapConnectionDecisionTest {
     void rejectionKeepsTheYamlConnectionAndDoesNotRewriteXml() throws Exception {
         try (Fixture fixture = new Fixture(directory)) {
             fixture.start();
-            String revision = fixture.desired.current().revision().orElseThrow();
+            String revision = ((OrionRevision.Stored) fixture.acl.configuration().revision()).value();
             fixture.decisions.decide(fixture.decisions.list(ACTOR).getFirst().id(), new DecisionAnswer(1, ACTOR))
                     .valueOrFailure("reject");
-            assertThat(fixture.desired.current().revision()).contains(revision);
+            assertThat(fixture.acl.configuration().revision()).isEqualTo(new OrionRevision.Stored(revision));
             assertThat(fixture.storage.load().isFailure()).isFalse();
             assertThat(fixture.provider.retry(fixture.previous.alias(),
-                    () -> fixture.desired.current().document(), fixture.secrets).isFailure()).isFalse();
-            assertThat(fixture.desired.current().document().system().proxies()).containsExactly(fixture.previous);
+                    () -> fixture.acl.configuration().document(), fixture.secrets).isFailure()).isFalse();
+            assertThat(fixture.acl.configuration().document().system().proxies())
+                    .containsExactly(fixture.previous);
         }
     }
 
@@ -89,20 +101,29 @@ class BootstrapConnectionDecisionTest {
             GitProxyBinding unrelated = new GitProxyBinding(new RemoteAlias("other"),
                 new GitProxyBinding.Direct(directory.resolve("other.git").toUri(), GitCredentialKind.NONE,
                         Optional.empty(), Optional.empty()), "main");
-            fixture.editor.edit(
-                    fixture.desired.current().revision().orElseThrow(), "unrelated edit",
-                    UserEmail.EMPTY)
-                .update(document ->
-                    new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
-                            document.system().https(), document.system().secrets(),
-                            List.of(fixture.previous, unrelated), document.system().connections(),
-                            document.system().oidcProviders()),
-            document.organizations())).apply();
+            fixture.editor
+                    .edit(
+                            fixture.acl.configuration().revision(),
+                            new ChangeMetadata(UserEmail.EMPTY, "unrelated edit"))
+                    .update(
+                            document ->
+                                    new OrionDocument(
+                                            new OrionDocument.SystemConfiguration(
+                                                    document.system().accessControl(),
+                                                    document.system().https(),
+                                                    document.system().secrets(),
+                                                    List.of(fixture.previous, unrelated),
+                                                    document.system().connections(),
+                                                    document.system().oidcProviders()),
+                                            document.organizations()))
+                    .apply();
+            EVENTS.await();
             fixture.decisions.decide(request.id(), new DecisionAnswer(0, ACTOR)).valueOrFailure("approve");
-            assertThat(fixture.desired.current().document().system().proxies()).contains(unrelated);
-            assertThat(fixture.desired.current().document().system().proxies()).filteredOn(
+            EVENTS.await();
+            assertThat(fixture.acl.configuration().document().system().proxies()).contains(unrelated);
+            assertThat(fixture.acl.configuration().document().system().proxies()).filteredOn(
                     binding -> binding.alias().equals(fixture.previous.alias())).singleElement()
-                    .satisfies(binding -> assertThat(binding.upstream(fixture.desired.current().document()
+                    .satisfies(binding -> assertThat(binding.upstream(fixture.acl.configuration().document()
                             .system())).isEqualTo(fixture.upstream.toUri()));
         }
     }
@@ -113,14 +134,18 @@ class BootstrapConnectionDecisionTest {
             fixture.start();
             DecisionRequest request = fixture.decisions.list(ACTOR).getFirst();
             GitProxyBinding concurrent = new GitProxyBinding(fixture.previous.alias(),
-                new GitProxyBinding.Direct(fixture.previous.upstream(fixture.desired.current().document()
+                new GitProxyBinding.Direct(fixture.previous.upstream(fixture.acl.configuration().document()
                         .system()), GitCredentialKind.NONE, Optional.empty(), Optional.empty()), "refs/heads/other");
-            fixture.editor.edit(
-                    fixture.desired.current().revision().orElseThrow(), "concurrent edit",
-                    UserEmail.EMPTY)
-                .update(document -> withBinding(concurrent)).apply();
+            fixture.editor
+                    .edit(
+                            fixture.acl.configuration().revision(),
+                            new ChangeMetadata(UserEmail.EMPTY, "concurrent edit"))
+                    .update(document -> withBinding(concurrent))
+                    .apply();
+            EVENTS.await();
             fixture.decisions.decide(request.id(), new DecisionAnswer(0, ACTOR)).valueOrFailure("approve");
-            assertThat(fixture.desired.current().document().system().proxies()).containsExactly(concurrent);
+            EVENTS.await();
+            assertThat(fixture.acl.configuration().document().system().proxies()).containsExactly(concurrent);
             assertThat(fixture.storage.load().isFailure()).isFalse();
         }
     }
@@ -134,18 +159,20 @@ class BootstrapConnectionDecisionTest {
     private static final class Fixture implements AutoCloseable {
         final Path upstream;
         final GitProxyBinding previous;
-        final OrionDesiredState desired = new OrionDesiredState();
         final DecisionRegistry decisions = new DecisionRegistry(10, Runnable::run, (actor, scope) -> true);
         final OrionKeyMaterial material;
         final NativeGitRepositoryFactory provider;
-        final OrionConfigurationStorage storage;
+        final OrionVersionedConfigurationStorage storage;
         final OrionConfigurationEditor editor;
         final OrionAccessControlServiceImpl acl;
         final ConfigurationSecrets secrets;
         final pro.deta.orion.git.s3.S3Transport transport = new pro.deta.orion.git.s3.S3Transport();
         final pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory configured =
                 new pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory(
-                        pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(), transport);
+                        pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(
+                                EVENTS.manager()),
+                        transport,
+                        EVENTS.manager());
 
         Fixture(Path directory) throws Exception {
             upstream = directory.resolve("moved.git");
@@ -187,31 +214,35 @@ class BootstrapConnectionDecisionTest {
             editor = new OrionConfigurationEditor(storage,
                 new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
                 material.configurationCipher(),
-                material.configurationMaterial(),
-                desired);
-            acl = new OrionAccessControlServiceImpl(storage,
-                new OrionPasswordHashingService(),
-                new RootPasswordReset(false),
-                material.serverIdentity(),
-                desired,
-                editor,
-                java.util.Optional.empty());
+                material.configurationMaterial());
+            acl =
+                    new OrionAccessControlServiceImpl(
+                            new OrionPasswordHashingService(),
+                            new RootPasswordReset(false),
+                            material.serverIdentity(),
+                            storage,
+                            new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
+                            editor,
+                            EVENTS.manager());
             acl.onStart();
-            secrets = new ConfigurationSecrets(() -> desired.current().document(), material.configurationCipher());
+            secrets =
+                    new ConfigurationSecrets(
+                            () -> acl.configuration().document(), material.configurationCipher());
         }
 
         void start() {
             OrionRuntimeModule.bootstrapProxies(storage,
                     configured, provider,
                             material.configurationCipher(), secrets,
-                    desired, editor, decisions,
+                    acl, editor, decisions,
                     OrionRuntimeModule.connectionFailures(decisions),
-                    OrionRuntimeModule.proxyHostKeyDecisions(desired, editor, record -> { })).run();
+                    OrionRuntimeModule.proxyHostKeyDecisions(acl, editor, record -> { })).run();
             assertThat(decisions.list(ACTOR)).hasSize(1);
         }
 
         @Override
         public void close() {
+            acl.onStop();
             decisions.close();
             transport.close();
             material.close();

@@ -22,6 +22,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class NativeGitRepositoryShallowFetchTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @Test
     void depthAndTimestampStopBeforeTheParent() throws Exception {
         try (NativeGitRepository repository = repository()) {
@@ -109,6 +117,6 @@ class NativeGitRepositoryShallowFetchTest {
     }
 
     private static NativeGitRepository repository() {
-        return NativeGitRepository.createInMemory(RepositoryName.parse("demo"));
+        return NativeGitRepository.createInMemory(RepositoryName.parse("demo"), EVENTS.manager());
     }
 }

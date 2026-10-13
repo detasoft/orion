@@ -1,6 +1,7 @@
 package pro.deta.orion.transport.http;
 
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
+import pro.deta.orion.test.integration.TestConfiguration;
 import java.util.Set;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.X509TrustManager;
@@ -15,7 +16,6 @@ import ch.qos.logback.core.read.ListAppender;
 import org.slf4j.LoggerFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.AcmeKeyMaterial;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
@@ -62,6 +62,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 class AcmeCertificateServiceTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private static final String CLUSTER = "test-cluster";
     private static final KeyMaterialDescriptor SIGNING = descriptor(
             "server-signing-v1", KeyMaterialPurpose.SERVER_SIGNING);
@@ -72,13 +80,13 @@ class AcmeCertificateServiceTest {
     @Test
     void issuesFromDesiredStatePersistsInMaterialStoreAndReloadsWithoutLegacyFiles() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        OrionDesiredState desiredState = desiredState(false);
+        TestConfiguration desiredState = desiredState(false);
         BootstrapConfiguration bootstrap = bootstrap();
 
         try (OrionKeyMaterial owner = owner(store)) {
             RecordingIssuer issuer = new RecordingIssuer(false);
             AcmeCertificateService service = new AcmeCertificateService(
-                    bootstrap, desiredState, owner.acme(), issuer, null);
+                    bootstrap, desiredState.acl(), owner.acme(), issuer, null);
 
             IssuedAcmeCertificate certificate = service.issue(AcmeCertificateService.IssueRequest.EMPTY);
 
@@ -95,7 +103,7 @@ class AcmeCertificateServiceTest {
 
         try (OrionKeyMaterial owner = owner(store)) {
             AcmeCertificateService restarted = new AcmeCertificateService(
-                    bootstrap, desiredState, owner.acme(), new RecordingIssuer(false), null);
+                    bootstrap, desiredState.acl(), owner.acme(), new RecordingIssuer(false), null);
 
             assertThat(restarted.savedCertificate().orElseThrow().certificateChain()).hasSize(1);
         }
@@ -109,7 +117,7 @@ class AcmeCertificateServiceTest {
     void rejectsRequestedDomainsUnlessDesiredStateAllowsIt() throws Exception {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             AcmeCertificateService service = new AcmeCertificateService(
-                    bootstrap(), desiredState(false), owner.acme(), new RecordingIssuer(false), null);
+                    bootstrap(), desiredState(false).acl(), owner.acme(), new RecordingIssuer(false), null);
 
             assertThatThrownBy(() -> service.issue(new AcmeCertificateService.IssueRequest(
                     null, null, List.of("other.example.test"), null, null, null, null)))
@@ -123,7 +131,7 @@ class AcmeCertificateServiceTest {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             RecordingIssuer issuer = new RecordingIssuer(false);
             AcmeCertificateService service = new AcmeCertificateService(
-                    bootstrap(), desiredState(true), owner.acme(), issuer, null);
+                    bootstrap(), desiredState(true).acl(), owner.acme(), issuer, null);
 
             service.issue(new AcmeCertificateService.IssueRequest(
                     null, null, List.of("other.example.test"), null, null, null, null));
@@ -137,7 +145,7 @@ class AcmeCertificateServiceTest {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         try (OrionKeyMaterial owner = owner(store)) {
             AcmeCertificateService service = new AcmeCertificateService(
-                    bootstrap(), desiredState(false), owner.acme(), new RecordingIssuer(true), null);
+                    bootstrap(), desiredState(false).acl(), owner.acme(), new RecordingIssuer(true), null);
 
             assertThatThrownBy(() -> service.issue(AcmeCertificateService.IssueRequest.EMPTY))
                     .isInstanceOf(AcmeCertificateIssueException.class)
@@ -153,7 +161,7 @@ class AcmeCertificateServiceTest {
             CountingAcmeKeyMaterial keyMaterial = new CountingAcmeKeyMaterial(owner.acme());
             BlockingFirstIssuer issuer = new BlockingFirstIssuer();
             AcmeCertificateService service = new AcmeCertificateService(
-                    bootstrap(), desiredState(false), keyMaterial, issuer, null);
+                    bootstrap(), desiredState(false).acl(), keyMaterial, issuer, null);
             Future<IssuedAcmeCertificate> first = executor.submit(
                     () -> service.issue(AcmeCertificateService.IssueRequest.EMPTY));
 
@@ -181,7 +189,7 @@ class AcmeCertificateServiceTest {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             FailFirstIssuer issuer = new FailFirstIssuer();
             AcmeCertificateService service = new AcmeCertificateService(
-                    bootstrap(), desiredState(false), owner.acme(), issuer, null);
+                    bootstrap(), desiredState(false).acl(), owner.acme(), issuer, null);
 
             assertThatThrownBy(() -> service.issue(AcmeCertificateService.IssueRequest.EMPTY))
                     .isInstanceOf(AcmeCertificateIssueException.class)
@@ -203,7 +211,7 @@ class AcmeCertificateServiceTest {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             RecordingIssuer issuer = new RecordingIssuer(false);
             AcmeCertificateService service = new AcmeCertificateService(
-                    bootstrap(), desiredState(false), owner.acme(), issuer, null);
+                    bootstrap(), desiredState(false).acl(), owner.acme(), issuer, null);
             X509Certificate initial = service.issue(AcmeCertificateService.IssueRequest.EMPTY)
                     .certificateChain().getFirst();
             Instant due = Instant.parse(service.renewalStatus().nextAttempt());
@@ -237,7 +245,7 @@ class AcmeCertificateServiceTest {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             RecordingIssuer issuer = new RecordingIssuer(false);
             AcmeCertificateService service = new AcmeCertificateService(
-                    bootstrap(), desiredState(false), owner.acme(), issuer, null);
+                    bootstrap(), desiredState(false).acl(), owner.acme(), issuer, null);
             service.maintainCertificate(Instant.now(), () -> {});
             assertThat(issuer.lastRequest).isNull();
             X509Certificate initial = service.issue(AcmeCertificateService.IssueRequest.EMPTY)
@@ -259,7 +267,7 @@ class AcmeCertificateServiceTest {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             RecordingIssuer issuer = new RecordingIssuer(false);
             AcmeCertificateService service = new AcmeCertificateService(
-                    bootstrap(), desiredState(false), owner.acme(), issuer, null);
+                    bootstrap(), desiredState(false).acl(), owner.acme(), issuer, null);
             X509Certificate initial = service.issue(AcmeCertificateService.IssueRequest.EMPTY)
                     .certificateChain().getFirst();
             Instant due = Instant.parse(service.renewalStatus().nextAttempt());
@@ -293,8 +301,10 @@ class AcmeCertificateServiceTest {
     void disablesRenewalWhenConfigurationIsRemoved() throws Exception {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             RecordingIssuer issuer = new RecordingIssuer(false);
-            OrionDesiredState desired = desiredState(false);
-            AcmeCertificateService service = new AcmeCertificateService(bootstrap(), desired, owner.acme(), issuer, null);
+            TestConfiguration desired = desiredState(false);
+            AcmeCertificateService service =
+                    new AcmeCertificateService(
+                            bootstrap(), desired.acl(), owner.acme(), issuer, null);
             service.issue(AcmeCertificateService.IssueRequest.EMPTY);
             Instant due = Instant.parse(service.renewalStatus().nextAttempt());
             desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("removed"));
@@ -309,8 +319,9 @@ class AcmeCertificateServiceTest {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             BootstrapConfiguration bootstrap = bootstrap();
             bootstrap.getTransport().getHttp().setEnabled(false);
-            OrionDesiredState desired = desiredState(false);
-            OrionHttpsConfiguration old = desired.current().document().system().https().orElseThrow();
+            TestConfiguration desired = desiredState(false);
+            OrionHttpsConfiguration old =
+                    desired.acl().configuration().document().system().https().orElseThrow();
             int availablePort;
             try (ServerSocket probe = new ServerSocket(0)) { availablePort = probe.getLocalPort(); }
             OrionHttpsConfiguration https = new OrionHttpsConfiguration(true, "127.0.0.1", availablePort, old.publicUrl(),
@@ -319,11 +330,11 @@ class AcmeCertificateServiceTest {
                     Optional.of(https), List.of(), List.of(), List.of(),
                     List.of()), List.of()), Optional.of("https"));
             AcmeCertificateService service = new AcmeCertificateService(
-                    bootstrap, desired, owner.acme(), new RecordingIssuer(false), null);
+                    bootstrap, desired.acl(), owner.acme(), new RecordingIssuer(false), null);
             X509Certificate initial = service.issue(AcmeCertificateService.IssueRequest.EMPTY)
                     .certificateChain().getFirst();
             ObjectMapper mapper = new ObjectMapper();
-            JettyHTTPServer server = new JettyHTTPServer(bootstrap, desired, owner.tls(),
+            JettyHTTPServer server = new JettyHTTPServer(bootstrap, desired.acl(), owner.tls(),
                     new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of()),
                             new OrionHttpResponseWriter(mapper)), null, null);
             server.onStart();
@@ -387,12 +398,12 @@ class AcmeCertificateServiceTest {
                 }
             };
             AcmeCertificateService service = new AcmeCertificateService(
-                    bootstrap(), desiredState(false), owner.acme(), issuer, null);
+                    bootstrap(), desiredState(false).acl(), owner.acme(), issuer, null);
             X509Certificate initial = service.issue(AcmeCertificateService.IssueRequest.EMPTY)
                     .certificateChain().getFirst();
             // A restart reconstructs the due date from the persisted certificate.
             AcmeCertificateService restarted = new AcmeCertificateService(
-                    bootstrap(), desiredState(false), owner.acme(), issuer, null);
+                    bootstrap(), desiredState(false).acl(), owner.acme(), issuer, null);
             restarted.startMaintenance(() -> { throw new AssertionError("Stopped maintenance must not activate"); });
             try {
                 assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
@@ -410,10 +421,12 @@ class AcmeCertificateServiceTest {
     void discardsCertificateIfSettingsChangeDuringIssuance() throws Exception {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore());
                 ExecutorService executor = Executors.newSingleThreadExecutor()) {
-            OrionDesiredState desired = desiredState(false);
-            OrionDocument initial = desired.current().document();
+            TestConfiguration desired = desiredState(false);
+            OrionDocument initial = desired.acl().configuration().document();
             BlockingFirstIssuer issuer = new BlockingFirstIssuer();
-            AcmeCertificateService service = new AcmeCertificateService(bootstrap(), desired, owner.acme(), issuer, null);
+            AcmeCertificateService service =
+                    new AcmeCertificateService(
+                            bootstrap(), desired.acl(), owner.acme(), issuer, null);
             Future<IssuedAcmeCertificate> issuance = executor.submit(
                     () -> service.issue(AcmeCertificateService.IssueRequest.EMPTY));
             assertThat(issuer.awaitStarted()).isTrue();
@@ -433,7 +446,7 @@ class AcmeCertificateServiceTest {
             issuer.before = Instant.now().minus(Duration.ofDays(90));
             issuer.after = Instant.now().plus(Duration.ofDays(90));
             AcmeCertificateService service = new AcmeCertificateService(
-                    bootstrap(), desiredState(false), owner.acme(), issuer, null);
+                    bootstrap(), desiredState(false).acl(), owner.acme(), issuer, null);
             X509Certificate initial = service.issue(AcmeCertificateService.IssueRequest.EMPTY)
                     .certificateChain().getFirst();
             Instant due = initial.getNotAfter().toInstant().minus(Duration.ofDays(30));
@@ -451,14 +464,14 @@ class AcmeCertificateServiceTest {
             BootstrapConfiguration bootstrap = bootstrap();
             bootstrap.getTransport().getHttp().setEnabled(true);
             bootstrap.getTransport().getHttp().setPort(0);
-            OrionDesiredState desired = desiredState(false);
+            TestConfiguration desired = desiredState(false);
             AcmeCertificateService service = new AcmeCertificateService(
-                    bootstrap, desired, owner.acme(), new RecordingIssuer(false), null);
+                    bootstrap, desired.acl(), owner.acme(), new RecordingIssuer(false), null);
             service.issue(AcmeCertificateService.IssueRequest.EMPTY);
             assertThat(service.renewalStatus().state()).isEqualTo("stopped");
             CountDownLatch checked = new CountDownLatch(1);
             ObjectMapper mapper = new ObjectMapper();
-            JettyHTTPServer server = new JettyHTTPServer(bootstrap, desired, owner.tls(),
+            JettyHTTPServer server = new JettyHTTPServer(bootstrap, desired.acl(), owner.tls(),
                     new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of()),
                             new OrionHttpResponseWriter(mapper)), null, null) {
                 @Override
@@ -467,7 +480,8 @@ class AcmeCertificateServiceTest {
                     checked.countDown();
                 }
             };
-            GitPackCleanupTask cleanup = new GitPackCleanupTask(NativeGitRepositoryProvider.inMemory());
+            GitPackCleanupTask cleanup =
+                    new GitPackCleanupTask(NativeGitRepositoryProvider.inMemory(EVENTS.manager()));
             JettyHTTPServerStateMachine machine = new JettyHTTPServerStateMachine(
                     () -> server, () -> service, () -> cleanup);
             try {
@@ -498,7 +512,7 @@ class AcmeCertificateServiceTest {
         return configuration;
     }
 
-    private static OrionDesiredState desiredState(boolean allowRequestedDomains) {
+    private static TestConfiguration desiredState(boolean allowRequestedDomains) {
         OrionAcmeConfiguration acme = new OrionAcmeConfiguration(
                 true,
                 URI.create("acme://letsencrypt.org/staging"),
@@ -520,7 +534,7 @@ class AcmeCertificateServiceTest {
                 OrionHttpsConfiguration.ClientAuthentication.DISABLED,
                 List.of(),
                 Optional.of(acme));
-        OrionDesiredState desiredState = new OrionDesiredState();
+        TestConfiguration desiredState = new TestConfiguration(EVENTS);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.of(https), List.of(), List.of(), List.of(),
                 List.of()),

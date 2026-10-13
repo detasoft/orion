@@ -1,8 +1,6 @@
 package pro.deta.orion.transport.git.command;
 import pro.deta.orion.acl.AccessControlAccess;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
-import pro.deta.orion.config.ConfigurationFile;
-import pro.deta.orion.config.OrionConfigurationEdit;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
@@ -32,6 +30,10 @@ import pro.deta.orion.command.CommandRequest;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.CommandValue;
 import pro.deta.orion.command.DefaultCommandDispatcher;
+import pro.deta.orion.config.OrionConfigurationModification;
+import pro.deta.orion.config.OrionDocumentRevision;
+import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.internal.ChangeMetadata;
 import java.security.KeyPairGenerator;
 import java.util.ArrayList;
 import java.util.List;
@@ -43,7 +45,7 @@ class SshCredentialCommandCatalogTest {
     private final RecordingService service = new RecordingService();
     private final DefaultCommandDispatcher dispatcher = new DefaultCommandDispatcher(
             new CommandLineParser(),
-            new SshCredentialCommandCatalog(service, pro.deta.orion.transport.git.TestConfigurationEditor.create()).commandTree(),
+            new SshCredentialCommandCatalog(service).commandTree(),
             new pro.deta.orion.command.CommandRowQuery());
 
     @Test
@@ -239,19 +241,22 @@ class SshCredentialCommandCatalogTest {
         private final List<String> removals = new ArrayList<>();
 
         @Override
-        public AccessControlAccess createAccess(OrionConfigurationEdit edit) {
-            return new AccessControlAccess(edit, new OrionPasswordHashingService()) {
+        public AccessControlAccess createAccess(OrionRevision revision, ChangeMetadata metadata) {
+            return new AccessControlAccess(
+                    new OrionConfigurationModification(configuration(), document -> revision),
+                    new OrionPasswordHashingService()) {
 
                 @Override
-                public SshCredentialUpdateResult addSshCredentials(String userId, List<String> publicKeys) {
+                public SshCredentialUpdateResult addSshCredentials(
+                        String userId, List<String> publicKeys) {
                     updateUsers.add(userId);
                     addedKeys.add(List.copyOf(publicKeys));
                     return updateResult;
                 }
 
                 @Override
-                public SshCredentialUpdateResult removeSshCredential(String userId,
-                        String prefix, boolean force) {
+                public SshCredentialUpdateResult removeSshCredential(
+                        String userId, String prefix, boolean force) {
                     updateUsers.add(userId);
                     removals.add(userId + "|" + prefix + "|" + force);
                     return updateResult;
@@ -306,8 +311,11 @@ class SshCredentialCommandCatalogTest {
         }
 
         @Override
-        public ConfigurationFile accessControlConfigurationFile() {
-            throw new UnsupportedOperationException();
+        public OrionDocumentRevision configuration() {
+            return new OrionDocumentRevision(
+                    pro.deta.orion.schema.orion.v2.OrionDocument.withAccessControl(
+                            new pro.deta.orion.schema.acl.AccessControl()),
+                    pro.deta.orion.config.OrionRevision.INITIAL);
         }
     }
 }

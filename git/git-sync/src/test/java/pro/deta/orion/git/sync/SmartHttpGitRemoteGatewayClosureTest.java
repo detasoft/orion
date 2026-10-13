@@ -32,6 +32,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SmartHttpGitRemoteGatewayClosureTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void rejectsAllHeadsBeforeTrackingOrLivePublicationWhenOneTreeIsMissing(boolean attach) throws Exception {
@@ -86,7 +94,7 @@ class SmartHttpGitRemoteGatewayClosureTest {
     }
 
     private static NativeGitRepository repository() {
-        return NativeGitRepository.createInMemory(RepositoryName.parse("project"));
+        return NativeGitRepository.createInMemory(RepositoryName.parse("project"), EVENTS.manager());
     }
 
     private static Entry commit(String tree, String message) {

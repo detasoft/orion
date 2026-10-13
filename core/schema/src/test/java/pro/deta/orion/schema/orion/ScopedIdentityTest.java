@@ -12,7 +12,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ScopedIdentityTest {
     private static final OrganizationId ACME = new OrganizationId("acme");
     private static final TeamId PLATFORM = new TeamId("platform");
-    private static final RepositoryId API = new RepositoryId("api");
+    private static final String API = "api";
 
     @Test
     void acceptsCanonicalRoleAndGrantIdentifiers() {

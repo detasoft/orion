@@ -2,7 +2,6 @@ package pro.deta.orion.transport.http;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.GitTransportConfig;
@@ -13,6 +12,7 @@ import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
 
+import pro.deta.orion.test.integration.TestConfiguration;
 import java.net.URI;
 import java.util.List;
 import java.util.Optional;
@@ -24,6 +24,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OrionAdminTransportsRouteTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @Test
     void reportsOnlyRunningTransportEndpoints() {
         BootstrapConfiguration.AppTransport transport = new BootstrapConfiguration.AppTransport();
@@ -92,19 +100,19 @@ class OrionAdminTransportsRouteTest {
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
                 new OrionHttpRouteRegistry(Set.of()),
                 new OrionHttpResponseWriter(new ObjectMapper()));
-        OrionDesiredState desiredState = new OrionDesiredState();
+        TestConfiguration desiredState = new TestConfiguration(EVENTS);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of(), List.of(),
                 List.of()),
                 List.of()), Optional.of("test-revision"));
         JettyHTTPServer server = new JettyHTTPServer(
-                configuration, desiredState, TlsCapability.unavailable(), servlet, null, null);
+                configuration, desiredState.acl(), TlsCapability.unavailable(), servlet, null, null);
         server.onStart();
 
         try {
             OrionAdminTransportsRoute route = new OrionAdminTransportsRoute(
                     configuration,
-                    desiredState,
+                    desiredState.acl(),
                     () -> server,
                     null,
                     null);
@@ -124,7 +132,7 @@ class OrionAdminTransportsRouteTest {
     @Test
     void reportsDesiredStateHttpsWhenBootstrapTransportsAreAbsent() {
         BootstrapConfiguration configuration = new BootstrapConfiguration();
-        OrionDesiredState desiredState = new OrionDesiredState();
+        TestConfiguration desiredState = new TestConfiguration(EVENTS);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(
                         new AccessControl(),
@@ -142,7 +150,7 @@ class OrionAdminTransportsRouteTest {
                         List.of()),
                 List.of()), Optional.of("test-revision"));
         JettyHTTPServer server = new JettyHTTPServer(
-                configuration, desiredState, TlsCapability.unavailable(), null, null, null) {
+                configuration, desiredState.acl(), TlsCapability.unavailable(), null, null, null) {
             @Override
             public int boundHttpsPort() {
                 return 9443;
@@ -150,7 +158,7 @@ class OrionAdminTransportsRouteTest {
         };
         configuration.setTransport(null);
         OrionAdminTransportsRoute route = new OrionAdminTransportsRoute(
-                configuration, desiredState, () -> server, null, null);
+                configuration, desiredState.acl(), () -> server, null, null);
 
         OrionAdminTransportsRoute.AdminTransportsResponse response =
                 (OrionAdminTransportsRoute.AdminTransportsResponse) route.doGet(null).body();

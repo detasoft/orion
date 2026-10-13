@@ -13,9 +13,9 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.Head;
-import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 
+import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
@@ -26,6 +26,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class FileGitCompatibilityExporterTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @TempDir
     Path root;
 
@@ -33,7 +41,7 @@ class FileGitCompatibilityExporterTest {
     void exportsDetachedHeadWithoutAListedBranch() throws Exception {
         Path store = root.resolve("store");
         ObjectId commit;
-        try (NativeGitRepository source = NativeGitRepositoryProvider.file(store)
+        try (NativeGitRepository source = NativeGitRepositoryProvider.file(store, EVENTS.manager())
                 .create("demo").valueOrFailure("source repository")) {
             ObjectId tree = source.writeObject(GitObjectType.TREE, new byte[0]);
             commit = source.writeObject(GitObjectType.COMMIT, commit(tree, null, "detached"));
@@ -61,7 +69,7 @@ class FileGitCompatibilityExporterTest {
         ObjectId originalParent;
         ObjectId originalTip;
         ObjectId blob;
-        try (NativeGitRepository source = NativeGitRepositoryProvider.file(store)
+        try (NativeGitRepository source = NativeGitRepositoryProvider.file(store, EVENTS.manager())
                 .create("demo").valueOrFailure("source repository")) {
             blob = source.writeObject(GitObjectType.BLOB, "content".getBytes(StandardCharsets.UTF_8));
             originalTree = source.writeObject(GitObjectType.TREE, tree(
@@ -96,7 +104,7 @@ class FileGitCompatibilityExporterTest {
         Path store = root.resolve("store");
         ObjectId blob;
         ObjectId originalTag;
-        try (NativeGitRepository source = NativeGitRepositoryProvider.file(store)
+        try (NativeGitRepository source = NativeGitRepositoryProvider.file(store, EVENTS.manager())
                 .create("demo").valueOrFailure("source repository")) {
             blob = source.writeObject(GitObjectType.BLOB, "content".getBytes(StandardCharsets.UTF_8));
             ObjectId child = source.writeObject(GitObjectType.TREE, tree(
@@ -134,7 +142,7 @@ class FileGitCompatibilityExporterTest {
     @Test
     void rejectsSignedCommitThatWouldNeedARewrittenTreeWithoutPublishingOutput() throws Exception {
         Path store = root.resolve("store");
-        try (NativeGitRepository source = NativeGitRepositoryProvider.file(store)
+        try (NativeGitRepository source = NativeGitRepositoryProvider.file(store, EVENTS.manager())
                 .create("demo").valueOrFailure("source repository")) {
             ObjectId blob = source.writeObject(GitObjectType.BLOB, new byte[]{1});
             ObjectId tree = source.writeObject(GitObjectType.TREE, tree(
@@ -160,7 +168,7 @@ class FileGitCompatibilityExporterTest {
     @ValueSource(strings = {"PGP SIGNATURE", "SSH SIGNATURE", "SIGNED MESSAGE"})
     void rejectsSignedTagWhoseTargetCommitChanges(String signature) throws Exception {
         Path store = root.resolve("store");
-        try (NativeGitRepository source = NativeGitRepositoryProvider.file(store)
+        try (NativeGitRepository source = NativeGitRepositoryProvider.file(store, EVENTS.manager())
                 .create("demo").valueOrFailure("source repository")) {
             ObjectId blob = source.writeObject(GitObjectType.BLOB, new byte[]{1});
             ObjectId tree = source.writeObject(GitObjectType.TREE, tree(
@@ -183,7 +191,7 @@ class FileGitCompatibilityExporterTest {
     @Test
     void rejectsDuplicateNamesEvenWhenGitSortPlacesAnotherEntryBetweenThem() throws Exception {
         Path store = root.resolve("store");
-        try (NativeGitRepository source = NativeGitRepositoryProvider.file(store)
+        try (NativeGitRepository source = NativeGitRepositoryProvider.file(store, EVENTS.manager())
                 .create("demo").valueOrFailure("source repository")) {
             ObjectId blob = source.writeObject(GitObjectType.BLOB, new byte[]{1});
             ObjectId directory = source.writeObject(GitObjectType.TREE, tree(entry("x", blob)));
@@ -202,7 +210,7 @@ class FileGitCompatibilityExporterTest {
     @Test
     void preservesAnExistingOutputDirectory() throws Exception {
         Path store = root.resolve("store");
-        try (NativeGitRepository ignored = NativeGitRepositoryProvider.file(store)
+        try (NativeGitRepository ignored = NativeGitRepositoryProvider.file(store, EVENTS.manager())
                 .create("demo").valueOrFailure("source repository")) {
             // The output check runs before object conversion.
         }

@@ -9,7 +9,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.bootstrap.config.location.BootstrapConfigurationReader;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -28,7 +27,6 @@ import java.security.KeyPairGenerator;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -60,17 +58,22 @@ class RemoteBootstrapConfigurationIT {
 
         try (var upstream = RuntimeHttpTestSupport.start(upstreamConfiguration)) {
             var environment = configureSources(tempDir, target, upstream, transport);
-            byte[] xml = upstream.accessControlService().accessControlConfigurationFile().content();
+            byte[] xml = TestRuntimeBootstrap.configurationXml(upstream.accessControlService());
             byte[] material = materialBytes(target, environment);
             var repository = upstream.repositoryProvider().create("bootstrap-inputs")
                     .valueOrFailure("native bootstrap repository");
-            repository.files().withAccess("refs/heads/bootstrap", "seed remote bootstrap inputs",
-                    GitCommitAuthor.EMPTY, fileAccess -> {
-                fileAccess.write("config/acl.xml", xml);
-                fileAccess.write("keys/server.p12", material);
-                fileAccess.apply();
-                return null;
-            });
+            repository
+                    .files()
+                    .withAccess(
+                            "refs/heads/bootstrap",
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                    "", "", "seed remote bootstrap inputs"),
+                            fileAccess -> {
+                                fileAccess.write("config/acl.xml", xml);
+                                fileAccess.write("keys/server.p12", material);
+                                fileAccess.apply();
+                                return null;
+                            });
             target.getBootstrap().getAccessControl().setRef("refs/heads/bootstrap");
             target.getBootstrap().getAccessControl().setPath("config/acl.xml");
             target.getBootstrap().getKeyMaterial().setRef("refs/heads/bootstrap");
@@ -99,19 +102,21 @@ class RemoteBootstrapConfigurationIT {
 
             var materialStore = new InMemoryKeyMaterialContentStore();
             materialStore.write(material, null);
+            pro.deta.orion.event.OrionEventManager bootstrapEvents1 =
+                    new pro.deta.orion.event.OrionEventManager();
             try (var seededMaterial = OrionKeyMaterialFactory.open(configuration, environment, materialStore,
                     new KeyMaterialCreation(false));
-                 var bootstrap = BootstrapContext.open(configuration, environment)) {
+                 var bootstrap = BootstrapContext.open(configuration, environment, bootstrapEvents1)) {
                 byte[] payload = "remote material identity".getBytes(StandardCharsets.UTF_8);
                 assertThat(bootstrap.serverIdentity().verify(seededMaterial.serverIdentity().activeKeyId(),
                         payload, seededMaterial.serverIdentity().sign(payload))).isTrue();
-                var component = runtimeComponent(configuration, bootstrap);
+                var component = runtimeComponent(configuration, bootstrap, bootstrapEvents1);
                 var lifecycle = component.orionApplicationLifecycle();
                 try {
                     assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
                     lifecycle.waitForStarting();
                     var loaded = OrionXml.read(new ByteArrayInputStream(
-                            component.orionAccessControlService().accessControlConfigurationFile().content()));
+                            TestRuntimeBootstrap.configurationXml(component.orionAccessControlService())));
                     var seeded = OrionXml.read(new ByteArrayInputStream(xml));
                     var seededAcl = seeded.system().accessControl();
                     var loadedAcl = loaded.system().accessControl();
@@ -166,7 +171,9 @@ class RemoteBootstrapConfigurationIT {
                 Files.writeString(credential, authorized);
             }
             assertThat(repository.refs()).isEqualTo(refsBeforeFailures);
-            try (var recovered = BootstrapContext.open(configuration, environment)) {
+            pro.deta.orion.event.OrionEventManager bootstrapEvents2 =
+                    new pro.deta.orion.event.OrionEventManager();
+            try (var recovered = BootstrapContext.open(configuration, environment, bootstrapEvents2)) {
                 assertThat(recovered.serverIdentity().activeKeyId()).isNotBlank();
             }
         }
@@ -200,26 +207,40 @@ class RemoteBootstrapConfigurationIT {
                     .valueOrFailure("configuration upstream");
             var materialRepository = materialServer.repositoryProvider().create("bootstrap-inputs")
                     .valueOrFailure("material upstream");
-            configurationRepository.files().withAccess(acl.getRef(), "seed configuration",
-                    GitCommitAuthor.EMPTY, fileAccess -> {
-                fileAccess.write(acl.getPath(),
-                        configurationServer.accessControlService().accessControlConfigurationFile().content());
-                fileAccess.apply();
-                return null;
-            });
-            materialRepository.files().withAccess(material.getRef(), "seed material", GitCommitAuthor.EMPTY,
-                    fileAccess -> {
-                fileAccess.write(material.getPath(), materialBytes(target, environment));
-                fileAccess.apply();
-                return null;
-            });
+            configurationRepository
+                    .files()
+                    .withAccess(
+                            acl.getRef(),
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                    "", "", "seed configuration"),
+                            fileAccess -> {
+                                fileAccess.write(
+                                        acl.getPath(),
+                                        TestRuntimeBootstrap.configurationXml(
+                                                configurationServer.accessControlService()));
+                                fileAccess.apply();
+                                return null;
+                            });
+            materialRepository
+                    .files()
+                    .withAccess(
+                            material.getRef(),
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "seed material"),
+                            fileAccess -> {
+                                fileAccess.write(
+                                        material.getPath(), materialBytes(target, environment));
+                                fileAccess.apply();
+                                return null;
+                            });
 
             String configurationRevision = null;
             String materialRevision = null;
             byte[] payload = "independent upstream identity".getBytes(StandardCharsets.UTF_8);
             byte[] signature = null;
             for (int launch = 0; launch < 2; launch++) {
-                try (var bootstrap = BootstrapContext.open(target, environment)) {
+                pro.deta.orion.event.OrionEventManager bootstrapEvents3 =
+                        new pro.deta.orion.event.OrionEventManager();
+                try (var bootstrap = BootstrapContext.open(target, environment, bootstrapEvents3)) {
                     var provider = bootstrap.repositoryProvider();
                     String configurationCache = bootstrap.repositoryFactory()
                             .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE)
@@ -227,12 +248,14 @@ class RemoteBootstrapConfigurationIT {
                     String materialCache = bootstrap.repositoryFactory()
                             .bootstrapRepositoryName(NativeGitRepositoryFactory.MATERIAL_SOURCE).orElseThrow();
                     assertThat(configurationCache).isNotEqualTo(materialCache);
-                    var component = runtimeComponent(target, bootstrap);
+                    var component = runtimeComponent(target, bootstrap, bootstrapEvents3);
                     var lifecycle = component.orionApplicationLifecycle();
                     try {
                         assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
                         lifecycle.waitForStarting();
-                        byte[] xml = component.orionAccessControlService().accessControlConfigurationFile().content();
+                        byte[] xml =
+                                TestRuntimeBootstrap.configurationXml(
+                                        component.orionAccessControlService());
                         var document = OrionXml.read(new ByteArrayInputStream(xml));
                         assertThat(document.system().proxies()).extracting(binding -> binding.alias().value())
                                 .containsExactly("material");
@@ -250,24 +273,34 @@ class RemoteBootstrapConfigurationIT {
                         if (launch == 0) {
                             signature = bootstrap.serverIdentity().sign(payload);
                             var materialRefs = materialRepository.refs();
-                            provider.openForWrite(configurationCache).valueOrFailure("configuration proxy")
-                                    .files().withAccess(acl.getRef(), "write configuration upstream",
-                                            GitCommitAuthor.EMPTY, fileAccess -> {
-                                fileAccess.write("configuration-marker", payload);
-                                fileAccess.apply();
-                                return null;
-                            });
+                            provider.openForWrite(configurationCache)
+                                    .valueOrFailure("configuration proxy")
+                                    .files()
+                                    .withAccess(
+                                            acl.getRef(),
+                                            new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                                    "", "", "write configuration upstream"),
+                                            fileAccess -> {
+                                                fileAccess.write("configuration-marker", payload);
+                                                fileAccess.apply();
+                                                return null;
+                                            });
                             assertThat(configurationRepository.files().readBytes(acl.getRef(),
                                     "configuration-marker")).isEqualTo(payload);
                             assertThat(materialRepository.refs()).isEqualTo(materialRefs);
                             var configurationRefs = configurationRepository.refs();
-                            provider.openForWrite(materialCache).valueOrFailure("material proxy")
-                                    .files().withAccess(material.getRef(), "write material upstream",
-                                            GitCommitAuthor.EMPTY, fileAccess -> {
-                                fileAccess.write("material-marker", payload);
-                                fileAccess.apply();
-                                return null;
-                            });
+                            provider.openForWrite(materialCache)
+                                    .valueOrFailure("material proxy")
+                                    .files()
+                                    .withAccess(
+                                            material.getRef(),
+                                            new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                                    "", "", "write material upstream"),
+                                            fileAccess -> {
+                                                fileAccess.write("material-marker", payload);
+                                                fileAccess.apply();
+                                                return null;
+                                            });
                             assertThat(materialRepository.files().readBytes(material.getRef(),
                                     "material-marker")).isEqualTo(payload);
                             assertThat(configurationRepository.refs()).isEqualTo(configurationRefs);
@@ -295,7 +328,9 @@ class RemoteBootstrapConfigurationIT {
             configuration.getTransport().getHttp().setPort(occupiedPort.getLocalPort());
             try {
                 assertThatThrownBy(() -> {
-                    try (var ignored = BootstrapContext.open(configuration, environment)) {
+                    pro.deta.orion.event.OrionEventManager bootstrapEvents4 =
+                            new pro.deta.orion.event.OrionEventManager();
+                    try (var ignored = BootstrapContext.open(configuration, environment, bootstrapEvents4)) {
                         throw new AssertionError("Invalid bootstrap must fail");
                     }
                 }).as(scenario).isInstanceOf(IllegalStateException.class)

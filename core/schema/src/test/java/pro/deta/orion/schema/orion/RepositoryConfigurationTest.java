@@ -18,7 +18,7 @@ class RepositoryConfigurationTest {
         RepositoryRemote upstream = primaryUpstream();
 
         OrionDocument.Repository repository = new OrionDocument.Repository(
-                new RepositoryId("project"),
+                "project",
                 "Project",
                 "refs/heads/main",
                 RepositoryPolicy.safeDefaults(),
@@ -71,7 +71,7 @@ class RepositoryConfigurationTest {
     @Test
     void rejectsInvalidBranchAndRefMappings() {
         assertThatThrownBy(() -> new OrionDocument.Repository(
-                new RepositoryId("project"),
+                "project",
                 "Project",
                 "main",
                 RepositoryPolicy.safeDefaults(),
@@ -145,7 +145,7 @@ class RepositoryConfigurationTest {
 
     private static OrionDocument.Repository repository(List<RepositoryRemote> remotes) {
         return new OrionDocument.Repository(
-                new RepositoryId("project"),
+                "project",
                 "Project",
                 "refs/heads/main",
                 RepositoryPolicy.safeDefaults(),

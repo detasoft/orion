@@ -13,7 +13,7 @@ class OrionHierarchyIdentityTest {
     void acceptsCanonicalHierarchyIdentifiers() {
         assertThat(new OrganizationId("acme").value()).isEqualTo("acme");
         assertThat(new TeamId("platform-tools").value()).isEqualTo("platform-tools");
-        assertThat(new RepositoryId("api_v2.1").value()).isEqualTo("api_v2.1");
+        assertThat(RepositoryAddress.parse("acme/platform/api_v2.1").repositoryId()).isEqualTo("api_v2.1");
         assertThat(new UserId("alice.smith").value()).isEqualTo("alice.smith");
     }
 
@@ -23,7 +23,7 @@ class OrionHierarchyIdentityTest {
 
         assertThat(address.organizationId()).isEqualTo(new OrganizationId("acme"));
         assertThat(address.teamId()).isEqualTo(new TeamId("platform"));
-        assertThat(address.repositoryId()).isEqualTo(new RepositoryId("api"));
+        assertThat(address.repositoryId()).isEqualTo("api");
         assertThat(address.toString()).isEqualTo("acme/platform/api");
     }
 
@@ -52,6 +52,11 @@ class OrionHierarchyIdentityTest {
                     .as("identifier %s", value)
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("team id");
+            assertThatThrownBy(() -> new RepositoryAddress(
+                    new OrganizationId("acme"), new TeamId("platform"), value))
+                    .as("repository identifier %s", value)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("repository id");
         }
     }
 

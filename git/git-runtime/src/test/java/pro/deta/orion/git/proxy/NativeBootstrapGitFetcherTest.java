@@ -33,7 +33,6 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Arrays;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,6 +40,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class NativeBootstrapGitFetcherTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @TempDir
     private Path tempDir;
 
@@ -48,7 +55,7 @@ class NativeBootstrapGitFetcherTest {
     void fetchesAndRefreshesSelectedRefIntoNativeRepository() throws Exception {
         Upstream upstream = upstream("first");
         BootstrapGitLocation location = location(upstream.bare());
-        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
+        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
                 .create(location.proxyName()).valueOrFailure("create proxy");
         NativeBootstrapGitFetcher fetcher = new NativeBootstrapGitFetcher();
 
@@ -74,7 +81,7 @@ class NativeBootstrapGitFetcherTest {
     void missingUpstreamFailsWithoutDisclosingItsPath() {
         Path missing = tempDir.resolve("credential-looking-upstream.git");
         BootstrapGitLocation location = location(missing);
-        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
+        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
                 .create(location.proxyName()).valueOrFailure("create proxy");
 
         assertThatThrownBy(() -> {
@@ -92,7 +99,7 @@ class NativeBootstrapGitFetcherTest {
     void rewindsSelectedRefToObjectAlreadyPresentWithoutPackData() throws Exception {
         Upstream upstream = upstream("first");
         BootstrapGitLocation location = location(upstream.bare());
-        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
+        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
                 .create(location.proxyName()).valueOrFailure("create proxy");
         NativeBootstrapGitFetcher fetcher = new NativeBootstrapGitFetcher();
         String firstId = upstream.git().getRepository().resolve("refs/heads/main").name();
@@ -126,7 +133,7 @@ class NativeBootstrapGitFetcherTest {
     @ParameterizedTest
     @ValueSource(strings = {"ffffffffffffffffffffffffffffffffffffffff", "invalid-private-tree"})
     void rejectsInvalidDownloadedObjectGraphBeforeRefPublication(String tree) throws Exception {
-        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
+        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
                 .create("proxy").valueOrFailure("create proxy");
         byte[] content = ("tree " + tree + "\n\ninvalid tree\n").getBytes(StandardCharsets.UTF_8);
         ObjectId commit;
@@ -152,7 +159,7 @@ class NativeBootstrapGitFetcherTest {
     @Test
     void rejectsDamagedDownloadedPacksWithoutPublishingObjectsOrRefs() throws Exception {
         FileTestSupport.Prepared prepared;
-        try (NativeGitRepository source = NativeGitRepositoryProvider.inMemory()
+        try (NativeGitRepository source = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
                 .create("source").valueOrFailure("source")) {
             prepared = FileTestSupport.prepared(source.files(), "main", "initial", GitCommitAuthor.EMPTY,
                     fileAccess -> {
@@ -166,7 +173,7 @@ class NativeBootstrapGitFetcherTest {
         ObjectId commit = prepared.refUpdates().getFirst().newId().orElseThrow();
         for (byte[] invalid : new byte[][]{
                 Arrays.copyOf(valid, valid.length - 1), corrupt, Arrays.copyOf(valid, valid.length + 1)}) {
-            try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
+            try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
                     .create("proxy").valueOrFailure("proxy")) {
                 GitClientTransport transport = packTransport(commit, invalid);
                 assertThatThrownBy(() -> new NativeBootstrapGitFetcher().fetch(
@@ -186,18 +193,28 @@ class NativeBootstrapGitFetcherTest {
     void reportsConcurrentLocalRefPublicationAsAConflictWithoutChangingRefs() throws Exception {
         Upstream upstream = upstream("remote");
         BootstrapGitLocation location = location(upstream.bare());
-        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
+        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
                 .create("proxy").valueOrFailure("create proxy");
-        repository.files().withAccess("refs/heads/main", "local", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("orion.xml", new byte[]{1});
-            fileAccess.apply();
-            return null;
-        });
-        repository.files().withAccess("refs/heads/incoming", "remote", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("orion.xml", new byte[]{2});
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "refs/heads/main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "local"),
+                        fileAccess -> {
+                            fileAccess.write("orion.xml", new byte[] {1});
+                            fileAccess.apply();
+                            return null;
+                        });
+        repository
+                .files()
+                .withAccess(
+                        "refs/heads/incoming",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "remote"),
+                        fileAccess -> {
+                            fileAccess.write("orion.xml", new byte[] {2});
+                            fileAccess.apply();
+                            return null;
+                        });
         Map<String, String> before = repository.refs();
         String concurrent = before.get("refs/heads/incoming");
         AtomicInteger connections = new AtomicInteger();

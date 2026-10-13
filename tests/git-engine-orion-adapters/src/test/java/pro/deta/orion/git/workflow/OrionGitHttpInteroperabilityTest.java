@@ -48,7 +48,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -56,6 +55,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionGitHttpInteroperabilityTest {
+    private final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private static final GitCommandRunner GIT = new GitCommandRunner("git", Duration.ofSeconds(30));
 
     @TempDir
@@ -66,7 +73,8 @@ class OrionGitHttpInteroperabilityTest {
             "git-v1,160", "git-v2,160", "jgit-v2,160"})
     @Execution(ExecutionMode.CONCURRENT)
     void discoversAndFetchesInitialAndUpdatedHistory(String engine, int divergence) throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(directory.resolve("server"));
+        NativeGitRepositoryProvider provider =
+                NativeGitRepositoryProvider.file(directory.resolve("server"), EVENTS.manager());
         NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
         List<String> versions = new CopyOnWriteArrayList<>();
         AtomicInteger uploadRequests = new AtomicInteger();
@@ -107,7 +115,7 @@ class OrionGitHttpInteroperabilityTest {
             if (divergence > 0) {
                 for (int number = 0; number < 64; number++) {
                     String version = "history " + number;
-                    repository.files().withAccess("main", "history " + number, GitCommitAuthor.EMPTY,
+                    repository.files().withAccess("main", new GitCommitAuthor("", "", "history " + number),
                             fileAccess -> {
                         fileAccess.write("README.md", version.getBytes(
                                     StandardCharsets.UTF_8));
@@ -121,11 +129,17 @@ class OrionGitHttpInteroperabilityTest {
             List<String> updates = divergence > 0 ? List.of("base\n", "initial\n", "updated\n")
                     : List.of("initial\n", "updated\n");
             for (String content : updates) {
-                repository.files().withAccess("main", "update", GitCommitAuthor.EMPTY, fileAccess -> {
-                    fileAccess.write("README.md", content.getBytes(StandardCharsets.UTF_8));
-                    fileAccess.apply();
-                    return null;
-                });
+                repository
+                        .files()
+                        .withAccess(
+                                "main",
+                                new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "update"),
+                                fileAccess -> {
+                                    fileAccess.write(
+                                            "README.md", content.getBytes(StandardCharsets.UTF_8));
+                                    fileAccess.apply();
+                                    return null;
+                                });
                 String commit = repository.refs().get("refs/heads/main");
                 history.addFirst(commit);
                 int requestsBeforeFetch = uploadRequests.get();
@@ -181,7 +195,7 @@ class OrionGitHttpInteroperabilityTest {
                     new GitSmartHttpClientTransport(http, GitCredentials.none(), true));
             assertThat(client.discover(remote, GitClientOptions.defaults())).isInstanceOf(GitClientResult.Success.class);
             NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(
-                    Files.createTempDirectory(directory, "received-"));
+                    Files.createTempDirectory(directory, "received-"), EVENTS.manager());
             try (NativeGitRepository received = provider.create("copy").valueOrFailure("copy")) {
                 GitClientResult<GitUploadPackResult<PackMetadata>> result = client.fetch(
                         remote, GitClientOptions.defaults(),

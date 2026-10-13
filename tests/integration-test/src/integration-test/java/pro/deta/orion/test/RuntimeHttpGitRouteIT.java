@@ -32,7 +32,6 @@ import pro.deta.orion.schema.orion.v2.GrantId;
 import pro.deta.orion.schema.orion.v2.OidcProvider;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
-import pro.deta.orion.schema.orion.v2.RepositoryId;
 import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 import pro.deta.orion.schema.orion.v2.RoleId;
 import pro.deta.orion.schema.orion.v2.ScopedGrant;
@@ -167,7 +166,7 @@ class RuntimeHttpGitRouteIT {
                 new GrantExpression(GrantKey.CREATE, "true")));
         ScopedRole role = new ScopedRole(new RoleId("developer"), List.of(),
                 List.of(GrantAddress.parse(id + "/write")));
-        OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
+        OrionDocument.Repository repository = new OrionDocument.Repository("repo", "",
                 "refs/heads/" + BRANCH,
                 RepositoryPolicy.safeDefaults(), List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
@@ -283,7 +282,7 @@ class RuntimeHttpGitRouteIT {
             }
         }
 
-        assertThat(NativeGitRepositoryProvider.file(repositoryRoot).repositoryNames())
+        assertThat(NativeGitRepositoryProvider.file(repositoryRoot, new pro.deta.orion.event.OrionEventManager()).repositoryNames())
                 .contains(repositoryName);
     }
 
@@ -583,14 +582,15 @@ class RuntimeHttpGitRouteIT {
     private static void assertRepositoryDoesNotExist(
             Path repositoryRoot,
             String repositoryName) {
-        assertThat(NativeGitRepositoryProvider.file(repositoryRoot).exists(repositoryName))
+        assertThat(NativeGitRepositoryProvider.file(repositoryRoot, new pro.deta.orion.event.OrionEventManager())
+                .exists(repositoryName))
                 .isFalse();
     }
 
     private static NativeGitRepository nativeRepository(
             Path repositoryRoot,
             String repositoryName) {
-        return NativeGitRepositoryProvider.file(repositoryRoot)
+        return NativeGitRepositoryProvider.file(repositoryRoot, new pro.deta.orion.event.OrionEventManager())
                 .find(repositoryName)
                 .valueOrFailure("repository");
     }

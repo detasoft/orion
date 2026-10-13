@@ -15,9 +15,9 @@ import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.keymaterial.SshHostKeyReference;
 
+import pro.deta.orion.keymaterial.KeyMaterialService;
 import java.security.GeneralSecurityException;
 import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -31,8 +31,7 @@ class SshHostKeyLifecycleTest {
         List<byte[]> publicKeys;
 
         try (OrionKeyMaterial material = open(store)) {
-            SshHostKeyCapability keys = SshHostKeyLifecycle.open(
-                    material.sshHostKeyMaterial(), List.of());
+            SshHostKeyCapability keys = material.sshHostKeys(List.of());
 
             assertThat(keys.descriptors())
                     .extracting(descriptor -> descriptor.alias().value())
@@ -43,7 +42,7 @@ class SshHostKeyLifecycleTest {
         }
 
         try (OrionKeyMaterial material = open(store)) {
-            assertThat(SshHostKeyLifecycle.open(material.sshHostKeyMaterial(), List.of()).keyPairs())
+            assertThat(material.sshHostKeys(List.of()).keyPairs())
                     .extracting(key -> key.getPublic().getEncoded())
                     .containsExactlyElementsOf(publicKeys);
         }
@@ -56,28 +55,22 @@ class SshHostKeyLifecycleTest {
         KeyMaterialDescriptor latest = sshHostKey("node-a-rsa-v3", KeyMaterialAlgorithm.RSA, 3);
         KeyMaterialDescriptor other = sshHostKey("node-b-rsa-v4", KeyMaterialAlgorithm.RSA, 4);
 
+        seed(store, List.of(first, latest, other));
         try (OrionKeyMaterial material = open(store)) {
-            material.sshHostKeyMaterial().generateIfMissing(Map.of(first, 2_048, latest, 2_048, other, 2_048));
 
-            assertThat(SshHostKeyLifecycle.open(
-                    material.sshHostKeyMaterial(),
-                    List.of(new SshHostKeyReference("node-a-rsa")))
+            assertThat(material.sshHostKeys(List.of(new SshHostKeyReference("node-a-rsa")))
                     .descriptors()).containsExactly(latest);
-            assertThat(SshHostKeyLifecycle.open(
-                    material.sshHostKeyMaterial(),
-                    List.of(new SshHostKeyReference("node-a-rsa-v1")))
+            assertThat(material.sshHostKeys(List.of(new SshHostKeyReference("node-a-rsa-v1")))
                     .descriptors()).containsExactly(first);
-            assertThat(SshHostKeyLifecycle.open(material.sshHostKeyMaterial(), List.of()).descriptors())
+            assertThat(material.sshHostKeys(List.of()).descriptors())
                     .containsExactly(first, latest, other);
-            assertThatThrownBy(() -> SshHostKeyLifecycle.open(
-                    material.sshHostKeyMaterial(),
-                    List.of(new SshHostKeyReference("missing"))))
+            assertThatThrownBy(() -> material.sshHostKeys(List.of(new SshHostKeyReference("missing"))))
                     .isInstanceOf(GeneralSecurityException.class)
                     .hasMessageContaining("missing");
         }
 
         try (OrionKeyMaterial material = open(store)) {
-            assertThat(material.sshHostKeyMaterial().available())
+            assertThat(material.sshHostKeys(List.of()).descriptors())
                     .containsExactly(first, latest, other);
         }
     }
@@ -88,14 +81,23 @@ class SshHostKeyLifecycleTest {
         KeyMaterialDescriptor nestedLogicalAlias = sshHostKey(
                 "node-a-rsa-v1-v3", KeyMaterialAlgorithm.RSA, 3);
 
+        seed(store, List.of(nestedLogicalAlias));
         try (OrionKeyMaterial material = open(store)) {
-            material.sshHostKeyMaterial().generateIfMissing(Map.of(nestedLogicalAlias, 2_048));
 
-            assertThatThrownBy(() -> SshHostKeyLifecycle.open(
-                    material.sshHostKeyMaterial(),
-                    List.of(new SshHostKeyReference("node-a-rsa-v1"))))
+            assertThatThrownBy(() -> material.sshHostKeys(List.of(new SshHostKeyReference("node-a-rsa-v1"))))
                     .isInstanceOf(GeneralSecurityException.class)
                     .hasMessageContaining("node-a-rsa-v1");
+        }
+    }
+
+    private static void seed(InMemoryKeyMaterialContentStore store, List<KeyMaterialDescriptor> descriptors)
+            throws Exception {
+        try (KeyMaterialService material = KeyMaterialService.open(store,
+                KeyMaterialOptions.pkcs12("test-password".toCharArray()))) {
+            material.generateKeyIfMissing(serverSigning(), 2_048);
+            for (KeyMaterialDescriptor descriptor : descriptors)
+                material.generateKeyIfMissing(descriptor, 2_048);
+            material.save();
         }
     }
 

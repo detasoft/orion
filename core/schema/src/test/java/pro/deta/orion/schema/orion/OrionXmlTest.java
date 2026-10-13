@@ -378,7 +378,7 @@ class OrionXmlTest {
         assertThat(document.organizations().getFirst().teams()).extracting(team -> team.id().value())
                 .containsExactly("a-team", "z-team");
         assertThat(document.organizations().getFirst().teams().getFirst().repositories())
-                .extracting(repository -> repository.id().value())
+                .extracting(repository -> repository.id())
                 .containsExactly("a-repo", "z-repo");
         assertThat(document.system().accessControl().users()).extracting(User::id)
                 .containsExactly("a-user", "z-user");
@@ -741,7 +741,7 @@ class OrionXmlTest {
     private static OrionDocument.Organization organization(String id) {
         OrionDocument.Repository repository =
                 new OrionDocument.Repository(
-                        new RepositoryId("repository"),
+                        "repository",
                         null,
                         "refs/heads/main",
                         RepositoryPolicy.safeDefaults(),
@@ -758,7 +758,7 @@ class OrionXmlTest {
 
     private static OrionDocument documentWithRemotes(List<RepositoryRemote> remotes) {
         OrionDocument.Repository repository = new OrionDocument.Repository(
-                new RepositoryId("repository"),
+                "repository",
                 null,
                 OrionDocument.Repository.DEFAULT_BRANCH,
                 RepositoryPolicy.safeDefaults(),

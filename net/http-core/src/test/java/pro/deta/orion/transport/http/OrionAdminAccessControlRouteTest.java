@@ -1,6 +1,5 @@
 package pro.deta.orion.transport.http;
 
-import pro.deta.orion.config.ConfigurationFile;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
@@ -12,7 +11,6 @@ import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -23,10 +21,10 @@ import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 
+import pro.deta.orion.test.integration.TestConfiguration;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.lang.reflect.Proxy;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -39,29 +37,31 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionAdminAccessControlRouteTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"alice", "José-東京-Ирина"})
-    void exportsOriginalXmlBytesAndRejectsUploads(String userId) throws Exception {
+    void exportsCanonicalXmlAndRejectsUploads(String userId) throws Exception {
         User user = new User(userId, null, null, "user@example.test",
                 List.of(), List.of(), List.of());
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         AccessControl acl = new AccessControl(List.of(user), List.of(), List.of());
         OrionXml.write(OrionDocument.withAccessControl(acl), output);
         byte[] content = output.toByteArray();
-        OrionAccessControlService accessControl = (OrionAccessControlService) Proxy.newProxyInstance(
-                OrionAccessControlService.class.getClassLoader(), new Class<?>[]{OrionAccessControlService.class},
-                (proxy, method, arguments) -> {
-                    if (method.getName().equals("accessControlConfigurationFile")) {
-                        return new ConfigurationFile(content, Optional.of("revision-1"));
-                    }
-                    throw new AssertionError("Unexpected ACL call: " + method.getName());
-                });
+        TestConfiguration configuration = new TestConfiguration(EVENTS);
+        configuration.publish(OrionDocument.withAccessControl(acl), Optional.of("revision-1"));
         Grant grant = new Grant("admin", List.of(
                 new GrantExpression(GrantKey.ADMIN, "true")));
         SecurityContext admin = SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl("admin", List.of(grant)));
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
-                new OrionHttpRouteRegistry(Set.of(new OrionAdminAccessControlRoute(accessControl))),
+                new OrionHttpRouteRegistry(Set.of(new OrionAdminAccessControlRoute(configuration.storage()))),
                 new OrionHttpResponseWriter(new ObjectMapper())) {
             @Override
             public void service(HttpServletRequest request, HttpServletResponse response)

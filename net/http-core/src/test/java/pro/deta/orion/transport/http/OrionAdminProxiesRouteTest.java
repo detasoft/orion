@@ -7,14 +7,12 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
-import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.GrantKey;
-import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
 import pro.deta.orion.schema.orion.v2.GitCredentialKind;
 import pro.deta.orion.schema.orion.v2.GitProxyBinding;
 import pro.deta.orion.schema.orion.v2.Connection;
@@ -22,6 +20,7 @@ import pro.deta.orion.schema.orion.v2.ConnectionReference;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.RemoteAlias;
 
+import pro.deta.orion.test.integration.TestConfiguration;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.lang.reflect.InvocationHandler;
@@ -34,13 +33,21 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionAdminProxiesRouteTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private final ObjectMapper mapper = new ObjectMapper();
-    private final OrionDesiredState desired = new OrionDesiredState();
+    private final TestConfiguration desired = new TestConfiguration(EVENTS);
     private final NativeGitRepositoryFactory provider = new NativeGitRepositoryFactory(
-            pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory());
+            pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager()));
     private final NativeGitRepositoryProvider backend = provider.provider();
     private final OrionAdminProxiesRoute route = new OrionAdminProxiesRoute(
-            desired, provider, null, null, null, mapper);
+            desired.acl(), provider, null, null, null, mapper);
     private final OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
             new OrionHttpRouteRegistry(Set.of(route)), new OrionHttpResponseWriter(mapper));
 
@@ -101,10 +108,10 @@ class OrionAdminProxiesRouteTest {
         }
     }
 
-    private static OrionDocument document(List<GitProxyBinding> bindings) {
-        return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(),
-                List.of(new ConfigurationSecret("private-key-id", "private-ciphertext")), bindings, List.of(),
-                List.of()), List.of());
+    private OrionDocument document(List<GitProxyBinding> bindings) {
+        OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
+                Optional.empty(), List.of(), bindings, List.of(), List.of()), List.of());
+        return desired.secrets().createSystem(document, "private-key-id", "private-ciphertext".toCharArray());
     }
 
     private Response get(SecurityContext context) throws Exception {

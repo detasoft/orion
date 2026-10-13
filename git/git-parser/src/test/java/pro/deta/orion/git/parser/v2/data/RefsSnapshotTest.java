@@ -1,10 +1,10 @@
 package pro.deta.orion.git.parser.v2.data;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 
+import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import java.util.HashMap;
 import java.util.Map;
 

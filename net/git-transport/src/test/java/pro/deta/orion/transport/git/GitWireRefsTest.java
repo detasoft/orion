@@ -1,15 +1,14 @@
 package pro.deta.orion.transport.git;
 
-import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.Head;
-import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.lsrefs.LsRefsRequest;
 
+import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -20,10 +19,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static pro.deta.orion.transport.git.GitWireTestClient.*;
 
 class GitWireRefsTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
 
     @Test
     void listsMatchingBranchesAndLightweightTagsInLexicographicOrder() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository = createRepository(provider, "demo");
         ObjectId lightweightTagId = repository.writeObject(GitObjectType.COMMIT,
                 "tag target".getBytes(StandardCharsets.US_ASCII));
@@ -41,7 +48,7 @@ class GitWireRefsTest {
 
     @Test
     void doesNotDuplicateRefsMatchedByOverlappingPrefixes() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository = createRepository(provider, "demo");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
@@ -56,7 +63,7 @@ class GitWireRefsTest {
 
     @Test
     void returnsEmptyResponseWhenNoRefsMatch() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository = createRepository(provider, "demo");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
@@ -69,7 +76,7 @@ class GitWireRefsTest {
 
     @Test
     void listsResolvedHeadWithoutSymrefTargetWhenNotRequested() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository = createRepository(provider, "demo");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
@@ -82,7 +89,7 @@ class GitWireRefsTest {
 
     @Test
     void listsResolvedHeadWithSymrefTargetWhenRequested() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository = createRepository(provider, "demo");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
@@ -96,7 +103,7 @@ class GitWireRefsTest {
 
     @Test
     void listsUnbornHeadWhenAnotherBranchExists() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository = createRepository(provider, "demo");
         repository.updateRef("refs/heads/master", NULL_ID, MAIN_ID);
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
@@ -112,7 +119,7 @@ class GitWireRefsTest {
 
     @Test
     void listsDetachedHeadThroughTheDedicatedHeadApi() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository = createRepository(provider, "demo");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         repository.index().withAccess(access1 -> {
@@ -130,7 +137,7 @@ class GitWireRefsTest {
 
     @Test
     void listsUnbornHeadWhenRequested() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         createRepository(provider, "demo");
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
@@ -142,7 +149,7 @@ class GitWireRefsTest {
 
     @Test
     void peelsNestedAnnotatedTagToFinalNonTagObject() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository = createRepository(provider, "demo");
         ObjectId commitId = repository.writeObject(GitObjectType.COMMIT,
                 "commit".getBytes(StandardCharsets.US_ASCII));
@@ -160,7 +167,7 @@ class GitWireRefsTest {
 
     @Test
     void peelsAnnotatedTagWithLargeBodyFromBoundedPrefix() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository = createRepository(provider, "demo");
         ObjectId commitId = repository.writeObject(GitObjectType.COMMIT,
                 "commit".getBytes(StandardCharsets.US_ASCII));
@@ -183,7 +190,7 @@ class GitWireRefsTest {
 
     @Test
     void omitsPeeledAttributeForMalformedAnnotatedTag() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository = createRepository(provider, "demo");
         ObjectId malformedTagId = repository.writeObject(GitObjectType.TAG,
                 "object not-a-hex-object-id\n".getBytes(StandardCharsets.US_ASCII));
@@ -198,7 +205,7 @@ class GitWireRefsTest {
 
     @Test
     void omitsPeeledAttributeWhenAnnotatedTagTargetIsMissing() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository = createRepository(provider, "demo");
         ObjectId tagId = repository.writeObject(GitObjectType.TAG, tagData("f".repeat(40)));
         repository.updateRef("refs/tags/missing-target", NULL_ID, tagId.toHex());
@@ -212,7 +219,7 @@ class GitWireRefsTest {
 
     @Test
     void memoizesSharedTagChainsAcrossMatchingRefs() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository = createRepository(provider, "demo");
         ObjectId commitId = repository.writeObject(GitObjectType.COMMIT,
                 "commit".getBytes(StandardCharsets.US_ASCII));
@@ -242,7 +249,7 @@ class GitWireRefsTest {
 
     @Test
     void distinguishesCachedLightweightTagFromAnnotatedTagTarget() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository = createRepository(provider, "demo");
         ObjectId commitId = repository.writeObject(GitObjectType.COMMIT,
                 "commit".getBytes(StandardCharsets.US_ASCII));
@@ -261,7 +268,7 @@ class GitWireRefsTest {
 
     @Test
     void omitsPeeledAttributeWhenTagChainExceedsDepthLimit() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository = createRepository(provider, "demo");
         ObjectId targetId = repository.writeObject(GitObjectType.COMMIT,
                 "commit".getBytes(StandardCharsets.US_ASCII));

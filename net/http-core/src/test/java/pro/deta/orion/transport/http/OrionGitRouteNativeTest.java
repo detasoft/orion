@@ -43,6 +43,14 @@ import java.util.zip.GZIPOutputStream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionGitRouteNativeTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private static final String REPOSITORY_NAME = "team/project";
     private static final String NULL_ID = "0".repeat(40);
 
@@ -537,7 +545,7 @@ class OrionGitRouteNativeTest {
     }
 
     private NativeGitRepositoryProvider provider() {
-        return NativeGitRepositoryProvider.file(tempDir);
+        return NativeGitRepositoryProvider.file(tempDir, EVENTS.manager());
     }
 
     private static GitTransportConfig autoPackfileUriConfig() {

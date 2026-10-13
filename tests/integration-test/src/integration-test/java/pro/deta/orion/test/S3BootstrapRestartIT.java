@@ -7,11 +7,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.BootstrapContext;
-import pro.deta.orion.config.ConfigurationFile;
 import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.s3.S3NativeGitRepositoryFactory;
 import pro.deta.orion.internal.UserEmail;
@@ -23,6 +21,7 @@ import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.test.integration.s3.MinioS3TestServer;
+import pro.deta.orion.config.OrionDocumentRevision;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -43,6 +42,14 @@ import static pro.deta.orion.test.RemoteBootstrapTestSupport.runtimeComponent;
 
 @Timeout(120)
 class S3BootstrapRestartIT {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private static final String SECRET_ID = "stateless-restart-secret";
     private static final String SECRET_VALUE = "persisted encrypted bootstrap credential";
     private static final String CONFIGURATION_REF = "refs/heads/bootstrap-config";
@@ -82,36 +89,51 @@ class S3BootstrapRestartIT {
             Map<String, String> refs;
             try (NativeGitRepositoryProvider provider = S3NativeGitRepositoryFactory.repositories(
                     configuration.getStorage().getLocation(), configuration.getStorage().getEndpoint(),
-                    configuration.getStorage().getAuth(), environment)) {
+                    configuration.getStorage().getAuth(), environment, EVENTS.manager())) {
                 NativeGitRepository repository = provider.create("orion").valueOrFailure("seed S3 bootstrap");
-                repository.files().withAccess(CONFIGURATION_REF, "Seed bootstrap configuration",
-                        GitCommitAuthor.EMPTY, access -> {
-                            access.write(CONFIGURATION_PATH, xml);
-                            access.apply();
-                            return null;
-                        });
-                repository.files().withAccess(MATERIAL_REF, "Seed bootstrap key material",
-                        GitCommitAuthor.EMPTY, access -> {
-                            access.write(MATERIAL_PATH, material);
-                            access.apply();
-                            return null;
-                        });
+                repository
+                        .files()
+                        .withAccess(
+                                CONFIGURATION_REF,
+                                new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                        "", "", "Seed bootstrap configuration"),
+                                access -> {
+                                    access.write(CONFIGURATION_PATH, xml);
+                                    access.apply();
+                                    return null;
+                                });
+                repository
+                        .files()
+                        .withAccess(
+                                MATERIAL_REF,
+                                new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                        "", "", "Seed bootstrap key material"),
+                                access -> {
+                                    access.write(MATERIAL_PATH, material);
+                                    access.apply();
+                                    return null;
+                                });
                 refs = Map.copyOf(repository.refs());
             }
 
             assertThat(tempDir).isEmptyDirectory();
+            pro.deta.orion.event.OrionEventManager bootstrapEvents1 =
+                    new pro.deta.orion.event.OrionEventManager();
             try (BootstrapContext bootstrap = BootstrapContext.open(configuration, environment,
-                    new KeyMaterialCreation(false))) {
-                assertThat(bootstrap.initialConfiguration()).isPresent();
+                    new KeyMaterialCreation(false), bootstrapEvents1)) {
+
                 assertThat(bootstrap.serverIdentity().activeKeyId()).isEqualTo(signingKeyId);
                 assertThat(bootstrap.serverIdentity().verify(signingKeyId, payload, signature)).isTrue();
-                OrionComponent component = runtimeComponent(configuration, bootstrap);
+                OrionComponent component = runtimeComponent(configuration, bootstrap, bootstrapEvents1);
                 OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
                 try {
                     assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
                     lifecycle.waitForStarting();
-                    OrionDocument loaded = OrionXml.read(new ByteArrayInputStream(component.orionAccessControlService()
-                            .accessControlConfigurationFile().content()));
+                    OrionDocument loaded =
+                            OrionXml.read(
+                                    new ByteArrayInputStream(
+                                            TestRuntimeBootstrap.configurationXml(
+                                                    component.orionAccessControlService())));
                     ConfigurationSecrets secrets = new ConfigurationSecrets(() -> loaded,
                             bootstrap.configurationCipher());
                     assertThat(secrets.resolveSystem(SECRET_ID)).isEqualTo(SECRET_VALUE.toCharArray());
@@ -143,26 +165,29 @@ class S3BootstrapRestartIT {
             Path firstRoot = Files.createDirectory(tempDir.resolve("first"));
             BootstrapConfiguration first = configuration(s3, firstRoot);
             first.getBootstrap().getAccessControl().setCreateDefaultIfMissing(true);
+            pro.deta.orion.event.OrionEventManager bootstrapEvents2 =
+                    new pro.deta.orion.event.OrionEventManager();
             try (BootstrapContext bootstrap = BootstrapContext.open(first, environment,
-                    new KeyMaterialCreation(true))) {
-                OrionComponent component = runtimeComponent(first, bootstrap);
+                    new KeyMaterialCreation(true), bootstrapEvents2)) {
+                OrionComponent component = runtimeComponent(first, bootstrap, bootstrapEvents2);
                 OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
                 try {
                     assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
                     lifecycle.waitForStarting();
-                    ConfigurationFile current = component.orionAccessControlService()
-                            .accessControlConfigurationFile();
-                    OrionDocument document = OrionXml.read(new ByteArrayInputStream(current.content()));
+                    OrionDocumentRevision current = component.orionAccessControlService().configuration();
+                    OrionDocument document = current.document();
                     ConfigurationSecrets secrets = new ConfigurationSecrets(() -> document,
                             bootstrap.configurationCipher());
                     OrionDocument updated = secrets.createSystem(document, SECRET_ID, SECRET_VALUE.toCharArray());
-                    component.configurationEditor().edit(
-                            current.revision().orElseThrow(), "Persist stateless bootstrap secret",
-                            UserEmail.EMPTY)
-                            .update(ignored -> updated)
-                        .apply();
-                    savedConfiguration = component.orionAccessControlService()
-                            .accessControlConfigurationFile().content();
+                    TestRuntimeBootstrap.updateConfiguration(
+                            component,
+                            current.revision(),
+                            new pro.deta.orion.internal.ChangeMetadata(
+                                    UserEmail.EMPTY, "Persist stateless bootstrap secret"),
+                            ignored -> updated);
+                    savedConfiguration =
+                            TestRuntimeBootstrap.configurationXml(
+                                    component.orionAccessControlService());
                     assertThat(new String(savedConfiguration, StandardCharsets.UTF_8))
                             .contains(SECRET_ID).doesNotContain(SECRET_VALUE);
                     NativeGitRepository repository = bootstrap.repositoryProvider().find("orion")
@@ -172,7 +197,7 @@ class S3BootstrapRestartIT {
                     assertThat(savedRefs).containsKeys(CONFIGURATION_REF, MATERIAL_REF);
                     signingKeyId = bootstrap.serverIdentity().activeKeyId();
                     signature = bootstrap.serverIdentity().sign(payload);
-                    for (KeyPair pair : bootstrap.sshHostKeys().keyPairs()) {
+                    for (KeyPair pair : bootstrap.sshHostKeys(List.of()).keyPairs()) {
                         hostKeys.add(PublicKeyEntry.toString(pair.getPublic()));
                     }
                     assertThat(hostKeys).isNotEmpty();
@@ -192,22 +217,25 @@ class S3BootstrapRestartIT {
             assertThat(freshRoot).isEmptyDirectory();
             BootstrapConfiguration restarted = configuration(s3, freshRoot);
             restarted.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
+            pro.deta.orion.event.OrionEventManager bootstrapEvents3 =
+                    new pro.deta.orion.event.OrionEventManager();
             try (BootstrapContext bootstrap = BootstrapContext.open(restarted, environment,
-                    new KeyMaterialCreation(false))) {
-                assertThat(bootstrap.initialConfiguration()).isPresent();
+                    new KeyMaterialCreation(false), bootstrapEvents3)) {
+
                 assertThat(bootstrap.serverIdentity().activeKeyId()).isEqualTo(signingKeyId);
                 assertThat(bootstrap.serverIdentity().verify(signingKeyId, payload, signature)).isTrue();
-                assertThat(bootstrap.sshHostKeys().keyPairs())
+                assertThat(bootstrap.sshHostKeys(List.of()).keyPairs())
                         .extracting(pair -> PublicKeyEntry.toString(pair.getPublic()))
                         .containsExactlyElementsOf(hostKeys);
 
-                OrionComponent component = runtimeComponent(restarted, bootstrap);
+                OrionComponent component = runtimeComponent(restarted, bootstrap, bootstrapEvents3);
                 OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
                 try {
                     assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
                     lifecycle.waitForStarting();
-                    byte[] loadedConfiguration = component.orionAccessControlService()
-                            .accessControlConfigurationFile().content();
+                    byte[] loadedConfiguration =
+                            TestRuntimeBootstrap.configurationXml(
+                                    component.orionAccessControlService());
                     assertThat(loadedConfiguration).isEqualTo(savedConfiguration);
                     OrionDocument loaded = OrionXml.read(new ByteArrayInputStream(loadedConfiguration));
                     ConfigurationSecrets secrets = new ConfigurationSecrets(() -> loaded,

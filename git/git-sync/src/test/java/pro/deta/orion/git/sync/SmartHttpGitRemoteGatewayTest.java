@@ -35,6 +35,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class SmartHttpGitRemoteGatewayTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private static final String NULL_ID = "0".repeat(40);
 
     @Test
@@ -79,8 +87,8 @@ class SmartHttpGitRemoteGatewayTest {
 
                 assertThat(local.updateRef("refs/heads/main", NULL_ID, seed.main()).status())
                         .isEqualTo(RefUpdateResult.Status.APPLIED);
-                local.files().withAccess("main", "Orion outbound", new GitCommitAuthor("Orion",
-                        "orion@example.invalid"), fileAccess -> {
+                local.files().withAccess("main", new GitCommitAuthor("Orion",
+                        "orion@example.invalid", "Orion outbound"), fileAccess -> {
                     fileAccess.write("orion.txt", "outbound\n".getBytes());
                     fileAccess.apply();
                     return null;
@@ -132,8 +140,8 @@ class SmartHttpGitRemoteGatewayTest {
                 gateway.fetchHeads(local);
                 assertThat(local.updateRef("refs/heads/main", NULL_ID, seed.main()).status())
                         .isEqualTo(RefUpdateResult.Status.APPLIED);
-                local.files().withAccess("main", "Outbound", new GitCommitAuthor("Orion",
-                        "orion@example.invalid"), fileAccess -> {
+                local.files().withAccess("main", new GitCommitAuthor("Orion",
+                        "orion@example.invalid", "Outbound"), fileAccess -> {
                     fileAccess.write("outbound.txt", "outbound\n".getBytes());
                     fileAccess.apply();
                     return null;
@@ -204,7 +212,8 @@ class SmartHttpGitRemoteGatewayTest {
     private static NativeGitRepository nativeRepository(Path directory) throws Exception {
         Path gitDirectory = directory.resolve(".git");
         Files.createDirectories(gitDirectory);
-        return NativeGitRepository.openLocal(RepositoryName.parse("project"), gitDirectory, "refs/heads/main");
+        return NativeGitRepository.openLocal(
+                RepositoryName.parse("project"), gitDirectory, "refs/heads/main", EVENTS.manager());
     }
 
     private static Seed seedRemote(
@@ -253,7 +262,11 @@ class SmartHttpGitRemoteGatewayTest {
         }
 
         private RacingRepository(Path directory, LocalGitStorage storage) throws IOException {
-            super("project", storage, new LocalGitIndex(directory.resolve(".git"), new RefId("refs/heads/main")));
+            super(
+                    "project",
+                    storage,
+                    new LocalGitIndex(directory.resolve(".git"), new RefId("refs/heads/main")),
+                    EVENTS.manager());
         }
 
         @Override

@@ -2,7 +2,6 @@ package pro.deta.orion.auth.check;
 
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
-import pro.deta.orion.schema.orion.v2.RepositoryId;
 import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 import pro.deta.orion.schema.orion.v2.TeamId;
 import org.junit.jupiter.api.Assertions;
@@ -67,7 +66,7 @@ public class AccessRulesTest {
 
     private static SecurityContext organizationContext(String userId, List<Grant> grants) {
         User user = new User(userId, null, null, null, List.of(), List.of(), grants);
-        OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
+        OrionDocument.Repository repository = new OrionDocument.Repository("repo", "",
                 OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
                 List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),

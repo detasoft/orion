@@ -37,16 +37,29 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class ProxyNativeGitRepositoryTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @Test
     void rejectedUpstreamCasDoesNotAdvanceLocalRef() throws Exception {
         BootstrapGitLocation location = fileLocation();
-        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
+        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
                 .create(location.proxyName()).valueOrFailure("create proxy");
-        repository.files().withAccess(location.refName(), "first", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("orion.xml", "first".getBytes());
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        location.refName(),
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "first"),
+                        fileAccess -> {
+                            fileAccess.write("orion.xml", "first".getBytes());
+                            fileAccess.apply();
+                            return null;
+                        });
         String oldId = repository.refs().get(location.refName());
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), location.refName(),
                 "second", GitCommitAuthor.EMPTY, fileAccess -> {
@@ -74,13 +87,18 @@ class ProxyNativeGitRepositoryTest {
     @ValueSource(booleans = {true, false})
     void fetchAndPushFailuresReachTheSameDecisionHandlerWithoutChangingRefs(boolean failFetch) throws Exception {
         BootstrapGitLocation location = fileLocation();
-        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
+        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
                 .create(location.proxyName()).valueOrFailure("create proxy");
-        repository.files().withAccess(location.refName(), "first", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("file", new byte[]{1});
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        location.refName(),
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "first"),
+                        fileAccess -> {
+                            fileAccess.write("file", new byte[] {1});
+                            fileAccess.apply();
+                            return null;
+                        });
         String previous = repository.refs().get(location.refName());
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), location.refName(),
                 "second", GitCommitAuthor.EMPTY, fileAccess -> {

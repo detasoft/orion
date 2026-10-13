@@ -21,32 +21,50 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Timeout(120)
 class S3RepositoryManagementIT {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @Test
     void encryptedManagementPersistsActivatesCreatesAndReopensMetadataInMinio() throws Exception {
         try (MinioS3TestServer server = MinioS3TestServer.start("orion-management-" + UUID.randomUUID());
              KeyMaterialService material = KeyMaterialService.open(new InMemoryKeyMaterialContentStore(),
                      KeyMaterialOptions.pkcs12("test-password".toCharArray()));
              S3Transport transport = new S3Transport();
-             NativeGitRepositoryProvider local = NativeGitRepositoryProvider.inMemory()) {
+             NativeGitRepositoryProvider local = NativeGitRepositoryProvider.inMemory(EVENTS.manager())) {
             KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(new KeyMaterialAlias("configuration-v1"),
                     KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES,
                     new KeyMaterialVersion(1), KeyMaterialScope.cluster("test"));
             material.generateSecretKeyIfMissing(descriptor, 256);
             ConfigurationCipherCapability cipher = KeyMaterialCapabilities.open(material, List.of(descriptor))
                     .configurationCipher(descriptor);
-            ConfiguredNativeGitRepositoryFactory configuredFactory = new ConfiguredNativeGitRepositoryFactory(
-                    pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(), transport);
+            ConfiguredNativeGitRepositoryFactory configuredFactory =
+                    new ConfiguredNativeGitRepositoryFactory(
+                            pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(
+                                    EVENTS.manager()),
+                            transport,
+                            EVENTS.manager());
             NativeGitRepositoryProvider configured = new NativeGitRepositoryProvider(configuredFactory);
             OrionDocument.Organization organization = new OrionDocument.Organization(new OrganizationId("acme"), "",
                     List.of(), List.of(), List.of(), List.of(new OrionDocument.Team(new TeamId("team"), "",
                     List.of(), List.of(), List.of())), List.of(), List.of(), List.of(), List.of());
-            StorageManagementFixture.State fixture = StorageManagementFixture.open(configured, List.of(organization), cipher);
-            ConfigurationSecrets secrets = new ConfigurationSecrets(() -> fixture.desired().current().document(), cipher);
-            configuredFactory.activate(() -> fixture.desired().current().document(), secrets, name -> false);
+            StorageManagementFixture.State fixture =
+                    StorageManagementFixture.open(
+                            EVENTS, configured, List.of(organization), cipher);
+            ConfigurationSecrets secrets =
+                    new ConfigurationSecrets(
+                            () -> fixture.desired().acl().configuration().document(), cipher);
+            configuredFactory.activate(
+                    () -> fixture.desired().acl().configuration().document(),
+                    secrets,
+                    name -> false);
             SecurityContext actor = SecurityContext.createContext().withUserIdentity(new InternalUserImpl("root",
                     pro.deta.orion.auth.DefaultAccessControl.create("unused").grants()));
             StorageManagement management = fixture.management();
@@ -62,12 +80,30 @@ class S3RepositoryManagementIT {
                     + "\"connection\":\"minio\",\"location\":\"" + binding.location() + "\"}";
             assertThat(http.doPost(StorageManagementFixture.request(json, actor, null)).status()).isEqualTo(201);
             assertThat(local.repositoryNames()).isEmpty();
-            assertThat(fixture.desired().current().document().organizations().getFirst().teams().getFirst()
-                    .repositories().getFirst().storage()).contains(binding);
-            ConfiguredNativeGitRepositoryFactory reopenedFactory = new ConfiguredNativeGitRepositoryFactory(
-                    pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(), transport);
+            assertThat(
+                            fixture.desired()
+                                    .acl()
+                                    .configuration()
+                                    .document()
+                                    .organizations()
+                                    .getFirst()
+                                    .teams()
+                                    .getFirst()
+                                    .repositories()
+                                    .getFirst()
+                                    .storage())
+                    .contains(binding);
+            ConfiguredNativeGitRepositoryFactory reopenedFactory =
+                    new ConfiguredNativeGitRepositoryFactory(
+                            pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(
+                                    EVENTS.manager()),
+                            transport,
+                            EVENTS.manager());
             NativeGitRepositoryProvider reopened = new NativeGitRepositoryProvider(reopenedFactory);
-            reopenedFactory.activate(() -> fixture.desired().current().document(), secrets, name -> false);
+            reopenedFactory.activate(
+                    () -> fixture.desired().acl().configuration().document(),
+                    secrets,
+                    name -> false);
             NativeGitRepository repository = reopened.find("acme/team/archive").valueOrFailure("reopen");
             assertThat(repository.name()).isEqualTo("acme/team/archive");
             assertThat(repository.index().getHEAD()).isEqualTo(new Head.Symbolic(new RefId("refs/heads/main")));

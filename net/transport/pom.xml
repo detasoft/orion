@@ -14,6 +14,12 @@
 
     <dependencies>
         <dependency>
+            <groupId>pro.deta.orion.tests</groupId>
+            <artifactId>integration-test-support</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
             <groupId>pro.deta.orion.net</groupId>
             <artifactId>http-core</artifactId>
         </dependency>

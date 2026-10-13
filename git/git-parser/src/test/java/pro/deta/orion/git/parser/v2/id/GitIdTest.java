@@ -2,6 +2,7 @@ package pro.deta.orion.git.parser.v2.id;
 
 import org.junit.jupiter.api.Test;
 
+import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.function.Function;
@@ -54,7 +55,7 @@ class GitIdTest {
     }
 
     @Test
-    void equalityAndHashingUseTypeAndContent() {
+    void equalityAndHashingUseHashAndDistinguishPackChecksums() {
         for (Function<String, GitId> factory : HEX_FACTORIES) {
             GitId first = factory.apply(HEX);
             GitId second = factory.apply(HEX.toUpperCase(java.util.Locale.ROOT));
@@ -68,7 +69,12 @@ class GitIdTest {
         List<GitId> ids = List.of(new PackChecksum(HEX), new CommitId(HEX), new ObjectId(HEX));
         for (int first = 0; first < ids.size(); first++) {
             for (int second = 0; second < ids.size(); second++) {
-                assertEquals(first == second, ids.get(first).equals(ids.get(second)));
+                boolean equal = first == second || first > 0 && second > 0;
+                assertEquals(equal, ids.get(first).equals(ids.get(second)));
+                if (equal) {
+                    assertEquals(ids.get(first).hashCode(), ids.get(second).hashCode());
+                    assertEquals("found", java.util.Map.of(ids.get(first), "found").get(ids.get(second)));
+                }
             }
         }
     }

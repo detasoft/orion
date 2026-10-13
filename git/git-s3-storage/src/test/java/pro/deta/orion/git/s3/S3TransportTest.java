@@ -30,6 +30,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Timeout(20)
 class S3TransportTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void concurrentConnectionsKeepTheirEndpointSigningRegionCredentialsAndToken(boolean sameEndpoint) throws Exception {
@@ -117,8 +125,15 @@ class S3TransportTest {
 
     private static NativeGitRepositoryProvider provider(S3Transport transport, Server server,
             String id, String region) {
-        return transport.repositories("s3://bucket/prefix", server.endpoint(), region, false,
-                Optional.of(StaticCredentialsProvider.create(AwsSessionCredentials.create(id, "secret", id + "-token"))));
+        return transport.repositories(
+                "s3://bucket/prefix",
+                server.endpoint(),
+                region,
+                false,
+                Optional.of(
+                        StaticCredentialsProvider.create(
+                                AwsSessionCredentials.create(id, "secret", id + "-token"))),
+                EVENTS.manager());
     }
 
     private static void assertRequest(Request request, String id, String region) {

@@ -4,7 +4,6 @@ import pro.deta.orion.internal.UserEmail;
 
 import pro.deta.orion.auth.SshCredentialUpdateResult;
 
-import pro.deta.orion.config.OrionConfigurationEdit;
 
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.eclipse.jgit.api.Git;
@@ -26,7 +25,6 @@ import pro.deta.orion.auth.AccessControlRepositoryGrantUpdate;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
@@ -91,7 +89,7 @@ class BootstrapProxyEndpointIT {
             var repository = upstream.repositoryProvider().create("bootstrap-inputs")
                     .valueOrFailure("bootstrap upstream");
             var document = OrionXml.read(new ByteArrayInputStream(
-                    upstream.accessControlService().accessControlConfigurationFile().content()));
+                    TestRuntimeBootstrap.configurationXml(upstream.accessControlService())));
             AccessControl currentAcl = document.system().accessControl();
             User currentRoot = currentAcl.users().getFirst();
             List<Grant> grants = new ArrayList<>(currentRoot.grants());
@@ -112,15 +110,23 @@ class BootstrapProxyEndpointIT {
             var xml = new ByteArrayOutputStream();
             OrionXml.write(document.replaceAccessControl(
                     new AccessControl(users, currentAcl.roles(), currentAcl.grants())), xml);
-            repository.files().withAccess(REF, "seed inputs", GitCommitAuthor.EMPTY, fileAccess -> {
-                fileAccess.write("orion.xml", xml.toByteArray());
-                fileAccess.write("material.p12", materialBytes(target, environment));
-                fileAccess.apply();
-                return null;
-            });
+            repository
+                    .files()
+                    .withAccess(
+                            REF,
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "seed inputs"),
+                            fileAccess -> {
+                                fileAccess.write("orion.xml", xml.toByteArray());
+                                fileAccess.write(
+                                        "material.p12", materialBytes(target, environment));
+                                fileAccess.apply();
+                                return null;
+                            });
             for (int launch = 0; launch < 2; launch++) {
-                try (var bootstrap = BootstrapContext.open(target, environment)) {
-                    var component = runtimeComponent(target, bootstrap);
+                pro.deta.orion.event.OrionEventManager bootstrapEvents1 =
+                        new pro.deta.orion.event.OrionEventManager();
+                try (var bootstrap = BootstrapContext.open(target, environment, bootstrapEvents1)) {
+                    var component = runtimeComponent(target, bootstrap, bootstrapEvents1);
                     var lifecycle = component.orionApplicationLifecycle();
                     try {
                         assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
@@ -129,9 +135,8 @@ class BootstrapProxyEndpointIT {
                                 ? component.httpTransport().boundHttpPort() : component.sshTransport().boundPort();
                         if (launch == 0) {
                             var acl = component.orionAccessControlService();
-                            acl.withAccess(component.configurationEditor().edit(
-                                    "add root test key",
-                                    UserEmail.EMPTY), edit -> {
+                            TestRuntimeBootstrap.withAccess(acl, component.configurationEditor(),
+                    new pro.deta.orion.internal.ChangeMetadata(UserEmail.EMPTY, "add root test key"), edit -> {
                                 assertThat(edit.addSshCredentials("root",
                                         List.of(PublicKeyEntry.toString(rootKey.getPublic()))))
                                         .isInstanceOf(SshCredentialUpdateResult.Success.class);
@@ -172,21 +177,31 @@ class BootstrapProxyEndpointIT {
                                     user("writer", writerKey, ENDPOINT, true),
                                     user("reader", readerKey, ENDPOINT, false),
                                     user("outsider", outsiderKey, "ordinary", true))) {
-                                acl.withAccess(component.configurationEditor().edit(
-                                        "createOrUpdateUser() " + user.id(),
-                                        new UserEmail(user.id(), user.email())), edit -> {
-                                    edit.createOrUpdateUser(user);
-                                    edit.apply();
-                                    return null;
-                                });
+                                TestRuntimeBootstrap.withAccess(
+                                        acl, component.configurationEditor(),
+                                        new pro.deta.orion.internal.ChangeMetadata(
+                                                new UserEmail(user.id(), user.email()),
+                                                "createOrUpdateUser() " + user.id()),
+                                        edit -> {
+                                            edit.createOrUpdateUser(user);
+                                            edit.apply();
+                                            return null;
+                                        });
                             }
-                            bootstrap.repositoryProvider().create("ordinary").valueOrFailure("ordinary repository")
-                                    .files().withAccess(REF, "ordinary seed", GitCommitAuthor.EMPTY,
+                            bootstrap
+                                    .repositoryProvider()
+                                    .create("ordinary")
+                                    .valueOrFailure("ordinary repository")
+                                    .files()
+                                    .withAccess(
+                                            REF,
+                                            new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                                    "", "", "ordinary seed"),
                                             fileAccess -> {
-                                fileAccess.write("file", new byte[]{1});
-                                fileAccess.apply();
-                                return null;
-                            });
+                                                fileAccess.write("file", new byte[] {1});
+                                                fileAccess.apply();
+                                                return null;
+                                            });
                         }
                         String cache = bootstrap.repositoryFactory()
                                 .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE)
@@ -284,7 +299,7 @@ class BootstrapProxyEndpointIT {
         Path home = Files.createDirectories(tempDir.resolve("ssh-" + username));
         Path sshDirectory = Files.createDirectories(home.resolve(".ssh"));
         List<PublicKey> hostKeys = new ArrayList<>();
-        for (var hostKey : bootstrap.sshHostKeys().keyPairs()) {
+        for (var hostKey : bootstrap.sshHostKeys(List.of()).keyPairs()) {
             hostKeys.add(hostKey.getPublic());
         }
         var factory = new SshdSessionFactoryBuilder().setHomeDirectory(home.toFile())

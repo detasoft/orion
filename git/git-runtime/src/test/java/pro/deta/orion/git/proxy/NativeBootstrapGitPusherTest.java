@@ -34,6 +34,14 @@ import static pro.deta.orion.git.proxy.NativeGitRepositoryFactory.SyncStatus.*;
 import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class NativeBootstrapGitPusherTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private static final String NULL_ID = "0".repeat(40);
 
     @TempDir
@@ -171,7 +179,7 @@ class NativeBootstrapGitPusherTest {
     }
 
     private NativeGitRepository repository(BootstrapGitLocation location) {
-        return NativeGitRepositoryProvider.inMemory()
+        return NativeGitRepositoryProvider.inMemory(EVENTS.manager())
                 .create(location.proxyName())
                 .valueOrFailure("create proxy");
     }

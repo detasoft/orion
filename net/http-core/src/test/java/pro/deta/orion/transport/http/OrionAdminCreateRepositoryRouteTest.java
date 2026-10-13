@@ -12,7 +12,6 @@ import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.TeamId;
-import pro.deta.orion.schema.orion.v2.RepositoryId;
 import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ReadListener;
@@ -34,15 +33,23 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionAdminCreateRepositoryRouteTest {
-    private final NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
+    private final NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
     private final OrionAdminCreateRepositoryRoute route = new OrionAdminCreateRepositoryRoute(
-            provider, StorageManagementFixture.create(provider, organizationDocument().organizations()),
+            provider, StorageManagementFixture.create(EVENTS, provider, organizationDocument().organizations()),
             new ObjectMapper());
 
     private static OrionDocument organizationDocument() {
         User user = new User("root", null, null, null, List.of(), List.of(),
                 DefaultAccessControl.create("unused").grants());
-        OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("visible"), "",
+        OrionDocument.Repository repository = new OrionDocument.Repository("visible", "",
                 OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
                 List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),

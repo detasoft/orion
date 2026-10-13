@@ -58,7 +58,6 @@ import pro.deta.orion.agentd.session.SessionDiscovery;
 import pro.deta.orion.agentd.session.SessionManifest;
 import pro.deta.orion.agentd.session.SessionRegistry;
 import pro.deta.orion.agentd.transport.JettyHttp2Transport;
-import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.keymaterial.AcmeKeyMaterial;
 import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
@@ -86,6 +85,7 @@ import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.security.auth.x500.X500Principal;
+import pro.deta.orion.test.integration.TestConfiguration;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigInteger;
@@ -136,6 +136,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class JettyHTTPServerIT {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private static final AgentProtocolCodec AGENT_CODEC =
             new AgentProtocolCodec(AgentProtocolLimits.defaults());
     private static final int HTTPS_START_ATTEMPTS = 3;
@@ -1096,13 +1104,13 @@ class JettyHTTPServerIT {
                 new KeyMaterialCreation(true));
     }
 
-    static OrionDesiredState desiredState(
+    static TestConfiguration desiredState(
             OrionHttpsConfiguration.ClientAuthentication mode,
             List<TrustedCertificateDescriptor> clientRoots) throws IOException {
         return desiredState(mode, clientRoots, NetworkUtils.findAvailablePort());
     }
 
-    static OrionDesiredState desiredState(
+    static TestConfiguration desiredState(
             OrionHttpsConfiguration.ClientAuthentication mode,
             List<TrustedCertificateDescriptor> clientRoots,
             int port) {
@@ -1128,12 +1136,12 @@ class JettyHTTPServerIT {
         int next() throws IOException;
     }
 
-    static OrionDesiredState desiredStateWithoutHttps() {
+    static TestConfiguration desiredStateWithoutHttps() {
         return desiredState(Optional.empty());
     }
 
-    static OrionDesiredState desiredState(Optional<OrionHttpsConfiguration> https) {
-        OrionDesiredState desiredState = new OrionDesiredState();
+    static TestConfiguration desiredState(Optional<OrionHttpsConfiguration> https) {
+        TestConfiguration desiredState = new TestConfiguration(EVENTS);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(), https, List.of(), List.of(), List.of(),
                 List.of()),
@@ -1151,13 +1159,13 @@ class JettyHTTPServerIT {
 
     private static JettyHTTPServer server(
             BootstrapConfiguration bootstrap,
-            OrionDesiredState desiredState,
+            TestConfiguration desiredState,
             TlsCapability tls,
             OrionHttpRoute... routes) {
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
                 new OrionHttpRouteRegistry(Set.of(routes)),
                 new OrionHttpResponseWriter(new ObjectMapper()));
-        return new JettyHTTPServer(bootstrap, desiredState, tls, servlet, null, null);
+        return new JettyHTTPServer(bootstrap, desiredState.acl(), tls, servlet, null, null);
     }
 
     private static KeyMaterialDescriptor descriptor(String alias, KeyMaterialPurpose purpose) {

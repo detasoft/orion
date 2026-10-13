@@ -1,8 +1,6 @@
 package pro.deta.orion.transport.http;
 
-import pro.deta.orion.internal.UserEmailMessage;
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
-import pro.deta.orion.config.ConfigurationFile;
 import pro.deta.orion.config.OrionConfigurationEditor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -25,7 +23,6 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.command.audit.CommandAuditRecord;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.decision.Decision;
 import pro.deta.orion.decision.DecisionAction;
@@ -39,11 +36,14 @@ import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
-import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.schema.orion.v2.GitProxyBinding;
 import pro.deta.orion.schema.orion.v2.RemoteAlias;
 import pro.deta.orion.util.Result;
+import pro.deta.orion.config.ConfigurationChanged;
+import pro.deta.orion.config.OrionDocumentRevision;
+import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.internal.ChangeMetadata;
 import java.io.*;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
@@ -58,6 +58,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionAdminProxyMutationTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private static final PrincipalAddress OPERATOR = PrincipalAddress.parse("system/operator");
 
     @Test
@@ -66,8 +74,15 @@ class OrionAdminProxyMutationTest {
             assertThat(f.createSsh(Set.of()).status).isEqualTo(201);
             f.answer(f.decisions.list(OPERATOR).getFirst(), "1");
             f.work.remove().run();
+            EVENTS.await();
             assertThat(f.decisions.list(OPERATOR)).isEmpty();
-            String repository = f.desired.current().document().system().proxies().getFirst().publicRepositoryName();
+            String repository =
+                    f.acl.configuration()
+                            .document()
+                            .system()
+                            .proxies()
+                            .getFirst()
+                            .publicRepositoryName();
 
             assertThatThrownBy(() -> f.provider.provider().openForRead(repository))
                     .isInstanceOf(IllegalStateException.class);
@@ -82,11 +97,20 @@ class OrionAdminProxyMutationTest {
             assertThat(f.createSsh(Set.of()).status).isEqualTo(201);
             f.answer(f.decisions.list(OPERATOR).getFirst(), "1");
             f.work.remove().run();
-            f.provider.activate(() -> f.desired.current().document(), f.secrets);
+            EVENTS.await();
+            f.provider.activate(() -> f.acl.configuration().document(), f.secrets);
             assertThat(f.decisions.list(OPERATOR)).hasSize(1);
-            assertThat(f.provider.syncObservation(f.desired.current().document().system().proxies().getFirst(),
-                    f.desired.current().document().system())
-                    .status()).isEqualTo(NativeGitRepositoryFactory.SyncStatus.UNAVAILABLE);
+            assertThat(
+                            f.provider
+                                    .syncObservation(
+                                            f.acl.configuration()
+                                                    .document()
+                                                    .system()
+                                                    .proxies()
+                                                    .getFirst(),
+                                            f.acl.configuration().document().system())
+                                    .status())
+                    .isEqualTo(NativeGitRepositoryFactory.SyncStatus.UNAVAILABLE);
         }
     }
 
@@ -106,10 +130,11 @@ class OrionAdminProxyMutationTest {
             assertThat(f.createSsh(Set.of()).status).isEqualTo(201);
             f.answer(f.decisions.list(OPERATOR).getFirst(), "1");
             f.work.remove().run();
+            EVENTS.await();
             Decision unrelated = new Decision(UUID.randomUUID(), Optional.empty(), "Other operation", "",
                     List.of(new DecisionAction("Confirm", false, actor -> Result.of(null))));
             f.decisions.register(unrelated).valueOrFailure("fill queue");
-            assertThatThrownBy(() -> f.provider.activate(() -> f.desired.current().document(), f.secrets))
+            assertThatThrownBy(() -> f.provider.activate(() -> f.acl.configuration().document(), f.secrets))
                     .isInstanceOf(IllegalStateException.class).hasCauseInstanceOf(RejectedExecutionException.class);
             assertThat(f.decisions.list(OPERATOR)).containsExactly(unrelated.request());
         }
@@ -161,17 +186,20 @@ class OrionAdminProxyMutationTest {
             assertThat(f.sshAuthentications).hasValue(0);
             assertThat(f.work).hasSize(1);
             f.work.remove().run();
+            EVENTS.await();
 
             assertThat(f.storage.saves).isEqualTo(saves + 1);
-            f.editor.reload("verify host key persistence");
-            var binding = f.desired.current().document().system().proxies().getFirst();
-            assertThat(binding.knownHosts(f.desired.current().document().system())).containsExactlyInAnyOrder(previous, f.hostKey());
+            f.acl.onStop();
+            f.acl.onStart();
+            var binding = f.acl.configuration().document().system().proxies().getFirst();
+            assertThat(binding.knownHosts(f.acl.configuration().document().system()))
+                    .containsExactlyInAnyOrder(previous, f.hostKey());
             assertThat(f.sshAuthentications).hasValue(0);
             assertThat(f.post(f.command("retry", "cluster", null, null)).json.at("/alias/status").asText())
                     .isEqualTo("success");
             assertThat(f.storage.saves).isEqualTo(saves + 1);
             assertThat(f.provider.syncObservation(binding,
-                    f.desired.current().document().system()).status().name()).isEqualTo("SUCCESS");
+                    f.acl.configuration().document().system()).status().name()).isEqualTo("SUCCESS");
             assertThat(f.sshAuthentications.get()).isPositive();
             assertThat(f.decisions.list(OPERATOR)).isEmpty();
             assertThat(f.audit).anySatisfy(record -> {
@@ -191,6 +219,7 @@ class OrionAdminProxyMutationTest {
             DecisionRequest first = f.decisions.list(OPERATOR).getFirst();
             assertThat(f.answer(first, "1").status).isEqualTo(204);
             f.work.remove().run();
+            EVENTS.await();
             assertThat(f.decisions.list(OPERATOR)).isEmpty();
             assertThat(f.work).isEmpty();
             assertThat(f.storage.saves).isEqualTo(saves);
@@ -209,16 +238,28 @@ class OrionAdminProxyMutationTest {
         try (Fixture f = new Fixture()) {
             f.createSsh(Set.of());
             f.answer(f.decisions.list(OPERATOR).getFirst(), "0");
-            f.editor.edit(
-                    f.desired.current().revision().orElseThrow(), "concurrent update",
-                    UserEmail.EMPTY)
-                .update(document -> document).apply();
+            f.editor
+                    .edit(
+                            f.acl.configuration().revision(),
+                            new ChangeMetadata(UserEmail.EMPTY, "concurrent update"))
+                    .update(document -> document.replaceAccessControl(new AccessControl(
+                            List.of(new pro.deta.orion.schema.acl.User("concurrent", null, null, null,
+                                    List.of(), List.of(), List.of())), List.of(), List.of())))
+                    .apply();
+            EVENTS.await();
             int saves = f.storage.saves;
             f.work.remove().run();
+            EVENTS.await();
             assertThat(f.storage.saves).isEqualTo(saves);
             assertThat(f.sshAuthentications).hasValue(0);
-            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts(f.desired
-                    .current().document().system())).isEmpty();
+            assertThat(
+                            f.acl.configuration()
+                                    .document()
+                                    .system()
+                                    .proxies()
+                                    .getFirst()
+                                    .knownHosts(f.acl.configuration().document().system()))
+                    .isEmpty();
             assertThat(f.audit).extracting(CommandAuditRecord::resultCode).contains("configuration-conflict");
         }
     }
@@ -231,10 +272,17 @@ class OrionAdminProxyMutationTest {
             f.answer(f.decisions.list(OPERATOR).getFirst(), "0");
             f.storage.failSave = true;
             f.work.remove().run();
+            EVENTS.await();
             assertThat(f.storage.saves).isEqualTo(saves);
             assertThat(f.sshAuthentications).hasValue(0);
-            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts(f.desired
-                    .current().document().system())).isEmpty();
+            assertThat(
+                            f.acl.configuration()
+                                    .document()
+                                    .system()
+                                    .proxies()
+                                    .getFirst()
+                                    .knownHosts(f.acl.configuration().document().system()))
+                    .isEmpty();
             assertThat(f.audit).extracting(CommandAuditRecord::resultCode).contains("operation-failed");
             DecisionRequest failed = f.decisions.list(OPERATOR).getFirst();
             Reply visible = f.request("/api/admin/decisions", "GET", Map.of(), true);
@@ -245,10 +293,16 @@ class OrionAdminProxyMutationTest {
             assertThat(f.answer(failed, "retry").status).isEqualTo(204);
             assertThat(f.answer(failed, "retry").status).isEqualTo(404);
             f.work.remove().run();
+            EVENTS.await();
             assertThat(f.decisions.list(OPERATOR)).isEmpty();
             assertThat(f.storage.saves).isEqualTo(saves + 1);
-            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts(f.desired
-                    .current().document().system()))
+            assertThat(
+                            f.acl.configuration()
+                                    .document()
+                                    .system()
+                                    .proxies()
+                                    .getFirst()
+                                    .knownHosts(f.acl.configuration().document().system()))
                     .contains(f.hostKey());
             assertThat(f.sshAuthentications).hasValue(0);
         }
@@ -282,8 +336,14 @@ class OrionAdminProxyMutationTest {
             assertThat(f.decisions.list(OPERATOR)).hasSize(1);
             assertThat(f.work).isEmpty();
             assertThat(f.sshAuthentications).hasValue(0);
-            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts(f.desired
-                    .current().document().system())).isEmpty();
+            assertThat(
+                            f.acl.configuration()
+                                    .document()
+                                    .system()
+                                    .proxies()
+                                    .getFirst()
+                                    .knownHosts(f.acl.configuration().document().system()))
+                    .isEmpty();
         }
     }
 
@@ -301,22 +361,45 @@ class OrionAdminProxyMutationTest {
             create.put("credentialKind", "PASSWORD");
             create.put("knownHosts", List.of(firstKey, secondKey, firstKey));
             assertThat(f.post(create).status).isEqualTo(201);
-            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts(f.desired
-                    .current().document().system()))
+            assertThat(
+                            f.acl.configuration()
+                                    .document()
+                                    .system()
+                                    .proxies()
+                                    .getFirst()
+                                    .knownHosts(f.acl.configuration().document().system()))
                     .containsExactlyInAnyOrder(firstKey, secondKey);
             assertThat(f.post(f.command("update", "cluster", null, null)).status).isEqualTo(200);
-            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts(f.desired
-                    .current().document().system())).hasSize(2);
+            assertThat(
+                            f.acl.configuration()
+                                    .document()
+                                    .system()
+                                    .proxies()
+                                    .getFirst()
+                                    .knownHosts(f.acl.configuration().document().system()))
+                    .hasSize(2);
             Map<String, Object> update = f.command("update", "cluster", null, null);
             update.put("upstream", upstream + "-other");
             assertThat(f.post(update).status).isEqualTo(200);
-            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts(f.desired
-                    .current().document().system())).containsExactlyInAnyOrder(firstKey, secondKey);
+            assertThat(
+                            f.acl.configuration()
+                                    .document()
+                                    .system()
+                                    .proxies()
+                                    .getFirst()
+                                    .knownHosts(f.acl.configuration().document().system()))
+                    .containsExactlyInAnyOrder(firstKey, secondKey);
             Map<String, Object> endpoint = f.command("update", "cluster", null, null);
             endpoint.put("upstream", upstream.replace("127.0.0.1", "localhost"));
             assertThat(f.post(endpoint).status).isEqualTo(200);
-            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts(f.desired
-                    .current().document().system())).isEmpty();
+            assertThat(
+                            f.acl.configuration()
+                                    .document()
+                                    .system()
+                                    .proxies()
+                                    .getFirst()
+                                    .knownHosts(f.acl.configuration().document().system()))
+                    .isEmpty();
         }
     }
 
@@ -327,16 +410,23 @@ class OrionAdminProxyMutationTest {
             assertThat(created.status).isEqualTo(201);
             assertThat(created.json.get("status").asText()).isEqualTo("saved");
             assertThat(created.json.at("/alias/status").asText()).isEqualTo("authentication-failed");
-            String secret = f.desired.current().document().system().proxies().getFirst().secret(f.desired
-                    .current().document().system()).orElseThrow();
+            String secret =
+                    f.acl.configuration()
+                            .document()
+                            .system()
+                            .proxies()
+                            .getFirst()
+                            .secret(f.acl.configuration().document().system())
+                            .orElseThrow();
             assertThat(f.secrets.resolveSystem(secret)).isEqualTo("first-private-token".toCharArray());
-            assertThat(new String(f.storage.snapshot.content()))
+            assertThat(f.storage.snapshot.document().toString())
                     .doesNotContain("first-private-token");
             Reply replaced = f.post(f.command("replace-credential", "credential", null, "second-private-token"));
             assertThat(replaced.status).isEqualTo(200);
             assertThat(f.secrets.resolveSystem(secret)).isEqualTo("second-private-token".toCharArray());
             assertThat(f.authorization).containsExactly("Bearer first-private-token", "Bearer second-private-token");
-            f.editor.reload("test persisted reload");
+            f.acl.onStop();
+            f.acl.onStart();
             assertThat(f.secrets.resolveSystem(secret)).isEqualTo("second-private-token".toCharArray());
             assertThat(f.audit).hasSize(2);
             assertThat(f.audit.toString()).doesNotContain("first-private-token", "second-private-token", f.upstream());
@@ -350,36 +440,59 @@ class OrionAdminProxyMutationTest {
         try (var f = new Fixture()) {
             assertThat(f.post(f.command("create", "first", f.upstream(), "shared-private-token")).status)
                     .isEqualTo(201);
-            String original = f.desired.current().document().system().proxies().getFirst().secret(f.desired
-                    .current().document().system()).orElseThrow();
+            String original =
+                    f.acl.configuration()
+                            .document()
+                            .system()
+                            .proxies()
+                            .getFirst()
+                            .secret(f.acl.configuration().document().system())
+                            .orElseThrow();
             var metadata = f.command("update", "first", null, null);
             metadata.put("ref", "other");
             assertThat(f.post(metadata).status).isEqualTo(200);
             assertThat(f.secrets.resolveSystem(original)).isEqualTo("shared-private-token".toCharArray());
             var implicit = f.command("update", "first", null, "unapproved-replacement");
             assertThat(f.post(implicit).status).isEqualTo(400);
-            f.editor.edit(
-                    f.desired.current().revision().orElseThrow(), "share fixture credential",
-                    UserEmail.EMPTY)
-                .update(document -> {
-                var first = document.system().proxies().getFirst();
-                var second = new GitProxyBinding(
-                        new RemoteAlias("second"), first.source(), "third");
-                return new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
-                        document.system().https(), document.system().secrets(), List.of(first, second),
-                                document.system().connections(),
-                        document.system().oidcProviders()),
-                        document.organizations());
-            }).apply();
+            f.editor
+                    .edit(
+                            f.acl.configuration().revision(),
+                            new ChangeMetadata(UserEmail.EMPTY, "share fixture credential"))
+                    .update(
+                            document -> {
+                                var first = document.system().proxies().getFirst();
+                                var second =
+                                        new GitProxyBinding(
+                                                new RemoteAlias("second"), first.source(), "third");
+                                return new OrionDocument(
+                                        new OrionDocument.SystemConfiguration(
+                                                document.system().accessControl(),
+                                                document.system().https(),
+                                                document.system().secrets(),
+                                                List.of(first, second),
+                                                document.system().connections(),
+                                                document.system().oidcProviders()),
+                                        document.organizations());
+                            })
+                    .apply();
+                    EVENTS.await();
 
             assertThat(f.post(f.command("replace-credential", "first", null, "new-private-token")).status)
                     .isEqualTo(200);
-            var bindings = f.desired.current().document().system().proxies();
-            assertThat(bindings.get(0).secret(f.desired.current().document().system())).isNotEqualTo(bindings
-                    .get(1).secret(f.desired.current().document().system()));
-            assertThat(f.secrets.resolveSystem(bindings.get(0).secret(f.desired.current().document().system()).orElseThrow()))
+            var bindings = f.acl.configuration().document().system().proxies();
+            assertThat(bindings.get(0).secret(f.acl.configuration().document().system())).isNotEqualTo(bindings
+                    .get(1).secret(f.acl.configuration().document().system()));
+            assertThat(
+                            f.secrets.resolveSystem(
+                                    bindings.get(0)
+                                            .secret(f.acl.configuration().document().system())
+                                            .orElseThrow()))
                     .isEqualTo("new-private-token".toCharArray());
-            assertThat(f.secrets.resolveSystem(bindings.get(1).secret(f.desired.current().document().system()).orElseThrow()))
+            assertThat(
+                            f.secrets.resolveSystem(
+                                    bindings.get(1)
+                                            .secret(f.acl.configuration().document().system())
+                                            .orElseThrow()))
                     .isEqualTo("shared-private-token".toCharArray());
         }
     }
@@ -388,7 +501,10 @@ class OrionAdminProxyMutationTest {
     void refreshesTheReadRevisionAfterAnExternalConfigurationChange() throws Exception {
         try (var f = new Fixture()) {
             var old = f.command("create", "credential", f.upstream(), "private-token");
-            f.storage.snapshot = new ConfigurationFile(f.storage.snapshot.content(), Optional.of("external"));
+            f.storage.snapshot =
+                    new OrionDocumentRevision(
+                            f.storage.snapshot.document(), new OrionRevision.Stored("external"));
+            EVENTS.manager().publishAndWait(new ConfigurationChanged(f.storage, f.storage.snapshot));
             assertThat(f.post(old).status).isEqualTo(409);
             Reply listing = f.request("GET", Map.of(), true);
             assertThat(listing.json.get("revision").asText()).isEqualTo("external");
@@ -402,15 +518,21 @@ class OrionAdminProxyMutationTest {
         try (var f = new Fixture()) {
             var first = f.command("create", "credential", f.upstream(), "private-token");
             assertThat(f.post(first).status).isEqualTo(201);
-            String version = f.storage.snapshot.revision().orElseThrow();
+            OrionRevision version = f.storage.snapshot.revision();
             assertThat(f.post(first).status).isEqualTo(409);
-            assertThat(f.storage.snapshot.revision()).contains(version);
+            assertThat(f.storage.snapshot.revision()).isEqualTo(version);
             f.storage.conflict = true;
             Reply race = f.post(f.command("replace-credential", "credential", null, "new-private-token"));
             assertThat(race.status).isEqualTo(409);
             assertThat(race.json.get("status").asText()).isEqualTo("configuration-conflict");
-            String id = f.desired.current().document().system().proxies().getFirst().secret(f.desired.current()
-                    .document().system()).orElseThrow();
+            String id =
+                    f.acl.configuration()
+                            .document()
+                            .system()
+                            .proxies()
+                            .getFirst()
+                            .secret(f.acl.configuration().document().system())
+                            .orElseThrow();
             assertThat(f.secrets.resolveSystem(id)).isEqualTo("private-token".toCharArray());
         }
     }
@@ -480,27 +602,40 @@ class OrionAdminProxyMutationTest {
             create.put("credentialKind", "PASSWORD");
             create.put("knownHosts", Set.of(f.hostKey()));
             assertThat(f.post(create).status).isEqualTo(201);
-            f.editor.edit(
-                    f.desired.current().revision().orElseThrow(), "share SSH connection",
-                    UserEmail.EMPTY)
-                .update(document -> {
-                var first = document.system().proxies().getFirst();
-                var source = (GitProxyBinding.Ssh) first.source();
-                var second = new GitProxyBinding(
-                        new RemoteAlias("second"),
-                        new GitProxyBinding.Ssh(source.connection(), "/second"), "main");
-                var system = document.system();
-                return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(), system.https(),
-                        system.secrets(), List.of(first, second), system.connections(),
-                        system.oidcProviders()), document.organizations());
-            }).apply();
-            OrionDocument original = f.desired.current().document();
+            f.editor
+                    .edit(
+                            f.acl.configuration().revision(),
+                            new ChangeMetadata(UserEmail.EMPTY, "share SSH connection"))
+                    .update(
+                            document -> {
+                                var first = document.system().proxies().getFirst();
+                                var source = (GitProxyBinding.Ssh) first.source();
+                                var second =
+                                        new GitProxyBinding(
+                                                new RemoteAlias("second"),
+                                                new GitProxyBinding.Ssh(
+                                                        source.connection(), "/second"),
+                                                "main");
+                                var system = document.system();
+                                return new OrionDocument(
+                                        new OrionDocument.SystemConfiguration(
+                                                system.accessControl(),
+                                                system.https(),
+                                                system.secrets(),
+                                                List.of(first, second),
+                                                system.connections(),
+                                                system.oidcProviders()),
+                                        document.organizations());
+                            })
+                    .apply();
+                    EVENTS.await();
+            OrionDocument original = f.acl.configuration().document();
             String upstream = original.system().proxies().getFirst().upstream(original.system()).toString();
             Map<String, Object> path = f.command("update", "cluster", upstream.replace("/repo", "/changed"), null);
             path.put("credentialKind", "PASSWORD");
             path.put("ref", "other");
             assertThat(f.post(path).status).isEqualTo(200);
-            OrionDocument before = f.desired.current().document();
+            OrionDocument before = f.acl.configuration().document();
             assertThat(before.system().connections()).isEqualTo(original.system().connections());
             assertThat(before.system().proxies().getFirst().upstream(before.system()).getPath()).isEqualTo("/changed");
             assertThat(before.system().proxies().getFirst().ref()).isEqualTo("refs/heads/other");
@@ -513,11 +648,11 @@ class OrionAdminProxyMutationTest {
             Reply moved = f.post(endpoint);
             assertThat(moved.status).isEqualTo(400);
             assertThat(moved.json.get("status").asText()).isEqualTo("shared-connection-requires-explicit-edit");
-            assertThat(f.desired.current().document()).isEqualTo(before);
+            assertThat(f.acl.configuration().document()).isEqualTo(before);
             Reply rejected = f.post(f.command("replace-credential", "cluster", null, "replacement-password"));
             assertThat(rejected.status).isEqualTo(400);
             assertThat(rejected.json.get("status").asText()).isEqualTo("shared-connection-requires-explicit-edit");
-            assertThat(f.desired.current().document()).isEqualTo(before);
+            assertThat(f.acl.configuration().document()).isEqualTo(before);
             String reference = before.system().proxies().getFirst().secret(before.system()).orElseThrow();
             assertThat(f.secrets.resolveSystem(reference)).isEqualTo("ssh-private-password".toCharArray());
         }
@@ -539,11 +674,10 @@ class OrionAdminProxyMutationTest {
     private static final class Fixture implements AutoCloseable {
         final ObjectMapper mapper = new ObjectMapper();
         final OrionKeyMaterial material;
-        final OrionDesiredState desired = new OrionDesiredState();
         final MemoryStorage storage = new MemoryStorage();
         final NativeGitRepositoryFactory provider =
                 new NativeGitRepositoryFactory(
-                        pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory());
+                        pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager()));
         final ConfigurationSecrets secrets;
         final OrionConfigurationEditor editor;
         final OrionAccessControlServiceImpl acl;
@@ -577,23 +711,26 @@ class OrionAdminProxyMutationTest {
             editor = new OrionConfigurationEditor(storage,
                 new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
                 material.configurationCipher(),
-                material.configurationMaterial(),
-                desired);
-            acl = new OrionAccessControlServiceImpl(storage,
-                new OrionPasswordHashingService(),
-                new RootPasswordReset(false),
-                material.serverIdentity(),
-                desired,
-                editor,
-                java.util.Optional.empty());
+                material.configurationMaterial());
+            acl =
+                    new OrionAccessControlServiceImpl(
+                            new OrionPasswordHashingService(),
+                            new RootPasswordReset(false),
+                            material.serverIdentity(),
+                            storage,
+                            new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
+                            editor,
+                            EVENTS.manager());
             acl.onStart();
-            secrets = new ConfigurationSecrets(() -> desired.current().document(), material.configurationCipher());
+            secrets =
+                    new ConfigurationSecrets(
+                            () -> acl.configuration().document(), material.configurationCipher());
             if (bootstrapSource != null) {
                 provider.resolveProvisional(NativeGitRepositoryFactory.MATERIAL_SOURCE, bootstrapSource, false);
             }
             provider.connectionFailures(OrionRuntimeModule.connectionFailures(decisions),
-                    OrionRuntimeModule.proxyHostKeyDecisions(desired, editor, audit::add));
-            provider.activate(() -> desired.current().document(), secrets, bootstrapSource != null);
+                    OrionRuntimeModule.proxyHostKeyDecisions(acl, editor, audit::add));
+            provider.activate(() -> acl.configuration().document(), secrets, bootstrapSource != null);
             routes();
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             server.createContext("/repository.git", exchange -> {
@@ -605,7 +742,7 @@ class OrionAdminProxyMutationTest {
         }
 
         void routes() {
-            var route = new OrionAdminProxiesRoute(desired, provider, editor, secrets, audit::add, mapper);
+            var route = new OrionAdminProxiesRoute(acl, provider, editor, secrets, audit::add, mapper);
             servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(
                     Set.of(route, new OrionAdminDecisionsRoute(decisions, mapper))),
                     new OrionHttpResponseWriter(mapper));
@@ -643,7 +780,7 @@ class OrionAdminProxyMutationTest {
             command.put("action", action);
             command.put("scope", "system");
             command.put("alias", alias);
-            command.put("revision", desired.current().revision().orElseThrow());
+            command.put("revision", ((OrionRevision.Stored) acl.configuration().revision()).value());
             if (upstream != null) {
                 command.put("upstream", upstream);
                 command.put("ref", "main");
@@ -685,13 +822,17 @@ class OrionAdminProxyMutationTest {
                 case "getWriter" -> new PrintWriter(output);
                 default -> throw new UnsupportedOperationException(called.toString());
             });
+            EVENTS.await();
             servlet.service(request, response);
+            EVENTS.await();
             return new Reply(status[0], output.toString().isEmpty() ? mapper.nullNode()
                     : contentType[0].contains("json") ? mapper.readTree(output.toString())
                     : mapper.getNodeFactory().textNode(output.toString()));
         }
 
         @Override public void close() throws Exception {
+            EVENTS.await();
+            acl.onStop();
             decisions.close();
             ssh.stop(true);
             server.stop(0);
@@ -699,24 +840,29 @@ class OrionAdminProxyMutationTest {
         }
     }
 
-    private static final class MemoryStorage implements OrionConfigurationStorage {
-        ConfigurationFile snapshot;
+    private static final class MemoryStorage implements OrionVersionedConfigurationStorage {
+        OrionDocumentRevision snapshot = new OrionDocumentRevision(
+                OrionDocument.withAccessControl(new AccessControl()), new OrionRevision.Stored("0"));
         int saves;
         boolean conflict;
         boolean failSave;
 
-        MemoryStorage() throws IOException {
-            var output = new ByteArrayOutputStream();
-            OrionXml.write(OrionDocument.withAccessControl(new AccessControl()), output);
-            snapshot = new ConfigurationFile(output.toByteArray(), Optional.of("0"));
+        @Override public Result<OrionDocumentRevision> load() { return Result.of(snapshot); }
+        @Override public Result<OrionDocumentRevision> load(OrionRevision.Stored revision) {
+            return snapshot.revision().equals(revision)
+                    ? load()
+                    : new Result.Failure<>(Result.FailureCode.NOT_FOUND);
         }
-        @Override public Result<ConfigurationFile> load() { return new Result.Success<>(snapshot); }
-        @Override public void save(ConfigurationFile next, UserEmailMessage author) {
+        @Override public synchronized OrionRevision save(OrionRevision expected,
+                OrionDocument document, ChangeMetadata metadata) {
             if (failSave) throw new IllegalStateException("storage unavailable");
-            if (conflict || !snapshot.revision().equals(next.revision())) {
+            if (conflict || !snapshot.revision().equals(expected)) {
                 throw new OrionConfigurationConcurrentUpdateException("configuration conflict", null);
             }
-            snapshot = new ConfigurationFile(next.content(), Optional.of(Integer.toString(++saves)));
+            if (snapshot.document().equals(document)) return snapshot.revision();
+            snapshot = new OrionDocumentRevision(document, new OrionRevision.Stored(Integer.toString(++saves)));
+            EVENTS.manager().publish(new ConfigurationChanged(this, snapshot));
+            return snapshot.revision();
         }
     }
 

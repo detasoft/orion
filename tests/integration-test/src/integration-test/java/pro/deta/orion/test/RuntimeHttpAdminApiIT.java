@@ -3,7 +3,6 @@ package pro.deta.orion.test;
 import pro.deta.orion.schema.acl.CredentialType;
 import pro.deta.orion.internal.UserEmail;
 
-import pro.deta.orion.config.OrionConfigurationEdit;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -127,7 +126,8 @@ class RuntimeHttpAdminApiIT {
             assertThat(OBJECT_MAPPER.readTree(recovered.body()).at("/alias/status").asText())
                     .isEqualTo("success");
             assertThat(OBJECT_MAPPER.readTree(recovered.body()).get("revision").asText()).isEqualTo(savedRevision);
-            orion.component().configurationEditor().reload("verify saved proxy");
+            orion.accessControlService().onStop();
+            orion.accessControlService().onStart();
             assertThat(adminAcl(orion, token).body()).contains("archive");
             assertThat(orion.repositoryProvider().repositoryNames())
                     .noneMatch(name -> name.startsWith("bootstrap/proxy-"));
@@ -380,13 +380,16 @@ class RuntimeHttpAdminApiIT {
             AccessControlUserUpdate update = new AccessControlUserUpdate(
                 "token-user", "token-user@example.test",
                 List.of(new AccessControlCredentialUpdate(CredentialType.SHA1, hash)), List.of());
-            orion.accessControlService().withAccess(orion.component().configurationEditor().edit(
-                    "createOrUpdateUser() " + update.id(),
-                    new UserEmail(update.id(), update.email())), edit -> {
-                edit.createOrUpdateUser(update);
-                edit.apply();
-                return null;
-            });
+            TestRuntimeBootstrap.withAccess(
+                    orion.accessControlService(), orion.component().configurationEditor(),
+                    new pro.deta.orion.internal.ChangeMetadata(
+                            new UserEmail(update.id(), update.email()),
+                            "createOrUpdateUser() " + update.id()),
+                    edit -> {
+                        edit.createOrUpdateUser(update);
+                        edit.apply();
+                        return null;
+                    });
             RuntimeHttpTestSupport.HttpResponse invalidExpiration = RuntimeHttpTestSupport.request(
                     "POST",
                     orion.httpUrl("/api/admin/token"),

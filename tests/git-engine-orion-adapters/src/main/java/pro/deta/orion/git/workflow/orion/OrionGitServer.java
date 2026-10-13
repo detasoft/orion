@@ -265,7 +265,7 @@ final class OrionGitServer implements GitServer {
     private void start(Path requestedRoot) {
         root = requestedRoot;
         storageRoot = root.resolve(".orion-native-storage");
-        provider = NativeGitRepositoryProvider.file(storageRoot);
+        provider = NativeGitRepositoryProvider.file(storageRoot, new pro.deta.orion.event.OrionEventManager());
         if (transport != GIT) {
             try {
                 startAllowAllTransport();
@@ -355,7 +355,7 @@ final class OrionGitServer implements GitServer {
             });
             executor = new OrionExecutor(4, new OrionThreadFactory());
             ssh.setCommandFactory(new SshCommandFactory(
-                    executor, null, null, repositories, new GitTransportConfig(), null, null));
+                    executor, null, null, repositories, new GitTransportConfig(), null));
             ssh.start();
             boundPort = ssh.getPort();
         }

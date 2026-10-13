@@ -56,8 +56,8 @@ final class GitWireTestClient {
         return repository;
     }
 
-    static NativeGitRepositoryProvider providerWithMainRef() {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
+    static NativeGitRepositoryProvider providerWithMainRef(pro.deta.orion.test.util.TestEvents events) {
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(events.manager());
         createRepository(provider, "demo").updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         return provider;
     }

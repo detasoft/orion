@@ -29,7 +29,6 @@ import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.schema.orion.v2.RemoteAlias;
 import pro.deta.orion.schema.orion.v2.RepositoryAddress;
-import pro.deta.orion.schema.orion.v2.RepositoryId;
 import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 import pro.deta.orion.schema.orion.v2.TeamId;
 
@@ -376,7 +375,7 @@ class ConfigurationSecretsTest {
 
     private static OrionDocument document() {
         OrionDocument.Repository repository = new OrionDocument.Repository(
-                new RepositoryId("api"), "API", "refs/heads/main", RepositoryPolicy.safeDefaults(),
+                "api", "API", "refs/heads/main", RepositoryPolicy.safeDefaults(),
                 List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()),
                 List.of(new OrionDocument.Organization(new OrganizationId("acme"), "Acme", List.of(),

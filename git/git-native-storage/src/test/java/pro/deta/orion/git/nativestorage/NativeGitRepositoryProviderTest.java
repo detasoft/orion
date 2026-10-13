@@ -12,17 +12,27 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class NativeGitRepositoryProviderTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @Test
     void retainsOneFileHandleAndFindsItAfterCreation(@TempDir Path directory) {
         try (NativeGitRepositoryProvider provider =
-                     new NativeGitRepositoryProvider(new FileNativeGitRepositoryFactory(directory))) {
+                new NativeGitRepositoryProvider(
+                        new FileNativeGitRepositoryFactory(directory, EVENTS.manager()))) {
             NativeGitRepository created = provider.create("team/repo").valueOrFailure("create");
             assertThat(provider.find("team/repo").valueOrFailure("find")).isSameAs(created);
             assertThat(provider.repositoryNames()).containsExactly("team/repo");
             assertThat(provider.create("team/repo")).isInstanceOf(Result.Failure.class);
         }
         try (NativeGitRepositoryProvider reopened =
-                     new NativeGitRepositoryProvider(new FileNativeGitRepositoryFactory(directory))) {
+                new NativeGitRepositoryProvider(
+                        new FileNativeGitRepositoryFactory(directory, EVENTS.manager()))) {
             assertThat(reopened.exists("team/repo")).isTrue();
             assertThat(reopened.find("team/repo").valueOrFailure("reopen").name()).isEqualTo("team/repo");
         }
@@ -30,7 +40,7 @@ class NativeGitRepositoryProviderTest {
 
     @Test
     void inMemoryFactoryDoesNotKeepASecondRepositoryRegistry() {
-        NativeGitRepositoryBackend factory = new InMemoryNativeGitRepositoryFactory();
+        NativeGitRepositoryBackend factory = new InMemoryNativeGitRepositoryFactory(EVENTS.manager());
         try (NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider(factory)) {
             assertThat(provider.find("team/repo")).isInstanceOf(Result.Failure.class);
             NativeGitRepository created = provider.create("team/repo").valueOrFailure("create");
@@ -44,7 +54,9 @@ class NativeGitRepositoryProviderTest {
     @Test
     void opensCacheCreatedByAnotherOwnerDuringBootstrap() {
         AtomicInteger opens = new AtomicInteger();
-        NativeGitRepository cached = NativeGitRepository.createInMemory(RepositoryName.parse("bootstrap"));
+        NativeGitRepository cached =
+                NativeGitRepository.createInMemory(
+                        RepositoryName.parse("bootstrap"), EVENTS.manager());
         NativeGitRepositoryBackend backing = new NativeGitRepositoryBackend() {
             @Override
             public List<String> repositoryNames() {

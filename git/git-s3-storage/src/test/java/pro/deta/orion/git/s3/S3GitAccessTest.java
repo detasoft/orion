@@ -14,14 +14,35 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class S3GitAccessTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @Test
     void closingOwnersPreventsNewAccessesButExistingAccessesCanFinish() throws Exception {
-        try (S3TransportTest.Server server = new S3TransportTest.Server(new CountDownLatch(0), new CountDownLatch(0));
-             S3Transport transport = new S3Transport();
-             NativeGitRepository repository = transport.repositories("s3://bucket/repos", server.endpoint(),
-                     "us-east-1", true, Optional.of(software.amazon.awssdk.auth.credentials.StaticCredentialsProvider
-                             .create(software.amazon.awssdk.auth.credentials.AwsBasicCredentials.create("id", "key"))))
-                     .create("repo").valueOrFailure("create")) {
+        try (S3TransportTest.Server server =
+                        new S3TransportTest.Server(new CountDownLatch(0), new CountDownLatch(0));
+                S3Transport transport = new S3Transport();
+                NativeGitRepository repository =
+                        transport
+                                .repositories(
+                                        "s3://bucket/repos",
+                                        server.endpoint(),
+                                        "us-east-1",
+                                        true,
+                                        Optional.of(
+                                                software.amazon.awssdk.auth.credentials
+                                                        .StaticCredentialsProvider.create(
+                                                        software.amazon.awssdk.auth.credentials
+                                                                .AwsBasicCredentials.create(
+                                                                "id", "key"))),
+                                        EVENTS.manager())
+                                .create("repo")
+                                .valueOrFailure("create")) {
             GitIndexAccess index = repository.index().createAccess();
             GitStorageAccess storage = repository.storage().createAccess();
             repository.close();

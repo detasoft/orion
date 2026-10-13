@@ -22,6 +22,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class S3NativeGitRepositoryProviderTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @TempDir
     Path directory;
 
@@ -45,9 +53,13 @@ class S3NativeGitRepositoryProviderTest {
             }
         });
         server.start();
-        try (NativeGitRepositoryProvider provider = S3NativeGitRepositoryFactory.repositories("s3://bucket/prefix",
-                "http://127.0.0.1:" + server.getAddress().getPort(),
-                Map.of("accessKeyId", "test", "secretAccessKey", "env:SECRET"), Map.of("SECRET", "test"))) {
+        try (NativeGitRepositoryProvider provider =
+                S3NativeGitRepositoryFactory.repositories(
+                        "s3://bucket/prefix",
+                        "http://127.0.0.1:" + server.getAddress().getPort(),
+                        Map.of("accessKeyId", "test", "secretAccessKey", "env:SECRET"),
+                        Map.of("SECRET", "test"),
+                        EVENTS.manager())) {
             long started = System.nanoTime();
             Result<?> result = provider.find("repository");
             assertThat(result).isInstanceOf(Result.Failure.class);
@@ -62,7 +74,7 @@ class S3NativeGitRepositoryProviderTest {
     void validatesNamesBeforeAnyRequestAndClosesIdempotently() {
         NativeGitRepositoryProvider provider = S3NativeGitRepositoryFactory.repositories(
                 "s3://bucket/", null, Map.of("accessKeyId", "test", "secretAccessKey", "env:SECRET"),
-                Map.of("SECRET", "test"));
+                Map.of("SECRET", "test"), EVENTS.manager());
         try (provider) {
             for (String name : List.of("../escape", "a//b", "repo.git", "/absolute", "bad%XX")) {
                 assertThatThrownBy(() -> provider.create(name)).isInstanceOf(IllegalArgumentException.class);
@@ -84,12 +96,12 @@ class S3NativeGitRepositoryProviderTest {
         try (NativeGitRepositoryProvider ignored = S3NativeGitRepositoryFactory.repositories(
                 "s3://bucket/prefix", null, Map.of("accessKeyId", "test",
                         "secretAccessKey", secret.toUri().toString(),
-                        "sessionToken", "env:TOKEN"), Map.of("TOKEN", "test-token"))) {
+                        "sessionToken", "env:TOKEN"), Map.of("TOKEN", "test-token"), EVENTS.manager())) {
             // Client construction must accept the same env/file secret conventions as S3 configuration.
         }
         for (String reference : List.of("inline-secret", "env:MISSING", "file:/does-not-exist")) {
             assertThatThrownBy(() -> S3NativeGitRepositoryFactory.repositories("s3://bucket/prefix", null,
-                    Map.of("accessKeyId", "test", "secretAccessKey", reference), Map.of()))
+                    Map.of("accessKeyId", "test", "secretAccessKey", reference), Map.of(), EVENTS.manager()))
                     .isInstanceOf(IllegalArgumentException.class).hasMessageNotContaining(reference);
         }
     }
@@ -98,7 +110,10 @@ class S3NativeGitRepositoryProviderTest {
     @ValueSource(strings = {"file:repos", "s3://", "s3://bucket/../escape", "s3://bucket/a//b", "s3://bucket//",
             "s3://user:password@bucket/path", "s3://bucket/path?secret=value", "s3://bucket/path#fragment"})
     void rejectsInvalidLocations(String location) {
-        assertThatThrownBy(() -> S3NativeGitRepositoryFactory.repositories(location, null, Map.of(), Map.of()))
+        assertThatThrownBy(
+                        () ->
+                                S3NativeGitRepositoryFactory.repositories(
+                                        location, null, Map.of(), Map.of(), EVENTS.manager()))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -107,7 +122,7 @@ class S3NativeGitRepositoryProviderTest {
             "http://localhost:9000?key=secret", "http://localhost:9000#fragment"})
     void rejectsInvalidEndpoints(String endpoint) {
         assertThatThrownBy(() -> S3NativeGitRepositoryFactory.repositories(
-                "s3://bucket/prefix", endpoint, Map.of(), Map.of()))
+                "s3://bucket/prefix", endpoint, Map.of(), Map.of(), EVENTS.manager()))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("S3 endpoint");
     }
 
@@ -117,7 +132,14 @@ class S3NativeGitRepositoryProviderTest {
                 Map.of("accessKeyId", "test"), Map.of("secretAccessKey", "env:SECRET"),
                 Map.of("sessionToken", "env:TOKEN"), Map.of("region", " "),
                 Map.of("pathStyleAccess", "maybe"))) {
-            assertThatThrownBy(() -> S3NativeGitRepositoryFactory.repositories("s3://bucket/prefix", null, auth, Map.of()))
+            assertThatThrownBy(
+                            () ->
+                                    S3NativeGitRepositoryFactory.repositories(
+                                            "s3://bucket/prefix",
+                                            null,
+                                            auth,
+                                            Map.of(),
+                                            EVENTS.manager()))
                     .isInstanceOf(IllegalArgumentException.class);
         }
     }

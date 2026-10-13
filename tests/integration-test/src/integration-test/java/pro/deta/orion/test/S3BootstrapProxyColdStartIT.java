@@ -9,7 +9,6 @@ import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.S3NativeGitRepositoryFactory;
@@ -40,6 +39,14 @@ import static pro.deta.orion.test.RemoteBootstrapTestSupport.runtimeComponent;
 
 @Timeout(120)
 class S3BootstrapProxyColdStartIT {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private static final String REF = "refs/heads/bootstrap";
     private static final String CONFIGURATION_PATH = "configuration/orion.xml";
     private static final String MATERIAL_PATH = "keys/server.p12";
@@ -96,34 +103,42 @@ class S3BootstrapProxyColdStartIT {
                 material = materialStore.read().orElseThrow().bytes();
                 NativeGitRepository repository = upstream.repositoryProvider().create("bootstrap-inputs")
                         .valueOrFailure("seed remote bootstrap repository");
-                repository.files().withAccess(REF, "Seed remote bootstrap inputs", GitCommitAuthor.EMPTY, access -> {
-                    access.write(CONFIGURATION_PATH, xml);
-                    access.write(MATERIAL_PATH, material);
-                    access.apply();
-                    return null;
-                });
+                repository
+                        .files()
+                        .withAccess(
+                                REF,
+                                new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                        "", "", "Seed remote bootstrap inputs"),
+                                access -> {
+                                    access.write(CONFIGURATION_PATH, xml);
+                                    access.write(MATERIAL_PATH, material);
+                                    access.apply();
+                                    return null;
+                                });
                 try (NativeGitRepositoryProvider empty = S3NativeGitRepositoryFactory.repositories(
                         configuration.getStorage().getLocation(), configuration.getStorage().getEndpoint(),
-                        configuration.getStorage().getAuth(), environment)) {
+                        configuration.getStorage().getAuth(), environment, EVENTS.manager())) {
                     assertThat(empty.repositoryNames()).isEmpty();
                 }
                 assertThat(localRoot).isEmptyDirectory();
+                pro.deta.orion.event.OrionEventManager bootstrapEvents1 =
+                        new pro.deta.orion.event.OrionEventManager();
                 try (BootstrapContext bootstrap = BootstrapContext.open(configuration, environment,
-                        new KeyMaterialCreation(false))) {
-                    assertThat(bootstrap.initialConfiguration().orElseThrow().content()).isEqualTo(xml);
+                        new KeyMaterialCreation(false), bootstrapEvents1)) {
                     assertThat(bootstrap.serverIdentity().activeKeyId()).isEqualTo(signingKeyId);
                     assertThat(bootstrap.serverIdentity().verify(signingKeyId, payload, signature)).isTrue();
                     cacheName = bootstrap.repositoryFactory()
                             .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE).orElseThrow();
                     assertThat(bootstrap.repositoryFactory()
                             .bootstrapRepositoryName(NativeGitRepositoryFactory.MATERIAL_SOURCE)).contains(cacheName);
-                    OrionComponent component = runtimeComponent(configuration, bootstrap);
+                    OrionComponent component = runtimeComponent(configuration, bootstrap, bootstrapEvents1);
                     OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
                     try {
                         assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
                         lifecycle.waitForStarting();
-                        loadedConfiguration = component.orionAccessControlService()
-                                .accessControlConfigurationFile().content();
+                        loadedConfiguration =
+                                TestRuntimeBootstrap.configurationXml(
+                                        component.orionAccessControlService());
                         OrionDocument loaded = OrionXml.read(new ByteArrayInputStream(loadedConfiguration));
                         ConfigurationSecrets secrets = new ConfigurationSecrets(() -> loaded,
                                 bootstrap.configurationCipher());
@@ -133,12 +148,17 @@ class S3BootstrapProxyColdStartIT {
                                 .valueOrFailure("hydrated S3 proxy cache");
                         assertThat(cache.files().readBytes(REF, MATERIAL_PATH)).isEqualTo(material);
                         String initialRevision = cache.refs().get(REF);
-                        repository.files().withAccess(REF, "Change upstream after cold start", GitCommitAuthor.EMPTY,
-                                access -> {
-                                    access.write("marker.txt", marker);
-                                    access.apply();
-                                    return null;
-                                });
+                        repository
+                                .files()
+                                .withAccess(
+                                        REF,
+                                        new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                                "", "", "Change upstream after cold start"),
+                                        access -> {
+                                            access.write("marker.txt", marker);
+                                            access.apply();
+                                            return null;
+                                        });
                         refreshedRevision = repository.refs().get(REF);
                         assertThat(refreshedRevision).isNotEqualTo(initialRevision);
                         bootstrap.repositoryProvider().openForRead(cacheName).valueOrFailure("refresh S3 proxy cache");
@@ -152,7 +172,7 @@ class S3BootstrapProxyColdStartIT {
             }
             try (NativeGitRepositoryProvider reopened = S3NativeGitRepositoryFactory.repositories(
                     configuration.getStorage().getLocation(), configuration.getStorage().getEndpoint(),
-                    configuration.getStorage().getAuth(), environment)) {
+                    configuration.getStorage().getAuth(), environment, EVENTS.manager())) {
                 NativeGitRepository persisted = reopened.find(cacheName).valueOrFailure("persisted S3 proxy cache");
                 assertThat(persisted.files().readBytes(REF, CONFIGURATION_PATH)).isEqualTo(loadedConfiguration);
                 assertThat(persisted.files().readBytes(REF, MATERIAL_PATH)).isEqualTo(material);

@@ -23,13 +23,13 @@ import pro.deta.orion.command.CommandRequest;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.CommandRowQuery;
 import pro.deta.orion.command.DefaultCommandDispatcher;
-import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 
+import pro.deta.orion.test.integration.TestConfiguration;
 import java.io.ByteArrayInputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -43,6 +43,14 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class AcmeAdministrationTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @Test
     void enforcesAdminAccessOnBothTransportsAndRedactsSshSecrets() throws Exception {
         DefaultCommandDispatcher dispatcher = dispatcher(new AcmeCommandCatalog(null, null));
@@ -74,10 +82,10 @@ class AcmeAdministrationTest {
 
     @Test
     void listsPresetsAndSettingsThroughUiApiAndSsh() throws Exception {
-        OrionDesiredState desired = new OrionDesiredState();
+        TestConfiguration desired = new TestConfiguration(EVENTS);
         desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("revision"));
-        AcmeConfigurationService configuration = new AcmeConfigurationService(desired, null, null,
-                new AcmeCertificateService(new BootstrapConfiguration(), desired,
+        AcmeConfigurationService configuration = new AcmeConfigurationService(desired.acl(), null, null,
+                new AcmeCertificateService(new BootstrapConfiguration(), desired.acl(),
                         AcmeKeyMaterialCapability.unavailable(), null, null),
                 ConfigurationMaterialCapability.unavailable(), new BootstrapConfiguration());
         ObjectMapper mapper = new ObjectMapper();

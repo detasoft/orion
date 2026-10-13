@@ -385,7 +385,7 @@ class OrionAuthorizationModelTest {
     private static OrionDocument.Repository repository(
             String id, List<ScopedGrant> grants, List<ScopedRole> roles) {
         return new OrionDocument.Repository(
-                new RepositoryId(id),
+                id,
                 null,
                 OrionDocument.Repository.DEFAULT_BRANCH,
                 RepositoryPolicy.safeDefaults(),

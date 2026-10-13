@@ -38,6 +38,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionGitRouteStreamingFailureTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void preservesFailureBeforeAndAfterResponseCommitment(boolean commit) throws Exception {
@@ -59,7 +67,8 @@ class OrionGitRouteStreamingFailureTest {
     private static void verifyFailure(boolean commit, Exception failure, int expectedStatus) throws Exception {
         AtomicReference<HttpServletResponse> activeResponse = new AtomicReference<>();
         CompletableFuture<Throwable> escaped = new CompletableFuture<>();
-        NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider() {
+        NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider(
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager())) {
             @Override
             public boolean isPublicRepositoryName(String repositoryName) {
                 return true;

@@ -57,9 +57,6 @@ import java.util.Set;
 final class OrionGitWorkTree implements GitWorkTree {
     private static final String NULL_ID = "0".repeat(40);
     private static final String MAIN_REF = "refs/heads/" + GitScenarioContext.DEFAULT_BRANCH;
-    private static final GitCommitAuthor PARITY_AUTHOR = new GitCommitAuthor(
-            GitScenarioContext.IDENTITY_NAME,
-            GitScenarioContext.IDENTITY_EMAIL);
 
     private final OrionGitClient client;
     private final Path directory;
@@ -81,8 +78,12 @@ final class OrionGitWorkTree implements GitWorkTree {
         Path workTree = Objects.requireNonNull(directory, "directory").toAbsolutePath().normalize();
         Path gitDirectory = workTree.resolve(".git");
         Files.createDirectories(gitDirectory);
-        NativeGitRepository repository = NativeGitRepository.openLocal(
-                RepositoryName.parse("worktree"), gitDirectory, MAIN_REF);
+        NativeGitRepository repository =
+                NativeGitRepository.openLocal(
+                        RepositoryName.parse("worktree"),
+                        gitDirectory,
+                        MAIN_REF,
+                        new pro.deta.orion.event.OrionEventManager());
         repository.index().withAccess(access -> {
             access.updateHead(new Head.Symbolic(new RefId(MAIN_REF)));
             access.apply();
@@ -153,7 +154,8 @@ final class OrionGitWorkTree implements GitWorkTree {
         if (stagedPaths.isEmpty()) {
             throw new IllegalStateException("Orion native commit requires staged files");
         }
-        repository.files().withAccess(currentBranch, message, PARITY_AUTHOR, access -> {
+        repository.files().withAccess(currentBranch, new GitCommitAuthor(
+                GitScenarioContext.IDENTITY_NAME, GitScenarioContext.IDENTITY_EMAIL, message), access -> {
             for (String path : stagedPaths) {
                 Path source = directory.resolve(path);
                 if (Files.isSymbolicLink(source)) {

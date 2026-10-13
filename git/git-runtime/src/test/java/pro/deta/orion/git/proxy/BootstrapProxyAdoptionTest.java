@@ -2,10 +2,8 @@ package pro.deta.orion.git.proxy;
 
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
-import java.util.Set;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
@@ -35,6 +33,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class BootstrapProxyAdoptionTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @Test
     void keepsSharedBootstrapSourcesPrivateWithoutCreatingAnAlias() throws Exception {
         try (OrionKeyMaterial material = material()) {
@@ -153,7 +159,7 @@ class BootstrapProxyAdoptionTest {
     }
 
     private static NativeGitRepositoryFactory provider(String token) {
-        return new NativeGitRepositoryFactory(NativeGitRepositoryBackend.inMemory(),
+        return new NativeGitRepositoryFactory(NativeGitRepositoryBackend.inMemory(EVENTS.manager()),
                 new BootstrapSecretResolver(Map.of("TOKEN", token)), (location, transport, repository) -> { },
                 (location, transport, repository, received, updates, atomic) -> List.of());
     }

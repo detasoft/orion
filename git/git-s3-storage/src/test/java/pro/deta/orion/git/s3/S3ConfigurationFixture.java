@@ -19,7 +19,6 @@ import pro.deta.orion.schema.orion.v2.Connection;
 import pro.deta.orion.schema.orion.v2.ConnectionReference;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
-import pro.deta.orion.schema.orion.v2.RepositoryId;
 import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 import pro.deta.orion.schema.orion.v2.S3StorageBinding;
 import pro.deta.orion.schema.orion.v2.TeamId;
@@ -32,6 +31,9 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 final class S3ConfigurationFixture implements AutoCloseable {
+    private final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
     static final OrganizationId ORGANIZATION = new OrganizationId("acme");
     final AtomicReference<OrionDocument> current = new AtomicReference<>(new OrionDocument(
             new OrionDocument.SystemConfiguration(new AccessControl()), List.of(new OrionDocument.Organization(
@@ -47,8 +49,12 @@ final class S3ConfigurationFixture implements AutoCloseable {
 
     S3ConfigurationFixture(Path directory) throws Exception {
         localRoot = directory.resolve("local-repositories");
-        local = NativeGitRepositoryProvider.file(localRoot);
-        factory = new ConfiguredNativeGitRepositoryFactory(NativeGitRepositoryBackend.file(localRoot), transport);
+        local = NativeGitRepositoryProvider.file(localRoot, EVENTS.manager());
+        factory =
+                new ConfiguredNativeGitRepositoryFactory(
+                        NativeGitRepositoryBackend.file(localRoot, EVENTS.manager()),
+                        transport,
+                        EVENTS.manager());
         provider = new NativeGitRepositoryProvider(factory);
         KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(new KeyMaterialAlias("configuration-v1"),
                 KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES, new KeyMaterialVersion(1),
@@ -94,8 +100,8 @@ final class S3ConfigurationFixture implements AutoCloseable {
         OrionDocument.Organization organization = document.organizations().getFirst();
         OrionDocument.Team team = organization.teams().getFirst();
         List<OrionDocument.Repository> repositories = new ArrayList<>(team.repositories());
-        repositories.removeIf(value -> value.id().value().equals(repository));
-        repositories.add(new OrionDocument.Repository(new RepositoryId(repository), "", "refs/heads/main",
+        repositories.removeIf(value -> value.id().equals(repository));
+        repositories.add(new OrionDocument.Repository(repository, "", "refs/heads/main",
                 RepositoryPolicy.safeDefaults(), List.of(), List.of(), List.of(), List.of(),
                 Optional.of(new S3StorageBinding(new ConnectionReference(system ? ConnectionReference.Scope.SYSTEM
                         : ConnectionReference.Scope.ORGANIZATION, connection), URI.create(location)))));
@@ -130,6 +136,7 @@ final class S3ConfigurationFixture implements AutoCloseable {
                     transport.close();
                 } finally {
                     material.close();
+                    EVENTS.close();
                 }
             }
         }

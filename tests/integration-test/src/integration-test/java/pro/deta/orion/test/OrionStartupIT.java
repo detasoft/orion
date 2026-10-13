@@ -1,6 +1,6 @@
 package pro.deta.orion.test;
 
-import pro.deta.orion.config.OrionConfigurationEdit;
+
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.jgit.api.Git;
@@ -15,7 +15,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.config.ConfigurationFile;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.component.OrionComponent;
@@ -34,6 +33,7 @@ import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.transport.http.OrionAccessControlSchemaRoute;
 import pro.deta.orion.schema.orion.OrionXml;
 
+import pro.deta.orion.config.OrionDocumentRevision;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -151,8 +151,8 @@ class OrionStartupIT {
         OrionDocument loadedDocument;
 
         try (StartedOrion orion = startServerWithConfig(configuration)) {
-            ConfigurationFile configurationFile = orion.accessControlService().accessControlConfigurationFile();
-            loadedDocument = OrionXml.read(new ByteArrayInputStream(configurationFile.content()));
+            OrionDocumentRevision configurationFile = orion.accessControlService().configuration();
+            loadedDocument = configurationFile.document();
 
             assertThat(hasUser(loadedDocument.system().accessControl(), "remote-user")).isTrue();
             assertThat(loadedDocument.system().proxies()).isEmpty();
@@ -160,10 +160,9 @@ class OrionStartupIT {
 
             OrionDocument updatedDocument = loadedDocument.replaceAccessControl(
                     accessControlWithUsers("root", "saved-remote-user"));
-            orion.component().configurationEditor().edit(
-                    configurationFile.revision().orElseThrow(), "Update remote configuration",
-                    UserEmail.EMPTY)
-                .update(ignored -> updatedDocument).apply();
+            TestRuntimeBootstrap.updateConfiguration(orion.component(), configurationFile.revision(),
+                    new pro.deta.orion.internal.ChangeMetadata(UserEmail.EMPTY, "Update remote configuration"),
+                    ignored -> updatedDocument);
 
             assertThat(orion.accessControlService().userExists("remote-user")).isFalse();
             assertThat(orion.accessControlService().userExists("saved-remote-user")).isTrue();
@@ -177,7 +176,7 @@ class OrionStartupIT {
 
         try (StartedOrion orion = startServerWithConfig(configuration)) {
             OrionDocument restartedDocument = OrionXml.read(new ByteArrayInputStream(
-                    orion.accessControlService().accessControlConfigurationFile().content()));
+                    TestRuntimeBootstrap.configurationXml(orion.accessControlService())));
 
             assertThat(orion.accessControlService().userExists("remote-user")).isFalse();
             assertThat(orion.accessControlService().userExists("saved-remote-user")).isTrue();
@@ -202,13 +201,16 @@ class OrionStartupIT {
                     .doesNotContain("<AccessControl");
             AccessControlUserUpdate update = new AccessControlUserUpdate(
                     "new-user", "new@example.test", List.of(), List.of());
-            orion.accessControlService().withAccess(orion.component().configurationEditor().edit(
-                    "createOrUpdateUser() " + update.id(),
-                    new UserEmail(update.id(), update.email())), edit -> {
-                edit.createOrUpdateUser(update);
-                edit.apply();
-                return null;
-            });
+            TestRuntimeBootstrap.withAccess(
+                    orion.accessControlService(), orion.component().configurationEditor(),
+                    new pro.deta.orion.internal.ChangeMetadata(
+                            new UserEmail(update.id(), update.email()),
+                            "createOrUpdateUser() " + update.id()),
+                    edit -> {
+                        edit.createOrUpdateUser(update);
+                        edit.apply();
+                        return null;
+                    });
         }
 
         byte[] savedAcl = readFileFromRepository(configuredAclRepository, ACL_FILE);
@@ -301,7 +303,12 @@ class OrionStartupIT {
 
         try (ServerSocket occupiedHttpPort = bindHttpPort(configuration)) {
             configuration.getTransport().getHttp().setPort(occupiedHttpPort.getLocalPort());
-            assertThatThrownBy(() -> BootstrapContext.open(configuration, Map.of()))
+            assertThatThrownBy(
+                            () ->
+                                    BootstrapContext.open(
+                                            configuration,
+                                            Map.of(),
+                                            new pro.deta.orion.event.OrionEventManager()))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessage("Bootstrap inputs are unavailable or invalid");
         }
@@ -378,7 +385,7 @@ class OrionStartupIT {
     }
 
     private static NativeGitRepositoryProvider repositoryProvider(Path orionRoot) {
-        return NativeGitRepositoryProvider.file(orionRoot.resolve("repos"));
+        return NativeGitRepositoryProvider.file(orionRoot.resolve("repos"), new pro.deta.orion.event.OrionEventManager());
     }
 
     private static byte[] readFileFromRepository(Path repositoryPath, String filePath) throws IOException {

@@ -1,6 +1,5 @@
 package pro.deta.orion.transport.git;
 
-import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -28,7 +27,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -39,13 +37,21 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class GitBlockingWireSessionTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private static final String MAIN_ID = "88d050b1908057b53d38b42702ebc659e3d7f696";
     private static final String WANT = "2".repeat(40);
     private static final String NULL_ID = "0".repeat(40);
 
     @Test
     void receivePreservesOriginalPackThroughTheWireAndProvider() throws Exception {
-        NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory();
+        NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository = backend.create("project").valueOrFailure("repository");
         FileTestSupport.Prepared prepared = FileTestSupport.prepared(repository.files(), "main", "prepared",
                 GitCommitAuthor.EMPTY, fileAccess -> {
@@ -53,7 +59,8 @@ class GitBlockingWireSessionTest {
             return null;
         });
         byte[] original = prepared.pack();
-        NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider() {
+        NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider(
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager())) {
             @Override
             public boolean isPublicRepositoryName(String name) {
                 return backend.isPublicRepositoryName(name);
@@ -220,7 +227,7 @@ class GitBlockingWireSessionTest {
     @Test
     void smartHttpPostWritesFetchPackfileResponse() throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory();
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         ObjectId blob = repository.writeObject(
@@ -247,14 +254,20 @@ class GitBlockingWireSessionTest {
     void sshCommandServesLsRefsThenFetchOnSameProtocolV2Connection()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory();
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("README.md", "payload".getBytes(StandardCharsets.US_ASCII));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "initial"),
+                        fileAccess -> {
+                            fileAccess.write(
+                                    "README.md", "payload".getBytes(StandardCharsets.US_ASCII));
+                            fileAccess.apply();
+                            return null;
+                        });
         String mainId = repository.refs().get("refs/heads/main");
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
@@ -286,7 +299,7 @@ class GitBlockingWireSessionTest {
     void smartHttpPostWritesSidebandFetchPackfileResponseForWantedRefs()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory();
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         ObjectId blob = repository.writeObject(
@@ -317,7 +330,7 @@ class GitBlockingWireSessionTest {
     @Test
     void smartHttpPostAcceptsAdvertisedFetchServerOption() throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory();
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         ObjectId blob = repository.writeObject(
@@ -387,7 +400,7 @@ class GitBlockingWireSessionTest {
     void smartHttpPostWritesLegacyUploadPackResponseOneByteAtATime()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory();
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         ObjectId blob = repository.writeObject(
@@ -415,7 +428,7 @@ class GitBlockingWireSessionTest {
     void smartHttpPostWritesLegacyMultiAckDetailedCommonAndFinalAckOnDone()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory();
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         ObjectId want = repository.writeObject(
@@ -447,20 +460,32 @@ class GitBlockingWireSessionTest {
     @Test
     void smartHttpPostEndsReadyNegotiationRoundWithNak() throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory();
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository.files().withAccess("main", "base", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("README.md", "base".getBytes(StandardCharsets.US_ASCII));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "base"),
+                        fileAccess -> {
+                            fileAccess.write(
+                                    "README.md", "base".getBytes(StandardCharsets.US_ASCII));
+                            fileAccess.apply();
+                            return null;
+                        });
         String have = repository.refs().get("refs/heads/main");
-        repository.files().withAccess("main", "next", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("README.md", "next".getBytes(StandardCharsets.US_ASCII));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "next"),
+                        fileAccess -> {
+                            fileAccess.write(
+                                    "README.md", "next".getBytes(StandardCharsets.US_ASCII));
+                            fileAccess.apply();
+                            return null;
+                        });
         String want = repository.refs().get("refs/heads/main");
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
@@ -483,19 +508,29 @@ class GitBlockingWireSessionTest {
     void smartHttpPostDoesNotSignalReadyUntilEveryWantReachesACommonHave()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory();
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository.files().withAccess("main", "first", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("first", new byte[]{1});
-            fileAccess.apply();
-            return null;
-        });
-        repository.files().withAccess("second", "second", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("second", new byte[]{2});
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "first"),
+                        fileAccess -> {
+                            fileAccess.write("first", new byte[] {1});
+                            fileAccess.apply();
+                            return null;
+                        });
+        repository
+                .files()
+                .withAccess(
+                        "second",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "second"),
+                        fileAccess -> {
+                            fileAccess.write("second", new byte[] {2});
+                            fileAccess.apply();
+                            return null;
+                        });
         ObjectId firstWant = new ObjectId(repository.refs().get("refs/heads/main"));
         ObjectId secondWant = new ObjectId(repository.refs().get("refs/heads/second"));
         try (QueueByteSource input = new QueueByteSource(
@@ -521,20 +556,32 @@ class GitBlockingWireSessionTest {
     void commandPreservesLegacyNegotiationAcrossFlushDelimitedRounds()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory();
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository.files().withAccess("main", "base", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("README.md", "base".getBytes(StandardCharsets.US_ASCII));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "base"),
+                        fileAccess -> {
+                            fileAccess.write(
+                                    "README.md", "base".getBytes(StandardCharsets.US_ASCII));
+                            fileAccess.apply();
+                            return null;
+                        });
         String have = repository.refs().get("refs/heads/main");
-        repository.files().withAccess("main", "next", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("README.md", "next".getBytes(StandardCharsets.US_ASCII));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "next"),
+                        fileAccess -> {
+                            fileAccess.write(
+                                    "README.md", "next".getBytes(StandardCharsets.US_ASCII));
+                            fileAccess.apply();
+                            return null;
+                        });
         String want = repository.refs().get("refs/heads/main");
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
@@ -562,7 +609,7 @@ class GitBlockingWireSessionTest {
     void smartHttpPostWritesLegacyMultiAckDetailedNakWhenNoHaveIsCommon()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory();
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         ObjectId want = repository.writeObject(
@@ -590,7 +637,7 @@ class GitBlockingWireSessionTest {
     void smartHttpPostWritesLegacyMultiAckContinueForCommonHave()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory();
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         ObjectId want = repository.writeObject(
@@ -663,19 +710,31 @@ class GitBlockingWireSessionTest {
     void smartHttpPostWritesLegacyShallowBoundaryBeforeNegotiation()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory();
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository.files().withAccess("main", "root", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("README.md", "root".getBytes(StandardCharsets.US_ASCII));
-            fileAccess.apply();
-            return null;
-        });
-        repository.files().withAccess("main", "tip", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("README.md", "tip".getBytes(StandardCharsets.US_ASCII));
-            fileAccess.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "root"),
+                        fileAccess -> {
+                            fileAccess.write(
+                                    "README.md", "root".getBytes(StandardCharsets.US_ASCII));
+                            fileAccess.apply();
+                            return null;
+                        });
+        repository
+                .files()
+                .withAccess(
+                        "main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "tip"),
+                        fileAccess -> {
+                            fileAccess.write(
+                                    "README.md", "tip".getBytes(StandardCharsets.US_ASCII));
+                            fileAccess.apply();
+                            return null;
+                        });
         String tip = repository.refs().get("refs/heads/main");
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
@@ -894,7 +953,7 @@ class GitBlockingWireSessionTest {
     void smartHttpPostReportsMalformedReceivePackThroughStatusV2()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory();
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         provider.create("project").valueOrFailure("repository");
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
@@ -924,7 +983,7 @@ class GitBlockingWireSessionTest {
     @Test
     void smartHttpPostAcceptsEmptyReceiveCommandSection() throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory();
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         provider.create("project").valueOrFailure("repository");
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
@@ -1040,7 +1099,7 @@ class GitBlockingWireSessionTest {
 
     private static NativeGitRepositoryProvider providerWithMainRef() {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory();
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
         ObjectId id = repository.writeObject(GitObjectType.BLOB, "main".getBytes(StandardCharsets.US_ASCII));
         assertThat(id.toHex()).isEqualTo(MAIN_ID);

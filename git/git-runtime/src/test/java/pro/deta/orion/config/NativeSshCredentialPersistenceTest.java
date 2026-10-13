@@ -2,10 +2,11 @@ package pro.deta.orion.config;
 
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.acl.AccessControlAccess;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
+import pro.deta.orion.internal.ChangeMetadata;
 import java.io.ByteArrayOutputStream;
-import java.util.Optional;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -26,16 +27,24 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class NativeSshCredentialPersistenceTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @TempDir
     Path root;
 
     @Test
     void activatesAndReloadsANewKeyWithoutChangingOtherFiles() throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.file(root);
+                NativeGitRepositoryProvider.file(root, EVENTS.manager());
         NativeGitRepository repository = provider.create("acl").valueOrFailure("create repository");
-        OrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(
-                provider, "acl", "refs/heads/main", "users.xml", false);
+        OrionVersionedConfigurationStorage storage = new NativeGitOrionConfigurationStorage(
+                provider, "acl", "refs/heads/main", "users.xml");
         User alice = new User("alice", null, null, "alice@example.test",
                 List.of(), List.of(), List.of());
         AccessControl primary = new AccessControl(List.of(alice), List.of(), List.of());
@@ -44,42 +53,57 @@ class NativeSshCredentialPersistenceTest {
         ByteArrayOutputStream roles = new ByteArrayOutputStream();
         OrionXml.write(OrionDocument.withAccessControl(new AccessControl()), roles);
         byte[] unchanged = roles.toByteArray();
-        repository.files().withAccess("refs/heads/main", "seed", GitCommitAuthor.EMPTY, access -> {
-            access.write("users.xml", users.toByteArray());
-            access.write("roles.xml", unchanged);
-            access.apply();
-            return null;
-        });
+        repository
+                .files()
+                .withAccess(
+                        "refs/heads/main",
+                        new pro.deta.orion.git.fileapi.GitCommitAuthor("", "", "seed"),
+                        access -> {
+                            access.write("users.xml", users.toByteArray());
+                            access.write("roles.xml", unchanged);
+                            access.apply();
+                            return null;
+                        });
         KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
         generator.initialize(2048);
         KeyPair key = generator.generateKeyPair();
-        OrionDesiredState desired = new OrionDesiredState();
         OrionConfigurationEditor editor = new OrionConfigurationEditor(storage,
                 new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
                 pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),
-                pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable(), desired);
-        OrionAccessControlServiceImpl service = service(storage, editor, desired);
+                pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable());
+        OrionAccessControlServiceImpl service = service(storage, editor);
         try {
             service.onStart();
             assertThat(service.authenticateSshUser("alice", key.getPublic().getEncoded()))
                     .isInstanceOf(AuthenticationResult.Failure.class);
-            service.withAccess(editor.edit(
-                    "add SSH credentials for alice",
-                    new UserEmail("alice", "alice@example.test")), edit -> {
-                assertThat(edit.addSshCredentials("alice", List.of(PublicKeyEntry.toString(key.getPublic()))))
-                    .isInstanceOfSatisfying(SshCredentialUpdateResult.Success.class,
-                            success -> assertThat(success.changed()).isTrue());
-                edit.apply();
-                return null;
-            });
+            AccessControlAccess access =
+                    service.createAccess(
+                            service.configuration().revision(),
+                            new ChangeMetadata(
+                                    new UserEmail("alice", "alice@example.test"),
+                                    "add SSH credentials for alice"));
+            try {
+                assertThat(access.addSshCredentials("alice", List.of(PublicKeyEntry.toString(key.getPublic()))))
+                        .isInstanceOfSatisfying(SshCredentialUpdateResult.Success.class,
+                                success -> assertThat(success.changed()).isTrue());
+                access.apply();
+            } finally {
+                access.discard();
+            }
+            EVENTS.await();
             assertThat(service.authenticateSshUser("alice", key.getPublic().getEncoded()))
                     .isInstanceOf(AuthenticationResult.Success.class);
         } finally {
             service.onStop();
         }
-        OrionAccessControlServiceImpl reopened = service(new NativeGitOrionConfigurationStorage(
-                NativeGitRepositoryProvider.file(root), "acl", "refs/heads/main", "users.xml", false),
-                editor, desired);
+        OrionAccessControlServiceImpl reopened =
+                service(
+                        new NativeGitOrionConfigurationStorage(
+                                NativeGitRepositoryProvider.file(root, EVENTS.manager()),
+                                "acl",
+                                "refs/heads/main",
+                                "users.xml"),
+                        editor);
         try {
             reopened.onStart();
             assertThat(reopened.authenticateSshUser("alice", key.getPublic().getEncoded()))
@@ -92,14 +116,15 @@ class NativeSshCredentialPersistenceTest {
     }
 
     private static OrionAccessControlServiceImpl service(
-            OrionConfigurationStorage storage, OrionConfigurationEditor editor, OrionDesiredState desired
+            OrionVersionedConfigurationStorage storage, OrionConfigurationEditor editor
     ) {
-        return new OrionAccessControlServiceImpl(storage,
+        return new OrionAccessControlServiceImpl(
                 new OrionPasswordHashingService(),
                 new RootPasswordReset(false),
                 ServerIdentityCapability.unavailable(),
-                desired,
+                storage,
+                new BootstrapConfiguration(),
                 editor,
-                Optional.empty());
+                EVENTS.manager());
     }
 }

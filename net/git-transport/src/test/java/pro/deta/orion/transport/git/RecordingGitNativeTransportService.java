@@ -22,7 +22,7 @@ final class RecordingGitNativeTransportService extends GitNativeTransportService
         super(
                 config(enabled),
                 new DefaultGitNativeRepositoryService(
-                        NativeGitRepositoryProvider.inMemory()));
+                        NativeGitRepositoryProvider.inMemory(new pro.deta.orion.event.OrionEventManager())));
         this.enabled = enabled;
     }
 

@@ -51,12 +51,20 @@ import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_ST
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.*;
 
 class GitNativeTransportStateMachineTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @Test
     void disabledNativeTransportDoesNotBindSocket() {
         GitNativeTransportService service = new GitNativeTransportService(
                 config(false),
                 new DefaultGitNativeRepositoryService(
-                        NativeGitRepositoryProvider.inMemory()));
+                        NativeGitRepositoryProvider.inMemory(EVENTS.manager())));
 
         service.onStart();
 
@@ -69,7 +77,7 @@ class GitNativeTransportStateMachineTest {
         GitNativeTransportService service = new GitNativeTransportService(
                 config(true),
                 new DefaultGitNativeRepositoryService(
-                        NativeGitRepositoryProvider.inMemory()));
+                        NativeGitRepositoryProvider.inMemory(EVENTS.manager())));
 
         try {
             service.onStart();
@@ -86,8 +94,11 @@ class GitNativeTransportStateMachineTest {
     @Test
     void occupiedPortFailureCanBeStoppedAndStartedAfterThePortIsReleased() throws Exception {
         GitTransportConfig config = config(true);
-        GitNativeTransportService service = new GitNativeTransportService(
-                config, new DefaultGitNativeRepositoryService(NativeGitRepositoryProvider.inMemory()));
+        GitNativeTransportService service =
+                new GitNativeTransportService(
+                        config,
+                        new DefaultGitNativeRepositoryService(
+                                NativeGitRepositoryProvider.inMemory(EVENTS.manager())));
 
         try {
             try (ServerSocket occupied = new ServerSocket()) {
@@ -124,8 +135,11 @@ class GitNativeTransportStateMachineTest {
                 "The runtime does not expose the open file descriptor count");
         UnixOperatingSystemMXBean unix = (UnixOperatingSystemMXBean) operatingSystem;
         GitTransportConfig config = config(true);
-        GitNativeTransportService service = new GitNativeTransportService(
-                config, new DefaultGitNativeRepositoryService(NativeGitRepositoryProvider.inMemory()));
+        GitNativeTransportService service =
+                new GitNativeTransportService(
+                        config,
+                        new DefaultGitNativeRepositoryService(
+                                NativeGitRepositoryProvider.inMemory(EVENTS.manager())));
 
         try (ServerSocket occupied = new ServerSocket()) {
             occupied.bind(new InetSocketAddress("127.0.0.1", 0));
@@ -210,7 +224,7 @@ class GitNativeTransportStateMachineTest {
         GitNativeTransportService service = new GitNativeTransportService(
                 config(true),
                 new DefaultGitNativeRepositoryService(
-                        NativeGitRepositoryProvider.inMemory()));
+                        NativeGitRepositoryProvider.inMemory(EVENTS.manager())));
 
         try (ConnectionFailureLogCapture logs = new ConnectionFailureLogCapture()) {
             service.onStart();
@@ -478,13 +492,14 @@ class GitNativeTransportStateMachineTest {
         }
 
         private final NativeGitRepositoryProvider delegate =
-                NativeGitRepositoryProvider.inMemory();
+                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
         private final CountDownLatch handled;
         private final AtomicBoolean virtualThread;
 
         private RecordingNativeGitRepositoryProvider(
                 CountDownLatch handled,
                 AtomicBoolean virtualThread) {
+            super(pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager()));
             this.handled = handled;
             this.virtualThread = virtualThread;
             delegate.create("repo");

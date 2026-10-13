@@ -1,6 +1,6 @@
 package pro.deta.orion.transport.http;
 
-import pro.deta.orion.config.ConfigurationFile;
+
 
 import pro.deta.orion.config.OrionConfigurationEditor;
 
@@ -17,13 +17,13 @@ import pro.deta.orion.auth.AccessControlValidationException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.auth.SecurityContext;
-import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.util.Result;
+import pro.deta.orion.test.integration.TestConfiguration;
 import java.util.List;
 import java.util.Optional;
 
@@ -44,23 +44,18 @@ import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Authorizati
 import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.GET;
 
 class OrionHttpRouteServletRoutingTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-    private static OrionConfigurationEditor configurationEditor() throws IOException {
-        java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
-        pro.deta.orion.schema.orion.OrionXml.write(OrionDocument.withAccessControl(new AccessControl()), output);
-        pro.deta.orion.config.OrionConfigurationStorage storage =
-                stub(pro.deta.orion.config.OrionConfigurationStorage.class, (proxy, method, args) ->
-                        switch (method.getName()) {
-                            case "load" -> pro.deta.orion.util.Result.of(
-                                    new ConfigurationFile(output.toByteArray(), Optional.empty()));
-                            default -> null;
-                        });
-        return new OrionConfigurationEditor(storage,
-                new BootstrapConfiguration(),
-                pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),
-                pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable(),
-                new pro.deta.orion.config.OrionDesiredState());
+    private static OrionConfigurationEditor configurationEditor() {
+        return new TestConfiguration(EVENTS).editor();
     }
 
     @Test
@@ -198,38 +193,28 @@ class OrionHttpRouteServletRoutingTest {
 
     @Test
     void missingAcmeConfigurationRemainsClientErrorForReadAndIssue() throws Exception {
-        OrionDesiredState desired = new OrionDesiredState();
+        TestConfiguration desired = new TestConfiguration(EVENTS);
         desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.empty());
         OrionHttpRoute route = acmeRoute(desired);
         for (String method : List.of("GET", "POST")) {
             ResponseRecorder response = new ResponseRecorder();
             servlet(route).service(request(method, OrionAdminPaths.ACME_CERTIFICATE, admin()), response.proxy());
             assertThat(response.status).isEqualTo(HttpServletResponse.SC_BAD_REQUEST);
-            assertThat(response.errorMessage).isEqualTo("HTTPS desired state is not configured");
-        }
-    }
-
-    @Test
-    void unpublishedServerStateIsNotMisreportedAsMissingAcmeConfiguration() throws Exception {
-        OrionHttpRoute route = acmeRoute(new OrionDesiredState());
-        for (String method : List.of("GET", "POST")) {
-            ResponseRecorder response = new ResponseRecorder();
-            servlet(route).service(request(method, OrionAdminPaths.ACME_CERTIFICATE, admin()), response.proxy());
-            assertThat(response.status).isEqualTo(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
-            assertThat(response.errorMessage).isEqualTo("Internal server error");
+            assertThat(response.errorMessage).isEqualTo("HTTPS configuration is not configured");
         }
     }
 
     @Test
     void repositoryValidationIs400ButProviderArgumentFailureIs500() throws Exception {
-        NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider() {
+        NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider(
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager())) {
             @Override
             public Result<NativeGitRepository> create(String repositoryName) {
                 throw new IllegalArgumentException("private provider details");
             }
         };
         OrionHttpRoute route = new OrionAdminCreateRepositoryRoute(provider,
-                StorageManagementFixture.create(provider, List.of()), OBJECT_MAPPER);
+                StorageManagementFixture.create(EVENTS, provider, List.of()), OBJECT_MAPPER);
         for (String json : List.of("{\"name\":\"../repo\"}", "null", "{}")) {
             ResponseRecorder response = new ResponseRecorder();
             servlet(route).service(request("POST", OrionAdminPaths.REPOSITORIES, admin(), json), response.proxy());
@@ -254,7 +239,7 @@ class OrionHttpRouteServletRoutingTest {
                 throw new IllegalArgumentException("private persistence details");
             });
             OrionHttpRoute route = new OrionAdminCreateOrUpdateUserRoute(
-                    service, configurationEditor(), OBJECT_MAPPER, new OrionDesiredState());
+                    service, configurationEditor(), OBJECT_MAPPER);
             ResponseRecorder response = new ResponseRecorder();
             servlet(route).service(request("POST", route.definition().urlPattern(), admin(),
                     "{\"id\":\"alice\"}"), response.proxy());
@@ -287,9 +272,15 @@ class OrionHttpRouteServletRoutingTest {
         assertThat(response.errorMessage).isEqualTo("Invalid request parameter");
     }
 
-    private static OrionHttpRoute acmeRoute(OrionDesiredState desired) {
-        return new OrionAdminAcmeCertificateRoute(new AcmeCertificateService(new BootstrapConfiguration(), desired,
-                AcmeKeyMaterialCapability.unavailable(), new AcmeCertificateIssuer(null), null), OBJECT_MAPPER);
+    private static OrionHttpRoute acmeRoute(TestConfiguration desired) {
+        return new OrionAdminAcmeCertificateRoute(
+                new AcmeCertificateService(
+                        new BootstrapConfiguration(),
+                        desired.acl(),
+                        AcmeKeyMaterialCapability.unavailable(),
+                        new AcmeCertificateIssuer(null),
+                        null),
+                OBJECT_MAPPER);
     }
 
     private static SecurityContext admin() {

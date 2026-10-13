@@ -19,13 +19,21 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class GitPackCleanupTaskTest {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @TempDir
     Path directory;
 
     @Test
     void recurringRunDeletesExpiredLocalPackAndRecordsNextAttempt() throws Exception {
         try (NativeGitRepository repository = NativeGitRepository.openLocal(
-                RepositoryName.parse("team/repo"), directory, "refs/heads/main")) {
+                RepositoryName.parse("team/repo"), directory, "refs/heads/main", EVENTS.manager())) {
             PackId orphan = PackId.create();
             GitStorageAccess bytes = repository.storage().createAccess();
             try (PackHandle handle = bytes.newPack(orphan)) {
@@ -51,7 +59,7 @@ class GitPackCleanupTaskTest {
     @Test
     void nonLocalPackIsObservedWithoutDeletion() throws Exception {
         try (NativeGitRepository repository = NativeGitRepository.createInMemory(
-                RepositoryName.parse("team/repo"))) {
+                RepositoryName.parse("team/repo"), EVENTS.manager())) {
             PackId orphan = PackId.create();
             GitStorageAccess bytes = repository.storage().createAccess();
             try (PackHandle handle = bytes.newPack(orphan)) {
@@ -67,7 +75,8 @@ class GitPackCleanupTaskTest {
     }
 
     private static NativeGitRepositoryProvider provider(NativeGitRepository repository) {
-        return new NativeGitRepositoryProvider() {
+        return new NativeGitRepositoryProvider(
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager())) {
             public List<String> repositoryNames() { return List.of(repository.name()); }
             public boolean exists(String name) { return repository.name().equals(name); }
             public Result<NativeGitRepository> find(String name) { return Result.of(repository); }

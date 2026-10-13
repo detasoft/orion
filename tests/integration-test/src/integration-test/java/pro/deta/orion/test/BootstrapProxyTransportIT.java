@@ -26,9 +26,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -62,17 +60,26 @@ class BootstrapProxyTransportIT {
             Map<String, String> environment = configureSources(tempDir, configuration, upstream, transport);
             NativeGitRepository repository = upstream.repositoryProvider().create("bootstrap-inputs")
                     .valueOrFailure("upstream repository");
-            byte[] originalConfiguration = upstream.accessControlService().accessControlConfigurationFile().content();
-            repository.files().withAccess(REF, "bootstrap inputs", GitCommitAuthor.EMPTY, fileAccess -> {
-                fileAccess.write("orion.xml", originalConfiguration);
-                fileAccess.write("material.p12", materialBytes(configuration, environment));
-                fileAccess.apply();
-                return null;
-            });
+            byte[] originalConfiguration =
+                    TestRuntimeBootstrap.configurationXml(upstream.accessControlService());
+            repository
+                    .files()
+                    .withAccess(
+                            REF,
+                            new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                    "", "", "bootstrap inputs"),
+                            fileAccess -> {
+                                fileAccess.write("orion.xml", originalConfiguration);
+                                fileAccess.write(
+                                        "material.p12", materialBytes(configuration, environment));
+                                fileAccess.apply();
+                                return null;
+                            });
 
             var upstreamProvider = NativeGitRepositoryFactory.bootstrap(
                     NativeGitRepositoryBackend.file(
-                            new ConfigurationContext(upstreamConfiguration).getFileGitStoragePath()),
+                            new ConfigurationContext(upstreamConfiguration).getFileGitStoragePath(),
+                            new pro.deta.orion.event.OrionEventManager()),
                     environment);
             String upstreamCache = upstreamProvider.prepareProvisional(
                     "cache-isolation-probe", configuration.getBootstrap().getAccessControl());
@@ -88,7 +95,10 @@ class BootstrapProxyTransportIT {
 
                 byte[] payload = bytes("bootstrap identity survives restart");
                 byte[] signature;
-                try (BootstrapContext bootstrap = BootstrapContext.open(configuration, environment)) {
+                pro.deta.orion.event.OrionEventManager bootstrapEvents1 =
+                        new pro.deta.orion.event.OrionEventManager();
+                try (BootstrapContext bootstrap =
+                        BootstrapContext.open(configuration, environment, bootstrapEvents1)) {
                     var provider = bootstrap.repositoryProvider();
                     String cache = bootstrap.repositoryFactory()
                             .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE).orElseThrow();
@@ -101,13 +111,12 @@ class BootstrapProxyTransportIT {
 
                     var storage = new NativeGitOrionConfigurationStorage(bootstrap.repositoryFactory(),
                             configuration.getBootstrap().getAccessControl());
-                    var component = runtimeComponent(configuration, bootstrap);
+                    var component = runtimeComponent(configuration, bootstrap, bootstrapEvents1);
                     var lifecycle = component.orionApplicationLifecycle();
                     try {
                         assertThat(lifecycle.runApplication())
                                 .isEqualTo(RUNNING);
-                        var current = new AtomicReference<>(OrionXml.read(new ByteArrayInputStream(
-                                storage.load().valueOrFailure("runtime configuration").content())));
+                        var current = new AtomicReference<>(storage.load().valueOrFailure("runtime configuration").document());
                         assertThat(cache).isEqualTo("bootstrap");
                         assertThat(current.get().system().proxies()).isEmpty();
                         assertThat(current.get().system().secrets()).isEmpty();
@@ -117,12 +126,17 @@ class BootstrapProxyTransportIT {
                         ByteArrayOutputStream xml = new ByteArrayOutputStream();
                         OrionXml.write(current.get(), xml);
                         byte[] updatedConfiguration = bytes(xml.toString(StandardCharsets.UTF_8) + "\n");
-                        repository.files().withAccess(REF, "upstream edit", GitCommitAuthor.EMPTY,
-                                fileAccess -> {
-                            fileAccess.write("orion.xml", updatedConfiguration);
-                            fileAccess.apply();
-                            return null;
-                        });
+                        repository
+                                .files()
+                                .withAccess(
+                                        REF,
+                                        new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                                "", "", "upstream edit"),
+                                        fileAccess -> {
+                                            fileAccess.write("orion.xml", updatedConfiguration);
+                                            fileAccess.apply();
+                                            return null;
+                                        });
                         provider.openForRead(cache).valueOrFailure("refreshed proxy");
                         assertThat(retained.files().readBytes(REF, "orion.xml"))
                                 .isEqualTo(updatedConfiguration);
@@ -134,7 +148,13 @@ class BootstrapProxyTransportIT {
                         try {
                             assertThatThrownBy(() -> provider.openForRead(cache))
                                     .isInstanceOf(IllegalStateException.class);
-                            assertThatThrownBy(() -> BootstrapContext.open(configuration, environment))
+                            assertThatThrownBy(
+                                            () ->
+                                                    BootstrapContext.open(
+                                                            configuration,
+                                                            environment,
+                                                            new pro.deta.orion.event
+                                                                    .OrionEventManager()))
                                     .isInstanceOf(IllegalStateException.class)
                                     .hasMessage("Bootstrap inputs are unavailable or invalid");
                         } finally {
@@ -144,11 +164,16 @@ class BootstrapProxyTransportIT {
                         configureSources(tempDir, configuration, upstream, transport);
                         provider.openForRead(cache).valueOrFailure("rotated credential");
 
-                        retained.files().withAccess(REF, "proxy edit", GitCommitAuthor.EMPTY, fileAccess -> {
-                            fileAccess.write("marker.txt", bytes("proxy edit"));
-                            fileAccess.apply();
-                            return null;
-                        });
+                        retained.files()
+                                .withAccess(
+                                        REF,
+                                        new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                                "", "", "proxy edit"),
+                                        fileAccess -> {
+                                            fileAccess.write("marker.txt", bytes("proxy edit"));
+                                            fileAccess.apply();
+                                            return null;
+                                        });
                         assertThat(repository.files().readBytes(REF, "marker.txt"))
                                 .isEqualTo(bytes("proxy edit"));
 
@@ -157,12 +182,19 @@ class BootstrapProxyTransportIT {
                             fileAccess.write("marker.txt", bytes("stale edit"));
                             return null;
                         });
-                        repository.files().withAccess(REF, "concurrent edit", GitCommitAuthor.EMPTY,
-                                fileAccess -> {
-                            fileAccess.write("marker.txt", bytes("concurrent upstream edit"));
-                            fileAccess.apply();
-                            return null;
-                        });
+                        repository
+                                .files()
+                                .withAccess(
+                                        REF,
+                                        new pro.deta.orion.git.fileapi.GitCommitAuthor(
+                                                "", "", "concurrent edit"),
+                                        fileAccess -> {
+                                            fileAccess.write(
+                                                    "marker.txt",
+                                                    bytes("concurrent upstream edit"));
+                                            fileAccess.apply();
+                                            return null;
+                                        });
                         String upstreamRevision = repository.refs().get(REF);
                         assertThat(provider.publishPack(cache, stale.pack(), stale.refUpdates(), true,
                                 GitNativeRepositoryAccessHook.ALLOW_ALL))
@@ -176,7 +208,10 @@ class BootstrapProxyTransportIT {
                     }
                 }
 
-                try (BootstrapContext restarted = BootstrapContext.open(configuration, environment)) {
+                pro.deta.orion.event.OrionEventManager bootstrapEvents2 =
+                        new pro.deta.orion.event.OrionEventManager();
+                try (BootstrapContext restarted =
+                        BootstrapContext.open(configuration, environment, bootstrapEvents2)) {
                     assertThat(restarted.serverIdentity().verify(
                             restarted.serverIdentity().activeKeyId(), payload, signature)).isTrue();
                     String cache = restarted.repositoryFactory()
@@ -185,7 +220,7 @@ class BootstrapProxyTransportIT {
                     var storage = new NativeGitOrionConfigurationStorage(restarted.repositoryFactory(),
                             configuration.getBootstrap().getAccessControl());
                     var before = storage.load().valueOrFailure("configuration before adoption").revision();
-                    var component = runtimeComponent(configuration, restarted);
+                    var component = runtimeComponent(configuration, restarted, bootstrapEvents2);
                     var lifecycle = component.orionApplicationLifecycle();
                     try {
                         assertThat(lifecycle.runApplication())
@@ -197,7 +232,13 @@ class BootstrapProxyTransportIT {
                         upstream.close();
                         assertThatThrownBy(() -> restarted.repositoryProvider().openForRead(cache))
                                 .isInstanceOf(IllegalStateException.class);
-                        assertThatThrownBy(() -> BootstrapContext.open(configuration, environment))
+                        assertThatThrownBy(
+                                        () ->
+                                                BootstrapContext.open(
+                                                        configuration,
+                                                        environment,
+                                                        new pro.deta.orion.event
+                                                                .OrionEventManager()))
                                 .isInstanceOf(IllegalStateException.class)
                                 .hasMessage("Bootstrap inputs are unavailable or invalid");
                     } finally {
@@ -222,7 +263,7 @@ class BootstrapProxyTransportIT {
         source.setAuth(configuration.getBootstrap().getAccessControl().getAuth());
         source.setPath("orion.xml");
         var client = NativeGitRepositoryFactory.bootstrap(
-                NativeGitRepositoryBackend.inMemory(), environment);
+                NativeGitRepositoryBackend.inMemory(new pro.deta.orion.event.OrionEventManager()), environment);
 
         assertThatThrownBy(() -> client.resolveProvisional("guessed-cache", source, false))
                 .isInstanceOf(IllegalStateException.class)

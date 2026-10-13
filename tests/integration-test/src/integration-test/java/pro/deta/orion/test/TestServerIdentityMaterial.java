@@ -9,7 +9,6 @@ import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
-import pro.deta.orion.transport.git.SshHostKeyLifecycle;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -46,7 +45,7 @@ final class TestServerIdentityMaterial implements AutoCloseable {
             return new TestServerIdentityMaterial(
                     material,
                     readActiveKey(configuration),
-                    SshHostKeyLifecycle.open(material.sshHostKeyMaterial(), List.of()));
+                    material.sshHostKeys(List.of()));
         } catch (Exception failure) {
             material.close();
             throw failure;

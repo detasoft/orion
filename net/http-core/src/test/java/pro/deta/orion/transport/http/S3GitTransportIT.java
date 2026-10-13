@@ -43,6 +43,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @Timeout(180)
 class S3GitTransportIT {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @TempDir
     Path directory;
 
@@ -105,7 +113,7 @@ class S3GitTransportIT {
     private static NativeGitRepositoryProvider provider(MinioS3TestServer server) {
         return S3NativeGitRepositoryFactory.repositories("s3://" + server.bucketName() + "/repos", server.endpoint(),
                 Map.of("accessKeyId", server.accessKeyId(), "secretAccessKey", "env:SECRET"),
-                Map.of("SECRET", server.secretAccessKey()));
+                Map.of("SECRET", server.secretAccessKey()), EVENTS.manager());
     }
 
     private static final class Http implements AutoCloseable {

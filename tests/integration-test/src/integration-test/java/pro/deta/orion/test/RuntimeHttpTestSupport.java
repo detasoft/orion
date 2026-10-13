@@ -73,11 +73,10 @@ final class RuntimeHttpTestSupport {
 
     static void updateConfiguration(StartedOrion orion, byte[] content, String etag) throws IOException {
         OrionDocument document = OrionXml.read(new ByteArrayInputStream(content));
-        orion.component().configurationEditor().edit(
-                etag.replace("\"", ""), "Update test configuration",
-                UserEmail.EMPTY)
-            .update(ignored -> document)
-            .apply();
+        TestRuntimeBootstrap.updateConfiguration(orion.component(),
+                new pro.deta.orion.config.OrionRevision.Stored(etag.replace("\"", "")),
+                new pro.deta.orion.internal.ChangeMetadata(UserEmail.EMPTY, "Update test configuration"),
+                ignored -> document);
     }
 
     static String aclEtag(StartedOrion orion, String token) throws IOException {

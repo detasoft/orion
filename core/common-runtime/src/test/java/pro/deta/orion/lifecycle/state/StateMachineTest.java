@@ -9,6 +9,8 @@ import org.junit.jupiter.api.TestInfo;
 import org.slf4j.LoggerFactory;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
 
+import pro.deta.orion.util.EventListeners;
+import pro.deta.orion.util.Subscription;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -1088,7 +1090,7 @@ class StateMachineTest {
         });
         machine.subscribe(events::add);
 
-        try (LogCapture logs = captureStateMachineLogs()) {
+        try (LogCapture logs = captureEventListenerLogs()) {
             StateTransitionResult event = machine.execute(actions.start(), new StartAction("ok"));
 
             assertThat(event.to()).isEqualTo(RUNNING);
@@ -1104,7 +1106,7 @@ class StateMachineTest {
             assertThat(logs.events()).anySatisfy(record -> {
                 assertThat(record.getLevel()).isEqualTo(Level.WARN);
                 assertThat(record.getFormattedMessage())
-                        .contains("State machine subscriber failed while observing event");
+                        .contains("Event listener failed for");
                 assertThat(record.getThrowableProxy().getMessage()).isEqualTo(subscriberFailure.getMessage());
             });
         }
@@ -1240,7 +1242,7 @@ class StateMachineTest {
                 .newStateMachine();
         List<StateMachineEvent> events = new ArrayList<>();
 
-        StateMachineSubscription subscription = machine.subscribe(events::add);
+        Subscription subscription = machine.subscribe(events::add);
         subscription.close();
         machine.execute(start, Void.EMPTY);
 
@@ -1260,7 +1262,8 @@ class StateMachineTest {
                 .newStateMachine();
         List<String> messages = new ArrayList<>();
         String displayName = testInfo.getDisplayName();
-        try (StateMachineSubscription ignored = machine.subscribe(new StateMachineLoggingSubscriber(displayName, messages::add))) {
+        try (Subscription ignored = machine.subscribe(
+                new StateMachineLoggingSubscriber(displayName, messages::add))) {
             machine.execute(start, Void.EMPTY);
         }
 
@@ -1740,7 +1743,7 @@ class StateMachineTest {
                 .newStateMachine();
     }
 
-    private static LogCapture captureStateMachineLogs() {
+    private static LogCapture captureEventListenerLogs() {
         return new LogCapture();
     }
 
@@ -1763,7 +1766,7 @@ class StateMachineTest {
     }
 
     private static final class LogCapture implements AutoCloseable {
-        private final Logger logger = (Logger) LoggerFactory.getLogger(StateMachine.class);
+        private final Logger logger = (Logger) LoggerFactory.getLogger(EventListeners.class);
         private final Level previousLevel;
         private final boolean previousAdditive;
         private final ListAppender<ILoggingEvent> appender = new ListAppender<>();

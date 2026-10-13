@@ -29,6 +29,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Timeout(120)
 class S3NativeGitRepositoryProviderIT {
+    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+            new pro.deta.orion.test.util.TestEvents();
+
+    @org.junit.jupiter.api.AfterEach
+    void stopTestEvents() {
+        EVENTS.close();
+    }
+
     @TempDir
     Path directory;
     @Test
@@ -107,10 +115,10 @@ class S3NativeGitRepositoryProviderIT {
         try (MinioS3TestServer server = MinioS3TestServer.start("orion-s3-" + UUID.randomUUID());
              NativeGitRepositoryProvider missingBucket = S3NativeGitRepositoryFactory.repositories(
                      "s3://missing-" + UUID.randomUUID() + "/repos", server.endpoint(),
-                     auth(server), environment(server));
+                     auth(server), environment(server), EVENTS.manager());
              NativeGitRepositoryProvider denied = S3NativeGitRepositoryFactory.repositories(
                      "s3://" + server.bucketName() + "/repos", server.endpoint(), auth(server),
-                     Map.of("SECRET", "wrong-secret"))) {
+                     Map.of("SECRET", "wrong-secret"), EVENTS.manager())) {
             for (NativeGitRepositoryProvider provider : List.of(missingBucket, denied)) {
                 assertFailure(provider.find("repo"), Result.FailureCode.GENERAL);
                 assertFailure(provider.create("repo"), Result.FailureCode.GENERAL);
@@ -166,9 +174,12 @@ class S3NativeGitRepositoryProviderIT {
                 fixture.provider.create("acme/dev/second").valueOrFailure("second bucket");
                 assertThat(fixture.provider.repositoryNames()).containsExactly("acme/dev/first", "acme/dev/second");
                 try (S3Transport reopened = new S3Transport()) {
-                    ConfiguredNativeGitRepositoryFactory readerFactory = new ConfiguredNativeGitRepositoryFactory(
-                            pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.file(fixture.localRoot),
-                            reopened);
+                    ConfiguredNativeGitRepositoryFactory readerFactory =
+                            new ConfiguredNativeGitRepositoryFactory(
+                                    pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend
+                                            .file(fixture.localRoot, EVENTS.manager()),
+                                    reopened,
+                                    EVENTS.manager());
                     try (NativeGitRepositoryProvider reader = new NativeGitRepositoryProvider(readerFactory)) {
                         readerFactory.activate(fixture.current::get, fixture.secrets, ignored -> false);
                         reader.find("acme/dev/first").valueOrFailure("reopen persisted metadata");
@@ -203,7 +214,7 @@ class S3NativeGitRepositoryProviderIT {
 
     private static NativeGitRepositoryProvider provider(MinioS3TestServer server, String prefix) {
         return S3NativeGitRepositoryFactory.repositories("s3://" + server.bucketName() + "/" + prefix,
-                server.endpoint(), auth(server), environment(server));
+                server.endpoint(), auth(server), environment(server), EVENTS.manager());
     }
 
     private static Map<String, String> auth(MinioS3TestServer server) {
