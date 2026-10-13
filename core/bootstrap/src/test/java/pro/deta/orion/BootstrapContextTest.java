@@ -1544,7 +1544,8 @@ class BootstrapContextTest {
         return BootstrapContext.adoptProxies(
                 new OrionConfigurationEditor(
                         storage,
-                        new BootstrapConfiguration(), context.configurationCipher(), context.configurationMaterial()),
+                        new BootstrapConfiguration(), context.configurationCipher(), context.configurationMaterial(),
+                        EVENTS.rawManager()),
                 context.repositoryFactory(), context.configurationCipher(), approved);
     }
 

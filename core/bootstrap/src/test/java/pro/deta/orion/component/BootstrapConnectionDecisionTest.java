@@ -231,16 +231,15 @@ class BootstrapConnectionDecisionTest {
             editor = new OrionConfigurationEditor(storage,
                 new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
                 material.configurationCipher(),
-                material.configurationMaterial());
+                material.configurationMaterial(),
+                EVENTS.manager());
             acl =
                     new OrionAccessControlServiceImpl(
                             new OrionPasswordHashingService(),
                             new RootPasswordReset(false),
                             material.serverIdentity(),
-                            storage,
                             new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
-                            editor,
-                            EVENTS.manager());
+                            editor);
             acl.onStart();
             secrets =
                     new ConfigurationSecrets(

@@ -70,16 +70,15 @@ class ConfiguredStorageManagementTest {
         editor = new OrionConfigurationEditor(storage,
                 new BootstrapConfiguration(),
                 cipher,
-                ConfigurationMaterialCapability.unavailable());
+                ConfigurationMaterialCapability.unavailable(),
+                EVENTS.manager());
         acl =
                 new OrionAccessControlServiceImpl(
                         new OrionPasswordHashingService(),
                         new RootPasswordReset(false),
                         ServerIdentityCapability.unavailable(),
-                        storage,
                         new BootstrapConfiguration(),
-                        editor,
-                        EVENTS.manager());
+                        editor);
         acl.onStart();
         management = new ConfiguredStorageManagement(acl, editor, cipher, repositories);
         actor = SecurityContext.createContext().withUserIdentity(

@@ -267,7 +267,8 @@ class NativeGitOrionConfigurationStorageTest {
                 storage,
                 new BootstrapConfiguration(),
                 pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),
-                pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable());
+                pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable(),
+                EVENTS.manager());
     }
 
     @Test

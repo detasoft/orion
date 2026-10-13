@@ -1,7 +1,6 @@
 package pro.deta.orion.acl;
 
 import pro.deta.orion.util.Subscription;
-import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.config.*;
 import jakarta.inject.Inject;
@@ -61,30 +60,24 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private final OrionPasswordHashingService orionPasswordHashingService;
     private final RootPasswordReset rootPasswordReset;
     private final OrionConfigurationEditor editor;
-    private final OrionVersionedConfigurationStorage configurationStorage;
     private final boolean createDefaultIfMissing;
     private volatile OrionDocumentRevision activeConfiguration;
     private final JwtAccessTokenService jwtAccessTokenService;
     private final AtomicReference<char[]> plainRootToken = new AtomicReference<>();
     private volatile Subscription changeSubscription;
-    private final OrionEventManager events;
 
     @Inject
     public OrionAccessControlServiceImpl(
             OrionPasswordHashingService orionPasswordHashingService,
             RootPasswordReset rootPasswordReset,
             ServerIdentityCapability serverIdentity,
-            OrionVersionedConfigurationStorage configurationStorage,
             BootstrapConfiguration bootstrapConfiguration,
-            OrionConfigurationEditor editor,
-            OrionEventManager events) {
+            OrionConfigurationEditor editor) {
         this.orionPasswordHashingService = orionPasswordHashingService;
         this.rootPasswordReset = rootPasswordReset;
-        this.configurationStorage = configurationStorage;
         this.createDefaultIfMissing = bootstrapConfiguration.getBootstrap().getAccessControl()
                 .isCreateDefaultIfMissing();
         this.editor = editor;
-        this.events = Objects.requireNonNull(events, "events");
         this.jwtAccessTokenService = new JwtAccessTokenService(serverIdentity);
     }
 
@@ -96,11 +89,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private synchronized void loadAccessControlOnStart() {
         try {
-            changeSubscription = events.subscribe(ConfigurationChanged.class, event -> {
-                if (event.storage() == configurationStorage) {
-                    onConfigurationChange(event.snapshot());
-                }
-            });
+            changeSubscription = editor.subscribe(this::onConfigurationChange);
             OrionDocumentRevision read = editor.load();
             switch (read.result()) {
                 case Result.Success<OrionDocument> ignored -> {
@@ -274,16 +263,14 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                     SshCredentialFailureCode.USER_NOT_FOUND,
                     "User is not available");
         }
-        synchronized (configurationStorage) {
-            OrionDocumentRevision snapshot = editor.load();
-            return switch (snapshot.result()) {
-                case Result.Failure<OrionDocument> failure -> SshCredentialListResult.failure(
-                        SshCredentialFailureCode.PERSISTENCE_FAILED,
-                        "Cannot load SSH credentials",
-                        failure.throwable());
-                case Result.Success<OrionDocument> ignored -> listSshCredentials(snapshot, userId);
-            };
-        }
+        OrionDocumentRevision snapshot = editor.load();
+        return switch (snapshot.result()) {
+            case Result.Failure<OrionDocument> failure -> SshCredentialListResult.failure(
+                    SshCredentialFailureCode.PERSISTENCE_FAILED,
+                    "Cannot load SSH credentials",
+                    failure.throwable());
+            case Result.Success<OrionDocument> ignored -> listSshCredentials(snapshot, userId);
+        };
     }
 
     private SshCredentialListResult listSshCredentials(OrionDocumentRevision snapshot, String userId) {

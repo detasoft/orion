@@ -70,8 +70,9 @@ class NativeSshCredentialPersistenceTest {
         OrionConfigurationEditor editor = new OrionConfigurationEditor(storage,
                 new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
                 pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),
-                pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable());
-        OrionAccessControlServiceImpl service = service(storage, editor);
+                pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable(),
+                EVENTS.manager());
+        OrionAccessControlServiceImpl service = service(editor);
         try {
             service.onStart();
             assertThat(service.authenticateSshUser("alice", key.getPublic().getEncoded()))
@@ -97,13 +98,16 @@ class NativeSshCredentialPersistenceTest {
             service.onStop();
         }
         OrionAccessControlServiceImpl reopened =
-                service(
+                service(new OrionConfigurationEditor(
                         new NativeGitOrionConfigurationStorage(
                                 NativeGitRepositoryProvider.file(root, EVENTS.manager()),
                                 "acl",
                                 "refs/heads/main",
                                 "users.xml"),
-                        editor);
+                        new BootstrapConfiguration(),
+                        pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),
+                        pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable(),
+                        EVENTS.manager()));
         try {
             reopened.onStart();
             assertThat(reopened.authenticateSshUser("alice", key.getPublic().getEncoded()))
@@ -116,15 +120,13 @@ class NativeSshCredentialPersistenceTest {
     }
 
     private static OrionAccessControlServiceImpl service(
-            OrionVersionedConfigurationStorage storage, OrionConfigurationEditor editor
+            OrionConfigurationEditor editor
     ) {
         return new OrionAccessControlServiceImpl(
                 new OrionPasswordHashingService(),
                 new RootPasswordReset(false),
                 ServerIdentityCapability.unavailable(),
-                storage,
                 new BootstrapConfiguration(),
-                editor,
-                EVENTS.manager());
+                editor);
     }
 }

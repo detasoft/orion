@@ -2,6 +2,7 @@ package pro.deta.orion.config;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
+import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -9,14 +10,16 @@ import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
 import pro.deta.orion.util.Result;
+import pro.deta.orion.util.Subscription;
 import java.security.GeneralSecurityException;
 import java.util.Objects;
 import java.util.function.Consumer;
 
-/** Owns configuration reads and candidates, saving against the revision captured for each edit. */
+/** Owns configuration reads, change subscriptions, and candidates saved against their captured revisions. */
 @Singleton
 public final class OrionConfigurationEditor {
     private final OrionVersionedConfigurationStorage storage;
+    private final OrionEventManager events;
     private final ConfigurationCipherCapability configurationCipher;
     private final ConfigurationMaterialCapability configurationMaterial;
     private final KeyMaterialScope materialScope;
@@ -24,8 +27,9 @@ public final class OrionConfigurationEditor {
     @Inject
     public OrionConfigurationEditor(OrionVersionedConfigurationStorage storage,
             BootstrapConfiguration configuration, ConfigurationCipherCapability configurationCipher,
-            ConfigurationMaterialCapability configurationMaterial) {
+            ConfigurationMaterialCapability configurationMaterial, OrionEventManager events) {
         this.storage = storage;
+        this.events = Objects.requireNonNull(events, "events");
         this.configurationCipher = configurationCipher;
         this.configurationMaterial = configurationMaterial;
         this.materialScope = KeyMaterialScope.cluster(configuration.getBootstrap().getKeyMaterial().getClusterId());
@@ -33,6 +37,15 @@ public final class OrionConfigurationEditor {
 
     public OrionDocumentRevision load() {
         return storage.load();
+    }
+
+    public Subscription subscribe(Consumer<OrionDocumentRevision> listener) {
+        Objects.requireNonNull(listener, "listener");
+        return events.subscribe(ConfigurationChanged.class, event -> {
+            if (event.storage() == storage) {
+                listener.accept(event.snapshot());
+            }
+        });
     }
 
     public OrionConfigurationModification edit(

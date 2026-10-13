@@ -61,7 +61,7 @@ class OrionAdminAccessControlRouteTest {
         SecurityContext admin = SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl("admin", List.of(grant)));
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
-                new OrionHttpRouteRegistry(Set.of(new OrionAdminAccessControlRoute(configuration.storage()))),
+                new OrionHttpRouteRegistry(Set.of(new OrionAdminAccessControlRoute(configuration.editor()))),
                 new OrionHttpResponseWriter(new ObjectMapper())) {
             @Override
             public void service(HttpServletRequest request, HttpServletResponse response)

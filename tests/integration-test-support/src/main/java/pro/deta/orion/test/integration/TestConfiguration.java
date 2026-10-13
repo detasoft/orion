@@ -56,9 +56,9 @@ public final class TestConfiguration implements AutoCloseable {
             ServerIdentityCapability identity) {
         this.events = events;
         this.cipher = cipher;
-        editor = new OrionConfigurationEditor(storage, bootstrap, cipher, material);
+        editor = new OrionConfigurationEditor(storage, bootstrap, cipher, material, events.manager());
         acl = new OrionAccessControlServiceImpl(new OrionPasswordHashingService(), new RootPasswordReset(false),
-                identity, storage, bootstrap, editor, events.manager());
+                identity, bootstrap, editor);
         events.own(this);
         acl.onStart();
     }
