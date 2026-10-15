@@ -4,9 +4,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import pro.deta.orion.keymaterial.KeyMaterialAdministrationCapability;
-import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialInventoryEntry;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 
@@ -23,7 +23,7 @@ class OrionAdminKeyMaterialRouteTest {
         KeyMaterialInventoryEntry entry = new KeyMaterialInventoryEntry(
                 "acme-identity", "TLS_IDENTITY", "RSA", 1, "cluster:5:orion",
                 "-----BEGIN PUBLIC KEY-----\npublic\n-----END PUBLIC KEY-----", "fingerprint", List.of());
-        ConfigurationMaterialCapability material = new ConfigurationMaterialCapability() {
+        OrionKeyMaterial material = new OrionKeyMaterial() {
             @Override
             public void require(KeyMaterialDescriptor descriptor) {
             }
@@ -37,8 +37,7 @@ class OrionAdminKeyMaterialRouteTest {
                 return List.of(entry);
             }
         };
-        OrionAdminKeyMaterialRoute route = new OrionAdminKeyMaterialRoute(material,
-                KeyMaterialAdministrationCapability.unavailable(), new ObjectMapper());
+        OrionAdminKeyMaterialRoute route = new OrionAdminKeyMaterialRoute(material, new ObjectMapper());
 
         assertThat(route.definition().authorization()).isEqualTo(APPLICATION_ADMIN);
         assertThat(route.doGet(null).body()).isEqualTo(Map.of("entries", List.of(entry)));
@@ -48,11 +47,14 @@ class OrionAdminKeyMaterialRouteTest {
     @ValueSource(strings = {"private-secret", "{\"kty\":\"RSA\",\"d\":\"private-secret\"}"})
     void createsKeysWithoutReturningSecretsAndClearsTheImportedInput(String privateKey) throws Exception {
         List<char[]> received = new ArrayList<>();
-        OrionAdminKeyMaterialRoute route = new OrionAdminKeyMaterialRoute(null, (alias, purpose, pem) -> {
-            assertThat(alias).isEqualTo("imported");
-            assertThat(purpose.name()).isEqualTo("ACME_ACCOUNT");
-            assertThat(pem).containsExactly(privateKey.toCharArray());
-            received.add(pem);
+        OrionAdminKeyMaterialRoute route = new OrionAdminKeyMaterialRoute(new OrionKeyMaterial() {
+            @Override
+            public void createKey(String alias, KeyMaterialPurpose purpose, char[] pem) {
+                assertThat(alias).isEqualTo("imported");
+                assertThat(purpose.name()).isEqualTo("ACME_ACCOUNT");
+                assertThat(pem).containsExactly(privateKey.toCharArray());
+                received.add(pem);
+            }
         }, new ObjectMapper());
         OrionHttpResponse response = route.doPost(AcmeAdministrationTest.httpRequest("POST",
                 "/api/admin/key-material", new ObjectMapper().writeValueAsString(Map.of(
@@ -66,8 +68,11 @@ class OrionAdminKeyMaterialRouteTest {
 
     @Test
     void rejectsInvalidAndOversizedRequestsWithoutInvokingTheStore() throws Exception {
-        OrionAdminKeyMaterialRoute route = new OrionAdminKeyMaterialRoute(null, (alias, purpose, pem) -> {
-            throw new AssertionError("Invalid request reached key store");
+        OrionAdminKeyMaterialRoute route = new OrionAdminKeyMaterialRoute(new OrionKeyMaterial() {
+            @Override
+            public void createKey(String alias, KeyMaterialPurpose purpose, char[] pem) {
+                throw new AssertionError("Invalid request reached key store");
+            }
         }, new ObjectMapper());
         for (String body : List.of("null", "{", "{\"purpose\":\"UNKNOWN\"}")) {
             assertThat(route.doPost(AcmeAdministrationTest.httpRequest("POST", "/api/admin/key-material",
@@ -80,9 +85,12 @@ class OrionAdminKeyMaterialRouteTest {
     @Test
     void sanitizesImportFailuresAndClearsSecretsWhenTheStoreRejectsTheKey() throws Exception {
         List<char[]> received = new ArrayList<>();
-        OrionAdminKeyMaterialRoute route = new OrionAdminKeyMaterialRoute(null, (alias, purpose, pem) -> {
-            received.add(pem);
-            throw new IllegalArgumentException("private-secret");
+        OrionAdminKeyMaterialRoute route = new OrionAdminKeyMaterialRoute(new OrionKeyMaterial() {
+            @Override
+            public void createKey(String alias, KeyMaterialPurpose purpose, char[] pem) {
+                received.add(pem);
+                throw new IllegalArgumentException("private-secret");
+            }
         }, new ObjectMapper());
         OrionHttpResponse response = route.doPost(AcmeAdministrationTest.httpRequest("POST",
                 "/api/admin/key-material", """

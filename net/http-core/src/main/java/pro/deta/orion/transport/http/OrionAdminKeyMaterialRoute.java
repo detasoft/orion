@@ -2,8 +2,7 @@ package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
-import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
-import pro.deta.orion.keymaterial.KeyMaterialAdministrationCapability;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
@@ -14,17 +13,14 @@ import java.util.Map;
 import java.util.Arrays;
 
 public final class OrionAdminKeyMaterialRoute extends BaseAdminRoute {
-    private final ConfigurationMaterialCapability material;
-    private final KeyMaterialAdministrationCapability administration;
+    private final OrionKeyMaterial material;
     private final ObjectMapper mapper;
 
     @Inject
-    public OrionAdminKeyMaterialRoute(ConfigurationMaterialCapability material,
-            KeyMaterialAdministrationCapability administration, ObjectMapper mapper) {
+    public OrionAdminKeyMaterialRoute(OrionKeyMaterial material, ObjectMapper mapper) {
         super(OrionAdminPaths.KEY_MATERIAL, OrionHttpRouteDefinition.Method.GET,
                 OrionHttpRouteDefinition.Method.POST);
         this.material = material;
-        this.administration = administration;
         this.mapper = mapper;
     }
 
@@ -51,7 +47,7 @@ public final class OrionAdminKeyMaterialRoute extends BaseAdminRoute {
             if (bytes.length > 32768) return OrionHttpResponse.empty(413);
             input = mapper.readValue(bytes, CreateKey.class);
             if (input == null) throw new IllegalArgumentException("Key settings are required");
-            administration.create(input.alias(), input.purpose(), input.privateKeyPem());
+            material.createKey(input.alias(), input.purpose(), input.privateKeyPem());
             return OrionHttpResponse.empty(201).withHeader("Cache-Control", "no-store");
         } catch (IllegalArgumentException | JsonProcessingException invalid) {
             return OrionHttpResponse.text(400,

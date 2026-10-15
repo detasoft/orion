@@ -1,7 +1,7 @@
 package pro.deta.orion.transport.http;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.keymaterial.TlsCapability;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
@@ -33,7 +33,7 @@ class JettyHTTPServerStateMachineTest {
                 new JettyHTTPServer(
                         new BootstrapConfiguration(),
                         desiredState.acl(),
-                        TlsCapability.unavailable(),
+                        OrionKeyMaterial.unavailable(),
                         null,
                         null,
                         null);

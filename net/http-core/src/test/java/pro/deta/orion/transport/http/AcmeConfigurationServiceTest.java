@@ -3,8 +3,7 @@ package pro.deta.orion.transport.http;
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.config.OrionConfigurationEditor;
 
-import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
-import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.test.integration.TestConfiguration;
 import java.time.Instant;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -30,7 +29,6 @@ import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialScope;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
-import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -54,12 +52,12 @@ class AcmeConfigurationServiceTest {
     @Test
     void selectsStoredAccountKeyPersistsItsReferenceAndReusesItForIssuance() throws Exception {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
-            owner.administration().create("existing-account", KeyMaterialPurpose.ACME_ACCOUNT, null);
+            owner.createKey("existing-account", KeyMaterialPurpose.ACME_ACCOUNT, null);
             OrionMaterialReference reference = new OrionMaterialReference("existing-account", 1);
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
             bootstrap.getBootstrap().getKeyMaterial().setClusterId("test");
             TestConfiguration desired = new TestConfiguration(EVENTS, bootstrap, owner.configurationCipher(),
-                    owner.configurationMaterial(), owner.serverIdentity());
+                    owner, owner.signingIdentity());
             desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("r1"));
             ConfigurationSecrets secrets = new ConfigurationSecrets(
                     () -> desired.acl().configuration().result()
@@ -80,12 +78,12 @@ class AcmeConfigurationServiceTest {
                 }
             };
             AcmeCertificateService certificates = new AcmeCertificateService(
-                    bootstrap, desired.acl(), owner.acme(), issuer, secrets);
+                    bootstrap, desired.acl(), owner, issuer, secrets);
             AcmeConfigurationService service = new AcmeConfigurationService(desired.acl(),
                     secrets,
                     editor,
                     certificates,
-                    owner.configurationMaterial(),
+                    owner,
                     bootstrap);
             AcmeConfigurationService.View view = service.save(new AcmeConfigurationService.Settings("r1",
                     "letsencrypt", "", "admin@example.test", List.of("example.test"), "", null, reference), "root");
@@ -112,7 +110,7 @@ class AcmeConfigurationServiceTest {
                     """, AcmeAdministrationTest.admin())).status()).isEqualTo(200);
             certificates.issue(new AcmeCertificateService.IssueRequest(null, null, null, null, null, null, true));
             assertThat(issuedKeys).hasSize(1);
-            String expected = owner.configurationMaterial().inventory().getFirst().publicKeyPem();
+            String expected = owner.inventory().getFirst().publicKeyPem();
             assertThat(expected.replaceAll("\\s", "")).contains(java.util.Base64.getEncoder()
                     .encodeToString(issuedKeys.getFirst().getPublic().getEncoded()));
             for (OrionMaterialReference invalid : List.of(new OrionMaterialReference("missing", 1),
@@ -132,7 +130,7 @@ class AcmeConfigurationServiceTest {
                                                 "root"))
                         .isInstanceOf(IllegalArgumentException.class);
             }
-            assertThat(owner.configurationMaterial().inventory()).noneMatch(entry -> entry.alias().equals("missing"));
+            assertThat(owner.inventory()).noneMatch(entry -> entry.alias().equals("missing"));
             assertThat(service.view().accountMaterial()).isEqualTo(reference);
         }
     }
@@ -141,18 +139,18 @@ class AcmeConfigurationServiceTest {
     void switchingExplicitAccountDoesNotReuseSavedEabCredentials() throws Exception {
         OrionDocument initial = OrionDocument.withAccessControl(new AccessControl());
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
-            owner.administration().create("other-account", KeyMaterialPurpose.ACME_ACCOUNT, null);
+            owner.createKey("other-account", KeyMaterialPurpose.ACME_ACCOUNT, null);
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
             bootstrap.getBootstrap().getKeyMaterial().setClusterId("test");
             TestConfiguration desired = new TestConfiguration(EVENTS, bootstrap, owner.configurationCipher(),
-                    owner.configurationMaterial(), owner.serverIdentity());
+                    owner, owner.signingIdentity());
             desired.publish(initial, Optional.of("r1"));
             ConfigurationSecrets secrets = new ConfigurationSecrets(
                     () -> desired.acl().configuration().result()
                             .valueOrFailure("Cannot read configuration document"), owner.configurationCipher());
             AcmeConfigurationService service = new AcmeConfigurationService(desired.acl(), secrets, null,
-                    new AcmeCertificateService(bootstrap, desired.acl(), owner.acme(), null, secrets),
-                    owner.configurationMaterial(), bootstrap);
+                    new AcmeCertificateService(bootstrap, desired.acl(), owner, null, secrets),
+                    owner, bootstrap);
             OrionDocument saved = service.updated(initial, settings("zerossl", "key-id", EAB_KEY));
             desired.publish(saved, Optional.of("r2"));
             assertThatThrownBy(() -> service.updated(saved, new AcmeConfigurationService.Settings("r2",
@@ -179,8 +177,8 @@ class AcmeConfigurationServiceTest {
         desired.publish(initial, Optional.of("r1"));
         AcmeConfigurationService service = new AcmeConfigurationService(desired.acl(), null, null,
                 new AcmeCertificateService(new BootstrapConfiguration(), desired.acl(),
-                        AcmeKeyMaterialCapability.unavailable(), null, null),
-                ConfigurationMaterialCapability.unavailable(), new BootstrapConfiguration());
+                        OrionKeyMaterial.unavailable(), null, null),
+                OrionKeyMaterial.unavailable(), new BootstrapConfiguration());
         AcmeConfigurationService.View view = service.view();
         assertThat(view.enabled()).isFalse();
         assertThat(view.directoryUrl()).isEqualTo("https://acme-staging-v02.api.letsencrypt.org/directory");
@@ -197,7 +195,7 @@ class AcmeConfigurationServiceTest {
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
             bootstrap.getBootstrap().getKeyMaterial().setClusterId("test");
             TestConfiguration desired = new TestConfiguration(EVENTS, bootstrap, owner.configurationCipher(),
-                    owner.configurationMaterial(), owner.serverIdentity());
+                    owner, owner.signingIdentity());
             desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("r1"));
             ConfigurationSecrets secrets = new ConfigurationSecrets(
                     () -> desired.acl().configuration().result()
@@ -224,12 +222,12 @@ class AcmeConfigurationServiceTest {
                 }
             };
             AcmeCertificateService certificates = new AcmeCertificateService(
-                    bootstrap, desired.acl(), owner.acme(), issuer, secrets);
+                    bootstrap, desired.acl(), owner, issuer, secrets);
             AcmeConfigurationService service = new AcmeConfigurationService(desired.acl(),
                     secrets,
                     editor,
                     certificates,
-                    owner.configurationMaterial(),
+                    owner,
                     bootstrap);
 
             AcmeConfigurationService.View result = service.save(settings("zerossl", "key-id", EAB_KEY), "root");
@@ -261,7 +259,7 @@ class AcmeConfigurationServiceTest {
                     AcmeAdministrationTest.admin())))
                     .isEqualTo(new CommandResult.Message("Certificate issued and saved."));
             AcmeCertificateService restarted = new AcmeCertificateService(
-                    bootstrap, desired.acl(), owner.acme(), issuer, secrets);
+                    bootstrap, desired.acl(), owner, issuer, secrets);
             assertThat(new OrionAdminAcmeCertificateRoute(restarted, new ObjectMapper())
                     .doPost(AcmeAdministrationTest.httpRequest("POST", "/api/admin/acme/certificate", "",
                             AcmeAdministrationTest.admin())).status()).isEqualTo(200);
@@ -293,15 +291,15 @@ class AcmeConfigurationServiceTest {
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
             bootstrap.getBootstrap().getKeyMaterial().setClusterId("test");
             TestConfiguration desired = new TestConfiguration(EVENTS, bootstrap,
-                    owner.configurationCipher(), owner.configurationMaterial(), owner.serverIdentity());
+                    owner.configurationCipher(), owner, owner.signingIdentity());
             desired.publish(initial, Optional.of("r1"));
             ConfigurationSecrets secrets = new ConfigurationSecrets(
                     () -> desired.acl().configuration().result()
                             .valueOrFailure("Cannot read configuration document"), owner.configurationCipher());
             AcmeCertificateService certificates = new AcmeCertificateService(
-                    bootstrap, desired.acl(), owner.acme(), null, secrets);
+                    bootstrap, desired.acl(), owner, null, secrets);
             AcmeConfigurationService service = new AcmeConfigurationService(desired.acl(), secrets, null,
-                    certificates, owner.configurationMaterial(), bootstrap);
+                    certificates, owner, bootstrap);
             saved = service.updated(initial, settings("zerossl", "key-id", EAB_KEY));
             certificates.prepareMaterial(saved.system().https().orElseThrow());
             desired.publish(saved, Optional.of("r2"));
@@ -343,10 +341,10 @@ class AcmeConfigurationServiceTest {
                             new AcmeCertificateService(
                                     new BootstrapConfiguration(),
                                     desired.acl(),
-                                    owner.acme(),
+                                    owner,
                                     null,
                                     secrets),
-                            owner.configurationMaterial(),
+                            owner,
                             new BootstrapConfiguration());
             OrionDocument saved = service.updated(initial, settings("zerossl", "key-id", EAB_KEY));
             String original = saved.system().https().orElseThrow().acme().orElseThrow().eabSecret().orElseThrow();
@@ -373,8 +371,8 @@ class AcmeConfigurationServiceTest {
         desired.publish(initial, Optional.of("r1"));
         AcmeConfigurationService service = new AcmeConfigurationService(desired.acl(), null, null,
                 new AcmeCertificateService(new BootstrapConfiguration(), desired.acl(),
-                        AcmeKeyMaterialCapability.unavailable(), null, null),
-                ConfigurationMaterialCapability.unavailable(), new BootstrapConfiguration());
+                        OrionKeyMaterial.unavailable(), null, null),
+                OrionKeyMaterial.unavailable(), new BootstrapConfiguration());
         assertThatThrownBy(() -> service.updated(initial, settings("zerossl", "", "")))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> service.updated(initial, settings("custom", "id", "")))

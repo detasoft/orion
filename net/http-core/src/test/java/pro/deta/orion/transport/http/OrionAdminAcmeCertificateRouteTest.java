@@ -5,7 +5,7 @@ import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 
 import pro.deta.orion.test.integration.TestConfiguration;
@@ -172,7 +172,7 @@ class OrionAdminAcmeCertificateRouteTest {
             super(
                     new BootstrapConfiguration(),
                     new TestConfiguration(EVENTS).acl(),
-                    AcmeKeyMaterialCapability.unavailable(),
+                    OrionKeyMaterial.unavailable(),
                     new AcmeCertificateIssuer(null), null);
             this.issued = issued;
             this.saved = saved;
@@ -194,7 +194,7 @@ class OrionAdminAcmeCertificateRouteTest {
             super(
                     new BootstrapConfiguration(),
                     new TestConfiguration(EVENTS).acl(),
-                    AcmeKeyMaterialCapability.unavailable(),
+                    OrionKeyMaterial.unavailable(),
                     new AcmeCertificateIssuer(null), null);
         }
 

@@ -25,13 +25,10 @@ import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.S3Transport;
-import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
-import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
-import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
-import pro.deta.orion.keymaterial.KeyMaterialAdministrationCapability;
-import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
+import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
+import pro.deta.orion.keymaterial.SigningIdentity;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
-import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -953,25 +950,25 @@ class InternalConfigurationRepositoryLifecycleIT {
     }
 
     private static OrionComponent component(BootstrapConfiguration configuration) {
-        return component(configuration, ServerIdentityCapability.unavailable());
+        return component(configuration, SigningIdentity.unavailable());
     }
 
     private static OrionComponent component(
             BootstrapConfiguration configuration,
             RootPasswordReset rootPasswordReset) {
-        return component(configuration, rootPasswordReset, ServerIdentityCapability.unavailable());
+        return component(configuration, rootPasswordReset, SigningIdentity.unavailable());
     }
 
     private static OrionComponent component(
             BootstrapConfiguration configuration,
-            ServerIdentityCapability serverIdentity) {
+            SigningIdentity serverIdentity) {
         return component(configuration, new RootPasswordReset(false), serverIdentity);
     }
 
     private static OrionComponent component(
             BootstrapConfiguration configuration,
             RootPasswordReset rootPasswordReset,
-            ServerIdentityCapability serverIdentity) {
+            SigningIdentity serverIdentity) {
         pro.deta.orion.event.OrionEventManager events = new pro.deta.orion.event.OrionEventManager();
         pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend backend =
                 pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.file(
@@ -987,13 +984,10 @@ class InternalConfigurationRepositoryLifecycleIT {
         return DaggerOrionComponent.builder()
                 .bootstrapConfiguration(configuration)
                 .rootPasswordReset(rootPasswordReset)
-                .serverIdentityCapability(serverIdentity)
-                .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
-                .configurationMaterialCapability(ConfigurationMaterialCapability.unavailable())
-                .keyMaterialAdministrationCapability(KeyMaterialAdministrationCapability.unavailable())
+                .signingIdentity(serverIdentity)
+                .keyMaterial(OrionKeyMaterial.unavailable())
                 .eventManager(events)
-                .configurationCipherCapability(ConfigurationCipherCapability.unavailable())
-                .tlsCapability(TlsCapability.unavailable())
+                .configurationSecretCipher(ConfigurationSecretCipher.unavailable())
                 .sshHostKeyCapability(SshHostKeyCapability.unavailable())
                 .nativeGitRepositoryProvider(provider)
                 .configuredRepositoryFactory(configured)
@@ -1111,9 +1105,15 @@ class InternalConfigurationRepositoryLifecycleIT {
         return generator.generateKeyPair();
     }
 
-    private record TestServerIdentity(
-            KeyPair active,
-            List<KeyPair> retained) implements ServerIdentityCapability {
+    private static final class TestServerIdentity extends SigningIdentity {
+        private final KeyPair active;
+        private final List<KeyPair> retained;
+
+        private TestServerIdentity(KeyPair active, List<KeyPair> retained) {
+            this.active = active;
+            this.retained = List.copyOf(retained);
+        }
+
         @Override
         public String activeKeyId() {
             return "active";

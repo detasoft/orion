@@ -1,8 +1,6 @@
 package pro.deta.orion.transport.http;
 
-import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
-import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
-import pro.deta.orion.keymaterial.KeyMaterialAdministrationCapability;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ReadListener;
@@ -57,7 +55,7 @@ class AcmeAdministrationTest {
         ObjectMapper mapper = new ObjectMapper();
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of(
                 new OrionAdminAcmeConfigurationRoute(null, mapper),
-                new OrionAdminKeyMaterialRoute(null, KeyMaterialAdministrationCapability.unavailable(), mapper),
+                new OrionAdminKeyMaterialRoute(OrionKeyMaterial.unavailable(), mapper),
                 new OrionAdminAcmeCertificateRoute(null, mapper))), new OrionHttpResponseWriter(mapper));
         for (SecurityContext context : List.of(SecurityContext.createContext(),
                 SecurityContext.createContext().withUserIdentity(new InternalUserImpl("reader", List.of())))) {
@@ -86,8 +84,8 @@ class AcmeAdministrationTest {
         desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("revision"));
         AcmeConfigurationService configuration = new AcmeConfigurationService(desired.acl(), null, null,
                 new AcmeCertificateService(new BootstrapConfiguration(), desired.acl(),
-                        AcmeKeyMaterialCapability.unavailable(), null, null),
-                ConfigurationMaterialCapability.unavailable(), new BootstrapConfiguration());
+                        OrionKeyMaterial.unavailable(), null, null),
+                OrionKeyMaterial.unavailable(), new BootstrapConfiguration());
         ObjectMapper mapper = new ObjectMapper();
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of(
                 new OrionAdminAcmeConfigurationRoute(configuration, mapper))), new OrionHttpResponseWriter(mapper));

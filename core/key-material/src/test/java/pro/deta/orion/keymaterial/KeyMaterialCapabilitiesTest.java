@@ -266,7 +266,11 @@ class KeyMaterialCapabilitiesTest {
             service.generateKeyIfMissing(ca, 2048);
             KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, List.of(tls, ssh, ca));
 
-            SSLContext context = capabilities.tls(
+            TestCertificateChain.Authority authority = TestCertificateChain.root("tls-root");
+            X509Certificate leaf = TestCertificateChain.leaf(
+                    "localhost", service.getKeyPair(tls.alias().value()), authority);
+            service.installAcmeCertificateChain(tls, List.of(leaf), Optional.empty(), Optional.empty());
+            SSLContext context = capabilities.certificateIdentity(
                     tls,
                     Optional.empty(),
                     List.of(),
@@ -292,16 +296,15 @@ class KeyMaterialCapabilitiesTest {
         byte[] accountPublic;
         byte[] identityPublic;
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            SelectedAcmeKeyMaterial capability = KeyMaterialCapabilities
-                    .open(service, List.of(account, identity))
-                    .acme(account, identity, Optional.empty());
+            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, List.of(account, identity));
 
-            AcmeKeyMaterial material = capability.acquire(2048, 2048);
+            AcmeKeyMaterial material = capabilities.acquireAcmeKeys(account, identity, Optional.empty(), 2048, 2048);
             accountPublic = material.accountKeyPair().getPublic().getEncoded();
             identityPublic = material.domainKeyPair().getPublic().getEncoded();
 
             assertThat(store.read().orElseThrow().version()).isEqualTo("1");
-            assertThat(capability.acquire(2048, 2048).accountKeyPair().getPublic().getEncoded())
+            AcmeKeyMaterial reused = capabilities.acquireAcmeKeys(account, identity, Optional.empty(), 2048, 2048);
+            assertThat(reused.accountKeyPair().getPublic().getEncoded())
                     .isEqualTo(accountPublic);
             assertThat(store.read().orElseThrow().version()).isEqualTo("1");
         }
@@ -309,8 +312,7 @@ class KeyMaterialCapabilitiesTest {
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
             AcmeKeyMaterial material = KeyMaterialCapabilities
                     .open(service, List.of(account, identity))
-                    .acme(account, identity, Optional.empty())
-                    .acquire(2048, 2048);
+                    .acquireAcmeKeys(account, identity, Optional.empty(), 2048, 2048);
 
             assertThat(material.accountKeyPair().getPublic().getEncoded()).isEqualTo(accountPublic);
             assertThat(material.domainKeyPair().getPublic().getEncoded()).isEqualTo(identityPublic);
@@ -326,11 +328,9 @@ class KeyMaterialCapabilitiesTest {
         KeyMaterialDescriptor identity = descriptor(
                 "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.EC, 1, CLUSTER);
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            SelectedAcmeKeyMaterial capability = KeyMaterialCapabilities
-                    .open(service, List.of(account, identity))
-                    .acme(account, identity, Optional.empty());
+            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, List.of(account, identity));
 
-            assertThatThrownBy(() -> capability.acquire(2048, 2048))
+            assertThatThrownBy(() -> capabilities.acquireAcmeKeys(account, identity, Optional.empty(), 2048, 2048))
                     .isInstanceOf(Exception.class);
             assertThat(store.read()).isEmpty();
         }
@@ -349,10 +349,10 @@ class KeyMaterialCapabilitiesTest {
             KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(
                     service, List.of(account, signing, identity));
 
-            assertThatThrownBy(() -> capabilities.acme(signing, identity, Optional.empty()))
+            assertThatThrownBy(() -> capabilities.acquireAcmeKeys(signing, identity, Optional.empty(), 2048, 2048))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("ACME_ACCOUNT");
-            assertThatThrownBy(() -> capabilities.acme(account, signing, Optional.empty()))
+            assertThatThrownBy(() -> capabilities.acquireAcmeKeys(account, signing, Optional.empty(), 2048, 2048))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("TLS_IDENTITY");
         }
@@ -370,10 +370,12 @@ class KeyMaterialCapabilitiesTest {
         TestCertificateChain.Authority intermediate = TestCertificateChain.intermediate("Intermediate", root);
 
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            SelectedAcmeKeyMaterial capability = KeyMaterialCapabilities
-                    .open(service, List.of(account, identity), List.of(rootDescriptor))
-                    .acme(account, identity, Optional.of(rootDescriptor));
-            KeyPair domainKey = capability.acquire(2048, 2048).domainKeyPair();
+            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(
+                    service, List.of(account, identity), List.of(rootDescriptor));
+            CertificateIdentity capability = capabilities.certificateIdentity(identity,
+                    Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED);
+            KeyPair domainKey = capabilities.acquireAcmeKeys(
+                    account, identity, Optional.of(rootDescriptor), 2048, 2048).domainKeyPair();
             X509Certificate leaf = TestCertificateChain.leaf("orion.example", domainKey, intermediate);
 
             capability.installCertificateChain(
@@ -388,18 +390,11 @@ class KeyMaterialCapabilitiesTest {
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
             KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(
                     service, List.of(account, identity), List.of(rootDescriptor));
-            SelectedAcmeKeyMaterial capability = capabilities.acme(
-                    account, identity, Optional.of(rootDescriptor));
-            SelectedTlsMaterial tls = capabilities.tls(
-                    identity,
-                    Optional.of(rootDescriptor),
-                    List.of(),
-                    TlsClientAuthentication.DISABLED);
-
+            CertificateIdentity capability = capabilities.certificateIdentity(identity,
+                    Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED);
             assertThat(capability.certificateChain()).hasSize(2);
-            assertThat(tls.certificateChain()).hasSize(2);
-            assertThat(tls.serverIssuerTrustAnchor()).contains(root.certificate());
-            assertThat(tls.createContext().getProtocol()).isEqualTo("TLS");
+            assertThat(capability.issuerTrustAnchor()).contains(root.certificate());
+            assertThat(capability.createContext().getProtocol()).isEqualTo("TLS");
         }
     }
 
@@ -415,10 +410,12 @@ class KeyMaterialCapabilitiesTest {
         TestCertificateChain.Authority otherRoot = TestCertificateChain.root("Other Root");
         TestCertificateChain.Authority intermediate = TestCertificateChain.intermediate("Intermediate", root);
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            SelectedAcmeKeyMaterial capability = KeyMaterialCapabilities
-                    .open(service, List.of(account, identity), List.of(rootDescriptor))
-                    .acme(account, identity, Optional.of(rootDescriptor));
-            KeyPair domainKey = capability.acquire(2048, 2048).domainKeyPair();
+            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(
+                    service, List.of(account, identity), List.of(rootDescriptor));
+            CertificateIdentity capability = capabilities.certificateIdentity(identity,
+                    Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED);
+            KeyPair domainKey = capabilities.acquireAcmeKeys(
+                    account, identity, Optional.of(rootDescriptor), 2048, 2048).domainKeyPair();
             KeyPair otherKey = KeyPairGenerator.getInstance("RSA").generateKeyPair();
             X509Certificate validLeaf = TestCertificateChain.leaf("orion.example", domainKey, intermediate);
             X509Certificate wrongLeaf = TestCertificateChain.leaf("other.example", otherKey, intermediate);
@@ -475,17 +472,17 @@ class KeyMaterialCapabilitiesTest {
             KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(
                     service, List.of(identity), List.of(serverRoot, clientRoot));
 
-            SelectedTlsMaterial disabled = capabilities.tls(
+            CertificateIdentity disabled = capabilities.certificateIdentity(
                     identity,
                     Optional.of(serverRoot),
                     List.of(),
                     TlsClientAuthentication.DISABLED);
-            SelectedTlsMaterial wanted = capabilities.tls(
+            CertificateIdentity wanted = capabilities.certificateIdentity(
                     identity,
                     Optional.of(serverRoot),
                     List.of(clientRoot),
                     TlsClientAuthentication.WANT);
-            SelectedTlsMaterial required = capabilities.tls(
+            CertificateIdentity required = capabilities.certificateIdentity(
                     identity,
                     Optional.of(serverRoot),
                     List.of(clientRoot),
@@ -496,20 +493,20 @@ class KeyMaterialCapabilitiesTest {
                     serverAuthority.certificate(), issuerSignedClientKey, issuerSignedClientCertificate);
 
             assertThat(required.clientAuthentication()).isEqualTo(TlsClientAuthentication.REQUIRED);
-            assertThat(required.serverIssuerTrustAnchor()).contains(serverAuthority.certificate());
+            assertThat(required.issuerTrustAnchor()).contains(serverAuthority.certificate());
             assertThat(handshake(disabled, issuerSignedClient)).isEqualTo(new HandshakeResult(true, false));
             assertThat(handshake(wanted, trustedClient)).isEqualTo(new HandshakeResult(true, true));
             assertThat(handshake(required, trustedClient)).isEqualTo(new HandshakeResult(true, true));
             assertThat(handshake(required, issuerSignedClient).successful()).isFalse();
 
-            SelectedTlsMaterial sharedRootRoles = capabilities.tls(
+            CertificateIdentity sharedRootRoles = capabilities.certificateIdentity(
                     identity,
                     Optional.of(serverRoot),
                     List.of(clientRoot, serverRoot),
                     TlsClientAuthentication.REQUIRED);
             assertThat(handshake(sharedRootRoles, issuerSignedClient))
                     .isEqualTo(new HandshakeResult(true, true));
-            assertThatThrownBy(() -> capabilities.tls(
+            assertThatThrownBy(() -> capabilities.certificateIdentity(
                     identity,
                     Optional.of(serverRoot),
                     List.of(),
@@ -568,7 +565,7 @@ class KeyMaterialCapabilitiesTest {
                 CLUSTER);
         try (KeyMaterialService service = service()) {
             service.generateSecretKeyIfMissing(cipher, 256);
-            ConfigurationCipherCapability capability = KeyMaterialCapabilities
+            ConfigurationSecretCipher capability = KeyMaterialCapabilities
                     .open(service, List.of(cipher))
                     .configurationCipher(cipher);
             byte[] plaintext = "same-password".getBytes(StandardCharsets.UTF_8);
@@ -594,7 +591,7 @@ class KeyMaterialCapabilitiesTest {
                 CLUSTER);
         try (KeyMaterialService service = service()) {
             service.generateSecretKeyIfMissing(cipher, 256);
-            ConfigurationCipherCapability capability = KeyMaterialCapabilities
+            ConfigurationSecretCipher capability = KeyMaterialCapabilities
                     .open(service, List.of(cipher))
                     .configurationCipher(cipher);
             ConfigurationSecretEnvelope envelope = capability.seal(
@@ -621,7 +618,7 @@ class KeyMaterialCapabilitiesTest {
                 CLUSTER);
         try (KeyMaterialService service = service()) {
             service.generateSecretKeyIfMissing(cipher, 256);
-            ConfigurationCipherCapability capability = KeyMaterialCapabilities
+            ConfigurationSecretCipher capability = KeyMaterialCapabilities
                     .open(service, List.of(cipher))
                     .configurationCipher(cipher);
             ConfigurationSecretEnvelope envelope = capability.seal(
@@ -845,7 +842,7 @@ class KeyMaterialCapabilitiesTest {
     }
 
     private static HandshakeResult handshake(
-            SelectedTlsMaterial capability,
+            CertificateIdentity capability,
             SSLContext clientContext) throws Exception {
         try (SSLServerSocket serverSocket = (SSLServerSocket) capability
                 .createContext()

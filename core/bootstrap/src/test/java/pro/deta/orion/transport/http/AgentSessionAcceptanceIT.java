@@ -290,7 +290,7 @@ class AgentSessionAcceptanceIT {
             http = new JettyHTTPServer(configuration,
                     allowUnsecure ? JettyHTTPServerIT.desiredStateWithoutHttps().acl()
                             : JettyHTTPServerIT.desiredState(OrionHttpsConfiguration.ClientAuthentication.DISABLED,
-                                    List.of(), port).acl(), material.owner().tls(), routes, null, owner);
+                                    List.of(), port).acl(), material.owner(), routes, null, owner);
             http.onStart();
             port = allowUnsecure ? http.boundHttpPort() : http.boundHttpsPort();
         }

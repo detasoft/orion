@@ -18,7 +18,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
-import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
+import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
@@ -1033,7 +1033,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
     }
 
     private static ConfigurationSecrets secrets(OrionDocument document) {
-        return new ConfigurationSecrets(() -> document, new ConfigurationCipherCapability() {
+        return new ConfigurationSecrets(() -> document, new ConfigurationSecretCipher() {
             @Override
             public KeyMaterialDescriptor descriptor() {
                 throw new AssertionError("File transport does not need a cipher");

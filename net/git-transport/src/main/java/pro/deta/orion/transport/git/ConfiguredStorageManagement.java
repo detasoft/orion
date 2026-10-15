@@ -22,7 +22,7 @@ import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
+import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.orion.PrincipalAddress;
@@ -46,7 +46,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
 
     @Inject
     public ConfiguredStorageManagement(OrionAccessControlServiceImpl acl, OrionConfigurationEditor editor,
-            ConfigurationCipherCapability cipher, NativeGitRepositoryProvider repositories) {
+            ConfigurationSecretCipher cipher, NativeGitRepositoryProvider repositories) {
         this.acl = acl;
         this.editor = editor;
         this.secrets = new ConfigurationSecrets(() -> acl.configuration().result()

@@ -70,7 +70,6 @@ import pro.deta.orion.keymaterial.KeyMaterialScope;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
-import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.HttpTransportConfig;
@@ -377,11 +376,11 @@ class JettyHTTPServerIT {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             AcmeMaterialConfiguration acme = new AcmeMaterialConfiguration(
                     ACCOUNT, IDENTITY, Optional.empty());
-            owner.acme().acquire(acme, 2048, 2048);
+            owner.acquireAcmeKeys(acme, 2048, 2048);
             JettyHTTPServer server = server(
                     httpConfiguration(false),
                     desiredState(OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of()),
-                    owner.tls(),
+                    owner,
                     new OkRoute());
 
             assertThatThrownBy(server::onStart)
@@ -423,7 +422,7 @@ class JettyHTTPServerIT {
             BootstrapConfiguration bootstrap = httpConfiguration(false);
             bootstrap.getTransport().setHttp(new HttpTransportConfig("127.0.0.1", occupied.getLocalPort()));
             JettyHTTPServer server = server(
-                    bootstrap, desiredStateWithoutHttps(), TlsCapability.unavailable(), new OkRoute());
+                    bootstrap, desiredStateWithoutHttps(), OrionKeyMaterial.unavailable(), new OkRoute());
 
             assertThatThrownBy(server::onStart)
                     .isInstanceOf(IllegalStateException.class)
@@ -437,7 +436,7 @@ class JettyHTTPServerIT {
         BootstrapConfiguration bootstrap = httpConfiguration(true);
         bootstrap.getTransport().getHttp().setBacklog(37);
         JettyHTTPServer server = server(
-                bootstrap, desiredStateWithoutHttps(), TlsCapability.unavailable(), new OkRoute());
+                bootstrap, desiredStateWithoutHttps(), OrionKeyMaterial.unavailable(), new OkRoute());
         server.onStart();
 
         try {
@@ -455,7 +454,7 @@ class JettyHTTPServerIT {
         BootstrapConfiguration bootstrap = httpConfiguration(true);
         BlockingRoute route = new BlockingRoute();
         JettyHTTPServer server = server(
-                bootstrap, desiredStateWithoutHttps(), TlsCapability.unavailable(), route);
+                bootstrap, desiredStateWithoutHttps(), OrionKeyMaterial.unavailable(), route);
         ExecutorService clientExecutor = Executors.newSingleThreadExecutor();
         server.onStart();
 
@@ -479,7 +478,7 @@ class JettyHTTPServerIT {
         JettyHTTPServer server = server(
                 httpConfiguration(true),
                 desiredStateWithoutHttps(),
-                TlsCapability.unavailable(),
+                OrionKeyMaterial.unavailable(),
                 new JavascriptRoute());
         server.onStart();
 
@@ -987,7 +986,7 @@ class JettyHTTPServerIT {
             JettyHTTPServer server = server(
                     httpConfiguration(httpEnabled),
                     desiredState(mode, clientRoots, portSupplier.next()),
-                    material.owner().tls(),
+                    material.owner(),
                     routes);
             try {
                 server.onStart();
@@ -1067,17 +1066,15 @@ class JettyHTTPServerIT {
                 TestCertificateChain.Authority clientRoot = TestCertificateChain.root("Client Root");
                 AcmeMaterialConfiguration clientProvisioning = new AcmeMaterialConfiguration(
                         ACCOUNT, IDENTITY, Optional.of(CLIENT_ROOT));
-                AcmeKeyMaterial keys = owner.acme().acquire(clientProvisioning, 2048, 2048);
-                owner.acme().installCertificateChain(
-                        clientProvisioning,
+                AcmeKeyMaterial keys = owner.acquireAcmeKeys(clientProvisioning, 2048, 2048);
+                owner.certificateIdentity(clientProvisioning).installCertificateChain(
                         List.of(TestCertificateChain.leaf("localhost", keys.domainKeyPair(), clientRoot)),
                         Optional.of(clientRoot.certificate()));
                 AcmeMaterialConfiguration serverProvisioning = new AcmeMaterialConfiguration(
                         ACCOUNT, IDENTITY, Optional.of(SERVER_ROOT));
                 X509Certificate serverCertificate = TestCertificateChain.leaf(
                         "localhost", keys.domainKeyPair(), serverRoot);
-                owner.acme().installCertificateChain(
-                        serverProvisioning,
+                owner.certificateIdentity(serverProvisioning).installCertificateChain(
                         List.of(serverCertificate),
                         Optional.of(serverRoot.certificate()));
                 KeyPair trustedClientKey = TestCertificateChain.keyPair();
@@ -1160,7 +1157,7 @@ class JettyHTTPServerIT {
     private static JettyHTTPServer server(
             BootstrapConfiguration bootstrap,
             TestConfiguration desiredState,
-            TlsCapability tls,
+            OrionKeyMaterial tls,
             OrionHttpRoute... routes) {
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
                 new OrionHttpRouteRegistry(Set.of(routes)),
@@ -1447,9 +1444,9 @@ class JettyHTTPServerIT {
             KeyPair serverIssuerClientKey,
             X509Certificate serverIssuerClientCertificate) implements AutoCloseable {
         X509Certificate serverRootCertificate() throws java.security.GeneralSecurityException {
-            return owner.tls().serverIssuerTrustAnchor(new pro.deta.orion.keymaterial.TlsMaterialConfiguration(
+            return owner.certificateIdentity(new pro.deta.orion.keymaterial.TlsMaterialConfiguration(
                     IDENTITY, Optional.of(SERVER_ROOT), List.of(),
-                    pro.deta.orion.keymaterial.TlsClientAuthentication.DISABLED)).orElseThrow();
+                    pro.deta.orion.keymaterial.TlsClientAuthentication.DISABLED)).issuerTrustAnchor().orElseThrow();
         }
 
         @Override

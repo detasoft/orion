@@ -19,7 +19,7 @@ import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.OidcProvider;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
-import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
+import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
 import pro.deta.orion.util.ConfigurationContext;
@@ -54,7 +54,7 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     private final Map<String, Session> sessions = new HashMap<>();
     private final Clock clock;
     private final Path sessionDirectory;
-    private final ConfigurationCipherCapability sessionCipher;
+    private final ConfigurationSecretCipher sessionCipher;
     private final ConfigurationSecretEnvelopeCodec sessionCodec = new ConfigurationSecretEnvelopeCodec();
     private boolean sessionsLoaded;
     private final Map<String, Attempt> attempts = new HashMap<>();
@@ -69,14 +69,14 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     @Inject
     public OrionOidcRoute(OrganizationAccounts accounts, OrionAccessControlServiceImpl acl,
             ConfigurationSecrets secrets, ObjectMapper mapper,
-            ConfigurationContext configuration, ConfigurationCipherCapability cipher) {
+            ConfigurationContext configuration, ConfigurationSecretCipher cipher) {
         this(accounts, acl, secrets, mapper, Clock.systemUTC(),
                 configuration.getBaseDir().resolve("oidc-sessions"), cipher);
     }
 
     OrionOidcRoute(OrganizationAccounts accounts, OrionAccessControlServiceImpl acl,
             ConfigurationSecrets secrets, ObjectMapper mapper, Clock clock,
-            Path sessionDirectory, ConfigurationCipherCapability sessionCipher) {
+            Path sessionDirectory, ConfigurationSecretCipher sessionCipher) {
         super("/api/auth/**", OrionHttpRouteDefinition.Method.GET, OrionHttpRouteDefinition.Method.POST);
         this.clock = clock;
         this.sessionDirectory = sessionDirectory;

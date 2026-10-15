@@ -2,7 +2,7 @@ package pro.deta.orion.transport;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.keymaterial.TlsCapability;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.SshTransportConfig;
@@ -168,7 +168,7 @@ class TransportLifecycleStateMachineTest {
                 List.of()),
                 List.of()), Optional.of("test-revision"));
         return new JettyHTTPServerStateMachine(() -> new JettyHTTPServer(
-                disabled, desiredState.acl(), TlsCapability.unavailable(), null, null, null),
+                disabled, desiredState.acl(), OrionKeyMaterial.unavailable(), null, null, null),
                 () -> { throw new AssertionError("Disabled HTTP must not start ACME maintenance"); },
                 () -> { throw new AssertionError("Disabled HTTP must not start Git cleanup"); });
     }

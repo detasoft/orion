@@ -43,7 +43,7 @@ class ConfiguredStorageManagementTest {
     private final NativeGitRepositoryProvider repositories =
             NativeGitRepositoryProvider.inMemory(EVENTS.manager());
     private KeyMaterialService material;
-    private ConfigurationCipherCapability cipher;
+    private ConfigurationSecretCipher cipher;
     private ConfiguredStorageManagement management;
     private OrionConfigurationEditor editor;
     private OrionAccessControlServiceImpl acl;
@@ -70,13 +70,13 @@ class ConfiguredStorageManagementTest {
         editor = new OrionConfigurationEditor(storage,
                 new BootstrapConfiguration(),
                 cipher,
-                ConfigurationMaterialCapability.unavailable(),
+                OrionKeyMaterial.unavailable(),
                 EVENTS.manager());
         acl =
                 new OrionAccessControlServiceImpl(
                         new OrionPasswordHashingService(),
                         new RootPasswordReset(false),
-                        ServerIdentityCapability.unavailable(),
+                        SigningIdentity.unavailable(),
                         new BootstrapConfiguration(),
                         editor);
         acl.onStart();

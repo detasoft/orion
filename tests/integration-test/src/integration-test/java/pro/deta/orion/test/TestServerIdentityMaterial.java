@@ -6,7 +6,7 @@ import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialService;
 import pro.deta.orion.keymaterial.LocalKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.keymaterial.SigningIdentity;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 
@@ -52,8 +52,8 @@ final class TestServerIdentityMaterial implements AutoCloseable {
         }
     }
 
-    ServerIdentityCapability capability() {
-        return material.serverIdentity();
+    SigningIdentity capability() {
+        return material.signingIdentity();
     }
 
     OrionKeyMaterial material() {

@@ -36,7 +36,7 @@ import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
-import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.keymaterial.SigningIdentity;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
@@ -70,7 +70,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     public OrionAccessControlServiceImpl(
             OrionPasswordHashingService orionPasswordHashingService,
             RootPasswordReset rootPasswordReset,
-            ServerIdentityCapability serverIdentity,
+            SigningIdentity serverIdentity,
             BootstrapConfiguration bootstrapConfiguration,
             OrionConfigurationEditor editor) {
         this.orionPasswordHashingService = orionPasswordHashingService;

@@ -16,15 +16,11 @@ import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
-import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
-import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
-import pro.deta.orion.keymaterial.KeyMaterialAdministrationCapability;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
+import pro.deta.orion.keymaterial.SigningIdentity;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.keymaterial.SshHostKeyReference;
-import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.bootstrap.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.bootstrap.config.KeyMaterialConfig;
@@ -158,7 +154,7 @@ public final class BootstrapContext implements AutoCloseable {
     public static Optional<OrionDocumentRevision> adoptProxies(
             OrionConfigurationEditor editor,
             NativeGitRepositoryFactory repositoryProvider,
-            ConfigurationCipherCapability cipher,
+            ConfigurationSecretCipher cipher,
             OrionDocumentRevision approved) {
         Objects.requireNonNull(editor, "configuration editor");
         Objects.requireNonNull(approved, "approved configuration");
@@ -216,28 +212,16 @@ public final class BootstrapContext implements AutoCloseable {
         throw new IllegalStateException("Proxy adoption did not converge");
     }
 
-    public ConfigurationCipherCapability configurationCipher() {
+    public OrionKeyMaterial keyMaterial() {
+        return keyMaterial;
+    }
+
+    public ConfigurationSecretCipher configurationCipher() {
         return keyMaterial.configurationCipher();
     }
 
-    public KeyMaterialAdministrationCapability keyMaterialAdministration() {
-        return keyMaterial.administration();
-    }
-
-    public ConfigurationMaterialCapability configurationMaterial() {
-        return keyMaterial.configurationMaterial();
-    }
-
-    public ServerIdentityCapability serverIdentity() {
-        return keyMaterial.serverIdentity();
-    }
-
-    public AcmeKeyMaterialCapability acmeKeyMaterial() {
-        return keyMaterial.acme();
-    }
-
-    public TlsCapability tlsKeyMaterial() {
-        return keyMaterial.tls();
+    public SigningIdentity signingIdentity() {
+        return keyMaterial.signingIdentity();
     }
 
     public SshHostKeyCapability sshHostKeys(List<SshHostKeyReference> references)

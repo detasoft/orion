@@ -1,7 +1,7 @@
 package pro.deta.orion.acl;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.keymaterial.SigningIdentity;
 
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
@@ -359,11 +359,18 @@ class JwtAccessTokenServiceTest {
         return generator.generateKeyPair();
     }
 
-    private record TestIdentity(
-            String activeKeyId,
-            Map<String, KeyPair> keys) implements ServerIdentityCapability {
-        private TestIdentity {
-            keys = Map.copyOf(keys);
+    private static final class TestIdentity extends SigningIdentity {
+        private final String activeKeyId;
+        private final Map<String, KeyPair> keys;
+
+        private TestIdentity(String activeKeyId, Map<String, KeyPair> keys) {
+            this.activeKeyId = activeKeyId;
+            this.keys = Map.copyOf(keys);
+        }
+
+        @Override
+        public String activeKeyId() {
+            return activeKeyId;
         }
 
         private static TestIdentity single(String alias) throws GeneralSecurityException {

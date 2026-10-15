@@ -27,7 +27,7 @@ import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.util.OrionUtils;
 import pro.deta.orion.internal.OrionExecutor;
-import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
+import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory.BootstrapChange;
@@ -70,7 +70,7 @@ public class OrionRuntimeModule {
     @Named("bootstrap-proxies")
     static Runnable bootstrapProxies(
             ConfiguredNativeGitRepositoryFactory configured,
-            NativeGitRepositoryFactory provider, ConfigurationCipherCapability cipher,
+            NativeGitRepositoryFactory provider, ConfigurationSecretCipher cipher,
             ConfigurationSecrets secrets, OrionAccessControlService configurationService, OrionConfigurationEditor editor,
             DecisionRegistry decisions,
             ConnectionFailureHandler connectionFailures,
@@ -239,7 +239,7 @@ public class OrionRuntimeModule {
     @Provides
     @Singleton
     static ConfigurationSecrets configurationSecrets(OrionAccessControlService configurationService,
-            ConfigurationCipherCapability cipher) {
+            ConfigurationSecretCipher cipher) {
         return new ConfigurationSecrets(() -> configurationService.configuration().result()
                 .valueOrFailure("Cannot read configuration document"), cipher);
     }

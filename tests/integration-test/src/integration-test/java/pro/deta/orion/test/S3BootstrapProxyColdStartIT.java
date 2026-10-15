@@ -94,8 +94,8 @@ class S3BootstrapProxyColdStartIT {
                 byte[] xml;
                 try (OrionKeyMaterial seeded = OrionKeyMaterialFactory.open(
                         configuration, environment, materialStore, new KeyMaterialCreation(false))) {
-                    signingKeyId = seeded.serverIdentity().activeKeyId();
-                    signature = seeded.serverIdentity().sign(payload);
+                    signingKeyId = seeded.signingIdentity().activeKeyId();
+                    signature = seeded.signingIdentity().sign(payload);
                     OrionDocument document = OrionDocument.withAccessControl(
                             DefaultAccessControl.create("proxy-cold-start-password-hash"));
                     ConfigurationSecrets secrets = new ConfigurationSecrets(() -> document,
@@ -128,8 +128,8 @@ class S3BootstrapProxyColdStartIT {
                         new pro.deta.orion.event.OrionEventManager();
                 try (BootstrapContext bootstrap = BootstrapContext.open(configuration, environment,
                         new KeyMaterialCreation(false), bootstrapEvents1)) {
-                    assertThat(bootstrap.serverIdentity().activeKeyId()).isEqualTo(signingKeyId);
-                    assertThat(bootstrap.serverIdentity().verify(signingKeyId, payload, signature)).isTrue();
+                    assertThat(bootstrap.signingIdentity().activeKeyId()).isEqualTo(signingKeyId);
+                    assertThat(bootstrap.signingIdentity().verify(signingKeyId, payload, signature)).isTrue();
                     cacheName = bootstrap.repositoryFactory()
                             .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE).orElseThrow();
                     assertThat(bootstrap.repositoryFactory()

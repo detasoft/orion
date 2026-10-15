@@ -1,6 +1,6 @@
 package pro.deta.orion.config;
 
-import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
+import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
@@ -30,10 +30,10 @@ import java.util.function.Supplier;
  */
 public final class ConfigurationSecrets {
     private final Supplier<OrionDocument> current;
-    private final ConfigurationCipherCapability cipher;
+    private final ConfigurationSecretCipher cipher;
     private final ConfigurationSecretEnvelopeCodec codec = new ConfigurationSecretEnvelopeCodec();
 
-    public ConfigurationSecrets(Supplier<OrionDocument> current, ConfigurationCipherCapability cipher) {
+    public ConfigurationSecrets(Supplier<OrionDocument> current, ConfigurationSecretCipher cipher) {
         this.current = Objects.requireNonNull(current, "current configuration");
         this.cipher = Objects.requireNonNull(cipher, "configuration cipher");
     }

@@ -3,7 +3,7 @@ package pro.deta.orion.config;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
+import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
@@ -316,7 +316,7 @@ class ConfigurationSecretsTest {
 
     @Test
     void rejectsAuthenticatedInvalidUtf8AndClearsTheDecryptedBuffer() throws Exception {
-        ConfigurationCipherCapability cipher = KeyMaterialCapabilities.open(keyMaterial, List.of(CIPHER))
+        ConfigurationSecretCipher cipher = KeyMaterialCapabilities.open(keyMaterial, List.of(CIPHER))
                 .configurationCipher(CIPHER);
         String envelope = new ConfigurationSecretEnvelopeCodec().serialize(cipher.seal(
                 new byte[]{'r', 'a', 'w', '-', 's', 'e', 'c', 'r', 'e', 't', (byte) 0xc3},
@@ -330,9 +330,9 @@ class ConfigurationSecretsTest {
     }
 
     private ConfigurationSecrets resolver(KeyMaterialService service) throws Exception {
-        ConfigurationCipherCapability cipher = KeyMaterialCapabilities.open(service, List.of(CIPHER))
+        ConfigurationSecretCipher cipher = KeyMaterialCapabilities.open(service, List.of(CIPHER))
                 .configurationCipher(CIPHER);
-        return new ConfigurationSecrets(current::get, new ConfigurationCipherCapability() {
+        return new ConfigurationSecrets(current::get, new ConfigurationSecretCipher() {
             @Override
             public KeyMaterialDescriptor descriptor() {
                 return cipher.descriptor();

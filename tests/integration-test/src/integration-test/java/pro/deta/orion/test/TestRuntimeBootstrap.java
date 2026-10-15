@@ -6,13 +6,10 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.S3Transport;
-import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
-import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
-import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
-import pro.deta.orion.keymaterial.KeyMaterialAdministrationCapability;
-import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
+import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
+import pro.deta.orion.keymaterial.SigningIdentity;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
-import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.util.ConfigurationContext;
@@ -70,14 +67,14 @@ final class TestRuntimeBootstrap {
 
     static OrionComponent.Builder componentBuilder(
             BootstrapConfiguration configuration,
-            ServerIdentityCapability identity,
+            SigningIdentity identity,
             SshHostKeyCapability sshHostKeys) {
         return componentBuilder(configuration, identity, sshHostKeys, new RootPasswordReset(false));
     }
 
     static OrionComponent.Builder componentBuilder(
             BootstrapConfiguration configuration,
-            ServerIdentityCapability identity,
+            SigningIdentity identity,
             SshHostKeyCapability sshHostKeys,
             RootPasswordReset rootPasswordReset) {
         pro.deta.orion.event.OrionEventManager events = new pro.deta.orion.event.OrionEventManager();
@@ -95,13 +92,10 @@ final class TestRuntimeBootstrap {
         return DaggerOrionComponent.builder()
                 .bootstrapConfiguration(configuration)
                 .rootPasswordReset(rootPasswordReset)
-                .serverIdentityCapability(identity)
-                .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
-                .configurationMaterialCapability(ConfigurationMaterialCapability.unavailable())
-                .keyMaterialAdministrationCapability(KeyMaterialAdministrationCapability.unavailable())
+                .signingIdentity(identity)
+                .keyMaterial(OrionKeyMaterial.unavailable())
                 .eventManager(events)
-                .configurationCipherCapability(ConfigurationCipherCapability.unavailable())
-                .tlsCapability(TlsCapability.unavailable())
+                .configurationSecretCipher(ConfigurationSecretCipher.unavailable())
                 .sshHostKeyCapability(sshHostKeys)
                 .nativeGitRepositoryProvider(provider)
                 .configuredRepositoryFactory(configured)

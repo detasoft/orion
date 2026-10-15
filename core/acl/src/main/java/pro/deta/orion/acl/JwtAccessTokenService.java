@@ -1,6 +1,6 @@
 package pro.deta.orion.acl;
 
-import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.keymaterial.SigningIdentity;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 
 import java.nio.charset.StandardCharsets;
@@ -26,14 +26,14 @@ final class JwtAccessTokenService {
     private static final Pattern STRING_CLAIM = Pattern.compile("\"%s\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
     private static final Pattern LONG_CLAIM = Pattern.compile("\"%s\"\\s*:\\s*(\\d+)");
 
-    private final ServerIdentityCapability serverIdentity;
+    private final SigningIdentity serverIdentity;
     private final Clock clock;
 
-    JwtAccessTokenService(ServerIdentityCapability serverIdentity) {
+    JwtAccessTokenService(SigningIdentity serverIdentity) {
         this(serverIdentity, Clock.systemUTC());
     }
 
-    JwtAccessTokenService(ServerIdentityCapability serverIdentity, Clock clock) {
+    JwtAccessTokenService(SigningIdentity serverIdentity, Clock clock) {
         if (serverIdentity == null) {
             throw new IllegalArgumentException("Server identity must not be null");
         }

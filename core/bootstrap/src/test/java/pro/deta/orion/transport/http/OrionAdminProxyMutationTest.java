@@ -760,13 +760,13 @@ class OrionAdminProxyMutationTest {
             editor = new OrionConfigurationEditor(storage,
                 new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
                 material.configurationCipher(),
-                material.configurationMaterial(),
+                material,
                 EVENTS.manager());
             acl =
                     new OrionAccessControlServiceImpl(
                             new OrionPasswordHashingService(),
                             new RootPasswordReset(false),
-                            material.serverIdentity(),
+                            material.signingIdentity(),
                             new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
                             editor);
             acl.onStart();

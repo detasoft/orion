@@ -33,7 +33,7 @@ class OrionStorageConnectionsRouteTest {
                     KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES,
                     new KeyMaterialVersion(1), KeyMaterialScope.cluster("test"));
             material.generateSecretKeyIfMissing(descriptor, 256);
-            ConfigurationCipherCapability cipher = KeyMaterialCapabilities.open(material, List.of(descriptor))
+            ConfigurationSecretCipher cipher = KeyMaterialCapabilities.open(material, List.of(descriptor))
                     .configurationCipher(descriptor);
             StorageManagementFixture.State fixture = StorageManagementFixture.open(EVENTS,
                     NativeGitRepositoryProvider.inMemory(EVENTS.manager()), List.of(), cipher);

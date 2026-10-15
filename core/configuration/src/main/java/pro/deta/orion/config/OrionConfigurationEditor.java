@@ -20,14 +20,14 @@ import java.util.function.Consumer;
 public final class OrionConfigurationEditor {
     private final OrionVersionedConfigurationStorage storage;
     private final OrionEventManager events;
-    private final ConfigurationCipherCapability configurationCipher;
-    private final ConfigurationMaterialCapability configurationMaterial;
+    private final ConfigurationSecretCipher configurationCipher;
+    private final OrionKeyMaterial configurationMaterial;
     private final KeyMaterialScope materialScope;
 
     @Inject
     public OrionConfigurationEditor(OrionVersionedConfigurationStorage storage,
-            BootstrapConfiguration configuration, ConfigurationCipherCapability configurationCipher,
-            ConfigurationMaterialCapability configurationMaterial, OrionEventManager events) {
+            BootstrapConfiguration configuration, ConfigurationSecretCipher configurationCipher,
+            OrionKeyMaterial configurationMaterial, OrionEventManager events) {
         this.storage = storage;
         this.events = Objects.requireNonNull(events, "events");
         this.configurationCipher = configurationCipher;

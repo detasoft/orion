@@ -20,7 +20,7 @@ import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.GitOperationException;
-import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.keymaterial.SigningIdentity;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.auth.DefaultAccessControl;
@@ -270,7 +270,7 @@ class OrionStartupIT {
             OrionComponent orionComponent = TestRuntimeBootstrap
                     .componentBuilder(
                             configuration,
-                            ServerIdentityCapability.unavailable(),
+                            SigningIdentity.unavailable(),
                             SshHostKeyCapability.unavailable())
                     .build();
             OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();

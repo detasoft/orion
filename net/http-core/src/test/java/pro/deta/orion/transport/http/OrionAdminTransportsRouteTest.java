@@ -2,7 +2,7 @@ package pro.deta.orion.transport.http;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.keymaterial.TlsCapability;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.GitTransportConfig;
 import pro.deta.orion.bootstrap.config.HttpTransportConfig;
@@ -106,7 +106,7 @@ class OrionAdminTransportsRouteTest {
                 List.of()),
                 List.of()), Optional.of("test-revision"));
         JettyHTTPServer server = new JettyHTTPServer(
-                configuration, desiredState.acl(), TlsCapability.unavailable(), servlet, null, null);
+                configuration, desiredState.acl(), OrionKeyMaterial.unavailable(), servlet, null, null);
         server.onStart();
 
         try {
@@ -150,7 +150,7 @@ class OrionAdminTransportsRouteTest {
                         List.of()),
                 List.of()), Optional.of("test-revision"));
         JettyHTTPServer server = new JettyHTTPServer(
-                configuration, desiredState.acl(), TlsCapability.unavailable(), null, null, null) {
+                configuration, desiredState.acl(), OrionKeyMaterial.unavailable(), null, null, null) {
             @Override
             public int boundHttpsPort() {
                 return 9443;

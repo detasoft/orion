@@ -22,7 +22,8 @@ import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialScope;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
-import pro.deta.orion.keymaterial.TlsCapability;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
+import pro.deta.orion.keymaterial.CertificateIdentity;
 import pro.deta.orion.keymaterial.TlsClientAuthentication;
 import pro.deta.orion.keymaterial.TlsMaterialConfiguration;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
@@ -53,7 +54,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
     private final HttpTransportConfig httpTransportConfig;
     private final KeyMaterialScope clusterScope;
     private final OrionAccessControlService configurationService;
-    private final TlsCapability tls;
+    private final OrionKeyMaterial keyMaterial;
     private final AgentSessionServer agentServer;
     private final OrionHttpRouteServlet rootServlet;
     private final OrionAuthorizationFilter authorizationFilter;
@@ -65,7 +66,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
     public JettyHTTPServer(
             BootstrapConfiguration orionConfiguration,
             OrionAccessControlService configurationService,
-            TlsCapability tls,
+            OrionKeyMaterial keyMaterial,
             OrionHttpRouteServlet rootServlet,
             OrionAuthorizationFilter authorizationFilter,
             AgentSessionServer agentServer) {
@@ -73,7 +74,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
         this.clusterScope = KeyMaterialScope.cluster(
                 orionConfiguration.getBootstrap().getKeyMaterial().getClusterId());
         this.configurationService = configurationService;
-        this.tls = tls;
+        this.keyMaterial = keyMaterial;
         this.rootServlet = rootServlet;
         this.authorizationFilter = authorizationFilter;
         this.agentServer = agentServer;
@@ -120,9 +121,10 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
         ActiveTls current = activeTls;
         if (current == null || !isRunning()) return;
         try {
-            List<X509Certificate> chain = tls.certificateChain(current.material());
+            CertificateIdentity identity = keyMaterial.certificateIdentity(current.material());
+            List<X509Certificate> chain = identity.certificateChain();
             if (chain.equals(current.chain())) return;
-            SSLContext replacement = tls.createContext(current.material());
+            SSLContext replacement = identity.createContext();
             SSLContext previous = current.factory().getSslContext();
             try {
                 current.factory().reload(factory -> factory.setSslContext(replacement));
@@ -195,8 +197,9 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
         OrionHttpsConfiguration https = configured.orElseThrow();
         TlsMaterialConfiguration material = tlsMaterial(https);
         SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
-        List<X509Certificate> chain = tls.certificateChain(material);
-        sslContextFactory.setSslContext(tls.createContext(material));
+        CertificateIdentity identity = keyMaterial.certificateIdentity(material);
+        List<X509Certificate> chain = identity.certificateChain();
+        sslContextFactory.setSslContext(identity.createContext());
         activeTls = new ActiveTls(material, sslContextFactory, List.copyOf(chain));
         sslContextFactory.setWantClientAuth(
                 material.clientAuthentication() == TlsClientAuthentication.WANT);

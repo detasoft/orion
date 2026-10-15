@@ -17,7 +17,7 @@ import pro.deta.orion.auth.AccessControlValidationException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.auth.SecurityContext;
-import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -277,7 +277,7 @@ class OrionHttpRouteServletRoutingTest {
                 new AcmeCertificateService(
                         new BootstrapConfiguration(),
                         desired.acl(),
-                        AcmeKeyMaterialCapability.unavailable(),
+                        OrionKeyMaterial.unavailable(),
                         new AcmeCertificateIssuer(null),
                         null),
                 OBJECT_MAPPER);

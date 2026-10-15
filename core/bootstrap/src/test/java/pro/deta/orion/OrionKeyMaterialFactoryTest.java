@@ -30,16 +30,14 @@ class OrionKeyMaterialFactoryTest {
         byte[] signature;
         try (OrionKeyMaterial material = OrionKeyMaterialFactory.open(
                 configuration, Map.of(PASSWORD_ENV, "test-password"), new KeyMaterialCreation(true))) {
-            var identity = material.serverIdentity();
+            var identity = material.signingIdentity();
             signature = identity.sign(payload);
             assertThat(identity.activeKeyId()).isEqualTo("cluster-signing-v2");
-            assertThat(material.acme()).isNotNull();
-            assertThat(material.tls()).isNotNull();
         }
 
         try (OrionKeyMaterial material = OrionKeyMaterialFactory.open(
                 configuration, Map.of(PASSWORD_ENV, "test-password"))) {
-            assertThat(material.serverIdentity().verify(
+            assertThat(material.signingIdentity().verify(
                     "cluster-signing-v2", payload, signature)).isTrue();
         }
 
@@ -102,7 +100,7 @@ class OrionKeyMaterialFactoryTest {
                 Map.of(PASSWORD_ENV, "test-password"),
                 store,
                 new KeyMaterialCreation(true))) {
-            assertThat(material.serverIdentity().activeKeyId()).isEqualTo("cluster-signing-v2");
+            assertThat(material.signingIdentity().activeKeyId()).isEqualTo("cluster-signing-v2");
         }
 
         assertThat(store.read()).isPresent();

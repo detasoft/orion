@@ -12,7 +12,7 @@ import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
@@ -46,13 +46,13 @@ public final class AcmeConfigurationService {
     private final ConfigurationSecrets secrets;
     private final OrionConfigurationEditor editor;
     private final AcmeCertificateService certificates;
-    private final ConfigurationMaterialCapability material;
+    private final OrionKeyMaterial material;
     private final KeyMaterialScope scope;
 
     @Inject
     public AcmeConfigurationService(OrionAccessControlService configurationService, ConfigurationSecrets secrets,
             OrionConfigurationEditor editor, AcmeCertificateService certificates,
-            ConfigurationMaterialCapability material, BootstrapConfiguration bootstrap) {
+            OrionKeyMaterial material, BootstrapConfiguration bootstrap) {
         this.configurationService = configurationService;
         this.secrets = secrets;
         this.editor = editor;

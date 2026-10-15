@@ -7,8 +7,6 @@ import org.bouncycastle.openssl.PEMKeyPair;
 import org.bouncycastle.openssl.PEMParser;
 import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
 
-import javax.net.ssl.SSLContext;
-import javax.security.auth.x500.X500Principal;
 import java.io.IOException;
 import java.io.CharArrayReader;
 import java.math.BigInteger;
@@ -19,8 +17,6 @@ import java.security.PrivateKey;
 import java.security.interfaces.RSAPrivateCrtKey;
 import java.security.spec.RSAPublicKeySpec;
 import java.security.spec.RSAPrivateCrtKeySpec;
-import java.security.cert.Certificate;
-import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -28,29 +24,25 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 /**
- * Owns runtime key material and its typed capabilities. The configuration cipher is persisted on first seal;
+ * Owns runtime key material and selects signing, certificate and configuration cipher identities.
+ * The configuration cipher is persisted on first seal;
  * a failed material save invalidates this owner so a caller must reopen the durable state before retrying.
  */
-public final class OrionKeyMaterial implements AutoCloseable {
+public class OrionKeyMaterial implements AutoCloseable {
     private final KeyMaterialService owner;
     private final KeyMaterialScope.Cluster clusterScope;
-    private final ServerIdentityCapability serverIdentity;
-    private final AcmeKeyMaterialCapability acme;
-    private final TlsCapability tls;
+    private final SigningIdentity signingIdentity;
     private boolean closed;
 
     private OrionKeyMaterial(
             KeyMaterialService owner,
             KeyMaterialScope.Cluster clusterScope,
-            ServerIdentityCapability serverIdentity) {
+            SigningIdentity signingIdentity) {
         this.owner = owner;
         this.clusterScope = clusterScope;
-        this.serverIdentity = serverIdentity;
-        this.acme = acmeCapability();
-        this.tls = tlsCapability();
+        this.signingIdentity = signingIdentity;
     }
 
     public static OrionKeyMaterial open(
@@ -88,55 +80,57 @@ public final class OrionKeyMaterial implements AutoCloseable {
             return new OrionKeyMaterial(
                     service,
                     clusterScope,
-                    capabilities.serverIdentity(signingMaterial));
+                    capabilities.signingIdentity(signingMaterial));
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {
             service.close();
             throw failure;
         }
     }
 
-    public ServerIdentityCapability serverIdentity() {
-        return serverIdentity;
+    protected OrionKeyMaterial() {
+        owner = null;
+        clusterScope = new KeyMaterialScope.Cluster("unavailable");
+        signingIdentity = SigningIdentity.unavailable();
     }
 
-    public AcmeKeyMaterialCapability acme() {
-        return acme;
+    public static OrionKeyMaterial unavailable() {
+        return new OrionKeyMaterial();
     }
 
-    public TlsCapability tls() {
-        return tls;
+    public SigningIdentity signingIdentity() {
+        return signingIdentity;
     }
 
-    public KeyMaterialAdministrationCapability administration() {
-        return (alias, purpose, privateKeyPem) -> {
-            try {
-                if (alias == null || !alias.matches("[a-z0-9][a-z0-9._-]{0,127}")) {
-                    throw new IllegalArgumentException("Invalid key material name");
-                }
-                if (purpose != KeyMaterialPurpose.ACME_ACCOUNT && purpose != KeyMaterialPurpose.TLS_IDENTITY) {
-                    throw new IllegalArgumentException("Only ACME account and TLS identity keys can be created");
-                }
-                KeyPair imported = privateKeyPem == null || privateKeyPem.length == 0
-                        ? null : readRsaPrivateKey(privateKeyPem);
-                KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(new KeyMaterialAlias(alias),
-                        purpose, KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1), clusterScope);
-                synchronized (owner) {
-                    if (owner.containsAlias(alias)) {
-                        throw new IllegalArgumentException("Key material name already exists");
-                    }
-                    if (imported == null) owner.generateKeyIfMissing(descriptor, 3072);
-                    else owner.importKey(descriptor, imported);
-                    try {
-                        owner.save();
-                    } catch (IOException | GeneralSecurityException | RuntimeException failure) {
-                        owner.close();
-                        throw failure;
-                    }
-                }
-            } finally {
-                if (privateKeyPem != null) Arrays.fill(privateKeyPem, '\0');
+    public void createKey(String alias, KeyMaterialPurpose purpose, char[] privateKeyPem)
+            throws IOException, GeneralSecurityException {
+        try {
+            if (owner == null) throw new GeneralSecurityException("Key material administration is unavailable");
+            if (alias == null || !alias.matches("[a-z0-9][a-z0-9._-]{0,127}")) {
+                throw new IllegalArgumentException("Invalid key material name");
             }
-        };
+            if (purpose != KeyMaterialPurpose.ACME_ACCOUNT && purpose != KeyMaterialPurpose.TLS_IDENTITY) {
+                throw new IllegalArgumentException("Only ACME account and TLS identity keys can be created");
+            }
+            KeyPair imported = privateKeyPem == null || privateKeyPem.length == 0
+                    ? null : readRsaPrivateKey(privateKeyPem);
+            KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(new KeyMaterialAlias(alias),
+                    purpose, KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1), clusterScope);
+            synchronized (owner) {
+                if (owner.containsAlias(alias)) {
+                    throw new IllegalArgumentException("Key material name already exists");
+                }
+                if (imported == null) owner.generateKeyIfMissing(descriptor, 3072);
+                else owner.importKey(descriptor, imported);
+                try {
+                    owner.save();
+                } catch (IOException | GeneralSecurityException | RuntimeException failure) {
+                    owner.close();
+                    throw failure;
+                }
+            }
+        } finally {
+            if (privateKeyPem != null) Arrays.fill(privateKeyPem, '\0');
+        }
     }
 
     private static KeyPair readRsaPrivateKey(char[] input) {
@@ -231,71 +225,62 @@ public final class OrionKeyMaterial implements AutoCloseable {
                 n, e, d, p, q, values.get("dp"), values.get("dq"), values.get("qi")));
     }
 
-    public ConfigurationMaterialCapability configurationMaterial() {
-        return new ConfigurationMaterialCapability() {
-            @Override
-            public void require(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
-                requireOwnerScope(descriptor.scope());
-                owner.validateExisting(descriptor);
-            }
-
-            @Override
-            public void require(TrustedCertificateDescriptor descriptor) throws GeneralSecurityException {
-                requireOwnerScope(descriptor.scope());
-                owner.validateExisting(descriptor);
-            }
-
-            @Override
-            public List<KeyMaterialInventoryEntry> inventory() throws GeneralSecurityException {
-                return owner.inventory();
-            }
-        };
+    public void require(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
+        if (owner == null) throw new GeneralSecurityException("Configuration material is unavailable");
+        requireOwnerScope(descriptor.scope());
+        owner.validateExisting(descriptor);
     }
 
-    public ConfigurationCipherCapability configurationCipher() {
+    public void require(TrustedCertificateDescriptor descriptor) throws GeneralSecurityException {
+        if (owner == null) throw new GeneralSecurityException("Configuration material is unavailable");
+        requireOwnerScope(descriptor.scope());
+        owner.validateExisting(descriptor);
+    }
+
+    public List<KeyMaterialInventoryEntry> inventory() throws GeneralSecurityException {
+        if (owner == null) throw new GeneralSecurityException("Configuration material inventory is unavailable");
+        return owner.inventory();
+    }
+
+    public ConfigurationSecretCipher configurationCipher() {
+        if (owner == null) return ConfigurationSecretCipher.unavailable();
         KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(new KeyMaterialAlias("configuration-v1"),
                 KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES,
                 new KeyMaterialVersion(1), clusterScope);
-        return new ConfigurationCipherCapability() {
-            @Override
-            public KeyMaterialDescriptor descriptor() {
-                return descriptor;
-            }
+        return new ConfigurationSecretCipher(descriptor, this);
+    }
 
-            @Override
-            public ConfigurationSecretEnvelope seal(byte[] plaintext, ConfigurationSecretContext context)
-                    throws GeneralSecurityException {
-                if (plaintext == null || plaintext.length == 0 || context == null) {
-                    throw new IllegalArgumentException("Configuration secret and context must not be empty");
-                }
-                synchronized (owner) {
-                    if (!owner.containsAlias(descriptor.alias().value())) {
-                        try {
-                            owner.generateSecretKeyIfMissing(descriptor, 256);
-                            owner.save();
-                        } catch (IOException | GeneralSecurityException | RuntimeException failure) {
-                            owner.close();
-                            throw new GeneralSecurityException("Cannot persist configuration cipher", failure);
-                        }
-                    }
-                    return KeyMaterialCapabilities.open(owner, List.of(descriptor))
-                            .configurationCipher(descriptor).seal(plaintext, context);
+    ConfigurationSecretEnvelope sealConfigurationSecret(KeyMaterialDescriptor descriptor,
+            byte[] plaintext, ConfigurationSecretContext context) throws GeneralSecurityException {
+        if (plaintext == null || plaintext.length == 0 || context == null) {
+            throw new IllegalArgumentException("Configuration secret and context must not be empty");
+        }
+        synchronized (owner) {
+            if (!owner.containsAlias(descriptor.alias().value())) {
+                try {
+                    owner.generateSecretKeyIfMissing(descriptor, 256);
+                    owner.save();
+                } catch (IOException | GeneralSecurityException | RuntimeException failure) {
+                    owner.close();
+                    throw new GeneralSecurityException("Cannot persist configuration cipher", failure);
                 }
             }
+            return KeyMaterialCapabilities.open(owner, List.of(descriptor))
+                    .configurationCipher(descriptor).seal(plaintext, context);
+        }
+    }
 
-            @Override
-            public byte[] open(ConfigurationSecretEnvelope envelope, ConfigurationSecretContext context)
-                    throws GeneralSecurityException {
-                synchronized (owner) {
-                    return KeyMaterialCapabilities.open(owner, List.of(descriptor))
-                            .configurationCipher(descriptor).open(envelope, context);
-                }
-            }
-        };
+    byte[] openConfigurationSecret(KeyMaterialDescriptor descriptor, ConfigurationSecretEnvelope envelope,
+            ConfigurationSecretContext context) throws GeneralSecurityException {
+        synchronized (owner) {
+            return KeyMaterialCapabilities.open(owner, List.of(descriptor))
+                    .configurationCipher(descriptor).open(envelope, context);
+        }
     }
 
     public SshHostKeyCapability sshHostKeys(List<SshHostKeyReference> references)
             throws IOException, GeneralSecurityException {
+        requireAvailable();
         if (references == null) {
             throw new IllegalArgumentException("SSH host key references must not be null");
         }
@@ -392,142 +377,63 @@ public final class OrionKeyMaterial implements AutoCloseable {
             return;
         }
         closed = true;
-        owner.close();
+        if (owner != null) owner.close();
     }
 
-    private AcmeKeyMaterialCapability acmeCapability() {
-        return new AcmeKeyMaterialCapability() {
-            @Override
-            public AcmeKeyMaterial acquire(
-                    AcmeMaterialConfiguration configuration,
-                    int accountKeySize,
-                    int domainKeySize) throws IOException, GeneralSecurityException {
-                return select(configuration).acquire(accountKeySize, domainKeySize);
-            }
-
-            @Override
-            public void installCertificateChain(
-                    AcmeMaterialConfiguration configuration,
-                    List<? extends Certificate> certificateChain,
-                    Optional<X509Certificate> issuerTrustAnchor)
-                    throws IOException, GeneralSecurityException {
-                select(configuration).installCertificateChain(certificateChain, issuerTrustAnchor);
-            }
-
-            @Override
-            public Optional<List<X509Certificate>> certificateChain(AcmeMaterialConfiguration configuration)
-                    throws GeneralSecurityException {
-                if (configuration == null) {
-                    throw new IllegalArgumentException("ACME material configuration must not be null");
-                }
-                requireOwnerScope(configuration.identity().scope());
-                if (!owner.containsAlias(configuration.identity().alias().value())) {
-                    return Optional.empty();
-                }
-                List<X509Certificate> chain = select(configuration).certificateChain();
-                if (chain.size() == 1 && isStorageCertificate(chain.getFirst())) {
-                    return Optional.empty();
-                }
-                return Optional.of(chain);
-            }
-
-            @Override
-            public Optional<X509Certificate> issuerTrustAnchor(
-                    AcmeMaterialConfiguration configuration) throws GeneralSecurityException {
-                return select(configuration).issuerTrustAnchor();
-            }
-        };
+    public AcmeKeyMaterial acquireAcmeKeys(AcmeMaterialConfiguration configuration,
+            int accountKeySize, int domainKeySize) throws IOException, GeneralSecurityException {
+        requireAcmeConfiguration(configuration);
+        return KeyMaterialCapabilities.open(owner, List.of(configuration.account(), configuration.identity()),
+                configuration.issuerTrustAnchor().map(List::of).orElseGet(List::of))
+                .acquireAcmeKeys(configuration.account(), configuration.identity(),
+                        configuration.issuerTrustAnchor(), accountKeySize, domainKeySize);
     }
 
-    private TlsCapability tlsCapability() {
-        return new TlsCapability() {
-            @Override
-            public List<X509Certificate> certificateChain(TlsMaterialConfiguration configuration)
-                    throws GeneralSecurityException {
-                return select(configuration).certificateChain();
-            }
-
-            @Override
-            public Optional<X509Certificate> serverIssuerTrustAnchor(
-                    TlsMaterialConfiguration configuration) throws GeneralSecurityException {
-                return select(configuration).serverIssuerTrustAnchor();
-            }
-
-            @Override
-            public SSLContext createContext(TlsMaterialConfiguration configuration)
-                    throws GeneralSecurityException {
-                SelectedTlsMaterial selected = select(configuration);
-                List<X509Certificate> certificateChain = selected.certificateChain();
-                if (certificateChain.size() == 1 && isStorageCertificate(certificateChain.getFirst())) {
-                    throw new GeneralSecurityException(
-                            "TLS identity must contain an issued certificate chain");
-                }
-                return selected.createContext();
-            }
-        };
-    }
-
-    private SelectedAcmeKeyMaterial select(AcmeMaterialConfiguration configuration)
+    public CertificateIdentity certificateIdentity(AcmeMaterialConfiguration configuration)
             throws GeneralSecurityException {
-        if (configuration == null) {
-            throw new IllegalArgumentException("ACME material configuration must not be null");
-        }
-        requireOwnerScope(configuration.account().scope());
-        requireOwnerScope(configuration.identity().scope());
-        configuration.issuerTrustAnchor().ifPresent(root -> requireOwnerScope(root.scope()));
-        List<TrustedCertificateDescriptor> trustedCertificates = configuration
-                .issuerTrustAnchor()
-                .map(List::of)
-                .orElseGet(List::of);
-        return KeyMaterialCapabilities.open(
-                        owner,
-                        List.of(configuration.account(), configuration.identity()),
-                        trustedCertificates)
-                .acme(
-                        configuration.account(),
-                        configuration.identity(),
-                        configuration.issuerTrustAnchor());
+        requireAcmeConfiguration(configuration);
+        return KeyMaterialCapabilities.open(owner, List.of(configuration.account(), configuration.identity()),
+                configuration.issuerTrustAnchor().map(List::of).orElseGet(List::of))
+                .certificateIdentity(configuration.identity(), configuration.issuerTrustAnchor(),
+                        List.of(), TlsClientAuthentication.DISABLED);
     }
 
-    private SelectedTlsMaterial select(TlsMaterialConfiguration configuration)
+    public CertificateIdentity certificateIdentity(TlsMaterialConfiguration configuration)
             throws GeneralSecurityException {
         if (configuration == null) {
             throw new IllegalArgumentException("TLS material configuration must not be null");
         }
         requireOwnerScope(configuration.identity().scope());
         configuration.serverIssuerTrustAnchor().ifPresent(root -> requireOwnerScope(root.scope()));
+        List<TrustedCertificateDescriptor> trusted = new ArrayList<>();
+        configuration.serverIssuerTrustAnchor().ifPresent(trusted::add);
         for (TrustedCertificateDescriptor root : configuration.clientTrustAnchors()) {
             requireOwnerScope(root.scope());
+            if (!trusted.contains(root)) trusted.add(root);
         }
-        List<TrustedCertificateDescriptor> trustedCertificates = new ArrayList<>();
-        configuration.serverIssuerTrustAnchor().ifPresent(trustedCertificates::add);
-        for (TrustedCertificateDescriptor root : configuration.clientTrustAnchors()) {
-            if (!trustedCertificates.contains(root)) {
-                trustedCertificates.add(root);
-            }
+        return KeyMaterialCapabilities.open(owner, List.of(configuration.identity()), trusted)
+                .certificateIdentity(configuration.identity(), configuration.serverIssuerTrustAnchor(),
+                        configuration.clientTrustAnchors(), configuration.clientAuthentication());
+    }
+
+    private void requireAcmeConfiguration(AcmeMaterialConfiguration configuration) {
+        if (configuration == null) {
+            throw new IllegalArgumentException("ACME material configuration must not be null");
         }
-        return KeyMaterialCapabilities.open(
-                        owner,
-                        List.of(configuration.identity()),
-                        trustedCertificates)
-                .tls(
-                        configuration.identity(),
-                        configuration.serverIssuerTrustAnchor(),
-                        configuration.clientTrustAnchors(),
-                        configuration.clientAuthentication());
+        requireOwnerScope(configuration.account().scope());
+        requireOwnerScope(configuration.identity().scope());
+        configuration.issuerTrustAnchor().ifPresent(root -> requireOwnerScope(root.scope()));
+    }
+
+    private void requireAvailable() {
+        if (owner == null) throw new IllegalStateException("Key material is not available");
     }
 
     private void requireOwnerScope(KeyMaterialScope scope) {
+        requireAvailable();
         if (!clusterScope.equals(scope)) {
             throw new IllegalArgumentException("Key material reference does not belong to the owner cluster");
         }
-    }
-
-    private static boolean isStorageCertificate(X509Certificate certificate) {
-        String subject = certificate.getSubjectX500Principal().getName(X500Principal.RFC2253);
-        return certificate.getBasicConstraints() < 0
-                && certificate.getSubjectX500Principal().equals(certificate.getIssuerX500Principal())
-                && subject.contains("O=" + KeyMaterialConstants.STORAGE_CERTIFICATE_ORGANIZATION);
     }
 
     private static void requireRsa(SigningMaterialSet signingMaterial) {

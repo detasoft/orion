@@ -66,11 +66,11 @@ class PlaywrightExternalServicesIT {
         KeyPair rootKey = KeyUtils.generateRSAKeyPair().valueOrFailure("test root key");
         AcmeMaterialConfiguration material = acmeMaterial(configuration);
         try (TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(configuration)) {
-            identity.material().acme().acquire(material, 2048, 2048);
+            identity.material().acquireAcmeKeys(material, 2048, 2048);
             runPlaywright(configuration, identity, rootKey, fixtureRoot, caRoot);
         }
         try (TestServerIdentityMaterial reopened = TestServerIdentityMaterial.open(configuration)) {
-            assertThat(reopened.material().acme().certificateChain(material)).isPresent();
+            assertThat(reopened.material().certificateIdentity(material).issuedCertificateChain()).isPresent();
         }
     }
 
@@ -141,10 +141,8 @@ class PlaywrightExternalServicesIT {
                 boolean issueCertificate = goal.equals("browser-acme-test");
                 OrionComponent component = TestRuntimeBootstrap.componentBuilder(
                                 configuration, identity.capability(), identity.sshHostKeys())
-                        .acmeKeyMaterialCapability(identity.material().acme())
-                        .configurationMaterialCapability(identity.material().configurationMaterial())
-                        .configurationCipherCapability(identity.material().configurationCipher())
-                        .tlsCapability(identity.material().tls())
+                        .keyMaterial(identity.material())
+                        .configurationSecretCipher(identity.material().configurationCipher())
                         .build();
                 OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
                 try {

@@ -8,7 +8,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.cert.X509Certificate;
-import java.security.KeyPair;
 import java.util.List;
 import java.util.Optional;
 
@@ -32,7 +31,7 @@ class OrionKeyMaterialTest {
 
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
                 new KeyMaterialCreation(true))) {
-            ServerIdentityCapability identity = material.serverIdentity();
+            SigningIdentity identity = material.signingIdentity();
             signature = identity.sign(payload);
             assertThat(identity.activeKeyId()).isEqualTo("server-signing-v1");
             assertThat(identity.verify("server-signing-v1", payload, signature)).isTrue();
@@ -40,7 +39,7 @@ class OrionKeyMaterialTest {
         }
 
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048)) {
-            ServerIdentityCapability identity = material.serverIdentity();
+            SigningIdentity identity = material.signingIdentity();
             assertThat(identity.verify("server-signing-v1", payload, signature)).isTrue();
             assertThat(identity.verify("unknown", payload, signature)).isFalse();
         }
@@ -64,7 +63,7 @@ class OrionKeyMaterialTest {
 
         SigningMaterialSet signing = new SigningMaterialSet(active, List.of(old));
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048)) {
-            ServerIdentityCapability identity = material.serverIdentity();
+            SigningIdentity identity = material.signingIdentity();
             byte[] activeSignature = identity.sign(payload);
 
             assertThat(identity.activeKeyId()).isEqualTo("server-signing-v2");
@@ -88,20 +87,20 @@ class OrionKeyMaterialTest {
 
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), initial, 2048,
                 new KeyMaterialCreation(true))) {
-            oldSignature = material.serverIdentity().sign(payload);
+            oldSignature = material.signingIdentity().sign(payload);
         }
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
             service.generateKeyIfMissing(next, 2048);
             service.save();
         }
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), initial, 2048)) {
-            assertThat(material.serverIdentity().activeKeyId()).isEqualTo(old.alias().value());
-            assertThat(material.serverIdentity().hasVerificationKey(next.alias().value())).isFalse();
+            assertThat(material.signingIdentity().activeKeyId()).isEqualTo(old.alias().value());
+            assertThat(material.signingIdentity().hasVerificationKey(next.alias().value())).isFalse();
         }
 
         SigningMaterialSet retained = new SigningMaterialSet(next, List.of(old));
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), retained, 2048)) {
-            ServerIdentityCapability identity = material.serverIdentity();
+            SigningIdentity identity = material.signingIdentity();
             nextSignature = identity.sign(payload);
             assertThat(identity.activeKeyId()).isEqualTo(next.alias().value());
             assertThat(identity.verify(old.alias().value(), payload, oldSignature)).isTrue();
@@ -110,7 +109,7 @@ class OrionKeyMaterialTest {
 
         SigningMaterialSet retired = new SigningMaterialSet(next, List.of());
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), retired, 2048)) {
-            ServerIdentityCapability identity = material.serverIdentity();
+            SigningIdentity identity = material.signingIdentity();
             assertThat(identity.verify(old.alias().value(), payload, oldSignature)).isFalse();
             assertThat(identity.verify(next.alias().value(), payload, nextSignature)).isTrue();
             assertThat(identity.retainedPublicKeys()).isEmpty();
@@ -159,7 +158,7 @@ class OrionKeyMaterialTest {
     }
 
     @Test
-    void derivesLateBoundAcmeAndTlsCapabilitiesFromOneOwner() throws Exception {
+    void sharesCertificateIdentityBetweenAcmeAndTls() throws Exception {
         CountingStore store = new CountingStore();
         OrionKeyMaterial material = OrionKeyMaterial.open(
                 store,
@@ -175,24 +174,31 @@ class OrionKeyMaterialTest {
         TlsMaterialConfiguration tls = new TlsMaterialConfiguration(
                 identity, Optional.empty(), List.of(), TlsClientAuthentication.DISABLED);
 
-        AcmeKeyMaterial keys = material.acme().acquire(acme, 2048, 2048);
-        assertThatThrownBy(() -> material.tls().createContext(tls))
+        AcmeKeyMaterial keys = material.acquireAcmeKeys(acme, 2048, 2048);
+        CertificateIdentity certificate = material.certificateIdentity(tls);
+        assertThatThrownBy(certificate::createContext)
                 .hasMessageContaining("issued certificate chain");
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
         TestCertificateChain.Authority intermediate = TestCertificateChain.intermediate("Intermediate", root);
-        material.acme().installCertificateChain(
-                acme,
+        material.certificateIdentity(acme).installCertificateChain(
                 List.of(TestCertificateChain.leaf("orion.example", keys.domainKeyPair(), intermediate)),
                 Optional.empty());
 
-        assertThat(material.serverIdentity().activeKeyId()).isEqualTo("server-signing-v1");
-        assertThat(material.acme().certificateChain(acme).orElseThrow()).hasSize(1);
-        assertThat(material.tls().createContext(tls).getProtocol()).isEqualTo("TLS");
+        assertThat(material.signingIdentity().activeKeyId()).isEqualTo("server-signing-v1");
+        assertThat(material.certificateIdentity(acme).issuedCertificateChain().orElseThrow()).hasSize(1);
+        assertThat(certificate.createContext().getProtocol()).isEqualTo("TLS");
         assertThat(store.readCalls).isEqualTo(1);
+        KeyMaterialDescriptor staleAccount = descriptor(account.alias().value(), account.purpose(),
+                account.algorithm(), 2, account.scope());
+        AcmeMaterialConfiguration stale = new AcmeMaterialConfiguration(staleAccount, identity, Optional.empty());
+        assertThatThrownBy(() -> material.certificateIdentity(stale))
+                .isInstanceOf(GeneralSecurityException.class).hasMessageContaining("version");
 
         material.close();
         material.close();
-        assertThatThrownBy(() -> material.acme().acquire(acme, 2048, 2048))
+        assertThatThrownBy(certificate::createContext)
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
+        assertThatThrownBy(() -> material.acquireAcmeKeys(acme, 2048, 2048))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("closed");
     }
@@ -221,7 +227,7 @@ class OrionKeyMaterialTest {
             AcmeMaterialConfiguration configuration = new AcmeMaterialConfiguration(
                     account, identity, Optional.empty());
 
-            assertThatThrownBy(() -> material.acme().acquire(configuration, 2048, 2048))
+            assertThatThrownBy(() -> material.acquireAcmeKeys(configuration, 2048, 2048))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("owner cluster");
         }
@@ -241,7 +247,7 @@ class OrionKeyMaterialTest {
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
                 new KeyMaterialCreation(true))) {
             String initialVersion = store.read().orElseThrow().version();
-            ConfigurationCipherCapability cipher = material.configurationCipher();
+            ConfigurationSecretCipher cipher = material.configurationCipher();
             assertThat(store.read().orElseThrow().version()).isEqualTo(initialVersion);
             envelope = cipher.seal("git-token".getBytes(StandardCharsets.UTF_8), context);
             savedVersion = store.read().orElseThrow().version();
@@ -295,7 +301,7 @@ class OrionKeyMaterialTest {
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
                 new KeyMaterialCreation(true))) {
             String before = store.read().orElseThrow().version();
-            ConfigurationCipherCapability cipher = material.configurationCipher();
+            ConfigurationSecretCipher cipher = material.configurationCipher();
             store.fail = true;
             assertThatThrownBy(() -> cipher.seal(new byte[]{1}, context))
                     .isInstanceOf(GeneralSecurityException.class);
@@ -321,18 +327,18 @@ class OrionKeyMaterialTest {
                 new KeyMaterialCreation(true))) {
             String before = store.read().orElseThrow().version();
             store.fail = true;
-            assertThatThrownBy(() -> material.acme().acquire(configuration, 2048, 2048))
+            assertThatThrownBy(() -> material.acquireAcmeKeys(configuration, 2048, 2048))
                     .isInstanceOf(IOException.class).hasMessage("ACME save failed");
             afterFailure = store.read().orElseThrow().version();
             assertThat(afterFailure.equals(before)).isEqualTo(!committed);
             store.fail = false;
-            assertThatThrownBy(() -> material.acme().acquire(configuration, 2048, 2048))
+            assertThatThrownBy(() -> material.acquireAcmeKeys(configuration, 2048, 2048))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
-            assertThatThrownBy(() -> material.acme().certificateChain(configuration))
+            assertThatThrownBy(() -> material.certificateIdentity(configuration).issuedCertificateChain())
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
         }
         try (OrionKeyMaterial reopened = OrionKeyMaterial.open(store, options(), signing, 2048)) {
-            AcmeKeyMaterial keys = reopened.acme().acquire(configuration, 2048, 2048);
+            AcmeKeyMaterial keys = reopened.acquireAcmeKeys(configuration, 2048, 2048);
             assertThat(keys.accountKeyPair().getPrivate()).isNotNull();
             assertThat(keys.domainKeyPair().getPrivate()).isNotNull();
             assertThat(store.read().orElseThrow().version().equals(afterFailure)).isEqualTo(committed);
@@ -349,31 +355,35 @@ class OrionKeyMaterialTest {
         X509Certificate expected;
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
                 new KeyMaterialCreation(true))) {
-            AcmeKeyMaterial keys = material.acme().acquire(configuration, 2048, 2048);
+            AcmeKeyMaterial keys = material.acquireAcmeKeys(configuration, 2048, 2048);
             TestCertificateChain.Authority issuer = TestCertificateChain.root("ACME issuer");
             X509Certificate original = TestCertificateChain.leaf(
                     "original.example", keys.domainKeyPair(), issuer);
             X509Certificate replacement = TestCertificateChain.leaf(
                     "replacement.example", keys.domainKeyPair(), issuer);
-            material.acme().installCertificateChain(configuration, List.of(original), Optional.empty());
-            assertThatThrownBy(() -> material.acme().installCertificateChain(
-                    configuration, List.of(), Optional.empty())).isInstanceOf(IllegalArgumentException.class);
-            assertThat(material.acme().certificateChain(configuration).orElseThrow()).containsExactly(original);
+            material.certificateIdentity(configuration).installCertificateChain(
+                    List.of(original), Optional.empty());
+            assertThatThrownBy(() -> material.certificateIdentity(configuration)
+                    .installCertificateChain(List.of(), Optional.empty()))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThat(material.certificateIdentity(configuration).issuedCertificateChain().orElseThrow())
+                    .containsExactly(original);
             store.fail = true;
-            assertThatThrownBy(() -> material.acme().installCertificateChain(
-                    configuration, List.of(replacement), Optional.empty()))
+            assertThatThrownBy(() -> material.certificateIdentity(configuration)
+                    .installCertificateChain(List.of(replacement), Optional.empty()))
                     .isInstanceOf(IOException.class).hasMessage("ACME save failed");
             store.fail = false;
-            assertThatThrownBy(() -> material.acme().certificateChain(configuration))
+            assertThatThrownBy(() -> material.certificateIdentity(configuration).issuedCertificateChain())
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
-            assertThatThrownBy(() -> material.acme().installCertificateChain(
-                    configuration, List.of(replacement), Optional.empty()))
+            assertThatThrownBy(() -> material.certificateIdentity(configuration)
+                    .installCertificateChain(List.of(replacement), Optional.empty()))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
             expected = committed ? replacement : original;
         }
         String durableVersion = store.read().orElseThrow().version();
         try (OrionKeyMaterial reopened = OrionKeyMaterial.open(store, options(), signing, 2048)) {
-            assertThat(reopened.acme().certificateChain(configuration).orElseThrow()).containsExactly(expected);
+            assertThat(reopened.certificateIdentity(configuration).issuedCertificateChain().orElseThrow())
+                    .containsExactly(expected);
             assertThat(store.read().orElseThrow().version()).isEqualTo(durableVersion);
         }
     }
@@ -430,7 +440,7 @@ class OrionKeyMaterialTest {
                     new ConfigurationSecretContext("system/token", "credential")))
                     .isInstanceOf(GeneralSecurityException.class);
             assertThat(store.read().orElseThrow().version()).isEqualTo(before);
-            assertThat(material.serverIdentity().sign(new byte[]{1})).isNotEmpty();
+            assertThat(material.signingIdentity().sign(new byte[]{1})).isNotEmpty();
         }
     }
 

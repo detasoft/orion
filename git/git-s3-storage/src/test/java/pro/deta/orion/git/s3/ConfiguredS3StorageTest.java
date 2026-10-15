@@ -14,7 +14,7 @@ import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
-import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
+import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
@@ -174,7 +174,7 @@ class ConfiguredS3StorageTest {
             fixture.bind("remote", true, "unavailable", "s3://bucket/prefix");
             fixture.local.create("local-repo").valueOrFailure("local data");
             ConfigurationSecrets unavailable = new ConfigurationSecrets(fixture.current::get,
-                    ConfigurationCipherCapability.unavailable());
+                    ConfigurationSecretCipher.unavailable());
             fixture.factory.activate(fixture.current::get, unavailable, ignored -> false);
             assertThat(fixture.provider.exists("local-repo")).isTrue();
             fixture.provider.find("local-repo").valueOrFailure("local read");

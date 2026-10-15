@@ -93,68 +93,15 @@ public final class KeyMaterialCapabilities {
         };
     }
 
-    public ServerIdentityCapability serverIdentity(SigningMaterialSet material) {
-        if (material == null) {
-            throw new IllegalArgumentException("Server signing material must not be null");
-        }
+    public SigningIdentity signingIdentity(SigningMaterialSet material) {
+        if (material == null) throw new IllegalArgumentException("Server signing material must not be null");
         if (material.active().algorithm() != KeyMaterialAlgorithm.RSA) {
             throw new IllegalArgumentException("JWT server identity material must use RSA");
         }
-        KeyMaterialDescriptor active = requireRegistered(
-                material.active(), KeyMaterialPurpose.SERVER_SIGNING);
-        Map<String, KeyMaterialDescriptor> verification = new LinkedHashMap<>();
         for (KeyMaterialDescriptor descriptor : material.verificationIncludingActive()) {
-            KeyMaterialDescriptor registered = requireRegistered(
-                    descriptor, KeyMaterialPurpose.SERVER_SIGNING);
-            verification.put(registered.alias().value(), registered);
+            requireRegistered(descriptor, KeyMaterialPurpose.SERVER_SIGNING);
         }
-        Map<String, KeyMaterialDescriptor> immutable = Map.copyOf(verification);
-        return new ServerIdentityCapability() {
-            @Override
-            public String activeKeyId() {
-                return active.alias().value();
-            }
-
-            @Override
-            public byte[] sign(byte[] payload) throws GeneralSecurityException {
-                return signWith(active, payload);
-            }
-
-            @Override
-            public boolean hasVerificationKey(String keyId) {
-                return keyId != null && immutable.containsKey(keyId);
-            }
-
-            @Override
-            public boolean verify(
-                    String keyId,
-                    byte[] payload,
-                    byte[] signature) throws GeneralSecurityException {
-                if (keyId == null || keyId.isBlank()) {
-                    return false;
-                }
-                KeyMaterialDescriptor descriptor = immutable.get(keyId);
-                if (descriptor == null) {
-                    return false;
-                }
-                return KeyMaterialCapabilities.this.verification(List.of(descriptor))
-                        .verify(payload, signature);
-            }
-
-            @Override
-            public List<java.security.PublicKey> publicKeys() throws GeneralSecurityException {
-                return List.of(owner.getKeyPair(active.alias().value()).getPublic());
-            }
-
-            @Override
-            public List<java.security.PublicKey> retainedPublicKeys() throws GeneralSecurityException {
-                List<java.security.PublicKey> keys = new ArrayList<>();
-                for (KeyMaterialDescriptor descriptor : material.verification()) {
-                    keys.add(owner.getKeyPair(descriptor.alias().value()).getPublic());
-                }
-                return List.copyOf(keys);
-            }
-        };
+        return new SigningIdentity(owner, this, material);
     }
 
     public VerificationCapability verification(List<KeyMaterialDescriptor> requested) {
@@ -201,58 +148,23 @@ public final class KeyMaterialCapabilities {
         };
     }
 
-    SelectedAcmeKeyMaterial acme(
-            KeyMaterialDescriptor accountDescriptor,
-            KeyMaterialDescriptor identityDescriptor,
-            Optional<TrustedCertificateDescriptor> issuerDescriptor) {
-        KeyMaterialDescriptor account = requireRegistered(
-                accountDescriptor, KeyMaterialPurpose.ACME_ACCOUNT);
-        KeyMaterialDescriptor identity = requireRegistered(
-                identityDescriptor, KeyMaterialPurpose.TLS_IDENTITY);
+    AcmeKeyMaterial acquireAcmeKeys(KeyMaterialDescriptor accountDescriptor,
+            KeyMaterialDescriptor identityDescriptor, Optional<TrustedCertificateDescriptor> issuerDescriptor,
+            int accountKeySize, int domainKeySize) throws IOException, GeneralSecurityException {
+        KeyMaterialDescriptor account = requireRegistered(accountDescriptor, KeyMaterialPurpose.ACME_ACCOUNT);
+        KeyMaterialDescriptor identity = requireRegistered(identityDescriptor, KeyMaterialPurpose.TLS_IDENTITY);
         requireAcmeScope(account, identity);
         Optional<TrustedCertificateDescriptor> issuer = requireRegistered(issuerDescriptor);
         issuer.ifPresent(value -> requireSameScope(identity.scope(), value.scope(), "ACME issuer"));
-        return new SelectedAcmeKeyMaterial() {
-            @Override
-            public AcmeKeyMaterial acquire(int accountKeySize, int domainKeySize)
-                    throws IOException, GeneralSecurityException {
-                return owner.acquireAcmeKeys(account, accountKeySize, identity, domainKeySize);
-            }
-
-            @Override
-            public void installCertificateChain(
-                    List<? extends Certificate> certificateChain,
-                    Optional<X509Certificate> issuerTrustAnchor)
-                    throws IOException, GeneralSecurityException {
-                List<X509Certificate> validated = requireX509Chain(certificateChain);
-                Optional<X509Certificate> root = requireIssuerCertificate(issuer, issuerTrustAnchor);
-                validateCertificateChain(
-                        validated,
-                        owner.getKeyPair(identity.alias().value()).getPublic(),
-                        root);
-                owner.installAcmeCertificateChain(identity, validated, issuer, root);
-            }
-
-            @Override
-            public List<X509Certificate> certificateChain() throws GeneralSecurityException {
-                return x509CertificateChain(identity);
-            }
-
-            @Override
-            public Optional<X509Certificate> issuerTrustAnchor() throws GeneralSecurityException {
-                return trustedCertificate(issuer);
-            }
-        };
+        return owner.acquireAcmeKeys(account, accountKeySize, identity, domainKeySize);
     }
 
-    SelectedTlsMaterial tls(
-            KeyMaterialDescriptor descriptor,
+    CertificateIdentity certificateIdentity(KeyMaterialDescriptor descriptor,
             Optional<TrustedCertificateDescriptor> serverIssuerDescriptor,
             List<TrustedCertificateDescriptor> clientTrustDescriptors,
             TlsClientAuthentication clientAuthentication) {
-        KeyMaterialDescriptor registered = requireRegistered(
-                descriptor, KeyMaterialPurpose.TLS_IDENTITY);
-        Optional<TrustedCertificateDescriptor> serverIssuer = requireRegistered(serverIssuerDescriptor);
+        KeyMaterialDescriptor registered = requireRegistered(descriptor, KeyMaterialPurpose.TLS_IDENTITY);
+        Optional<TrustedCertificateDescriptor> issuer = requireRegistered(serverIssuerDescriptor);
         List<TrustedCertificateDescriptor> clientTrust = requireRegistered(clientTrustDescriptors);
         if (clientAuthentication == null) {
             throw new IllegalArgumentException("TLS client authentication must not be null");
@@ -260,33 +172,7 @@ public final class KeyMaterialCapabilities {
         if (clientAuthentication != TlsClientAuthentication.DISABLED && clientTrust.isEmpty()) {
             throw new IllegalArgumentException("TLS client authentication requires client trust anchors");
         }
-        return new SelectedTlsMaterial() {
-            @Override
-            public List<X509Certificate> certificateChain() throws GeneralSecurityException {
-                return x509CertificateChain(registered);
-            }
-
-            @Override
-            public Optional<X509Certificate> serverIssuerTrustAnchor() throws GeneralSecurityException {
-                return trustedCertificate(serverIssuer);
-            }
-
-            @Override
-            public TlsClientAuthentication clientAuthentication() {
-                return clientAuthentication;
-            }
-
-            @Override
-            public SSLContext createContext() throws GeneralSecurityException {
-                List<X509Certificate> chain = certificateChain();
-                Optional<X509Certificate> root = serverIssuerTrustAnchor();
-                validateCertificateChain(
-                        chain,
-                        owner.getKeyPair(registered.alias().value()).getPublic(),
-                        root);
-                return createTlsContext(registered, chain, clientTrust);
-            }
-        };
+        return new CertificateIdentity(owner, this, registered, issuer, clientTrust, clientAuthentication);
     }
 
     public SshHostKeyCapability sshHostKeys(List<KeyMaterialDescriptor> requested) {
@@ -354,32 +240,12 @@ public final class KeyMaterialCapabilities {
         };
     }
 
-    public ConfigurationCipherCapability configurationCipher(KeyMaterialDescriptor descriptor) {
-        KeyMaterialDescriptor registered = requireRegistered(
-                descriptor, KeyMaterialPurpose.CONFIGURATION_CIPHER);
-        return new ConfigurationCipherCapability() {
-            @Override
-            public KeyMaterialDescriptor descriptor() {
-                return registered;
-            }
-
-            @Override
-            public ConfigurationSecretEnvelope seal(
-                    byte[] plaintext,
-                    ConfigurationSecretContext context) throws GeneralSecurityException {
-                return sealConfigurationSecret(registered, plaintext, context);
-            }
-
-            @Override
-            public byte[] open(
-                    ConfigurationSecretEnvelope envelope,
-                    ConfigurationSecretContext context) throws GeneralSecurityException {
-                return openConfigurationSecret(registered, envelope, context);
-            }
-        };
+    public ConfigurationSecretCipher configurationCipher(KeyMaterialDescriptor descriptor) {
+        KeyMaterialDescriptor registered = requireRegistered(descriptor, KeyMaterialPurpose.CONFIGURATION_CIPHER);
+        return new ConfigurationSecretCipher(registered, this);
     }
 
-    private ConfigurationSecretEnvelope sealConfigurationSecret(
+    ConfigurationSecretEnvelope sealConfigurationSecret(
             KeyMaterialDescriptor descriptor,
             byte[] plaintext,
             ConfigurationSecretContext context) throws GeneralSecurityException {
@@ -414,7 +280,7 @@ public final class KeyMaterialCapabilities {
                 ciphertext);
     }
 
-    private byte[] openConfigurationSecret(
+    byte[] openConfigurationSecret(
             KeyMaterialDescriptor descriptor,
             ConfigurationSecretEnvelope envelope,
             ConfigurationSecretContext context) throws GeneralSecurityException {
@@ -480,7 +346,7 @@ public final class KeyMaterialCapabilities {
                 cause);
     }
 
-    private byte[] signWith(KeyMaterialDescriptor descriptor, byte[] payload)
+    byte[] signWith(KeyMaterialDescriptor descriptor, byte[] payload)
             throws GeneralSecurityException {
         requireBytes(payload, "Payload");
         Signature signer = Signature.getInstance(descriptor.algorithm().requireSignatureAlgorithm());
@@ -489,7 +355,7 @@ public final class KeyMaterialCapabilities {
         return signer.sign();
     }
 
-    private SSLContext createTlsContext(
+    SSLContext createTlsContext(
             KeyMaterialDescriptor descriptor,
             List<X509Certificate> identityChain,
             List<TrustedCertificateDescriptor> clientTrust) throws GeneralSecurityException {
@@ -651,7 +517,7 @@ public final class KeyMaterialCapabilities {
         return registered;
     }
 
-    private List<X509Certificate> x509CertificateChain(KeyMaterialDescriptor descriptor)
+    List<X509Certificate> x509CertificateChain(KeyMaterialDescriptor descriptor)
             throws GeneralSecurityException {
         List<X509Certificate> chain = requireX509Chain(
                 Arrays.asList(owner.getCertificateChain(descriptor.alias().value())));
@@ -661,7 +527,7 @@ public final class KeyMaterialCapabilities {
         return chain;
     }
 
-    private Optional<X509Certificate> trustedCertificate(
+    Optional<X509Certificate> trustedCertificate(
             Optional<TrustedCertificateDescriptor> descriptor) throws GeneralSecurityException {
         if (descriptor.isEmpty()) {
             return Optional.empty();
@@ -669,7 +535,7 @@ public final class KeyMaterialCapabilities {
         return Optional.of(owner.getTrustedCertificate(descriptor.orElseThrow()));
     }
 
-    private static List<X509Certificate> requireX509Chain(
+    static List<X509Certificate> requireX509Chain(
             List<? extends Certificate> certificateChain) throws GeneralSecurityException {
         if (certificateChain == null || certificateChain.isEmpty()) {
             throw new IllegalArgumentException("Certificate chain must not be empty");
@@ -684,7 +550,7 @@ public final class KeyMaterialCapabilities {
         return List.copyOf(certificates);
     }
 
-    private static Optional<X509Certificate> requireIssuerCertificate(
+    static Optional<X509Certificate> requireIssuerCertificate(
             Optional<TrustedCertificateDescriptor> descriptor,
             Optional<X509Certificate> certificate) throws GeneralSecurityException {
         if (certificate == null) {
@@ -702,7 +568,7 @@ public final class KeyMaterialCapabilities {
         return certificate;
     }
 
-    private static void validateCertificateChain(
+    static void validateCertificateChain(
             List<X509Certificate> chain,
             java.security.PublicKey identityPublicKey,
             Optional<X509Certificate> root) throws GeneralSecurityException {

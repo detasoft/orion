@@ -43,7 +43,7 @@ class S3RepositoryManagementIT {
                     KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES,
                     new KeyMaterialVersion(1), KeyMaterialScope.cluster("test"));
             material.generateSecretKeyIfMissing(descriptor, 256);
-            ConfigurationCipherCapability cipher = KeyMaterialCapabilities.open(material, List.of(descriptor))
+            ConfigurationSecretCipher cipher = KeyMaterialCapabilities.open(material, List.of(descriptor))
                     .configurationCipher(descriptor);
             ConfiguredNativeGitRepositoryFactory configuredFactory =
                     new ConfiguredNativeGitRepositoryFactory(

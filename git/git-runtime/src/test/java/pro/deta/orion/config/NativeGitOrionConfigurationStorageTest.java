@@ -270,8 +270,8 @@ class NativeGitOrionConfigurationStorageTest {
         return new OrionConfigurationEditor(
                 storage,
                 new BootstrapConfiguration(),
-                pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),
-                pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable(),
+                pro.deta.orion.keymaterial.ConfigurationSecretCipher.unavailable(),
+                pro.deta.orion.keymaterial.OrionKeyMaterial.unavailable(),
                 EVENTS.manager());
     }
 

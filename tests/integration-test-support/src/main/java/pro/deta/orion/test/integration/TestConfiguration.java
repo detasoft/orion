@@ -13,8 +13,8 @@ import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.config.OrionVersionedConfigurationStorage;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.internal.ChangeMetadata;
-import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
-import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
+import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialAlias;
@@ -25,7 +25,7 @@ import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialScope;
 import pro.deta.orion.keymaterial.KeyMaterialService;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
-import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.keymaterial.SigningIdentity;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
@@ -38,22 +38,22 @@ public final class TestConfiguration implements AutoCloseable {
     private final MemoryStorage storage = new MemoryStorage();
     private final OrionConfigurationEditor editor;
     private final OrionAccessControlServiceImpl acl;
-    private final ConfigurationCipherCapability cipher;
+    private final ConfigurationSecretCipher cipher;
 
     public TestConfiguration(TestEvents events) {
         this(events, new BootstrapConfiguration(), defaultCipher(events),
-                new ConfigurationMaterialCapability() {
+                new OrionKeyMaterial() {
                     @Override
                     public void require(KeyMaterialDescriptor descriptor) {}
 
                     @Override
                     public void require(TrustedCertificateDescriptor descriptor) {}
-                }, ServerIdentityCapability.unavailable());
+                }, SigningIdentity.unavailable());
     }
 
     public TestConfiguration(TestEvents events, BootstrapConfiguration bootstrap,
-            ConfigurationCipherCapability cipher, ConfigurationMaterialCapability material,
-            ServerIdentityCapability identity) {
+            ConfigurationSecretCipher cipher, OrionKeyMaterial material,
+            SigningIdentity identity) {
         this.events = events;
         this.cipher = cipher;
         editor = new OrionConfigurationEditor(storage, bootstrap, cipher, material, events.manager());
@@ -80,7 +80,7 @@ public final class TestConfiguration implements AutoCloseable {
                 .valueOrFailure("Cannot read configuration document"), cipher);
     }
 
-    private static ConfigurationCipherCapability defaultCipher(TestEvents events) {
+    private static ConfigurationSecretCipher defaultCipher(TestEvents events) {
         try {
             KeyMaterialService material = KeyMaterialService.open(new InMemoryKeyMaterialContentStore(),
                     KeyMaterialOptions.pkcs12("test-password".toCharArray()));

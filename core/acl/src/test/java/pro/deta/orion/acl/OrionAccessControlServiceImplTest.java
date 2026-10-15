@@ -31,9 +31,9 @@ import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.TokenRefreshResult;
-import pro.deta.orion.keymaterial.ServerIdentityCapability;
-import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
-import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
+import pro.deta.orion.keymaterial.SigningIdentity;
+import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
@@ -810,7 +810,7 @@ class OrionAccessControlServiceImplTest {
     void missingHttpsMaterialRetainsTheLastPublishedDocumentAndAcl() throws Exception {
         OrionDocument initial = OrionDocument.withAccessControl(new AccessControl());
         try (ServiceFixture fixture = fixture(initial, testServerIdentity(), new OrionPasswordHashingService(),
-                ConfigurationMaterialCapability.unavailable())) {
+                OrionKeyMaterial.unavailable())) {
             OrionDocumentRevision lastValid = fixture.service.configuration();
             OrionHttpsConfiguration https = new OrionHttpsConfiguration(true, "localhost", 8443,
                     URI.create("https://localhost:8443"),
@@ -1446,12 +1446,12 @@ class OrionAccessControlServiceImplTest {
 
     private static ServiceFixture fixture(
             AclFixture draft,
-            ServerIdentityCapability serverIdentity) {
+            SigningIdentity serverIdentity) {
         return fixture(draft, serverIdentity, new OrionPasswordHashingService());
     }
 
     private static ServiceFixture fixture(
-            AclFixture draft, ServerIdentityCapability serverIdentity, OrionPasswordHashingService hashing) {
+            AclFixture draft, SigningIdentity serverIdentity, OrionPasswordHashingService hashing) {
         return fixture(OrionDocument.withAccessControl(draft.toAccessControl()), serverIdentity, hashing,
                 testMaterial());
     }
@@ -1460,8 +1460,8 @@ class OrionAccessControlServiceImplTest {
         return fixture(document, testServerIdentity(), new OrionPasswordHashingService(), testMaterial());
     }
 
-    private static ServiceFixture fixture(OrionDocument document, ServerIdentityCapability identity,
-            OrionPasswordHashingService hashing, ConfigurationMaterialCapability material) {
+    private static ServiceFixture fixture(OrionDocument document, SigningIdentity identity,
+            OrionPasswordHashingService hashing, OrionKeyMaterial material) {
         InMemoryStorage storage = new InMemoryStorage(
                 new OrionDocumentRevision(Result.of(document), new OrionRevision.Stored("version-one")));
         BootstrapConfiguration configuration = new BootstrapConfiguration();
@@ -1678,7 +1678,7 @@ class OrionAccessControlServiceImplTest {
         }
     }
 
-    private static ServerIdentityCapability testServerIdentity() {
+    private static SigningIdentity testServerIdentity() {
         return testServerIdentity(List.of());
     }
 
@@ -1705,8 +1705,8 @@ class OrionAccessControlServiceImplTest {
         }
     }
 
-    private static ConfigurationCipherCapability testCipher() {
-        return new ConfigurationCipherCapability() {
+    private static ConfigurationSecretCipher testCipher() {
+        return new ConfigurationSecretCipher() {
             @Override
             public KeyMaterialDescriptor descriptor() {
                 throw new UnsupportedOperationException();
@@ -1724,8 +1724,8 @@ class OrionAccessControlServiceImplTest {
         };
     }
 
-    private static ConfigurationMaterialCapability testMaterial() {
-        return new ConfigurationMaterialCapability() {
+    private static OrionKeyMaterial testMaterial() {
+        return new OrionKeyMaterial() {
             @Override
             public void require(KeyMaterialDescriptor descriptor) {
             }
@@ -1736,8 +1736,8 @@ class OrionAccessControlServiceImplTest {
         };
     }
 
-    private static ServerIdentityCapability testServerIdentity(List<PublicKey> publicKeys) {
-        return new ServerIdentityCapability() {
+    private static SigningIdentity testServerIdentity(List<PublicKey> publicKeys) {
+        return new SigningIdentity() {
             @Override
             public String activeKeyId() {
                 return "test-signing-key";

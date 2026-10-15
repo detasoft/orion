@@ -2,10 +2,17 @@ package pro.deta.orion.transport.http;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.keymaterial.AcmeKeyMaterial;
-import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
-import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
-import pro.deta.orion.keymaterial.TlsCapability;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialAlias;
+import pro.deta.orion.keymaterial.KeyMaterialPurpose;
+import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
+import pro.deta.orion.keymaterial.KeyMaterialVersion;
+import pro.deta.orion.keymaterial.KeyMaterialScope;
+import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialOptions;
+import pro.deta.orion.keymaterial.SigningMaterialSet;
+import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.HttpTransportConfig;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -20,8 +27,6 @@ import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.security.KeyPair;
-import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.List;
 import java.util.LinkedHashSet;
@@ -59,33 +64,35 @@ public class ACMECertificateChallengeTest {
     void servesHttp01CallbackWhileAdmittedIssuanceWaitsForAuthorization() throws Exception {
         AcmeHttpChallengeService challengeService = new AcmeHttpChallengeService();
         WaitingChallengeIssuer issuer = new WaitingChallengeIssuer(challengeService);
-        AcmeCertificateService service = new AcmeCertificateService(
-                bootstrap(),
-                desiredStateWithAcme().acl(),
-                new TestAcmeKeyMaterial(),
-                issuer, null);
-        try (AcmeHttpTestServer server = startHttp(
-                challengeService,
-                new TestAdminAcmeCertificateRoute(service));
-                ExecutorService executor = Executors.newSingleThreadExecutor()) {
-            Future<HttpResponse> issuance = executor.submit(() -> post(server.adminAcmeUrl()));
+        try (OrionKeyMaterial material = keyMaterial()) {
+            AcmeCertificateService service = new AcmeCertificateService(
+                    bootstrap(),
+                    desiredStateWithAcme().acl(),
+                    material,
+                    issuer, null);
+            try (AcmeHttpTestServer server = startHttp(
+                    challengeService,
+                    new TestAdminAcmeCertificateRoute(service));
+                    ExecutorService executor = Executors.newSingleThreadExecutor()) {
+                Future<HttpResponse> issuance = executor.submit(() -> post(server.adminAcmeUrl()));
 
-            assertThat(issuer.awaitAuthorization()).isTrue();
-            assertThat(issuance.isDone()).isFalse();
-            try {
-                HttpURLConnection callback = get(server.challengeUrl("active-token"));
-                assertThat(callback.getResponseCode()).isEqualTo(HttpURLConnection.HTTP_OK);
-                assertThat(new String(callback.getInputStream().readAllBytes(), StandardCharsets.UTF_8))
-                        .isEqualTo("active-authorization");
-            } finally {
-                issuer.completeAuthorization();
+                assertThat(issuer.awaitAuthorization()).isTrue();
+                assertThat(issuance.isDone()).isFalse();
+                try {
+                    HttpURLConnection callback = get(server.challengeUrl("active-token"));
+                    assertThat(callback.getResponseCode()).isEqualTo(HttpURLConnection.HTTP_OK);
+                    assertThat(new String(callback.getInputStream().readAllBytes(), StandardCharsets.UTF_8))
+                            .isEqualTo("active-authorization");
+                } finally {
+                    issuer.completeAuthorization();
+                }
+
+                HttpResponse response = issuance.get(5, TimeUnit.SECONDS);
+                assertThat(response.status()).isEqualTo(HttpURLConnection.HTTP_OK);
+                assertThat(response.body()).contains("-----BEGIN CERTIFICATE-----");
+                assertThat(get(server.challengeUrl("active-token")).getResponseCode())
+                        .isEqualTo(HttpURLConnection.HTTP_NOT_FOUND);
             }
-
-            HttpResponse response = issuance.get(5, TimeUnit.SECONDS);
-            assertThat(response.status()).isEqualTo(HttpURLConnection.HTTP_OK);
-            assertThat(response.body()).contains("-----BEGIN CERTIFICATE-----");
-            assertThat(get(server.challengeUrl("active-token")).getResponseCode())
-                    .isEqualTo(HttpURLConnection.HTTP_NOT_FOUND);
         }
     }
 
@@ -110,7 +117,7 @@ public class ACMECertificateChallengeTest {
         JettyHTTPServer server = new JettyHTTPServer(
                 orionConfiguration,
                 desiredStateWithoutHttps().acl(),
-                TlsCapability.unavailable(),
+                OrionKeyMaterial.unavailable(),
                 rootServlet,
                 null, null);
         server.onStart();
@@ -149,7 +156,7 @@ public class ACMECertificateChallengeTest {
         JettyHTTPServer server = new JettyHTTPServer(
                 orionConfiguration,
                 desiredStateWithoutHttps().acl(),
-                TlsCapability.unavailable(),
+                OrionKeyMaterial.unavailable(),
                 rootServlet,
                 null, null);
         server.onStart();
@@ -261,39 +268,13 @@ public class ACMECertificateChallengeTest {
         }
     }
 
-    private static final class TestAcmeKeyMaterial implements AcmeKeyMaterialCapability {
-        private final KeyPair accountKeyPair;
-        private final KeyPair domainKeyPair;
-
-        private TestAcmeKeyMaterial() throws Exception {
-            accountKeyPair = TestCertificateChain.keyPair();
-            domainKeyPair = TestCertificateChain.keyPair();
-        }
-
-        @Override
-        public AcmeKeyMaterial acquire(
-                AcmeMaterialConfiguration configuration,
-                int accountKeySize,
-                int domainKeySize) {
-            return new AcmeKeyMaterial(accountKeyPair, domainKeyPair);
-        }
-
-        @Override
-        public void installCertificateChain(
-                AcmeMaterialConfiguration configuration,
-                List<? extends Certificate> certificateChain,
-                Optional<X509Certificate> issuerTrustAnchor) {
-        }
-
-        @Override
-        public Optional<List<X509Certificate>> certificateChain(AcmeMaterialConfiguration configuration) {
-            return Optional.empty();
-        }
-
-        @Override
-        public Optional<X509Certificate> issuerTrustAnchor(AcmeMaterialConfiguration configuration) {
-            return Optional.empty();
-        }
+    private static OrionKeyMaterial keyMaterial() throws Exception {
+        KeyMaterialDescriptor signing = new KeyMaterialDescriptor(new KeyMaterialAlias("server-signing-v1"),
+                KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1),
+                KeyMaterialScope.cluster("test-cluster"));
+        return OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
+                KeyMaterialOptions.pkcs12("test-password".toCharArray()),
+                new SigningMaterialSet(signing, List.of()), 2048, new KeyMaterialCreation(true));
     }
 
     private static final class WaitingChallengeIssuer extends AcmeCertificateIssuer {

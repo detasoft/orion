@@ -18,7 +18,7 @@ import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
-import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.keymaterial.SigningIdentity;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.acl.RootPasswordReset;
@@ -73,8 +73,8 @@ class NativeSshCredentialPersistenceTest {
         KeyPair key = generator.generateKeyPair();
         OrionConfigurationEditor editor = new OrionConfigurationEditor(storage,
                 new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
-                pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),
-                pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable(),
+                pro.deta.orion.keymaterial.ConfigurationSecretCipher.unavailable(),
+                pro.deta.orion.keymaterial.OrionKeyMaterial.unavailable(),
                 EVENTS.manager());
         OrionAccessControlServiceImpl service = service(editor);
         try {
@@ -109,8 +109,8 @@ class NativeSshCredentialPersistenceTest {
                                 "refs/heads/main",
                                 "users.xml"),
                         new BootstrapConfiguration(),
-                        pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),
-                        pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable(),
+                        pro.deta.orion.keymaterial.ConfigurationSecretCipher.unavailable(),
+                        pro.deta.orion.keymaterial.OrionKeyMaterial.unavailable(),
                         EVENTS.manager()));
         try {
             reopened.onStart();
@@ -129,7 +129,7 @@ class NativeSshCredentialPersistenceTest {
         return new OrionAccessControlServiceImpl(
                 new OrionPasswordHashingService(),
                 new RootPasswordReset(false),
-                ServerIdentityCapability.unavailable(),
+                SigningIdentity.unavailable(),
                 new BootstrapConfiguration(),
                 editor);
     }

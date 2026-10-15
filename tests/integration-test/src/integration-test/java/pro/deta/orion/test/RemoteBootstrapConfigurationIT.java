@@ -111,8 +111,8 @@ class RemoteBootstrapConfigurationIT {
                     new KeyMaterialCreation(false));
                  var bootstrap = BootstrapContext.open(configuration, environment, bootstrapEvents1)) {
                 byte[] payload = "remote material identity".getBytes(StandardCharsets.UTF_8);
-                assertThat(bootstrap.serverIdentity().verify(seededMaterial.serverIdentity().activeKeyId(),
-                        payload, seededMaterial.serverIdentity().sign(payload))).isTrue();
+                assertThat(bootstrap.signingIdentity().verify(seededMaterial.signingIdentity().activeKeyId(),
+                        payload, seededMaterial.signingIdentity().sign(payload))).isTrue();
                 var component = runtimeComponent(configuration, bootstrap, bootstrapEvents1);
                 var lifecycle = component.orionApplicationLifecycle();
                 try {
@@ -177,7 +177,7 @@ class RemoteBootstrapConfigurationIT {
             pro.deta.orion.event.OrionEventManager bootstrapEvents2 =
                     new pro.deta.orion.event.OrionEventManager();
             try (var recovered = BootstrapContext.open(configuration, environment, bootstrapEvents2)) {
-                assertThat(recovered.serverIdentity().activeKeyId()).isNotBlank();
+                assertThat(recovered.signingIdentity().activeKeyId()).isNotBlank();
             }
         }
     }
@@ -273,7 +273,7 @@ class RemoteBootstrapConfigurationIT {
                         assertThat(provider.isPublicRepositoryName(configurationCache)).isFalse();
                         assertThat(provider.isPublicRepositoryName(materialCache)).isFalse();
                         if (launch == 0) {
-                            signature = bootstrap.serverIdentity().sign(payload);
+                            signature = bootstrap.signingIdentity().sign(payload);
                             var materialRefs = materialRepository.refs();
                             provider.openForWrite(configurationCache)
                                     .valueOrFailure("configuration proxy")
@@ -309,7 +309,7 @@ class RemoteBootstrapConfigurationIT {
                             configurationRevision = configurationRepository.refs().get(acl.getRef());
                             materialRevision = materialRepository.refs().get(material.getRef());
                         } else {
-                            assertThat(bootstrap.serverIdentity().verify(bootstrap.serverIdentity().activeKeyId(),
+                            assertThat(bootstrap.signingIdentity().verify(bootstrap.signingIdentity().activeKeyId(),
                                     payload, signature)).isTrue();
                             assertThat(configurationRepository.refs()).containsEntry(acl.getRef(), configurationRevision);
                             assertThat(materialRepository.refs()).containsEntry(material.getRef(), materialRevision);

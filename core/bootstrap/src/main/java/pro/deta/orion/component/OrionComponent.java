@@ -9,7 +9,7 @@ import jakarta.inject.Named;
 import jakarta.inject.Singleton;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
+import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory;
@@ -18,12 +18,9 @@ import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.TestOnly;
-import pro.deta.orion.keymaterial.ServerIdentityCapability;
-import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
-import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
-import pro.deta.orion.keymaterial.KeyMaterialAdministrationCapability;
+import pro.deta.orion.keymaterial.SigningIdentity;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
-import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.transport.OrionTransportModule;
@@ -67,12 +64,9 @@ public interface OrionComponent {
         OrionComponent build();
         @BindsInstance Builder bootstrapConfiguration(BootstrapConfiguration configuration);
         @BindsInstance Builder rootPasswordReset(RootPasswordReset rootPasswordReset);
-        @BindsInstance Builder serverIdentityCapability(ServerIdentityCapability serverIdentityCapability);
-        @BindsInstance Builder acmeKeyMaterialCapability(AcmeKeyMaterialCapability capability);
-        @BindsInstance Builder keyMaterialAdministrationCapability(KeyMaterialAdministrationCapability capability);
-        @BindsInstance Builder configurationMaterialCapability(ConfigurationMaterialCapability capability);
-        @BindsInstance Builder configurationCipherCapability(ConfigurationCipherCapability capability);
-        @BindsInstance Builder tlsCapability(TlsCapability capability);
+        @BindsInstance Builder signingIdentity(SigningIdentity identity);
+        @BindsInstance Builder keyMaterial(OrionKeyMaterial material);
+        @BindsInstance Builder configurationSecretCipher(ConfigurationSecretCipher cipher);
         @BindsInstance Builder sshHostKeyCapability(SshHostKeyCapability capability);
         @BindsInstance Builder nativeGitRepositoryProvider(NativeGitRepositoryFactory repositoryProvider);
         @BindsInstance Builder s3Transport(S3Transport transport);
@@ -94,12 +88,9 @@ public interface OrionComponent {
                     true);
             return bootstrapConfiguration(configuration)
                     .rootPasswordReset(new RootPasswordReset(false))
-                    .serverIdentityCapability(ServerIdentityCapability.unavailable())
-                    .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
-                    .configurationMaterialCapability(ConfigurationMaterialCapability.unavailable())
-                    .keyMaterialAdministrationCapability(KeyMaterialAdministrationCapability.unavailable())
-                    .configurationCipherCapability(ConfigurationCipherCapability.unavailable())
-                    .tlsCapability(TlsCapability.unavailable())
+                    .signingIdentity(SigningIdentity.unavailable())
+                    .keyMaterial(OrionKeyMaterial.unavailable())
+                    .configurationSecretCipher(ConfigurationSecretCipher.unavailable())
                     .sshHostKeyCapability(SshHostKeyCapability.unavailable())
                     .nativeGitRepositoryProvider(repositoryProvider)
                     .configuredRepositoryFactory(configured)

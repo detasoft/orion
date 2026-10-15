@@ -106,7 +106,7 @@ class BootstrapProxyTransportIT {
                     assertThat(bootstrap.repositoryFactory()
                             .bootstrapRepositoryName(NativeGitRepositoryFactory.MATERIAL_SOURCE)).contains(cache);
                     assertThat(provider.repositoryNames()).doesNotContain(cache);
-                    signature = bootstrap.serverIdentity().sign(payload);
+                    signature = bootstrap.signingIdentity().sign(payload);
 
                     NativeGitRepository retained = provider.openForRead(cache).valueOrFailure("provisional handle");
 
@@ -213,8 +213,8 @@ class BootstrapProxyTransportIT {
                         new pro.deta.orion.event.OrionEventManager();
                 try (BootstrapContext restarted =
                         BootstrapContext.open(configuration, environment, bootstrapEvents2)) {
-                    assertThat(restarted.serverIdentity().verify(
-                            restarted.serverIdentity().activeKeyId(), payload, signature)).isTrue();
+                    assertThat(restarted.signingIdentity().verify(
+                            restarted.signingIdentity().activeKeyId(), payload, signature)).isTrue();
                     String cache = restarted.repositoryFactory()
                             .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE).orElseThrow();
                     var provider = restarted.repositoryProvider();

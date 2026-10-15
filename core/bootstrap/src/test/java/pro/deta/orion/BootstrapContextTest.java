@@ -209,9 +209,8 @@ class BootstrapContextTest {
             assertThat(context.repositoryProvider().find(configurationRepository)
                     .valueOrFailure("configuration repository").refs().get("refs/heads/main"))
                     .isEqualTo(initialRevision);
-            assertThat(context.serverIdentity().activeKeyId()).isNotBlank();
-            assertThat(context.acmeKeyMaterial()).isNotNull();
-            assertThat(context.tlsKeyMaterial()).isNotNull();
+            assertThat(context.signingIdentity().activeKeyId()).isNotBlank();
+            assertThat(context.keyMaterial().signingIdentity()).isSameAs(context.signingIdentity());
             assertThat(context.sshHostKeys(List.of()).descriptors())
                     .extracting(descriptor -> descriptor.alias().value())
                     .containsExactly("ssh-host-ec-v1", "ssh-host-rsa-v1");
@@ -261,8 +260,8 @@ class BootstrapContextTest {
                         .isEqualTo("configuration".equals(delayedInput) ? updated : first);
             }
             byte[] payload = bytes("already loaded material");
-            assertThat(context.serverIdentity().verify(context.serverIdentity().activeKeyId(), payload,
-                    context.serverIdentity().sign(payload))).isTrue();
+            assertThat(context.signingIdentity().verify(context.signingIdentity().activeKeyId(), payload,
+                    context.signingIdentity().sign(payload))).isTrue();
         }
     }
 
@@ -303,13 +302,13 @@ class BootstrapContextTest {
             byte[] oldSignature;
 
             try (BootstrapContext current = openContext(initial, ENVIRONMENT, borrow(backend))) {
-                oldSignature = current.serverIdentity().sign(payload);
+                oldSignature = current.signingIdentity().sign(payload);
                 assertThatThrownBy(() -> openContext(next, ENVIRONMENT, borrow(backend)))
                         .isInstanceOf(IllegalStateException.class)
                         .hasMessage("Bootstrap inputs are unavailable or invalid")
                         .rootCause()
                         .hasMessageContaining("server-signing-v2");
-                assertThat(current.serverIdentity().verify("server-signing-v1", payload, oldSignature)).isTrue();
+                assertThat(current.signingIdentity().verify("server-signing-v1", payload, oldSignature)).isTrue();
 
                 KeyMaterialDescriptor staged = new KeyMaterialDescriptor(
                         new KeyMaterialAlias("server-signing-v2"),
@@ -326,14 +325,14 @@ class BootstrapContextTest {
                 }
 
                 try (BootstrapContext activated = openContext(next, ENVIRONMENT, borrow(backend))) {
-                    assertThat(activated.serverIdentity().activeKeyId()).isEqualTo("server-signing-v2");
-                    assertThat(activated.serverIdentity().verify("server-signing-v1", payload, oldSignature)).isTrue();
+                    assertThat(activated.signingIdentity().activeKeyId()).isEqualTo("server-signing-v2");
+                    assertThat(activated.signingIdentity().verify("server-signing-v1", payload, oldSignature)).isTrue();
                 }
             }
 
             try (BootstrapContext restored = openContext(initial, ENVIRONMENT, borrow(backend))) {
-                assertThat(restored.serverIdentity().activeKeyId()).isEqualTo("server-signing-v1");
-                assertThat(restored.serverIdentity().verify("server-signing-v1", payload, oldSignature)).isTrue();
+                assertThat(restored.signingIdentity().activeKeyId()).isEqualTo("server-signing-v1");
+                assertThat(restored.signingIdentity().verify("server-signing-v1", payload, oldSignature)).isTrue();
             }
         }
     }
@@ -367,7 +366,7 @@ class BootstrapContextTest {
             byte[] payload = bytes("restored-identity");
             byte[] signature;
             try (BootstrapContext original = openContext(configuration, ENVIRONMENT, borrow(source))) {
-                signature = original.serverIdentity().sign(payload);
+                signature = original.signingIdentity().sign(payload);
             }
             Map<String, byte[]> backup = Map.of("orion.xml", source.find("orion")
                     .valueOrFailure("open repository")
@@ -386,8 +385,8 @@ class BootstrapContextTest {
 
                 try (NativeGitRepositoryProvider restored = repositoryWith(configuration, backup)) {
                     try (BootstrapContext runtime = openContext(configuration, ENVIRONMENT, borrow(restored))) {
-                        assertThat(runtime.serverIdentity().activeKeyId()).isEqualTo("server-signing-v1");
-                        assertThat(runtime.serverIdentity().verify("server-signing-v1", payload, signature)).isTrue();
+                        assertThat(runtime.signingIdentity().activeKeyId()).isEqualTo("server-signing-v1");
+                        assertThat(runtime.signingIdentity().verify("server-signing-v1", payload, signature)).isTrue();
                     }
                 }
             }
@@ -614,8 +613,8 @@ class BootstrapContextTest {
                 .hasMessage("Bootstrap source ref is unavailable: material");
 
         try (BootstrapContext initialized = openContext(configuration, ENVIRONMENT, true)) {
-            keyId = initialized.serverIdentity().activeKeyId();
-            signature = initialized.serverIdentity().sign(payload);
+            keyId = initialized.signingIdentity().activeKeyId();
+            signature = initialized.signingIdentity().sign(payload);
             OrionComponent component = runtimeComponent(configuration, initialized);
             try {
                 assertThat(component.orionApplicationLifecycle().runApplication()).isEqualTo(RUNNING);
@@ -626,8 +625,8 @@ class BootstrapContextTest {
         }
 
         try (BootstrapContext restarted = openContext(configuration, ENVIRONMENT)) {
-            assertThat(restarted.serverIdentity().activeKeyId()).isEqualTo(keyId);
-            assertThat(restarted.serverIdentity().verify(keyId, payload, signature)).isTrue();
+            assertThat(restarted.signingIdentity().activeKeyId()).isEqualTo(keyId);
+            assertThat(restarted.signingIdentity().verify(keyId, payload, signature)).isTrue();
             OrionComponent component = runtimeComponent(configuration, restarted);
             try {
                 assertThat(component.orionApplicationLifecycle().runApplication()).isEqualTo(RUNNING);
@@ -650,7 +649,7 @@ class BootstrapContextTest {
                     .valueOrFailure("open repository")
                     .files().readBytes("refs/heads/main", "material.p12");
 
-            assertThat(context.serverIdentity().activeKeyId()).isNotBlank();
+            assertThat(context.signingIdentity().activeKeyId()).isNotBlank();
             assertThat(material).isNotEmpty();
         }
     }
@@ -878,10 +877,10 @@ class BootstrapContextTest {
 
             String activeKeyId;
             try (BootstrapContext context = openContext(configuration, environment, borrow(backend))) {
-                activeKeyId = context.serverIdentity().activeKeyId();
+                activeKeyId = context.signingIdentity().activeKeyId();
             }
             try (BootstrapContext context = openContext(configuration, environment, borrow(backend))) {
-                assertThat(context.serverIdentity().activeKeyId()).isEqualTo(activeKeyId);
+                assertThat(context.signingIdentity().activeKeyId()).isEqualTo(activeKeyId);
             }
         }
     }
@@ -1541,7 +1540,7 @@ class BootstrapContextTest {
         return BootstrapContext.adoptProxies(
                 new OrionConfigurationEditor(
                         storage,
-                        new BootstrapConfiguration(), context.configurationCipher(), context.configurationMaterial(),
+                        new BootstrapConfiguration(), context.configurationCipher(), context.keyMaterial(),
                         EVENTS.rawManager()),
                 context.repositoryFactory(), context.configurationCipher(), approved);
     }
@@ -1555,14 +1554,11 @@ class BootstrapContextTest {
         return DaggerOrionComponent.builder()
                 .bootstrapConfiguration(configuration)
                 .rootPasswordReset(new RootPasswordReset(false))
-                .serverIdentityCapability(context.serverIdentity())
-                .acmeKeyMaterialCapability(context.acmeKeyMaterial())
-                .configurationMaterialCapability(context.configurationMaterial())
-                .keyMaterialAdministrationCapability(context.keyMaterialAdministration())
+                .signingIdentity(context.signingIdentity())
+                .keyMaterial(context.keyMaterial())
                 .eventManager(EVENTS.rawManager())
-                .tlsCapability(context.tlsKeyMaterial())
                 .sshHostKeyCapability(context.sshHostKeys(List.of()))
-                .configurationCipherCapability(context.configurationCipher())
+                .configurationSecretCipher(context.configurationCipher())
                 .nativeGitRepositoryProvider(context.repositoryFactory())
                 .configuredRepositoryFactory(context.storageFactory())
                 .s3Transport(context.s3Transport())
