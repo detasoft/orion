@@ -26,7 +26,12 @@ import pro.deta.orion.util.Subscription;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import pro.deta.orion.git.nativestorage.RepositoryRefChanged;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -332,42 +337,58 @@ class NativeGitOrionConfigurationStorageTest {
     }
 
     @Test
-    void reportsOnlyAcceptedUpdatesToConfiguredRef(@TempDir Path rootDirectory) throws Exception {
+    void reportsExactSnapshotsOfAcceptedUpdatesEvenAfterTheBranchMoves(@TempDir Path rootDirectory)
+            throws Exception {
         NativeGitRepositoryProvider provider =
                 NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
-        OrionVersionedConfigurationStorage storage = preparedStorage(provider);
-        AtomicInteger changes = new AtomicInteger();
-        Subscription subscription = EVENTS.manager().subscribe(ConfigurationChanged.class,
-                event -> { if (event.storage() == storage) changes.incrementAndGet(); });
-
-        storage.save(
-                new OrionRevision.Absent(),
-                document("first"),
-                new ChangeMetadata(UserEmail.EMPTY, "first"));
-        provider.find("internal/configuration")
-                .valueOrFailure("repository")
-                .files()
-                .withAccess(
-                        "refs/heads/other",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "other branch"),
-                        fileAccess -> {
-                            fileAccess.write(ACL_PATH, bytes("other"));
-                            fileAccess.apply();
+        CountDownLatch processingFirstUpdate = new CountDownLatch(1);
+        CountDownLatch resumeProcessing = new CountDownLatch(1);
+        AtomicBoolean gateFailed = new AtomicBoolean();
+        try (Subscription gate = EVENTS.manager().subscribe(RepositoryRefChanged.class, event -> {
+            if (!event.update().ref().value().equals("refs/heads/configuration")) return;
+            processingFirstUpdate.countDown();
+            try {
+                if (!resumeProcessing.await(10, TimeUnit.SECONDS)) gateFailed.set(true);
+            } catch (InterruptedException failure) {
+                Thread.currentThread().interrupt();
+                gateFailed.set(true);
+            }
+        })) {
+            OrionVersionedConfigurationStorage storage = preparedStorage(provider);
+            List<OrionDocumentRevision> changes = new ArrayList<>();
+            Subscription subscription = EVENTS.manager().subscribe(ConfigurationChanged.class, event -> {
+                if (event.storage() == storage) changes.add(event.snapshot());
+            });
+            try {
+                OrionRevision.Stored first = storage.save(new OrionRevision.Absent(), document("first"),
+                        new ChangeMetadata(UserEmail.EMPTY, "first"));
+                assertThat(processingFirstUpdate.await(5, TimeUnit.SECONDS)).isTrue();
+                provider.find("internal/configuration")
+                        .valueOrFailure("repository")
+                        .files()
+                        .withAccess("refs/heads/other",
+                                new GitCommitMetadata(GitCommitAuthor.EMPTY, "other branch"), access -> {
+                            access.write(ACL_PATH, bytes("other"));
+                            access.apply();
                             return null;
                         });
-        storage.save(
-                storage.load().revision(),
-                document("second"),
-                new ChangeMetadata(UserEmail.EMPTY, "second"));
-        EVENTS.await();
-        subscription.close();
-        storage.save(
-                storage.load().revision(),
-                document("third"),
-                new ChangeMetadata(UserEmail.EMPTY, "third"));
+                OrionRevision.Stored second = storage.save(first, document("second"),
+                        new ChangeMetadata(UserEmail.EMPTY, "second"));
+                resumeProcessing.countDown();
+                EVENTS.await();
+                subscription.close();
+                storage.save(second, document("third"), new ChangeMetadata(UserEmail.EMPTY, "third"));
+                EVENTS.await();
 
-        EVENTS.await();
-        assertThat(changes).hasValue(2);
+                assertThat(gateFailed).isFalse();
+                assertThat(changes).extracting(OrionDocumentRevision::revision).containsExactly(first, second);
+                assertThat(changes).extracting(snapshot -> snapshot.result().valueOrFailure("event document"))
+                        .containsExactly(document("first"), document("second"));
+            } finally {
+                resumeProcessing.countDown();
+                subscription.close();
+            }
+        }
     }
 
     @Test

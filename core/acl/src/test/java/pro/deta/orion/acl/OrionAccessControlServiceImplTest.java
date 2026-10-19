@@ -53,6 +53,8 @@ import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.util.Result;
+import pro.deta.orion.event.type.OrionEvent;
+import pro.deta.orion.util.Subscription;
 import pro.deta.orion.config.ConfigurationChanged;
 import pro.deta.orion.config.OrionConfigurationModification;
 import pro.deta.orion.config.OrionDocumentRevision;
@@ -74,9 +76,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.Optional;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -198,7 +197,9 @@ class OrionAccessControlServiceImplTest {
     void stagesTwoSshKeysAndPublishesOnlyOnce() {
         AclFixture initial = new AclFixture();
         initial.getUsers().add(user("alice"));
-        try (ServiceFixture fixture = fixture(initial)) {
+        List<OrionDocumentRevision> published = new ArrayList<>();
+        try (ServiceFixture fixture = fixture(initial);
+                Subscription subscription = fixture.editor.subscribe(published::add)) {
             fixture.withAccess(
                     fixture.editor.edit(
                             fixture.storage.snapshot.revision(),
@@ -229,6 +230,8 @@ class OrionAccessControlServiceImplTest {
                                                         document.system().oidcProviders()),
                                                 document.organizations()));
                         assertThat(fixture.storage.saveCount).isZero();
+                        fixture.storage.awaitEvents();
+                        assertThat(published).isEmpty();
                         assertThat(
                                         fixture.service.authenticateSshUser(
                                                 "alice", KEY_ONE.getPublic().getEncoded()))
@@ -236,6 +239,7 @@ class OrionAccessControlServiceImplTest {
                         edit.apply();
                         assertThat(fixture.storage.saveCount).isEqualTo(1);
                         fixture.storage.awaitEvents();
+                        assertThat(published).containsExactly(fixture.storage.snapshot);
                         assertThat(fixture.storage.snapshot.result()
                                 .valueOrFailure("Cannot read configuration document")
                                 .system().secrets())
@@ -282,7 +286,9 @@ class OrionAccessControlServiceImplTest {
     void discardedAndConflictingEditsPublishNothing() {
         AclFixture initial = new AclFixture();
         initial.getUsers().add(user("alice"));
-        try (ServiceFixture fixture = fixture(initial)) {
+        List<OrionDocumentRevision> published = new ArrayList<>();
+        try (ServiceFixture fixture = fixture(initial);
+                Subscription subscription = fixture.editor.subscribe(published::add)) {
             fixture.withAccess(
                     fixture.editor.edit(
                             fixture.storage.snapshot.revision(),
@@ -308,6 +314,7 @@ class OrionAccessControlServiceImplTest {
                     .isInstanceOf(AuthenticationResult.Failure.class);
             assertThat(fixture.service.authenticateSshUser("alice", KEY_TWO.getPublic().getEncoded()))
                     .isInstanceOf(AuthenticationResult.Failure.class);
+            assertThat(published).isEmpty();
         }
     }
 
@@ -315,19 +322,22 @@ class OrionAccessControlServiceImplTest {
     void nonAclEditPublishesWithoutAnAccessControlService() {
         InMemoryStorage storage =
                 new InMemoryStorage(snapshot(serialize(new AccessControl()), Optional.empty()));
+        List<OrionDocumentRevision> published = new ArrayList<>();
         try {
             OrionConfigurationEditor editor =
                     new OrionConfigurationEditor(
                             storage, new BootstrapConfiguration(), testCipher(), testMaterial(), storage.events);
             OrionConfigurationModification modification =
                     editor.edit(storage.snapshot.revision(), ChangeMetadata.EMPTY);
-            try {
+            try (Subscription subscription = editor.subscribe(published::add)) {
                 modification.update(document -> new OrionDocument(new OrionDocument.SystemConfiguration(
                         document.system().accessControl(), document.system().https(),
                         List.of(new ConfigurationSecret("credential", testEnvelope())),
                         document.system().proxies(), document.system().connections(),
                         document.system().oidcProviders()), document.organizations()));
                 modification.apply();
+                storage.awaitEvents();
+                assertThat(published).containsExactly(storage.snapshot);
                 assertThat(storage.snapshot.result()
                         .valueOrFailure("Cannot read configuration document")
                         .system().secrets()).extracting(ConfigurationSecret::id)
@@ -347,7 +357,7 @@ class OrionAccessControlServiceImplTest {
         try (ServiceFixture fixture = fixture(new AclFixture());
                 ServiceFixture other = fixture(new AclFixture())) {
             List<OrionDocumentRevision> received = new ArrayList<>();
-            pro.deta.orion.util.Subscription subscription = fixture.editor.subscribe(received::add);
+            Subscription subscription = fixture.editor.subscribe(received::add);
             try {
                 OrionDocumentRevision published = fixture.storage.snapshot;
                 fixture.storage.events.publishAndWait(new ConfigurationChanged(fixture.storage, published));
@@ -717,12 +727,6 @@ class OrionAccessControlServiceImplTest {
                     .valueOrFailure("Cannot read configuration document")
                     .system().secrets()).extracting("id").containsExactly("credential");
             assertThat(fixture.storage.snapshot.revision()).isEqualTo(appliedEdit.revision());
-            assertThat(fixture.storage.snapshot.result()
-                    .valueOrFailure("Cannot read configuration document")
-                    .system().secrets())
-                    .isEqualTo(result.result()
-                            .valueOrFailure("Cannot read configuration document")
-                            .system().secrets());
         }
     }
 
@@ -1203,43 +1207,51 @@ class OrionAccessControlServiceImplTest {
     }
 
     @Test
-    void adminUpdateWaitsForCredentialMutationAndCannotResurrectRootKey() throws Exception {
+    void staleAdminEditCannotResurrectARootKeyAndCanRetryAtTheWinningRevision() {
         AclFixture primary = new AclFixture();
         primary.getUsers().add(user("root")
                 .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
         primary.getUsers().add(user("alice")
                 .addCredential(CredentialType.ARGON2, "old-hash"));
 
-        try (ServiceFixture fixture = fixture(primary);
-             var executor = Executors.newFixedThreadPool(2)) {
-            fixture.storage.blockCredentialRemoval = true;
-            var removal = executor.submit(() -> fixture.removeSshCredential(
-                    "root",
-                    descriptor(KEY_ONE.getPublic()).fingerprint(),
-                    true));
-            assertThat(fixture.storage.credentialRemovalSaveEntered.await(5, TimeUnit.SECONDS)).isTrue();
-            CountDownLatch adminStarted = new CountDownLatch(1);
-            var adminUpdate = executor.submit(() -> {
-                adminStarted.countDown();
+        try (ServiceFixture fixture = fixture(primary)) {
+            OrionRevision revision = fixture.service.configuration().revision();
+            AccessControlAccess admin = fixture.service.createAccess(revision,
+                    new ChangeMetadata(UserEmail.EMPTY, "update alice"));
+            AccessControlAccess removal = fixture.service.createAccess(revision,
+                    new ChangeMetadata(UserEmail.EMPTY, "remove root key"));
+            try {
+                admin.createOrUpdateUser(userUpdate("alice", "new-hash"));
+                assertThat(removal.removeSshCredential("root",
+                        descriptor(KEY_ONE.getPublic()).fingerprint(), true))
+                        .isInstanceOf(SshCredentialUpdateResult.Success.class);
+                removal.apply();
+                fixture.storage.awaitEvents();
+                OrionDocumentRevision winner = fixture.service.configuration();
+
+                assertThatThrownBy(admin::apply)
+                        .isInstanceOf(OrionConfigurationConcurrentUpdateException.class);
+                fixture.storage.awaitEvents();
+                assertThat(fixture.storage.saveCount).isEqualTo(1);
+                assertThat(fixture.service.configuration()).isEqualTo(winner);
+                assertThat(sshValues(fixture.storage.snapshot, "root")).isEmpty();
+                assertThat(credentials(fixture.storage.snapshot, "alice"))
+                        .singleElement().extracting(Credential::value).isEqualTo("old-hash");
+
                 fixture.createOrUpdateUser(userUpdate("alice", "new-hash"));
-            });
-            assertThat(adminStarted.await(5, TimeUnit.SECONDS)).isTrue();
-            assertThat(adminUpdate.isDone()).isFalse();
-
-            fixture.storage.continueCredentialRemoval.countDown();
-
-            assertThat(removal.get()).isInstanceOf(SshCredentialUpdateResult.Success.class);
-            adminUpdate.get();
-            assertThat(sshValues(fixture.storage.snapshot, "root")).isEmpty();
-            assertThat(credentials(fixture.storage.snapshot, "root"))
-                    .extracting(Credential::keyId)
-                    .singleElement()
-                    .asString()
-                    .startsWith("root-auth-locked:");
-            assertThat(credentials(fixture.storage.snapshot, "alice"))
-                    .singleElement()
-                    .extracting(Credential::value)
-                    .isEqualTo("new-hash");
+                assertThat(fixture.storage.saveCount).isEqualTo(2);
+                assertThat(sshValues(fixture.storage.snapshot, "root")).isEmpty();
+                assertThat(credentials(fixture.storage.snapshot, "root"))
+                        .extracting(Credential::keyId)
+                        .singleElement().asString().startsWith("root-auth-locked:");
+                assertThat(credentials(fixture.storage.snapshot, "alice"))
+                        .singleElement().extracting(Credential::value).isEqualTo("new-hash");
+                assertThat(fixture.service.authenticateSshUser("root", KEY_ONE.getPublic().getEncoded()))
+                        .isInstanceOf(AuthenticationResult.Failure.class);
+            } finally {
+                admin.discard();
+                removal.discard();
+            }
         }
     }
 
@@ -1816,14 +1828,12 @@ class OrionAccessControlServiceImplTest {
         }
 
         private void createOrUpdateUser(AccessControlUserUpdate update) {
-            synchronized (storage) {
-                withAccess(editor.edit(storage.snapshot.revision(), new ChangeMetadata(
-                        new UserEmail(update.id(), update.email()), "update user " + update.id())), access -> {
-                    access.createOrUpdateUser(update);
-                    access.apply();
-                    return null;
-                });
-            }
+            withAccess(editor.edit(storage.snapshot.revision(), new ChangeMetadata(
+                    new UserEmail(update.id(), update.email()), "update user " + update.id())), access -> {
+                access.createOrUpdateUser(update);
+                access.apply();
+                return null;
+            });
         }
 
         private SshCredentialUpdateResult addSshCredentials(String userId, List<String> keys) {
@@ -1837,23 +1847,21 @@ class OrionAccessControlServiceImplTest {
 
         private SshCredentialUpdateResult mutate(String userId, String message,
                 java.util.function.Function<AccessControlAccess, SshCredentialUpdateResult> mutation) {
-            synchronized (storage) {
-                try {
-                    return withAccess(editor.edit(storage.snapshot.revision(), new ChangeMetadata(
-                            new UserEmail(userId, ""), message + " for " + userId)), access -> {
-                        SshCredentialUpdateResult result = mutation.apply(access);
-                        if (result instanceof SshCredentialUpdateResult.Success success && success.changed()) {
-                            access.apply();
-                        }
-                        return result;
-                    });
-                } catch (OrionConfigurationConcurrentUpdateException failure) {
-                    return SshCredentialUpdateResult.failure(SshCredentialFailureCode.CONCURRENT_UPDATE,
-                            "Configuration changed", List.of(), failure);
-                } catch (RuntimeException failure) {
-                    return SshCredentialUpdateResult.failure(SshCredentialFailureCode.PERSISTENCE_FAILED,
-                            "Cannot save configuration", List.of(), failure);
-                }
+            try {
+                return withAccess(editor.edit(storage.snapshot.revision(), new ChangeMetadata(
+                        new UserEmail(userId, ""), message + " for " + userId)), access -> {
+                    SshCredentialUpdateResult result = mutation.apply(access);
+                    if (result instanceof SshCredentialUpdateResult.Success success && success.changed()) {
+                        access.apply();
+                    }
+                    return result;
+                });
+            } catch (OrionConfigurationConcurrentUpdateException failure) {
+                return SshCredentialUpdateResult.failure(SshCredentialFailureCode.CONCURRENT_UPDATE,
+                        "Configuration changed", List.of(), failure);
+            } catch (RuntimeException failure) {
+                return SshCredentialUpdateResult.failure(SshCredentialFailureCode.PERSISTENCE_FAILED,
+                        "Cannot save configuration", List.of(), failure);
             }
         }
 
@@ -1872,9 +1880,6 @@ class OrionAccessControlServiceImplTest {
         private int loadCount;
         private boolean concurrentOnSave;
         private boolean loadUnavailable;
-        private boolean blockCredentialRemoval;
-        private final CountDownLatch credentialRemovalSaveEntered = new CountDownLatch(1);
-        private final CountDownLatch continueCredentialRemoval = new CountDownLatch(1);
 
         private InMemoryStorage(OrionDocumentRevision snapshot) {
             this.snapshot = snapshot;
@@ -1905,17 +1910,6 @@ class OrionAccessControlServiceImplTest {
         @Override
         public OrionRevision.Stored save(
                 OrionRevision expectedRevision, OrionDocument document, ChangeMetadata metadata) {
-            if (blockCredentialRemoval && metadata.message().startsWith("remove SSH credential")) {
-                credentialRemovalSaveEntered.countDown();
-                try {
-                    if (!continueCredentialRemoval.await(5, TimeUnit.SECONDS)) {
-                        throw new IllegalStateException("Timed out waiting for credential removal");
-                    }
-                } catch (InterruptedException failure) {
-                    Thread.currentThread().interrupt();
-                    throw new IllegalStateException(failure);
-                }
-            }
             if (concurrentReplacement != null) {
                 snapshot = concurrentReplacement;
                 concurrentReplacement = null;
@@ -1936,7 +1930,7 @@ class OrionAccessControlServiceImplTest {
         }
 
         private void awaitEvents() {
-            if (snapshot != null) events.publishAndWait(new ConfigurationChanged(this, snapshot));
+            events.publishAndWait(new OrionEvent() {});
         }
     }
 
