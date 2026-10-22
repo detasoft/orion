@@ -12,14 +12,11 @@ public class OrionConfigurationModification implements Modification {
     private final Function<OrionDocument, OrionRevision.Stored> onSave;
     private OrionDocument document;
     private OrionRevision revision;
-    private boolean finished;
 
-    public OrionConfigurationModification(OrionDocumentRevision snapshot,
+    public OrionConfigurationModification(OrionDocument document, OrionRevision revision,
             Function<OrionDocument, OrionRevision.Stored> onSave) {
-        Objects.requireNonNull(snapshot, "snapshot");
-        this.document = Objects.requireNonNull(snapshot.result()
-                .valueOrFailure("Cannot read configuration document"), "document");
-        this.revision = Objects.requireNonNull(snapshot.revision(), "revision");
+        this.document = Objects.requireNonNull(document, "document");
+        this.revision = Objects.requireNonNull(revision, "revision");
         this.onSave = Objects.requireNonNull(onSave, "onSave");
     }
 
@@ -57,11 +54,10 @@ public class OrionConfigurationModification implements Modification {
     @Override
     public synchronized void discard() {
         document = null;
-        finished = true;
     }
 
     private void requireOpen() {
-        if (finished) {
+        if (document == null) {
             throw new IllegalStateException("Configuration modification is already finished");
         }
     }

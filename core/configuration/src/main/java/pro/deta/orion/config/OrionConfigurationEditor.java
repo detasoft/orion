@@ -63,7 +63,7 @@ public final class OrionConfigurationEditor {
         Objects.requireNonNull(metadata, "metadata");
         OrionDocument document = document(snapshot).valueOrFailure("Cannot validate configuration for update");
         return new OrionConfigurationModification(
-                new OrionDocumentRevision(Result.of(document), snapshot.revision()),
+                document, snapshot.revision(),
                 updated -> storage.save(snapshot.revision(), validateConfiguration(updated), metadata));
     }
 

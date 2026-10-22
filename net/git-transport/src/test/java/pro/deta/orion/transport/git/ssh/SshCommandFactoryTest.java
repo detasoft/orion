@@ -428,9 +428,11 @@ class SshCommandFactoryTest {
                     @Override
                     public AccessControlAccess createAccess(
                             OrionRevision revision, ChangeMetadata metadata) {
+                        OrionDocumentRevision snapshot = configuration();
                         return new AccessControlAccess(
                                 new OrionConfigurationModification(
-                                        configuration(),
+                                        snapshot.result().valueOrFailure("Cannot read test configuration"),
+                                        snapshot.revision(),
                                         document ->
                                                 revision instanceof OrionRevision.Stored stored
                                                         ? stored
