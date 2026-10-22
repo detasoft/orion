@@ -646,8 +646,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     private void activateConfiguration(OrionDocumentRevision snapshot) {
-        OrionDocument document = editor.document(snapshot).valueOrFailure("Invalid ACL configuration");
-        activeConfiguration = new OrionDocumentRevision(Result.of(document), snapshot.revision());
+        editor.document(snapshot).failOnFailure("Invalid ACL configuration");
+        activeConfiguration = snapshot;
     }
 
     private void resetRootPassword(OrionDocumentRevision snapshot) {

@@ -72,9 +72,9 @@ public final class OrionConfigurationEditor {
             return failure;
         }
         try {
-            OrionDocument document = validateConfiguration(snapshot.result()
+            validateConfiguration(snapshot.result()
                     .valueOrFailure("Cannot read configuration document"));
-            return new Result.Success<>(document);
+            return snapshot.result();
         } catch (RuntimeException failure) {
             return new Result.Failure<>(Result.FailureCode.GENERAL,
                     "Cannot validate configuration file", failure);
