@@ -140,7 +140,7 @@ class PlaywrightExternalServicesIT {
             for (String phase : List.of("certificate", "browser", "refresh", "revoked")) {
                 boolean issueCertificate = phase.equals("certificate");
                 OrionComponent component = TestRuntimeBootstrap.componentBuilder(
-                                configuration, identity.capability(), identity.sshHostKeys())
+                                configuration, identity.material(), identity.sshHostKeys())
                         .keyMaterial(identity.material())
                         .configurationSecretCipher(identity.material().configurationCipher())
                         .build();

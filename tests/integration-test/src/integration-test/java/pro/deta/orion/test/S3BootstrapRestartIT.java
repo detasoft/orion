@@ -19,6 +19,7 @@ import pro.deta.orion.git.s3.S3NativeGitRepositoryFactory;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -79,8 +80,10 @@ class S3BootstrapRestartIT {
             byte[] xml;
             try (OrionKeyMaterial material = OrionKeyMaterialFactory.open(
                     configuration, environment, materialStore, new KeyMaterialCreation(false))) {
-                signingKeyId = material.signingIdentity().activeKeyId();
-                signature = material.signingIdentity().sign(payload);
+                KeyMaterialDescriptor active = OrionKeyMaterialFactory.signingMaterial(
+                        configuration.getBootstrap().getKeyMaterial()).active();
+                signingKeyId = active.alias().value();
+                signature = material.sign(active, payload);
                 OrionDocument document = OrionDocument.withAccessControl(
                         DefaultAccessControl.create("cold-start-test-password-hash"));
                 ConfigurationSecrets secrets = new ConfigurationSecrets(() -> document,
@@ -124,8 +127,9 @@ class S3BootstrapRestartIT {
             try (BootstrapContext bootstrap = BootstrapContext.open(configuration, environment,
                     new KeyMaterialCreation(false), bootstrapEvents1)) {
 
-                assertThat(bootstrap.signingIdentity().activeKeyId()).isEqualTo(signingKeyId);
-                assertThat(bootstrap.signingIdentity().verify(signingKeyId, payload, signature)).isTrue();
+                assertThat(bootstrap.signingMaterial().active().alias().value()).isEqualTo(signingKeyId);
+                assertThat(bootstrap.keyMaterial().verify(bootstrap.signingMaterial().active(),
+                        payload, signature)).isTrue();
                 OrionComponent component = runtimeComponent(configuration, bootstrap, bootstrapEvents1);
                 OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
                 try {
@@ -198,8 +202,8 @@ class S3BootstrapRestartIT {
                     savedMaterial = repository.files().readBytes(MATERIAL_REF, MATERIAL_PATH);
                     savedRefs = Map.copyOf(repository.refs());
                     assertThat(savedRefs).containsKeys(CONFIGURATION_REF, MATERIAL_REF);
-                    signingKeyId = bootstrap.signingIdentity().activeKeyId();
-                    signature = bootstrap.signingIdentity().sign(payload);
+                    signingKeyId = bootstrap.signingMaterial().active().alias().value();
+                    signature = bootstrap.keyMaterial().sign(bootstrap.signingMaterial().active(), payload);
                     for (KeyPair pair : bootstrap.sshHostKeys(List.of()).keyPairs()) {
                         hostKeys.add(PublicKeyEntry.toString(pair.getPublic()));
                     }
@@ -225,8 +229,9 @@ class S3BootstrapRestartIT {
             try (BootstrapContext bootstrap = BootstrapContext.open(restarted, environment,
                     new KeyMaterialCreation(false), bootstrapEvents3)) {
 
-                assertThat(bootstrap.signingIdentity().activeKeyId()).isEqualTo(signingKeyId);
-                assertThat(bootstrap.signingIdentity().verify(signingKeyId, payload, signature)).isTrue();
+                assertThat(bootstrap.signingMaterial().active().alias().value()).isEqualTo(signingKeyId);
+                assertThat(bootstrap.keyMaterial().verify(bootstrap.signingMaterial().active(),
+                        payload, signature)).isTrue();
                 assertThat(bootstrap.sshHostKeys(List.of()).keyPairs())
                         .extracting(pair -> PublicKeyEntry.toString(pair.getPublic()))
                         .containsExactlyElementsOf(hostKeys);

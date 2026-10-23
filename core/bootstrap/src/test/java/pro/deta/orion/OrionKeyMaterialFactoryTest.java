@@ -5,10 +5,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialOptions;
+import pro.deta.orion.keymaterial.KeyMaterialService;
+import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.SigningKeyReferenceConfig;
 
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -30,15 +35,15 @@ class OrionKeyMaterialFactoryTest {
         byte[] signature;
         try (OrionKeyMaterial material = OrionKeyMaterialFactory.open(
                 configuration, Map.of(PASSWORD_ENV, "test-password"), new KeyMaterialCreation(true))) {
-            var identity = material.signingIdentity();
-            signature = identity.sign(payload);
-            assertThat(identity.activeKeyId()).isEqualTo("cluster-signing-v2");
+            KeyMaterialDescriptor active = signing(configuration).active();
+            signature = material.sign(active, payload);
+            assertThat(active.alias().value()).isEqualTo("cluster-signing-v2");
+            assertThat(material.version()).isEqualTo(1);
         }
 
         try (OrionKeyMaterial material = OrionKeyMaterialFactory.open(
                 configuration, Map.of(PASSWORD_ENV, "test-password"))) {
-            assertThat(material.signingIdentity().verify(
-                    "cluster-signing-v2", payload, signature)).isTrue();
+            assertThat(material.verify(signing(configuration).active(), payload, signature)).isTrue();
         }
 
         assertThat(Files.isRegularFile(tempDir.resolve("security/orion.p12"))).isTrue();
@@ -100,10 +105,61 @@ class OrionKeyMaterialFactoryTest {
                 Map.of(PASSWORD_ENV, "test-password"),
                 store,
                 new KeyMaterialCreation(true))) {
-            assertThat(material.signingIdentity().activeKeyId()).isEqualTo("cluster-signing-v2");
+            assertThat(material.contains(signing(configuration).active())).isTrue();
         }
 
         assertThat(store.read()).isPresent();
+    }
+
+    @Test
+    void requiresExplicitCreationAndDoesNotPopulateAnExistingEmptyStore() throws Exception {
+        BootstrapConfiguration configuration = configuration();
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        assertThatThrownBy(() -> OrionKeyMaterialFactory.open(
+                configuration, Map.of(PASSWORD_ENV, "test-password"), store))
+                .isInstanceOf(GeneralSecurityException.class)
+                .hasMessageContaining("creation was not requested");
+        assertThat(store.read()).isEmpty();
+
+        try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray());
+                KeyMaterialService service = KeyMaterialService.open(store, options)) {
+            service.save();
+        }
+        byte[] before = store.read().orElseThrow().bytes();
+        assertThatThrownBy(() -> OrionKeyMaterialFactory.open(configuration,
+                Map.of(PASSWORD_ENV, "test-password"), store, new KeyMaterialCreation(true)))
+                .isInstanceOf(GeneralSecurityException.class)
+                .hasMessageContaining("cluster-signing-v2");
+        assertThat(store.read().orElseThrow().bytes()).isEqualTo(before);
+    }
+
+    @Test
+    void rejectsRetainedKeysOnCreationWithoutWritingTheStore() {
+        BootstrapConfiguration configuration = configuration();
+        configuration.getBootstrap().getKeyMaterial().getServerSigning()
+                .setVerification(List.of(new SigningKeyReferenceConfig("previous-signing", 1)));
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        assertThatThrownBy(() -> OrionKeyMaterialFactory.open(configuration,
+                Map.of(PASSWORD_ENV, "test-password"), store, new KeyMaterialCreation(true)))
+                .isInstanceOf(GeneralSecurityException.class)
+                .hasMessageContaining("retained");
+        assertThat(store.read()).isEmpty();
+    }
+
+    @Test
+    void rejectsNonRsaSigningConfigurationBeforeCreatingTheStore() {
+        BootstrapConfiguration configuration = configuration();
+        configuration.getBootstrap().getKeyMaterial().getServerSigning().setAlgorithm("ED25519");
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        assertThatThrownBy(() -> OrionKeyMaterialFactory.open(configuration,
+                Map.of(PASSWORD_ENV, "test-password"), store, new KeyMaterialCreation(true)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("RSA");
+        assertThat(store.read()).isEmpty();
+    }
+
+    private static SigningMaterialSet signing(BootstrapConfiguration configuration) {
+        return OrionKeyMaterialFactory.signingMaterial(configuration.getBootstrap().getKeyMaterial());
     }
 
     private BootstrapConfiguration configuration() {

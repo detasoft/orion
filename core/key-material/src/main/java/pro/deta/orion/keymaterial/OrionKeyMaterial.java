@@ -106,6 +106,11 @@ public class OrionKeyMaterial implements AutoCloseable {
         return signingIdentity;
     }
 
+    public boolean hasDurableSnapshot() {
+        requireAvailable();
+        return owner.hasDurableSnapshot();
+    }
+
     public long version() {
         requireAvailable();
         return owner.revision();

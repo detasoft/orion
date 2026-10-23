@@ -76,16 +76,36 @@ public final class OrionKeyMaterialFactory {
         String password = resolveAgainstBaseDirectory(material.getPassword(), baseDirectory, "password");
         SigningMaterialSet signingMaterial = signingMaterial(material);
         try (KeyMaterialOptions options = resolver.pkcs12Options(password)) {
-            return OrionKeyMaterial.open(
-                    store,
-                    options,
-                    signingMaterial,
-                    KeyMaterialConstants.RSA_KEY_SIZE_BITS,
-                    creation);
+            OrionKeyMaterial keys = OrionKeyMaterial.open(store, options);
+            try {
+                if (!keys.hasDurableSnapshot()) {
+                    if (!creation.allowed()) {
+                        throw new GeneralSecurityException(
+                                "Key material store is missing and creation was not requested");
+                    }
+                    if (!signingMaterial.verification().isEmpty()) {
+                        throw new GeneralSecurityException(
+                                "A new material store cannot contain retained server identities");
+                    }
+                    keys.withModification(modification -> {
+                        modification.generateKey(
+                                signingMaterial.active(), KeyMaterialConstants.RSA_KEY_SIZE_BITS);
+                        modification.apply();
+                    });
+                }
+                for (KeyMaterialDescriptor descriptor : signingMaterial.verificationIncludingActive()) {
+                    keys.require(descriptor);
+                }
+                return keys;
+            } catch (IOException | GeneralSecurityException | RuntimeException failure) {
+                keys.close();
+                throw failure;
+            }
         }
     }
 
-    private static SigningMaterialSet signingMaterial(KeyMaterialConfig material) {
+    public static SigningMaterialSet signingMaterial(KeyMaterialConfig material) {
+        requireMaterialConfig(material);
         ServerSigningConfig signing = material.getServerSigning();
         if (signing == null) {
             throw new IllegalArgumentException("Server signing configuration must not be null");
@@ -98,6 +118,9 @@ public final class OrionKeyMaterialFactory {
             throw new IllegalArgumentException("Unsupported server signing algorithm", failure);
         }
 
+        if (algorithm != KeyMaterialAlgorithm.RSA) {
+            throw new IllegalArgumentException("JWT server signing material must use RSA");
+        }
         KeyMaterialDescriptor active = descriptor(signing.getActive(), algorithm, "active");
         List<KeyMaterialDescriptor> verification = new ArrayList<>();
         if (signing.getVerification() != null) {

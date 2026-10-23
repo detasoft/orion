@@ -18,6 +18,7 @@ import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.S3NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -94,8 +95,10 @@ class S3BootstrapProxyColdStartIT {
                 byte[] xml;
                 try (OrionKeyMaterial seeded = OrionKeyMaterialFactory.open(
                         configuration, environment, materialStore, new KeyMaterialCreation(false))) {
-                    signingKeyId = seeded.signingIdentity().activeKeyId();
-                    signature = seeded.signingIdentity().sign(payload);
+                    KeyMaterialDescriptor active = OrionKeyMaterialFactory.signingMaterial(
+                            configuration.getBootstrap().getKeyMaterial()).active();
+                    signingKeyId = active.alias().value();
+                    signature = seeded.sign(active, payload);
                     OrionDocument document = OrionDocument.withAccessControl(
                             DefaultAccessControl.create("proxy-cold-start-password-hash"));
                     ConfigurationSecrets secrets = new ConfigurationSecrets(() -> document,
@@ -128,8 +131,9 @@ class S3BootstrapProxyColdStartIT {
                         new pro.deta.orion.event.OrionEventManager();
                 try (BootstrapContext bootstrap = BootstrapContext.open(configuration, environment,
                         new KeyMaterialCreation(false), bootstrapEvents1)) {
-                    assertThat(bootstrap.signingIdentity().activeKeyId()).isEqualTo(signingKeyId);
-                    assertThat(bootstrap.signingIdentity().verify(signingKeyId, payload, signature)).isTrue();
+                    assertThat(bootstrap.signingMaterial().active().alias().value()).isEqualTo(signingKeyId);
+                    assertThat(bootstrap.keyMaterial().verify(bootstrap.signingMaterial().active(),
+                            payload, signature)).isTrue();
                     cacheName = bootstrap.repositoryFactory()
                             .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE).orElseThrow();
                     assertThat(bootstrap.repositoryFactory()

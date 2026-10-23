@@ -59,7 +59,7 @@ class AcmeConfigurationServiceTest {
             OrionMaterialReference reference = new OrionMaterialReference("existing-account", 1);
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
             TestConfiguration desired = new TestConfiguration(EVENTS, bootstrap, owner.configurationCipher(),
-                    owner, owner.signingIdentity());
+                    owner);
             desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("r1"));
             ConfigurationSecrets secrets = new ConfigurationSecrets(
                     () -> desired.acl().configuration().result()
@@ -146,7 +146,7 @@ class AcmeConfigurationServiceTest {
             });
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
             TestConfiguration desired = new TestConfiguration(EVENTS, bootstrap, owner.configurationCipher(),
-                    owner, owner.signingIdentity());
+                    owner);
             desired.publish(initial, Optional.of("r1"));
             ConfigurationSecrets secrets = new ConfigurationSecrets(
                     () -> desired.acl().configuration().result()
@@ -197,7 +197,7 @@ class AcmeConfigurationServiceTest {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
             TestConfiguration desired = new TestConfiguration(EVENTS, bootstrap, owner.configurationCipher(),
-                    owner, owner.signingIdentity());
+                    owner);
             desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("r1"));
             ConfigurationSecrets secrets = new ConfigurationSecrets(
                     () -> desired.acl().configuration().result()
@@ -289,7 +289,7 @@ class AcmeConfigurationServiceTest {
         try (OrionKeyMaterial owner = owner(store)) {
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
             TestConfiguration desired = new TestConfiguration(EVENTS, bootstrap,
-                    owner.configurationCipher(), owner, owner.signingIdentity());
+                    owner.configurationCipher(), owner);
             desired.publish(initial, Optional.of("r1"));
             ConfigurationSecrets secrets = new ConfigurationSecrets(
                     () -> desired.acl().configuration().result()

@@ -18,7 +18,8 @@ import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.TestOnly;
-import pro.deta.orion.keymaterial.SigningIdentity;
+import pro.deta.orion.keymaterial.SigningMaterialSet;
+import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -64,7 +65,7 @@ public interface OrionComponent {
         OrionComponent build();
         @BindsInstance Builder bootstrapConfiguration(BootstrapConfiguration configuration);
         @BindsInstance Builder rootPasswordReset(RootPasswordReset rootPasswordReset);
-        @BindsInstance Builder signingIdentity(SigningIdentity identity);
+        @BindsInstance Builder signingMaterial(SigningMaterialSet material);
         @BindsInstance Builder keyMaterial(OrionKeyMaterial material);
         @BindsInstance Builder configurationSecretCipher(ConfigurationSecretCipher cipher);
         @BindsInstance Builder sshHostKeyCapability(SshHostKeyCapability capability);
@@ -88,7 +89,8 @@ public interface OrionComponent {
                     true);
             return bootstrapConfiguration(configuration)
                     .rootPasswordReset(new RootPasswordReset(false))
-                    .signingIdentity(SigningIdentity.unavailable())
+                    .signingMaterial(OrionKeyMaterialFactory.signingMaterial(
+                            configuration.getBootstrap().getKeyMaterial()))
                     .keyMaterial(OrionKeyMaterial.unavailable())
                     .configurationSecretCipher(ConfigurationSecretCipher.unavailable())
                     .sshHostKeyCapability(SshHostKeyCapability.unavailable())

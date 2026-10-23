@@ -46,7 +46,7 @@ final class RuntimeHttpTestSupport {
         try {
             TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(orionConfiguration);
             OrionComponent orionComponent = TestRuntimeBootstrap
-                    .componentBuilder(orionConfiguration, identity.capability(), identity.sshHostKeys())
+                    .componentBuilder(orionConfiguration, identity.material(), identity.sshHostKeys())
                     .configurationSecretCipher(identity.material().configurationCipher())
                     .build();
             OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();

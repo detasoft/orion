@@ -18,7 +18,7 @@ import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
-import pro.deta.orion.keymaterial.SigningIdentity;
+import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.keymaterial.SshHostKeyReference;
 import pro.deta.orion.lifecycle.state.TestOnly;
@@ -43,12 +43,14 @@ public final class BootstrapContext implements AutoCloseable {
 
     private final NativeGitRepositoryFactory repositoryFactory;
     private final OrionKeyMaterial keyMaterial;
+    private final SigningMaterialSet signingMaterial;
 
     private BootstrapContext(
             NativeGitRepositoryFactory repositoryFactory,
-            OrionKeyMaterial keyMaterial) {
+            OrionKeyMaterial keyMaterial, SigningMaterialSet signingMaterial) {
         this.repositoryFactory = repositoryFactory;
         this.keyMaterial = keyMaterial;
+        this.signingMaterial = signingMaterial;
     }
 
     public static BootstrapContext open(
@@ -121,7 +123,8 @@ public final class BootstrapContext implements AutoCloseable {
                     creation.allowed());
             keyMaterial = openKeyMaterial(configuration, environment, provider.provider(),
                     materialRepository, configuredMaterial, creation);
-            return new BootstrapContext(provider, keyMaterial);
+            return new BootstrapContext(provider, keyMaterial,
+                    OrionKeyMaterialFactory.signingMaterial(configuredMaterial));
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {
             try {
                 closeResources(s3Transport, provider == null ? null : provider.provider(), keyMaterial);
@@ -220,8 +223,8 @@ public final class BootstrapContext implements AutoCloseable {
         return keyMaterial.configurationCipher();
     }
 
-    public SigningIdentity signingIdentity() {
-        return keyMaterial.signingIdentity();
+    public SigningMaterialSet signingMaterial() {
+        return signingMaterial;
     }
 
     public SshHostKeyCapability sshHostKeys(List<SshHostKeyReference> references)

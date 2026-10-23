@@ -39,7 +39,7 @@ final class StorageManagementFixture {
         OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(
                 new AccessControl(List.of(root, admin), List.of(), List.of())), orgs);
         TestConfiguration configuration = new TestConfiguration(events, new BootstrapConfiguration(), cipher,
-                OrionKeyMaterial.unavailable(), SigningIdentity.unavailable());
+                OrionKeyMaterial.unavailable());
         configuration.publish(document, Optional.of("v1"));
         return new State(new ConfiguredStorageManagement(configuration.acl(), configuration.editor(), cipher,
                 repositories), configuration);

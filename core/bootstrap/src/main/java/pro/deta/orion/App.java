@@ -89,7 +89,7 @@ public class App {
                 OrionComponent orionComponent = DaggerOrionComponent.builder()
                         .bootstrapConfiguration(configuration)
                         .rootPasswordReset(options.rootPasswordReset())
-                        .signingIdentity(bootstrap.signingIdentity())
+                        .signingMaterial(bootstrap.signingMaterial())
                         .keyMaterial(bootstrap.keyMaterial())
                         .configurationSecretCipher(bootstrap.configurationCipher())
                         .sshHostKeyCapability(sshHostKeys)

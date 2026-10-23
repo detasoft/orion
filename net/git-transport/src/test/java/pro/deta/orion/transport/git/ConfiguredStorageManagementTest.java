@@ -75,7 +75,10 @@ class ConfiguredStorageManagementTest {
                 new OrionAccessControlServiceImpl(
                         new OrionPasswordHashingService(),
                         new RootPasswordReset(false),
-                        SigningIdentity.unavailable(),
+                        OrionKeyMaterial.unavailable(),
+                        new SigningMaterialSet(new KeyMaterialDescriptor(new KeyMaterialAlias("signing"),
+                                KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA,
+                                new KeyMaterialVersion(1)), List.of()),
                         new BootstrapConfiguration(),
                         editor);
         acl.onStart();

@@ -39,7 +39,7 @@ final class RemoteBootstrapTestSupport {
         return DaggerOrionComponent.builder()
                 .bootstrapConfiguration(configuration)
                 .rootPasswordReset(new RootPasswordReset(false))
-                .signingIdentity(context.signingIdentity())
+                .signingMaterial(context.signingMaterial())
                 .keyMaterial(context.keyMaterial())
                 .eventManager(events)
                 .sshHostKeyCapability(context.sshHostKeys(List.of()))

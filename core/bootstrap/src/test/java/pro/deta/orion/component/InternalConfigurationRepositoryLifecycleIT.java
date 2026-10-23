@@ -27,7 +27,7 @@ import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
-import pro.deta.orion.keymaterial.SigningIdentity;
+import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.auth.DefaultAccessControl;
@@ -58,7 +58,6 @@ import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
-import java.security.PublicKey;
 import java.security.Signature;
 import java.util.ArrayList;
 import java.util.List;
@@ -279,7 +278,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         KeyPair rootKey = keyPair();
         KeyPair recoveredRootKey = keyPair();
         KeyPair aliceKey = keyPair();
-        TestServerIdentity serverIdentity = new TestServerIdentity(keyPair(), List.of());
+        TestServerIdentity serverIdentity = new TestServerIdentity(keyPair());
         String rootOpenSshKey = PublicKeyEntry.toString(rootKey.getPublic());
         String oldPassword;
         String oldRootToken;
@@ -692,7 +691,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         KeyPair oldIdentity = keyPair();
         KeyPair activeIdentity = keyPair();
 
-        OrionComponent first = component(configuration, new TestServerIdentity(oldIdentity, List.of()));
+        OrionComponent first = component(configuration, new TestServerIdentity(oldIdentity));
         OrionApplicationLifecycle firstLifecycle = first.orionApplicationLifecycle();
         try {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
@@ -708,7 +707,7 @@ class InternalConfigurationRepositoryLifecycleIT {
 
         OrionComponent rotated = component(
                 configuration,
-                new TestServerIdentity(activeIdentity, List.of(oldIdentity)));
+                new TestServerIdentity(activeIdentity));
         OrionApplicationLifecycle rotatedLifecycle = rotated.orionApplicationLifecycle();
         try {
             assertThat(rotatedLifecycle.runApplication()).isEqualTo(RUNNING);
@@ -842,7 +841,7 @@ class InternalConfigurationRepositoryLifecycleIT {
     @Test
     void forcedLastRootKeyRemovalRemainsLockedUntilExplicitReset() throws Exception {
         BootstrapConfiguration configuration = configuration();
-        TestServerIdentity serverIdentity = new TestServerIdentity(keyPair(), List.of());
+        TestServerIdentity serverIdentity = new TestServerIdentity(keyPair());
         KeyPair rootKey = keyPair();
         KeyPair aliceKey = keyPair();
         String rootToken;
@@ -950,25 +949,25 @@ class InternalConfigurationRepositoryLifecycleIT {
     }
 
     private static OrionComponent component(BootstrapConfiguration configuration) {
-        return component(configuration, SigningIdentity.unavailable());
+        return component(configuration, OrionKeyMaterial.unavailable());
     }
 
     private static OrionComponent component(
             BootstrapConfiguration configuration,
             RootPasswordReset rootPasswordReset) {
-        return component(configuration, rootPasswordReset, SigningIdentity.unavailable());
+        return component(configuration, rootPasswordReset, OrionKeyMaterial.unavailable());
     }
 
     private static OrionComponent component(
             BootstrapConfiguration configuration,
-            SigningIdentity serverIdentity) {
+            OrionKeyMaterial serverIdentity) {
         return component(configuration, new RootPasswordReset(false), serverIdentity);
     }
 
     private static OrionComponent component(
             BootstrapConfiguration configuration,
             RootPasswordReset rootPasswordReset,
-            SigningIdentity serverIdentity) {
+            OrionKeyMaterial serverIdentity) {
         pro.deta.orion.event.OrionEventManager events = new pro.deta.orion.event.OrionEventManager();
         pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend backend =
                 pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.file(
@@ -984,8 +983,9 @@ class InternalConfigurationRepositoryLifecycleIT {
         return DaggerOrionComponent.builder()
                 .bootstrapConfiguration(configuration)
                 .rootPasswordReset(rootPasswordReset)
-                .signingIdentity(serverIdentity)
-                .keyMaterial(OrionKeyMaterial.unavailable())
+                .signingMaterial(OrionKeyMaterialFactory.signingMaterial(
+                        configuration.getBootstrap().getKeyMaterial()))
+                .keyMaterial(serverIdentity)
                 .eventManager(events)
                 .configurationSecretCipher(ConfigurationSecretCipher.unavailable())
                 .sshHostKeyCapability(SshHostKeyCapability.unavailable())
@@ -1105,22 +1105,16 @@ class InternalConfigurationRepositoryLifecycleIT {
         return generator.generateKeyPair();
     }
 
-    private static final class TestServerIdentity extends SigningIdentity {
+    private static final class TestServerIdentity extends OrionKeyMaterial {
         private final KeyPair active;
-        private final List<KeyPair> retained;
 
-        private TestServerIdentity(KeyPair active, List<KeyPair> retained) {
+        private TestServerIdentity(KeyPair active) {
             this.active = active;
-            this.retained = List.copyOf(retained);
         }
 
         @Override
-        public String activeKeyId() {
-            return "active";
-        }
-
-        @Override
-        public byte[] sign(byte[] payload) throws GeneralSecurityException {
+        public byte[] sign(pro.deta.orion.keymaterial.KeyMaterialDescriptor descriptor, byte[] payload)
+                throws GeneralSecurityException {
             Signature signature = Signature.getInstance("SHA256withRSA");
             signature.initSign(active.getPrivate());
             signature.update(payload);
@@ -1128,34 +1122,12 @@ class InternalConfigurationRepositoryLifecycleIT {
         }
 
         @Override
-        public boolean hasVerificationKey(String keyId) {
-            return "active".equals(keyId);
-        }
-
-        @Override
-        public boolean verify(String keyId, byte[] payload, byte[] signatureBytes)
-                throws GeneralSecurityException {
-            if (!hasVerificationKey(keyId)) {
-                return false;
-            }
+        public boolean verify(pro.deta.orion.keymaterial.KeyMaterialDescriptor descriptor,
+                byte[] payload, byte[] signatureBytes) throws GeneralSecurityException {
             Signature signature = Signature.getInstance("SHA256withRSA");
             signature.initVerify(active.getPublic());
             signature.update(payload);
             return signature.verify(signatureBytes);
-        }
-
-        @Override
-        public List<PublicKey> publicKeys() {
-            return List.of(active.getPublic());
-        }
-
-        @Override
-        public List<PublicKey> retainedPublicKeys() {
-            List<PublicKey> publicKeys = new java.util.ArrayList<>();
-            for (KeyPair keyPair : retained) {
-                publicKeys.add(keyPair.getPublic());
-            }
-            return List.copyOf(publicKeys);
         }
     }
 

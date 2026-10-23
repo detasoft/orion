@@ -36,7 +36,8 @@ import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
-import pro.deta.orion.keymaterial.SigningIdentity;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
+import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
@@ -70,7 +71,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     public OrionAccessControlServiceImpl(
             OrionPasswordHashingService orionPasswordHashingService,
             RootPasswordReset rootPasswordReset,
-            SigningIdentity serverIdentity,
+            OrionKeyMaterial keyMaterial,
+            SigningMaterialSet signingMaterial,
             BootstrapConfiguration bootstrapConfiguration,
             OrionConfigurationEditor editor) {
         this.orionPasswordHashingService = orionPasswordHashingService;
@@ -78,7 +80,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         this.createDefaultIfMissing = bootstrapConfiguration.getBootstrap().getAccessControl()
                 .isCreateDefaultIfMissing();
         this.editor = editor;
-        this.jwtAccessTokenService = new JwtAccessTokenService(serverIdentity);
+        this.jwtAccessTokenService = new JwtAccessTokenService(keyMaterial, signingMaterial);
     }
 
     @Override

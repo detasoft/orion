@@ -48,6 +48,7 @@ class OrionKeyMaterialApiTest {
             modification.generateKey(SIGNING, 2048);
             modification.generateKey(host, 2048);
 
+            assertThat(material.hasDurableSnapshot()).isFalse();
             assertThat(material.version()).isZero();
             assertThat(modification.version()).isEqualTo(1);
             assertThat(material.contains(SIGNING)).isFalse();
@@ -56,6 +57,7 @@ class OrionKeyMaterialApiTest {
 
             modification.apply();
 
+            assertThat(material.hasDurableSnapshot()).isTrue();
             assertThat(material.version()).isEqualTo(1);
             assertThat(store.read().orElseThrow().version()).isEqualTo("1");
             assertThat(material.privateKeyDescriptors(KeyMaterialPurpose.SSH_HOST)).containsExactly(host);
@@ -67,6 +69,7 @@ class OrionKeyMaterialApiTest {
         }
 
         try (OrionKeyMaterial reloaded = open(store)) {
+            assertThat(reloaded.hasDurableSnapshot()).isTrue();
             assertThat(reloaded.version()).isEqualTo(1);
             assertThat(reloaded.publicKey(SIGNING).getEncoded()).isEqualTo(publicKey);
             assertThat(reloaded.verify(SIGNING, payload, signature)).isTrue();

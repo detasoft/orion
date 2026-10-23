@@ -1160,7 +1160,7 @@ class OrionOidcOnboardingTest {
                     new OrionAccessControlServiceImpl(
                             new OrionPasswordHashingService(),
                             new RootPasswordReset(false),
-                            material.signingIdentity(),
+                            material, new SigningMaterialSet(descriptor, List.of()),
                             new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
                             editor);
             acl.onStart();

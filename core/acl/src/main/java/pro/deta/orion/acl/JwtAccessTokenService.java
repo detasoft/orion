@@ -1,12 +1,15 @@
 package pro.deta.orion.acl;
 
-import pro.deta.orion.keymaterial.SigningIdentity;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
+import pro.deta.orion.keymaterial.SigningMaterialSet;
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.time.Clock;
 import java.util.Base64;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -26,18 +29,17 @@ final class JwtAccessTokenService {
     private static final Pattern STRING_CLAIM = Pattern.compile("\"%s\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
     private static final Pattern LONG_CLAIM = Pattern.compile("\"%s\"\\s*:\\s*(\\d+)");
 
-    private final SigningIdentity serverIdentity;
+    private final OrionKeyMaterial keyMaterial;
+    private final SigningMaterialSet signing;
     private final Clock clock;
 
-    JwtAccessTokenService(SigningIdentity serverIdentity) {
-        this(serverIdentity, Clock.systemUTC());
+    JwtAccessTokenService(OrionKeyMaterial keyMaterial, SigningMaterialSet signing) {
+        this(keyMaterial, signing, Clock.systemUTC());
     }
 
-    JwtAccessTokenService(SigningIdentity serverIdentity, Clock clock) {
-        if (serverIdentity == null) {
-            throw new IllegalArgumentException("Server identity must not be null");
-        }
-        this.serverIdentity = serverIdentity;
+    JwtAccessTokenService(OrionKeyMaterial keyMaterial, SigningMaterialSet signing, Clock clock) {
+        this.keyMaterial = Objects.requireNonNull(keyMaterial, "key material");
+        this.signing = Objects.requireNonNull(signing, "signing material");
         this.clock = clock;
     }
 
@@ -72,7 +74,7 @@ final class JwtAccessTokenService {
         String header = "{\"alg\":\"%s\",\"typ\":\"%s\",\"kid\":%s}".formatted(
                 HEADER_ALGORITHM,
                 JWT_TYPE,
-                jsonString(serverIdentity.activeKeyId()));
+                jsonString(signing.active().alias().value()));
         String generationClaim = authenticationGeneration == null
                 ? ""
                 : ",\"%s\":%s".formatted(
@@ -96,7 +98,7 @@ final class JwtAccessTokenService {
         String signingInput = base64Url(header.getBytes(StandardCharsets.UTF_8))
                 + "."
                 + base64Url(payload.getBytes(StandardCharsets.UTF_8));
-        byte[] signature = serverIdentity.sign(signingInput.getBytes(StandardCharsets.US_ASCII));
+        byte[] signature = keyMaterial.sign(signing.active(), signingInput.getBytes(StandardCharsets.US_ASCII));
         String token = signingInput + "." + base64Url(signature);
         return new IssuedToken(token, expiresAt);
     }
@@ -130,10 +132,11 @@ final class JwtAccessTokenService {
             return VerificationResult.failure("JWT key id is required");
         }
 
-        if (!serverIdentity.hasVerificationKey(keyId)) {
+        KeyMaterialDescriptor verificationKey = verificationKey(keyId);
+        if (verificationKey == null) {
             return VerificationResult.failure("JWT signing key is unknown");
         }
-        if (!verify(keyId, parts[0] + "." + parts[1], signature)) {
+        if (!verify(verificationKey, parts[0] + "." + parts[1], signature)) {
             return VerificationResult.failure("JWT signature is invalid");
         }
 
@@ -215,10 +218,18 @@ final class JwtAccessTokenService {
         }
     }
 
-    private boolean verify(String keyId, String signingInput, byte[] signatureBytes) {
+    private KeyMaterialDescriptor verificationKey(String keyId) {
+        if (signing.active().alias().value().equals(keyId)) return signing.active();
+        for (KeyMaterialDescriptor descriptor : signing.verification()) {
+            if (descriptor.alias().value().equals(keyId)) return descriptor;
+        }
+        return null;
+    }
+
+    private boolean verify(KeyMaterialDescriptor descriptor, String signingInput, byte[] signatureBytes) {
         try {
-            return serverIdentity.verify(
-                    keyId,
+            return keyMaterial.verify(
+                    descriptor,
                     signingInput.getBytes(StandardCharsets.US_ASCII),
                     signatureBytes);
         } catch (GeneralSecurityException e) {

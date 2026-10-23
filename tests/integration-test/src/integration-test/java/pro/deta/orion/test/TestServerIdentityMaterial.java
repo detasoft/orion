@@ -2,11 +2,7 @@ package pro.deta.orion.test;
 
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.OrionKeyMaterialFactory;
-import pro.deta.orion.keymaterial.KeyMaterialOptions;
-import pro.deta.orion.keymaterial.KeyMaterialService;
-import pro.deta.orion.keymaterial.LocalKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.keymaterial.SigningIdentity;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 
@@ -44,16 +40,13 @@ final class TestServerIdentityMaterial implements AutoCloseable {
         try {
             return new TestServerIdentityMaterial(
                     material,
-                    readActiveKey(configuration),
+                    material.keyPair(OrionKeyMaterialFactory.signingMaterial(
+                            configuration.getBootstrap().getKeyMaterial()).active()),
                     material.sshHostKeys(List.of()));
         } catch (Exception failure) {
             material.close();
             throw failure;
         }
-    }
-
-    SigningIdentity capability() {
-        return material.signingIdentity();
     }
 
     OrionKeyMaterial material() {
@@ -71,21 +64,5 @@ final class TestServerIdentityMaterial implements AutoCloseable {
     @Override
     public void close() {
         material.close();
-    }
-
-    private static KeyPair readActiveKey(BootstrapConfiguration configuration) throws Exception {
-        Path location = Path.of(configuration.getBootstrap().getBaseDir())
-                .resolve(configuration.getBootstrap().getKeyMaterial().getLocation())
-                .normalize();
-        String alias = configuration.getBootstrap()
-                .getKeyMaterial()
-                .getServerSigning()
-                .getActive()
-                .getAlias();
-        try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(PASSWORD.toCharArray());
-             KeyMaterialService service = KeyMaterialService.open(
-                     new LocalKeyMaterialContentStore(location), options)) {
-            return service.getKeyPair(alias);
-        }
     }
 }

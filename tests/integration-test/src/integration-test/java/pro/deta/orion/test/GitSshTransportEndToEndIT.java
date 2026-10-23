@@ -1073,7 +1073,7 @@ class GitSshTransportEndToEndIT {
             OrionComponent component = TestRuntimeBootstrap
                     .componentBuilder(
                             configuration,
-                            identity.capability(),
+                            identity.material(),
                             identity.sshHostKeys(),
                             rootPasswordReset)
                     .build();

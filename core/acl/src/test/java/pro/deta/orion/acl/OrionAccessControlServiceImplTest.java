@@ -31,7 +31,9 @@ import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.TokenRefreshResult;
-import pro.deta.orion.keymaterial.SigningIdentity;
+import pro.deta.orion.keymaterial.SigningMaterialSet;
+import pro.deta.orion.keymaterial.KeyMaterialPurpose;
+import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
@@ -82,6 +84,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionAccessControlServiceImplTest {
+    private static final SigningMaterialSet SIGNING = new SigningMaterialSet(
+            new KeyMaterialDescriptor(new KeyMaterialAlias("test-signing-key"), KeyMaterialPurpose.SERVER_SIGNING,
+                    KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1)), List.of());
     private static final KeyPair KEY_ONE = keyPair("RSA", 2048);
     private static final KeyPair KEY_TWO = keyPair("EC", 256);
     private static final KeyPair KEY_THREE = keyPair("RSA", 2048);
@@ -418,7 +423,7 @@ class OrionAccessControlServiceImplTest {
                 new OrionAccessControlServiceImpl(
                         new OrionPasswordHashingService(),
                         new RootPasswordReset(false),
-                        testServerIdentity(),
+                        testServerIdentity(), SIGNING,
                         configuration,
                         editor);
         try {
@@ -1260,7 +1265,7 @@ class OrionAccessControlServiceImplTest {
         primary.getUsers().add(user("alice").addCredential(CredentialType.ARGON2, "alice-hash"));
         primary.getUsers().add(user("root")
                 .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
-        try (ServiceFixture fixture = fixture(primary, testServerIdentity(List.of(KEY_THREE.getPublic())))) {
+        try (ServiceFixture fixture = fixture(primary, testServerIdentity())) {
             fixture.addSshCredentials("root", List.of(key(KEY_TWO.getPublic())));
             assertThat(credentials(fixture.storage.snapshot, "alice"))
                     .singleElement().extracting(Credential::value).isEqualTo("alice-hash");
@@ -1323,7 +1328,7 @@ class OrionAccessControlServiceImplTest {
                 new OrionAccessControlServiceImpl(
                         new OrionPasswordHashingService(),
                         new RootPasswordReset(resetRoot),
-                        testServerIdentity(),
+                        testServerIdentity(), SIGNING,
                         configuration,
                         editor);
         PrintStream originalOut = System.out;
@@ -1341,7 +1346,7 @@ class OrionAccessControlServiceImplTest {
                     new OrionAccessControlServiceImpl(
                             new OrionPasswordHashingService(),
                             new RootPasswordReset(false),
-                            testServerIdentity(),
+                            testServerIdentity(), SIGNING,
                             configuration,
                             editor);
             try {
@@ -1392,7 +1397,7 @@ class OrionAccessControlServiceImplTest {
                 new OrionAccessControlServiceImpl(
                         new OrionPasswordHashingService(),
                         rootPasswordReset,
-                        testServerIdentity(),
+                        testServerIdentity(), SIGNING,
                         configuration,
                         new OrionConfigurationEditor(
                                 storage, testCipher(), testMaterial(), events));
@@ -1457,12 +1462,12 @@ class OrionAccessControlServiceImplTest {
 
     private static ServiceFixture fixture(
             AclFixture draft,
-            SigningIdentity serverIdentity) {
+            OrionKeyMaterial serverIdentity) {
         return fixture(draft, serverIdentity, new OrionPasswordHashingService());
     }
 
     private static ServiceFixture fixture(
-            AclFixture draft, SigningIdentity serverIdentity, OrionPasswordHashingService hashing) {
+            AclFixture draft, OrionKeyMaterial serverIdentity, OrionPasswordHashingService hashing) {
         return fixture(OrionDocument.withAccessControl(draft.toAccessControl()), serverIdentity, hashing,
                 testMaterial());
     }
@@ -1471,7 +1476,7 @@ class OrionAccessControlServiceImplTest {
         return fixture(document, testServerIdentity(), new OrionPasswordHashingService(), testMaterial());
     }
 
-    private static ServiceFixture fixture(OrionDocument document, SigningIdentity identity,
+    private static ServiceFixture fixture(OrionDocument document, OrionKeyMaterial identity,
             OrionPasswordHashingService hashing, OrionKeyMaterial material) {
         InMemoryStorage storage = new InMemoryStorage(
                 new OrionDocumentRevision(Result.of(document), new OrionRevision.Stored("version-one")));
@@ -1479,7 +1484,7 @@ class OrionAccessControlServiceImplTest {
         OrionConfigurationEditor editor =
                 new OrionConfigurationEditor(storage, testCipher(), material, storage.events);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(hashing,
-                new RootPasswordReset(false), identity, configuration, editor);
+                new RootPasswordReset(false), identity, SIGNING, configuration, editor);
         try {
             service.onStart();
             return new ServiceFixture(service, storage, editor);
@@ -1689,10 +1694,6 @@ class OrionAccessControlServiceImplTest {
         }
     }
 
-    private static SigningIdentity testServerIdentity() {
-        return testServerIdentity(List.of());
-    }
-
     private static String testEnvelope() {
         return testEnvelope(3);
     }
@@ -1747,15 +1748,11 @@ class OrionAccessControlServiceImplTest {
         };
     }
 
-    private static SigningIdentity testServerIdentity(List<PublicKey> publicKeys) {
-        return new SigningIdentity() {
+    private static OrionKeyMaterial testServerIdentity() {
+        return new OrionKeyMaterial() {
             @Override
-            public String activeKeyId() {
-                return "test-signing-key";
-            }
-
-            @Override
-            public byte[] sign(byte[] payload) throws java.security.GeneralSecurityException {
+            public byte[] sign(KeyMaterialDescriptor descriptor, byte[] payload)
+                    throws java.security.GeneralSecurityException {
                 Signature signature = Signature.getInstance("SHA256withRSA");
                 signature.initSign(KEY_THREE.getPrivate());
                 signature.update(payload);
@@ -1763,27 +1760,12 @@ class OrionAccessControlServiceImplTest {
             }
 
             @Override
-            public boolean hasVerificationKey(String keyId) {
-                return activeKeyId().equals(keyId);
-            }
-
-            @Override
-            public boolean verify(String keyId, byte[] payload, byte[] signatureBytes)
+            public boolean verify(KeyMaterialDescriptor descriptor, byte[] payload, byte[] signatureBytes)
                     throws java.security.GeneralSecurityException {
                 Signature signature = Signature.getInstance("SHA256withRSA");
                 signature.initVerify(KEY_THREE.getPublic());
                 signature.update(payload);
                 return signature.verify(signatureBytes);
-            }
-
-            @Override
-            public List<PublicKey> publicKeys() {
-                return publicKeys;
-            }
-
-            @Override
-            public List<PublicKey> retainedPublicKeys() {
-                return List.of();
             }
         };
     }

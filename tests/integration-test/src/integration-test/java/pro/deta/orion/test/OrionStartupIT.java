@@ -20,7 +20,7 @@ import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.GitOperationException;
-import pro.deta.orion.keymaterial.SigningIdentity;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.auth.DefaultAccessControl;
@@ -270,7 +270,7 @@ class OrionStartupIT {
             OrionComponent orionComponent = TestRuntimeBootstrap
                     .componentBuilder(
                             configuration,
-                            SigningIdentity.unavailable(),
+                            OrionKeyMaterial.unavailable(),
                             SshHostKeyCapability.unavailable())
                     .build();
             OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
@@ -319,7 +319,7 @@ class OrionStartupIT {
         try {
             TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(orionConfiguration);
             OrionComponent orionComponent = TestRuntimeBootstrap
-                    .componentBuilder(orionConfiguration, identity.capability(), identity.sshHostKeys())
+                    .componentBuilder(orionConfiguration, identity.material(), identity.sshHostKeys())
                     .build();
             OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
             assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);

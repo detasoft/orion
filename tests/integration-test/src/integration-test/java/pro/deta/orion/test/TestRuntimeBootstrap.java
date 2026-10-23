@@ -8,7 +8,7 @@ import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
-import pro.deta.orion.keymaterial.SigningIdentity;
+import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.acl.RootPasswordReset;
@@ -67,14 +67,14 @@ final class TestRuntimeBootstrap {
 
     static OrionComponent.Builder componentBuilder(
             BootstrapConfiguration configuration,
-            SigningIdentity identity,
+            OrionKeyMaterial material,
             SshHostKeyCapability sshHostKeys) {
-        return componentBuilder(configuration, identity, sshHostKeys, new RootPasswordReset(false));
+        return componentBuilder(configuration, material, sshHostKeys, new RootPasswordReset(false));
     }
 
     static OrionComponent.Builder componentBuilder(
             BootstrapConfiguration configuration,
-            SigningIdentity identity,
+            OrionKeyMaterial material,
             SshHostKeyCapability sshHostKeys,
             RootPasswordReset rootPasswordReset) {
         pro.deta.orion.event.OrionEventManager events = new pro.deta.orion.event.OrionEventManager();
@@ -92,8 +92,9 @@ final class TestRuntimeBootstrap {
         return DaggerOrionComponent.builder()
                 .bootstrapConfiguration(configuration)
                 .rootPasswordReset(rootPasswordReset)
-                .signingIdentity(identity)
-                .keyMaterial(OrionKeyMaterial.unavailable())
+                .signingMaterial(OrionKeyMaterialFactory.signingMaterial(
+                        configuration.getBootstrap().getKeyMaterial()))
+                .keyMaterial(material)
                 .eventManager(events)
                 .configurationSecretCipher(ConfigurationSecretCipher.unavailable())
                 .sshHostKeyCapability(sshHostKeys)

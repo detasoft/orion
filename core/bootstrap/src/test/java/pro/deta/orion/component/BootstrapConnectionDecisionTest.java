@@ -234,7 +234,7 @@ class BootstrapConnectionDecisionTest {
                     new OrionAccessControlServiceImpl(
                             new OrionPasswordHashingService(),
                             new RootPasswordReset(false),
-                            material.signingIdentity(),
+                            material, new SigningMaterialSet(signing, List.of()),
                             new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
                             editor);
             acl.onStart();

@@ -1,18 +1,26 @@
 package pro.deta.orion.acl;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.keymaterial.SigningIdentity;
+import org.junit.jupiter.api.AfterEach;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
+import pro.deta.orion.keymaterial.SigningMaterialSet;
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialAlias;
+import pro.deta.orion.keymaterial.KeyMaterialPurpose;
+import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
+import pro.deta.orion.keymaterial.KeyMaterialVersion;
+import pro.deta.orion.keymaterial.KeyMaterialOptions;
+import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
-import java.security.PublicKey;
-import java.security.Signature;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Base64;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,9 +32,16 @@ class JwtAccessTokenServiceTest {
     private static final Clock CLOCK = Clock.fixed(
             Instant.parse("2026-09-02T21:00:00Z"), ZoneOffset.UTC);
 
+    private final List<OrionKeyMaterial> materials = new ArrayList<>();
+
+    @AfterEach
+    void closeMaterials() {
+        for (OrionKeyMaterial material : materials) material.close();
+    }
+
     @Test
     void preservesOrganizationScopeSeparatelyFromTheLocalUserId() throws Exception {
-        JwtAccessTokenService service = new JwtAccessTokenService(TestIdentity.single("key"), CLOCK);
+        JwtAccessTokenService service = service(single("key"), CLOCK);
         String token = service.issue("root", 600, "oidc-binding", "acme").value();
         assertThat(service.verify(token)).isInstanceOfSatisfying(
                 JwtAccessTokenService.VerificationResult.Success.class, result -> {
@@ -41,8 +56,8 @@ class JwtAccessTokenServiceTest {
 
     @Test
     void issuesPurposeBoundAccessTokenWithCompleteTimeAndIdentityClaims() throws Exception {
-        JwtAccessTokenService service = new JwtAccessTokenService(
-                TestIdentity.single("server-signing-v1"), CLOCK);
+        JwtAccessTokenService service = service(
+                single("server-signing-v1"), CLOCK);
 
         JwtAccessTokenService.IssuedToken token = service.issue("alice", 600, null);
 
@@ -60,14 +75,14 @@ class JwtAccessTokenServiceTest {
 
     @Test
     void acceptsTokenUntilItsExactExpirationBoundary() throws Exception {
-        TestIdentity identity = TestIdentity.single("server-signing-v1");
-        JwtAccessTokenService issuer = new JwtAccessTokenService(identity, CLOCK);
+        TestIdentity identity = single("server-signing-v1");
+        JwtAccessTokenService issuer = service(identity, CLOCK);
         JwtAccessTokenService.IssuedToken token = issuer.issue("alice", 600, null);
 
-        JwtAccessTokenService beforeExpiration = new JwtAccessTokenService(
+        JwtAccessTokenService beforeExpiration = service(
                 identity,
                 Clock.fixed(Instant.ofEpochSecond(token.expiresAtEpochSecond() - 1), ZoneOffset.UTC));
-        JwtAccessTokenService atExpiration = new JwtAccessTokenService(
+        JwtAccessTokenService atExpiration = service(
                 identity,
                 Clock.fixed(Instant.ofEpochSecond(token.expiresAtEpochSecond()), ZoneOffset.UTC));
 
@@ -86,8 +101,8 @@ class JwtAccessTokenServiceTest {
 
     @Test
     void rejectsTokenWithoutAudience() throws Exception {
-        TestIdentity identity = TestIdentity.single("server-signing-v1");
-        JwtAccessTokenService service = new JwtAccessTokenService(identity, CLOCK);
+        TestIdentity identity = single("server-signing-v1");
+        JwtAccessTokenService service = service(identity, CLOCK);
         String token = signedToken(
                 identity,
                 "{\"iss\":\"orion\",\"sub\":\"alice\",\"purpose\":\"orion-access\","
@@ -101,8 +116,8 @@ class JwtAccessTokenServiceTest {
 
     @Test
     void rejectsExpirationBeyondShortLivedTokenLimit() throws Exception {
-        JwtAccessTokenService service = new JwtAccessTokenService(
-                TestIdentity.single("server-signing-v1"), CLOCK);
+        JwtAccessTokenService service = service(
+                single("server-signing-v1"), CLOCK);
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.issue("alice", 3_601, null))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -111,8 +126,8 @@ class JwtAccessTokenServiceTest {
 
     @Test
     void issuesAndVerifiesTokenAtMaximumLifetime() throws Exception {
-        JwtAccessTokenService service = new JwtAccessTokenService(
-                TestIdentity.single("server-signing-v1"), CLOCK);
+        JwtAccessTokenService service = service(
+                single("server-signing-v1"), CLOCK);
         JwtAccessTokenService.IssuedToken token = service.issue("alice", 3_600, null);
         assertThat(token.expiresAtEpochSecond()).isEqualTo(CLOCK.instant().getEpochSecond() + 3_600);
         assertThat(service.verify(token.value())).isInstanceOf(JwtAccessTokenService.VerificationResult.Success.class);
@@ -120,8 +135,8 @@ class JwtAccessTokenServiceTest {
 
     @Test
     void rejectsTokenWithoutAccessPurpose() throws Exception {
-        TestIdentity identity = TestIdentity.single("server-signing-v1");
-        JwtAccessTokenService service = new JwtAccessTokenService(identity, CLOCK);
+        TestIdentity identity = single("server-signing-v1");
+        JwtAccessTokenService service = service(identity, CLOCK);
         String token = signedToken(identity, validPayload().replace(
                 ",\"purpose\":\"orion-access\"", ""));
 
@@ -132,8 +147,8 @@ class JwtAccessTokenServiceTest {
 
     @Test
     void rejectsTokenWithoutValidTokenId() throws Exception {
-        TestIdentity identity = TestIdentity.single("server-signing-v1");
-        JwtAccessTokenService service = new JwtAccessTokenService(identity, CLOCK);
+        TestIdentity identity = single("server-signing-v1");
+        JwtAccessTokenService service = service(identity, CLOCK);
         String token = signedToken(identity, validPayload().replace(
                 "1fc784e3-3238-4279-8627-d8a2e64bc17f", "not-a-uuid"));
 
@@ -144,8 +159,8 @@ class JwtAccessTokenServiceTest {
 
     @Test
     void rejectsTokenWithoutIssuedAtOrNotBefore() throws Exception {
-        TestIdentity identity = TestIdentity.single("server-signing-v1");
-        JwtAccessTokenService service = new JwtAccessTokenService(identity, CLOCK);
+        TestIdentity identity = single("server-signing-v1");
+        JwtAccessTokenService service = service(identity, CLOCK);
         String withoutIssuedAt = signedToken(identity, validPayload().replace(
                 ",\"iat\":1788382800", ""));
         String withoutNotBefore = signedToken(identity, validPayload().replace(
@@ -161,8 +176,8 @@ class JwtAccessTokenServiceTest {
 
     @Test
     void rejectsSignedTokenWhoseLifetimeExceedsLimit() throws Exception {
-        TestIdentity identity = TestIdentity.single("server-signing-v1");
-        JwtAccessTokenService service = new JwtAccessTokenService(identity, CLOCK);
+        TestIdentity identity = single("server-signing-v1");
+        JwtAccessTokenService service = service(identity, CLOCK);
         String token = signedToken(identity, validPayload().replace(
                 "\"exp\":1788383400", "\"exp\":1788386401"));
 
@@ -173,8 +188,8 @@ class JwtAccessTokenServiceTest {
 
     @Test
     void rejectsTokenThatExpiresBeforeItBecomesActive() throws Exception {
-        TestIdentity identity = TestIdentity.single("server-signing-v1");
-        JwtAccessTokenService service = new JwtAccessTokenService(identity, CLOCK);
+        TestIdentity identity = single("server-signing-v1");
+        JwtAccessTokenService service = service(identity, CLOCK);
         String token = signedToken(identity, validPayload()
                 .replace("\"nbf\":1788382800", "\"nbf\":1788383500"));
 
@@ -185,8 +200,8 @@ class JwtAccessTokenServiceTest {
 
     @Test
     void returnsTokenIdInVerifiedIdentity() throws Exception {
-        JwtAccessTokenService service = new JwtAccessTokenService(
-                TestIdentity.single("server-signing-v1"), CLOCK);
+        JwtAccessTokenService service = service(
+                single("server-signing-v1"), CLOCK);
         JwtAccessTokenService.IssuedToken token = service.issue("alice", 600, null);
 
         JwtAccessTokenService.VerificationResult result = service.verify(token.value());
@@ -200,8 +215,8 @@ class JwtAccessTokenServiceTest {
 
     @Test
     void usesActiveMaterialAliasAsKid() throws Exception {
-        TestIdentity identity = TestIdentity.single("server-signing-v2");
-        JwtAccessTokenService service = new JwtAccessTokenService(identity, CLOCK);
+        TestIdentity identity = single("server-signing-v2");
+        JwtAccessTokenService service = service(identity, CLOCK);
 
         JwtAccessTokenService.IssuedToken token = service.issue("alice", 600, null);
 
@@ -212,7 +227,7 @@ class JwtAccessTokenServiceTest {
     @Test
     void escapesConfiguredAliasInKid() throws Exception {
         String alias = "server-\"signing\\v2";
-        JwtAccessTokenService service = new JwtAccessTokenService(TestIdentity.single(alias), CLOCK);
+        JwtAccessTokenService service = service(single(alias), CLOCK);
 
         JwtAccessTokenService.IssuedToken token = service.issue("alice", 600, null);
 
@@ -224,27 +239,34 @@ class JwtAccessTokenServiceTest {
     void rotatedIdentityVerifiesRetainedAliasAndIssuesWithNewAlias() throws Exception {
         KeyPair oldKey = rsaKeyPair();
         KeyPair newKey = rsaKeyPair();
-        JwtAccessTokenService oldService = new JwtAccessTokenService(
+        JwtAccessTokenService oldService = service(
                 new TestIdentity("server-signing-v1", Map.of("server-signing-v1", oldKey)),
                 CLOCK);
         String oldToken = oldService.issue("alice", 600, null).value();
         TestIdentity rotated = new TestIdentity(
                 "server-signing-v2",
                 orderedKeys("server-signing-v2", newKey, "server-signing-v1", oldKey));
-        JwtAccessTokenService rotatedService = new JwtAccessTokenService(rotated, CLOCK);
+        JwtAccessTokenService rotatedService = service(rotated, CLOCK);
 
         String newToken = rotatedService.issue("alice", 600, null).value();
 
         assertVerified(rotatedService, oldToken, "alice", null);
         assertThat(header(newToken)).contains("\"kid\":\"server-signing-v2\"");
+
+        JwtAccessTokenService retired = new JwtAccessTokenService(rotated.material,
+                new SigningMaterialSet(rotated.signing.active(), List.of()), CLOCK);
+        assertThat(retired.verify(oldToken)).isEqualTo(
+                JwtAccessTokenService.VerificationResult.failure("JWT signing key is unknown"));
+        assertVerified(retired, newToken, "alice", null);
+        assertThat(rotated.material.contains(rotated.signing.verification().getFirst())).isTrue();
     }
 
     @Test
     void rejectsTokenWhoseExactKidIsNotConfigured() throws Exception {
-        TestIdentity unknown = TestIdentity.single("unknown-signing");
-        String token = new JwtAccessTokenService(unknown, CLOCK).issue("alice", 600, null).value();
-        JwtAccessTokenService configured = new JwtAccessTokenService(
-                TestIdentity.single("server-signing-v1"), CLOCK);
+        TestIdentity unknown = single("unknown-signing");
+        String token = service(unknown, CLOCK).issue("alice", 600, null).value();
+        JwtAccessTokenService configured = service(
+                single("server-signing-v1"), CLOCK);
 
         assertThat(configured.verify(token))
                 .isEqualTo(JwtAccessTokenService.VerificationResult.failure(
@@ -253,8 +275,8 @@ class JwtAccessTokenServiceTest {
 
     @Test
     void roundTripsOptionalAuthenticationGeneration() throws Exception {
-        JwtAccessTokenService service = new JwtAccessTokenService(
-                TestIdentity.single("server-signing-v1"), CLOCK);
+        JwtAccessTokenService service = service(
+                single("server-signing-v1"), CLOCK);
 
         JwtAccessTokenService.IssuedToken token = service.issue("root", 600, "generation-1");
 
@@ -264,8 +286,8 @@ class JwtAccessTokenServiceTest {
 
     @Test
     void claimFreeTokensRemainCompatible() throws Exception {
-        JwtAccessTokenService service = new JwtAccessTokenService(
-                TestIdentity.single("server-signing-v1"), CLOCK);
+        JwtAccessTokenService service = service(
+                single("server-signing-v1"), CLOCK);
 
         JwtAccessTokenService.IssuedToken token = service.issue("alice", 600, null);
 
@@ -275,8 +297,8 @@ class JwtAccessTokenServiceTest {
 
     @Test
     void rejectsMalformedAuthenticationGenerationClaim() throws Exception {
-        TestIdentity identity = TestIdentity.single("server-signing-v1");
-        JwtAccessTokenService service = new JwtAccessTokenService(identity, CLOCK);
+        TestIdentity identity = single("server-signing-v1");
+        JwtAccessTokenService service = service(identity, CLOCK);
         String malformedToken = signedToken(
                 identity,
                 validPayload().replace(
@@ -359,59 +381,48 @@ class JwtAccessTokenServiceTest {
         return generator.generateKeyPair();
     }
 
-    private static final class TestIdentity extends SigningIdentity {
-        private final String activeKeyId;
-        private final Map<String, KeyPair> keys;
+    private static JwtAccessTokenService service(TestIdentity identity, Clock clock) {
+        return new JwtAccessTokenService(identity.material, identity.signing, clock);
+    }
 
-        private TestIdentity(String activeKeyId, Map<String, KeyPair> keys) {
-            this.activeKeyId = activeKeyId;
-            this.keys = Map.copyOf(keys);
-        }
+    private TestIdentity single(String alias) throws Exception {
+        return new TestIdentity(alias, Map.of(alias, rsaKeyPair()));
+    }
 
-        @Override
-        public String activeKeyId() {
-            return activeKeyId;
-        }
+    private final class TestIdentity {
+        private final OrionKeyMaterial material;
+        private final SigningMaterialSet signing;
 
-        private static TestIdentity single(String alias) throws GeneralSecurityException {
-            return new TestIdentity(alias, Map.of(alias, rsaKeyPair()));
-        }
-
-        @Override
-        public byte[] sign(byte[] payload) throws GeneralSecurityException {
-            Signature signer = Signature.getInstance("SHA256withRSA");
-            signer.initSign(keys.get(activeKeyId).getPrivate());
-            signer.update(payload);
-            return signer.sign();
-        }
-
-        @Override
-        public boolean hasVerificationKey(String keyId) {
-            return keyId != null && keys.containsKey(keyId);
-        }
-
-        @Override
-        public boolean verify(
-                String keyId,
-                byte[] payload,
-                byte[] signature) throws GeneralSecurityException {
-            if (!keys.containsKey(keyId)) {
-                return false;
+        private TestIdentity(String activeKeyId, Map<String, KeyPair> keys) throws Exception {
+            try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray())) {
+                material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options);
             }
-            Signature verifier = Signature.getInstance("SHA256withRSA");
-            verifier.initVerify(keys.get(keyId).getPublic());
-            verifier.update(payload);
-            return verifier.verify(signature);
+            materials.add(material);
+            List<KeyMaterialDescriptor> retained = new ArrayList<>();
+            KeyMaterialDescriptor active = descriptor(activeKeyId, keys.size());
+            material.withModification(modification -> {
+                for (Map.Entry<String, KeyPair> entry : keys.entrySet()) {
+                    KeyMaterialDescriptor descriptor = entry.getKey().equals(activeKeyId)
+                            ? active : descriptor(entry.getKey(), 1);
+                    if (!descriptor.equals(active)) retained.add(descriptor);
+                    modification.importKey(descriptor, entry.getValue());
+                }
+                modification.apply();
+            });
+            signing = new SigningMaterialSet(active, retained);
         }
 
-        @Override
-        public List<PublicKey> publicKeys() {
-            return keys.values().stream().map(KeyPair::getPublic).toList();
+        private String activeKeyId() {
+            return signing.active().alias().value();
         }
 
-        @Override
-        public List<PublicKey> retainedPublicKeys() {
-            return List.of();
+        private byte[] sign(byte[] payload) throws GeneralSecurityException {
+            return material.sign(signing.active(), payload);
         }
+    }
+
+    private static KeyMaterialDescriptor descriptor(String alias, int version) {
+        return new KeyMaterialDescriptor(new KeyMaterialAlias(alias), KeyMaterialPurpose.SERVER_SIGNING,
+                KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(version));
     }
 }

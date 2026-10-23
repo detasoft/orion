@@ -18,7 +18,13 @@ import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
-import pro.deta.orion.keymaterial.SigningIdentity;
+import pro.deta.orion.keymaterial.SigningMaterialSet;
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialAlias;
+import pro.deta.orion.keymaterial.KeyMaterialPurpose;
+import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
+import pro.deta.orion.keymaterial.KeyMaterialVersion;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.acl.RootPasswordReset;
@@ -127,7 +133,10 @@ class NativeSshCredentialPersistenceTest {
         return new OrionAccessControlServiceImpl(
                 new OrionPasswordHashingService(),
                 new RootPasswordReset(false),
-                SigningIdentity.unavailable(),
+                OrionKeyMaterial.unavailable(),
+                new SigningMaterialSet(new KeyMaterialDescriptor(new KeyMaterialAlias("signing"),
+                        KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA,
+                        new KeyMaterialVersion(1)), List.of()),
                 new BootstrapConfiguration(),
                 editor);
     }

@@ -1,6 +1,7 @@
 package pro.deta.orion.test.integration;
 
 import java.util.Optional;
+import java.util.List;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -24,7 +25,7 @@ import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialService;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
-import pro.deta.orion.keymaterial.SigningIdentity;
+import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
@@ -47,17 +48,19 @@ public final class TestConfiguration implements AutoCloseable {
 
                     @Override
                     public void require(TrustedCertificateDescriptor descriptor) {}
-                }, SigningIdentity.unavailable());
+                });
     }
 
     public TestConfiguration(TestEvents events, BootstrapConfiguration bootstrap,
-            ConfigurationSecretCipher cipher, OrionKeyMaterial material,
-            SigningIdentity identity) {
+            ConfigurationSecretCipher cipher, OrionKeyMaterial material) {
         this.events = events;
         this.cipher = cipher;
         editor = new OrionConfigurationEditor(storage, cipher, material, events.manager());
+        SigningMaterialSet signing = new SigningMaterialSet(
+                new KeyMaterialDescriptor(new KeyMaterialAlias("signing"), KeyMaterialPurpose.SERVER_SIGNING,
+                        KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1)), List.of());
         acl = new OrionAccessControlServiceImpl(new OrionPasswordHashingService(), new RootPasswordReset(false),
-                identity, bootstrap, editor);
+                material, signing, bootstrap, editor);
         events.own(this);
         acl.onStart();
     }
