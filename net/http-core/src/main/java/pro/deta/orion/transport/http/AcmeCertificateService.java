@@ -8,7 +8,6 @@ import org.slf4j.LoggerFactory;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
-import pro.deta.orion.keymaterial.AcmeKeyMaterial;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
@@ -23,6 +22,7 @@ import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
 import java.io.IOException;
 import java.security.GeneralSecurityException;
+import java.security.KeyPair;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.Instant;
@@ -93,9 +93,12 @@ public class AcmeCertificateService {
     }
 
     private IssuedAcmeCertificate issueAdmitted(IssueSettings settings, boolean automatic) {
-        AcmeKeyMaterial keys;
+        KeyPair accountKeyPair;
+        KeyPair domainKeyPair;
         try {
-            keys = keyMaterial.acquireAcmeKeys(settings.material(), RSA_KEY_SIZE, RSA_KEY_SIZE);
+            prepareMaterial(settings.material());
+            accountKeyPair = keyMaterial.keyPair(settings.material().account());
+            domainKeyPair = keyMaterial.keyPair(settings.material().identity());
         } catch (IOException | GeneralSecurityException failure) {
             throw new AcmeCertificateIssueException("Cannot acquire ACME key material", failure);
         }
@@ -106,8 +109,8 @@ public class AcmeCertificateService {
             issued = certificateIssuer.issue(new AcmeCertificateIssueRequest(
                     settings.directoryUrl(),
                     settings.accountEmail(),
-                    keys.accountKeyPair(),
-                    keys.domainKeyPair(),
+                    accountKeyPair,
+                    domainKeyPair,
                     settings.domains(),
                     settings.organization(),
                     Duration.ofSeconds(settings.authorizationTimeoutSeconds()),
@@ -124,9 +127,15 @@ public class AcmeCertificateService {
         }
         try {
             CertificateMaterial certificates = certificateMaterial(settings.material(), issued.certificateChain());
-            keyMaterial.certificateIdentity(settings.material()).installCertificateChain(
-                    certificates.chain(),
-                    certificates.issuerTrustAnchor());
+            keyMaterial.withModification(modification -> {
+                if (settings.material().issuerTrustAnchor().isPresent()) {
+                    modification.setTrustedCertificate(settings.material().issuerTrustAnchor().orElseThrow(),
+                            certificates.issuerTrustAnchor().orElseThrow());
+                }
+                modification.installCertificateChain(settings.material().identity(), certificates.chain(),
+                        settings.material().issuerTrustAnchor());
+                modification.apply();
+            });
             return new IssuedAcmeCertificate(issued.domains(), certificates.chain());
         } catch (IOException | GeneralSecurityException failure) {
             throw new AcmeCertificateIssueException("Cannot store issued ACME certificate", failure);
@@ -158,8 +167,8 @@ public class AcmeCertificateService {
             if (issuanceInProgress.compareAndSet(false, true)) {
                 try {
                     IssueSettings settings = settingsFrom(IssueRequest.EMPTY);
-                    Optional<List<X509Certificate>> chain = keyMaterial.certificateIdentity(settings.material())
-                    .issuedCertificateChain();
+                    Optional<List<X509Certificate>> chain =
+                            keyMaterial.issuedCertificateChain(settings.material().identity());
                     if (chain.isPresent() && !now.isBefore(nextAttempt(settings, chain.orElseThrow().getFirst()))) {
                         LOG.warn("Starting ACME certificate renewal: domains={}, expiresAt={}, attemptAt={}",
                                 settings.domains(), chain.orElseThrow().getFirst().getNotAfter().toInstant(), now);
@@ -189,8 +198,8 @@ public class AcmeCertificateService {
     public RenewalStatus renewalStatus() {
         try {
             IssueSettings settings = settingsFrom(IssueRequest.EMPTY);
-            Optional<List<X509Certificate>> chain = keyMaterial.certificateIdentity(settings.material())
-                    .issuedCertificateChain();
+            Optional<List<X509Certificate>> chain =
+                    keyMaterial.issuedCertificateChain(settings.material().identity());
             RenewalAttempt attempt = currentAttempt(settings);
             String state = maintenance == null || maintenanceStopped ? "stopped"
                     : issuanceInProgress.get() ? "issuing"
@@ -235,7 +244,7 @@ public class AcmeCertificateService {
     public Optional<IssuedAcmeCertificate> savedCertificate() {
         IssueSettings settings = settingsFrom(IssueRequest.EMPTY);
         try {
-            return keyMaterial.certificateIdentity(settings.material()).issuedCertificateChain()
+            return keyMaterial.issuedCertificateChain(settings.material().identity())
                     .map(chain -> new IssuedAcmeCertificate(settings.domains(), chain));
         } catch (GeneralSecurityException failure) {
             throw new AcmeCertificateIssueException("Cannot read issued ACME certificate", failure);
@@ -251,7 +260,8 @@ public class AcmeCertificateService {
             issuer = Optional.of(chain.removeLast());
         }
         if (configuration.issuerTrustAnchor().isPresent() && issuer.isEmpty()) {
-            issuer = keyMaterial.certificateIdentity(configuration).issuerTrustAnchor();
+            issuer = Optional.of(keyMaterial.trustedCertificate(
+                    configuration.issuerTrustAnchor().orElseThrow()));
         }
         if (configuration.issuerTrustAnchor().isEmpty()) {
             issuer = Optional.empty();
@@ -306,10 +316,28 @@ public class AcmeCertificateService {
 
     void prepareMaterial(OrionHttpsConfiguration https) {
         try {
-            keyMaterial.acquireAcmeKeys(materialFrom(https), RSA_KEY_SIZE, RSA_KEY_SIZE);
+            prepareMaterial(materialFrom(https));
         } catch (IOException | GeneralSecurityException failure) {
             throw new AcmeCertificateIssueException("Cannot prepare ACME key material", failure);
         }
+    }
+
+    private void prepareMaterial(AcmeMaterialConfiguration configuration)
+            throws IOException, GeneralSecurityException {
+        keyMaterial.withModification(modification -> {
+            if (configuration.issuerTrustAnchor().isPresent()) {
+                TrustedCertificateDescriptor issuer = configuration.issuerTrustAnchor().orElseThrow();
+                String alias = issuer.alias().value();
+                if (alias.equalsIgnoreCase(configuration.account().alias().value())
+                        || alias.equalsIgnoreCase(configuration.identity().alias().value())) {
+                    throw new IllegalArgumentException("ACME key and issuer must use different aliases");
+                }
+                if (keyMaterial.contains(issuer.alias())) keyMaterial.require(issuer);
+            }
+            modification.generateKey(configuration.account(), RSA_KEY_SIZE);
+            modification.generateKey(configuration.identity(), RSA_KEY_SIZE);
+            modification.apply();
+        });
     }
 
     private AcmeMaterialConfiguration materialFrom(OrionHttpsConfiguration https) {

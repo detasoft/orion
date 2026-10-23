@@ -1,6 +1,5 @@
 package pro.deta.orion.transport.http;
 
-import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.test.integration.TestConfiguration;
 import java.util.Set;
 import javax.net.ssl.SSLSocket;
@@ -15,12 +14,11 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import org.slf4j.LoggerFactory;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.keymaterial.AcmeKeyMaterial;
-import pro.deta.orion.keymaterial.CertificateIdentity;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialAlias;
@@ -28,7 +26,7 @@ import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
-import pro.deta.orion.keymaterial.SigningMaterialSet;
+import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
@@ -68,11 +66,219 @@ class AcmeCertificateServiceTest {
         EVENTS.close();
     }
 
-    private static final KeyMaterialDescriptor SIGNING = descriptor(
-            "server-signing-v1", KeyMaterialPurpose.SERVER_SIGNING);
+    private static final KeyMaterialDescriptor ACCOUNT = descriptor(
+            "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT);
+    private static final KeyMaterialDescriptor IDENTITY = descriptor(
+            "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY);
+    private static final TrustedCertificateDescriptor ROOT = new TrustedCertificateDescriptor(
+            new KeyMaterialAlias("issuer-root-v1"), KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1));
 
     @TempDir
     private Path tempDir;
+
+    @Test
+    void preparesBothKeysOnlyAfterTheStoreAcceptsThem() throws Exception {
+        class ObservingStore extends InMemoryKeyMaterialContentStore {
+            private OrionKeyMaterial material;
+
+            @Override
+            public synchronized String write(byte[] bytes, String expectedVersion) throws IOException {
+                if (material != null) {
+                    try {
+                        assertThat(material.contains(ACCOUNT)).isFalse();
+                        assertThat(material.contains(IDENTITY)).isFalse();
+                    } catch (GeneralSecurityException failure) {
+                        throw new IOException(failure);
+                    }
+                }
+                return super.write(bytes, expectedVersion);
+            }
+        }
+        ObservingStore store = new ObservingStore();
+        TestConfiguration desired = desiredState(false);
+        try (OrionKeyMaterial material = owner(store)) {
+            store.material = material;
+            AcmeCertificateService service = new AcmeCertificateService(desired.acl(), material, null, null);
+            OrionHttpsConfiguration https = desired.acl().configuration().result()
+                    .valueOrFailure("configuration").system().https().orElseThrow();
+            service.prepareMaterial(https);
+            assertThat(material.contains(ACCOUNT)).isTrue();
+            assertThat(material.contains(IDENTITY)).isTrue();
+            assertThat(material.version()).isEqualTo(1);
+            byte[] before = store.read().orElseThrow().bytes();
+            service.prepareMaterial(https);
+            assertThat(store.read().orElseThrow().bytes()).isEqualTo(before);
+        }
+    }
+
+    @Test
+    void publishesCertificateAndRootTogetherAndReusesTheKeysAfterReopening() throws Exception {
+        class ObservingStore extends InMemoryKeyMaterialContentStore {
+            private OrionKeyMaterial material;
+
+            @Override
+            public synchronized String write(byte[] bytes, String expectedVersion) throws IOException {
+                if (material != null) {
+                    try {
+                        assertThat(material.issuedCertificateChain(IDENTITY)).isEmpty();
+                        assertThat(material.contains(ROOT)).isFalse();
+                    } catch (GeneralSecurityException failure) {
+                        throw new IOException(failure);
+                    }
+                }
+                return super.write(bytes, expectedVersion);
+            }
+        }
+        ObservingStore store = new ObservingStore();
+        TestConfiguration desired = desiredState(false,
+                Optional.of(new OrionMaterialReference("issuer-root-v1", 1)));
+        RecordingIssuer issuer = new RecordingIssuer(false);
+        issuer.root = TestCertificateChain.root("Issuer root");
+        byte[] accountPublic;
+        byte[] identityPublic;
+        try (OrionKeyMaterial material = owner(store)) {
+            AcmeCertificateService service = new AcmeCertificateService(desired.acl(), material, issuer, null);
+            service.prepareMaterial(desired.acl().configuration().result()
+                    .valueOrFailure("configuration").system().https().orElseThrow());
+            store.material = material;
+            IssuedAcmeCertificate issued = service.issue(AcmeCertificateService.IssueRequest.EMPTY);
+
+            assertThat(issued.certificateChain()).hasSize(1);
+            assertThat(material.certificateChain(IDENTITY))
+                    .containsExactlyElementsOf(issued.certificateChain());
+            assertThat(material.trustedCertificate(ROOT)).isEqualTo(issuer.root.certificate());
+            assertThat(material.version()).isEqualTo(2);
+            accountPublic = issuer.lastRequest.accountKeyPair().getPublic().getEncoded();
+            identityPublic = issuer.lastRequest.domainKeyPair().getPublic().getEncoded();
+            store.material = null;
+        }
+        try (OrionKeyMaterial reloaded = owner(store)) {
+            issuer.omitRoot = true;
+            AcmeCertificateService service = new AcmeCertificateService(desired.acl(), reloaded, issuer, null);
+            assertThat(service.savedCertificate().orElseThrow().certificateChain()).hasSize(1);
+            service.issue(AcmeCertificateService.IssueRequest.EMPTY);
+            assertThat(issuer.lastRequest.accountKeyPair().getPublic().getEncoded()).isEqualTo(accountPublic);
+            assertThat(issuer.lastRequest.domainKeyPair().getPublic().getEncoded()).isEqualTo(identityPublic);
+            assertThat(reloaded.version()).isEqualTo(3);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void failedCertificateWriteRecoversTheChainAndRootAsOneVersion(boolean committed) throws Exception {
+        class FailingStore extends InMemoryKeyMaterialContentStore {
+            private boolean fail;
+
+            @Override
+            public synchronized String write(byte[] bytes, String expectedVersion) throws IOException {
+                if (fail) {
+                    if (committed) super.write(bytes, expectedVersion);
+                    throw new IOException("certificate save failed");
+                }
+                return super.write(bytes, expectedVersion);
+            }
+        }
+        FailingStore store = new FailingStore();
+        TestConfiguration desired = desiredState(false,
+                Optional.of(new OrionMaterialReference("issuer-root-v1", 1)));
+        TestCertificateChain.Authority originalRoot = TestCertificateChain.root("Original root");
+        TestCertificateChain.Authority replacementRoot = TestCertificateChain.root("Replacement root");
+        RecordingIssuer issuer = new RecordingIssuer(false);
+        issuer.root = originalRoot;
+        X509Certificate original;
+        try (OrionKeyMaterial material = owner(store)) {
+            AcmeCertificateService service = new AcmeCertificateService(desired.acl(), material, issuer, null);
+            original = service.issue(AcmeCertificateService.IssueRequest.EMPTY).certificateChain().getFirst();
+            store.fail = true;
+            issuer.root = replacementRoot;
+            assertThatThrownBy(() -> service.issue(AcmeCertificateService.IssueRequest.EMPTY))
+                    .isInstanceOf(AcmeCertificateIssueException.class)
+                    .hasMessage("Cannot store issued ACME certificate");
+            assertThatThrownBy(() -> material.certificateChain(IDENTITY))
+                    .isInstanceOf(IllegalStateException.class);
+        }
+        store.fail = false;
+        try (OrionKeyMaterial reloaded = owner(store)) {
+            X509Certificate expectedRoot =
+                    committed ? replacementRoot.certificate() : originalRoot.certificate();
+            X509Certificate loaded = reloaded.certificateChain(IDENTITY).getFirst();
+            loaded.verify(expectedRoot.getPublicKey());
+            assertThat(reloaded.trustedCertificate(ROOT)).isEqualTo(expectedRoot);
+            assertThat(reloaded.version()).isEqualTo(committed ? 3 : 2);
+            if (committed) assertThat(loaded).isNotEqualTo(original);
+            else assertThat(loaded).isEqualTo(original);
+        }
+    }
+
+    @Test
+    void savesTheCertificateAfterAnIndependentMaterialChangeDuringIssuance() throws Exception {
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        try (OrionKeyMaterial material = owner(store)) {
+            KeyMaterialDescriptor other = descriptor("other-account", KeyMaterialPurpose.ACME_ACCOUNT);
+            AcmeCertificateIssuer issuer = new AcmeCertificateIssuer(new AcmeHttpChallengeService()) {
+                @Override
+                public IssuedAcmeCertificate issue(AcmeCertificateIssueRequest request) {
+                    try {
+                        assertThat(material.contains(ACCOUNT)).isTrue();
+                        assertThat(material.contains(IDENTITY)).isTrue();
+                        material.withModification(modification -> {
+                            modification.generateKey(other, 2048);
+                            modification.apply();
+                        });
+                    } catch (IOException | GeneralSecurityException failure) {
+                        throw new AssertionError(failure);
+                    }
+                    return certificateFor(request);
+                }
+            };
+            AcmeCertificateService service = new AcmeCertificateService(
+                    desiredState(false).acl(), material, issuer, null);
+            service.issue(AcmeCertificateService.IssueRequest.EMPTY);
+            assertThat(material.contains(other)).isTrue();
+            assertThat(service.savedCertificate()).isPresent();
+            assertThat(material.version()).isEqualTo(3);
+        }
+    }
+
+    @Test
+    void rejectsMismatchedIssuerMetadataBeforeGeneratingKeysOrContactingTheCa() throws Exception {
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        RecordingIssuer issuer = new RecordingIssuer(false);
+        issuer.root = TestCertificateChain.root("Root");
+        try (OrionKeyMaterial material = owner(store)) {
+            material.withModification(modification -> {
+                TrustedCertificateDescriptor mismatched = new TrustedCertificateDescriptor(
+                        ROOT.alias(), ROOT.algorithm(), new KeyMaterialVersion(2));
+                modification.setTrustedCertificate(mismatched, issuer.root.certificate());
+                modification.apply();
+            });
+            AcmeCertificateService service = new AcmeCertificateService(desiredState(false,
+                    Optional.of(new OrionMaterialReference("issuer-root-v1", 1))).acl(),
+                    material, issuer, null);
+            assertThatThrownBy(() -> service.issue(AcmeCertificateService.IssueRequest.EMPTY))
+                    .isInstanceOf(AcmeCertificateIssueException.class)
+                    .hasMessage("Cannot acquire ACME key material");
+            assertThat(material.contains(ACCOUNT)).isFalse();
+            assertThat(material.contains(IDENTITY)).isFalse();
+            assertThat(material.version()).isEqualTo(1);
+            assertThat(issuer.calls).isZero();
+        }
+    }
+
+    @Test
+    void rejectsAnIssuerAliasThatIsAlsoAnAcmeKeyBeforeContactingTheCa() throws Exception {
+        try (OrionKeyMaterial material = owner(new InMemoryKeyMaterialContentStore())) {
+            RecordingIssuer issuer = new RecordingIssuer(false);
+            AcmeCertificateService service = new AcmeCertificateService(desiredState(false,
+                    Optional.of(new OrionMaterialReference("acme-account-v1", 1))).acl(),
+                    material, issuer, null);
+            assertThatThrownBy(() -> service.issue(AcmeCertificateService.IssueRequest.EMPTY))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThat(material.inventory()).isEmpty();
+            assertThat(material.version()).isZero();
+            assertThat(issuer.calls).isZero();
+        }
+    }
 
     @Test
     void issuesFromDesiredStatePersistsInMaterialStoreAndReloadsWithoutLegacyFiles() throws Exception {
@@ -137,33 +343,40 @@ class AcmeCertificateServiceTest {
     void invalidIssuedChainDoesNotBecomeSavedMaterial() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         try (OrionKeyMaterial owner = owner(store)) {
-            AcmeCertificateService service = new AcmeCertificateService(
-                    desiredState(false).acl(), owner, new RecordingIssuer(true), null);
+            RecordingIssuer issuer = new RecordingIssuer(true);
+            issuer.root = TestCertificateChain.root("Root for invalid chain");
+            AcmeCertificateService service = new AcmeCertificateService(desiredState(false,
+                    Optional.of(new OrionMaterialReference("issuer-root-v1", 1))).acl(), owner, issuer, null);
 
             assertThatThrownBy(() -> service.issue(AcmeCertificateService.IssueRequest.EMPTY))
                     .isInstanceOf(AcmeCertificateIssueException.class)
                     .hasMessageContaining("store issued ACME certificate");
             assertThat(service.savedCertificate()).isEmpty();
+            assertThat(owner.contains(ROOT)).isFalse();
+            assertThat(owner.version()).isEqualTo(1);
         }
     }
 
     @Test
-    void rejectsConcurrentIssuanceBeforeKeyAcquisitionOrIssuerEntryAndReopensAfterSuccess() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore());
+    void rejectsConcurrentIssuanceWithoutChangingStoredMaterialAndReopensAfterSuccess() throws Exception {
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        try (OrionKeyMaterial owner = owner(store);
                 ExecutorService executor = Executors.newSingleThreadExecutor()) {
-            CountingAcmeKeyMaterial keyMaterial = new CountingAcmeKeyMaterial(owner);
             BlockingFirstIssuer issuer = new BlockingFirstIssuer();
-            AcmeCertificateService service = new AcmeCertificateService(desiredState(false).acl(), keyMaterial, issuer, null);
+            AcmeCertificateService service = new AcmeCertificateService(desiredState(false).acl(), owner, issuer, null);
             Future<IssuedAcmeCertificate> first = executor.submit(
                     () -> service.issue(AcmeCertificateService.IssueRequest.EMPTY));
 
             assertThat(issuer.awaitStarted()).isTrue();
+            byte[] before = store.read().orElseThrow().bytes();
+            long beforeVersion = owner.version();
             try {
                 assertTimeoutPreemptively(Duration.ofSeconds(1), () -> assertThatThrownBy(
                         () -> service.issue(AcmeCertificateService.IssueRequest.EMPTY))
                         .isInstanceOf(AcmeCertificateService.IssuanceBusyException.class));
                 service.maintainCertificate(Instant.now().plus(Duration.ofDays(90)), () -> {});
-                assertThat(keyMaterial.acquireCalls()).isEqualTo(1);
+                assertThat(store.read().orElseThrow().bytes()).isEqualTo(before);
+                assertThat(owner.version()).isEqualTo(beforeVersion);
                 assertThat(issuer.issueCalls()).isEqualTo(1);
             } finally {
                 issuer.release();
@@ -171,7 +384,6 @@ class AcmeCertificateServiceTest {
 
             assertThat(first.get(5, TimeUnit.SECONDS).certificateChain()).hasSize(1);
             assertThat(service.issue(AcmeCertificateService.IssueRequest.EMPTY).certificateChain()).hasSize(1);
-            assertThat(keyMaterial.acquireCalls()).isEqualTo(2);
             assertThat(issuer.issueCalls()).isEqualTo(2);
         }
     }
@@ -496,6 +708,11 @@ class AcmeCertificateServiceTest {
     }
 
     private static TestConfiguration desiredState(boolean allowRequestedDomains) {
+        return desiredState(allowRequestedDomains, Optional.empty());
+    }
+
+    private static TestConfiguration desiredState(boolean allowRequestedDomains,
+            Optional<OrionMaterialReference> issuer) {
         OrionAcmeConfiguration acme = new OrionAcmeConfiguration(
                 true,
                 URI.create("acme://letsencrypt.org/staging"),
@@ -513,7 +730,7 @@ class AcmeCertificateServiceTest {
                 8443,
                 URI.create("https://example.test"),
                 Optional.of(new OrionMaterialReference("https-identity-v1", 1)),
-                Optional.empty(),
+                issuer,
                 OrionHttpsConfiguration.ClientAuthentication.DISABLED,
                 List.of(),
                 Optional.of(acme));
@@ -526,12 +743,9 @@ class AcmeCertificateServiceTest {
     }
 
     private static OrionKeyMaterial owner(InMemoryKeyMaterialContentStore store) throws Exception {
-        return OrionKeyMaterial.open(
-                store,
-                KeyMaterialOptions.pkcs12("test-password".toCharArray()),
-                new SigningMaterialSet(SIGNING, List.of()),
-                2048,
-                new KeyMaterialCreation(true));
+        try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray())) {
+            return OrionKeyMaterial.open(store, options);
+        }
     }
 
     private static KeyMaterialDescriptor descriptor(String alias, KeyMaterialPurpose purpose) {
@@ -546,6 +760,8 @@ class AcmeCertificateServiceTest {
         private final boolean wrongKey;
         private AcmeCertificateIssueRequest lastRequest;
         private RuntimeException failure;
+        private TestCertificateChain.Authority root;
+        private boolean omitRoot;
         private int calls;
         private Instant before;
         private Instant after;
@@ -562,9 +778,13 @@ class AcmeCertificateServiceTest {
             lastRequest = request;
             try {
                 KeyPair keyPair = wrongKey ? keyPair() : request.domainKeyPair();
-                X509Certificate leaf = before == null ? TestCertificateChain.selfSignedLeaf("example.test", keyPair)
-                        : TestCertificateChain.selfSignedLeaf("example.test", keyPair, before, after);
-                return new IssuedAcmeCertificate(request.domains(), List.of(leaf));
+                X509Certificate leaf;
+                if (root != null) leaf = TestCertificateChain.leaf("example.test", keyPair, root);
+                else if (before == null) leaf = TestCertificateChain.selfSignedLeaf("example.test", keyPair);
+                else leaf = TestCertificateChain.selfSignedLeaf("example.test", keyPair, before, after);
+                List<X509Certificate> chain =
+                        root == null || omitRoot ? List.of(leaf) : List.of(leaf, root.certificate());
+                return new IssuedAcmeCertificate(request.domains(), chain);
             } catch (Exception failure) {
                 throw new AssertionError(failure);
             }
@@ -632,34 +852,6 @@ class AcmeCertificateServiceTest {
 
         private int issueCalls() {
             return issueCalls.get();
-        }
-    }
-
-    private static final class CountingAcmeKeyMaterial extends OrionKeyMaterial {
-        private final OrionKeyMaterial delegate;
-        private final AtomicInteger acquireCalls = new AtomicInteger();
-
-        private CountingAcmeKeyMaterial(OrionKeyMaterial delegate) {
-            this.delegate = delegate;
-        }
-
-        @Override
-        public AcmeKeyMaterial acquireAcmeKeys(
-                AcmeMaterialConfiguration configuration,
-                int accountKeySize,
-                int domainKeySize) throws IOException, GeneralSecurityException {
-            acquireCalls.incrementAndGet();
-            return delegate.acquireAcmeKeys(configuration, accountKeySize, domainKeySize);
-        }
-
-        @Override
-        public CertificateIdentity certificateIdentity(AcmeMaterialConfiguration configuration)
-                throws GeneralSecurityException {
-            return delegate.certificateIdentity(configuration);
-        }
-
-        private int acquireCalls() {
-            return acquireCalls.get();
         }
     }
 

@@ -22,7 +22,6 @@ import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.keymaterial.CertificateIdentity;
 import pro.deta.orion.keymaterial.TlsClientAuthentication;
 import pro.deta.orion.keymaterial.TlsMaterialConfiguration;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
@@ -117,10 +116,9 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
         ActiveTls current = activeTls;
         if (current == null || !isRunning()) return;
         try {
-            CertificateIdentity identity = keyMaterial.certificateIdentity(current.material());
-            List<X509Certificate> chain = identity.certificateChain();
+            List<X509Certificate> chain = keyMaterial.certificateChain(current.material().identity());
             if (chain.equals(current.chain())) return;
-            SSLContext replacement = identity.createContext();
+            SSLContext replacement = keyMaterial.createTlsContext(current.material());
             SSLContext previous = current.factory().getSslContext();
             try {
                 current.factory().reload(factory -> factory.setSslContext(replacement));
@@ -193,9 +191,8 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
         OrionHttpsConfiguration https = configured.orElseThrow();
         TlsMaterialConfiguration material = tlsMaterial(https);
         SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
-        CertificateIdentity identity = keyMaterial.certificateIdentity(material);
-        List<X509Certificate> chain = identity.certificateChain();
-        sslContextFactory.setSslContext(identity.createContext());
+        List<X509Certificate> chain = keyMaterial.certificateChain(material.identity());
+        sslContextFactory.setSslContext(keyMaterial.createTlsContext(material));
         activeTls = new ActiveTls(material, sslContextFactory, List.copyOf(chain));
         sslContextFactory.setWantClientAuth(
                 material.clientAuthentication() == TlsClientAuthentication.WANT);
