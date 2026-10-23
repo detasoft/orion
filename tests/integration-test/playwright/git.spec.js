@@ -45,6 +45,176 @@ async function giteaRequest(method, path, password, data) {
   })
 }
 
+test('Gitea browser sessions enforce inactivity and reject unverifiable reauthentication',
+  async ({ page, browser, adminToken }) => {
+    test.setTimeout(120_000)
+    const credentials = await readFile(
+      new URL('../../external-services/.state/credentials.env', import.meta.url), 'utf8')
+    const password = credentials.match(/^GITEA_PASSWORD=(.+)$/m)?.[1]
+    expect(password, 'The fixture supplies GITEA_PASSWORD').toBeTruthy()
+    const secureUrl = new URL(browserUrl)
+    if (secureUrl.protocol === 'http:') {
+      secureUrl.protocol = 'https:'
+      secureUrl.port = '9443'
+    }
+    const origin = secureUrl.origin
+    const organization = 'oidc-acme'
+    const id = `timeouts-${randomUUID().slice(0, 8)}`
+    const registered = await giteaRequest('POST', '/api/v1/user/applications/oauth2', password, {
+      name: id, confidential_client: true,
+      redirect_uris: [`${origin}/api/auth/oidc/callback`], skip_secondary_authorization: false,
+    })
+    expect(registered.status).toBe(201)
+    const application = JSON.parse(registered.body)
+    const sessions = []
+
+    async function signIn(provider, mandatory) {
+      const context = await browser.newContext()
+      const userPage = await context.newPage()
+      const session = { context, page: userPage }
+      sessions.push(session)
+      await userPage.goto(origin)
+      await userPage.getByRole('button', { name: 'Sign in with OIDC', exact: true }).click()
+      await userPage.getByLabel('Sign-in scope').selectOption('organization')
+      await userPage.getByLabel('Organization', { exact: true }).fill(organization)
+      await userPage.getByRole('button', { name: 'Find sign-in providers', exact: true }).click()
+      await userPage.getByLabel('Sign-in provider').selectOption(provider)
+      const started = userPage.waitForRequest(request =>
+        new URL(request.url()).origin === giteaUrl
+        && new URL(request.url()).pathname === '/login/oauth/authorize')
+      await userPage.getByRole('button', { name: 'Sign in', exact: true }).click()
+      expect(new URL((await started).url()).searchParams.get('max_age')).toBe(mandatory ? '0' : null)
+      await userPage.locator('#user_name').waitFor()
+      await userPage.locator('#user_name').fill('fixture')
+      await userPage.locator('#password').fill(password)
+      const callback = userPage.waitForResponse(response =>
+        new URL(response.url()).pathname === '/api/auth/oidc/callback')
+      await userPage.getByRole('button', { name: 'Sign In', exact: true }).click()
+      const consent = userPage.getByRole('button', { name: 'Authorize Application', exact: true })
+      await expect.poll(async () => await consent.isVisible() || new URL(userPage.url()).origin === origin)
+        .toBe(true)
+      if (await consent.isVisible()) await consent.click()
+      session.callbackStatus = (await callback).status()
+      if (mandatory) return session
+      expect(session.callbackStatus).toBe(303)
+      const complete = userPage.waitForResponse(response =>
+        new URL(response.url()).pathname === '/api/auth/oidc/complete')
+      await userPage.getByRole('button', { name: 'Continue', exact: true }).click()
+      const completed = await complete
+      expect(completed.status()).toBe(200)
+      const identity = await completed.json()
+      session.userId = identity.userId
+      session.deadline = identity.expiresAt
+      await expect(userPage.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible()
+      // A same-origin document without the UI's background traffic lets each session's activity be controlled.
+      await context.route(`${origin}/oidc-timeout-harness`, route => route.fulfill({
+        contentType: 'text/html', body: '<!doctype html><title>OIDC timeout test</title>',
+      }))
+      await userPage.goto(`${origin}/oidc-timeout-harness`)
+      session.cookie = (await context.cookies(origin)).find(cookie => cookie.name === '__Host-orion-session')
+      expect(Boolean(session.cookie), 'The browser received its own refresh cookie').toBe(true)
+      const refreshed = await exercise(session, false)
+      expect(refreshed.status).toBe(200)
+      session.deadline = refreshed.expiresAt
+      return session
+    }
+
+    async function exercise(session, activity) {
+      // Keep the original cookie available even after browser expiry, so the server must enforce the deadline.
+      await session.context.addCookies([{ ...session.cookie, expires: -1 }])
+      return session.page.evaluate(async ({ organization, userId, activity }) => {
+        let readStatus = null
+        let names = null
+        if (activity) {
+          const headers = { Authorization: `Bearer ${sessionStorage.getItem('orion.ui.token')}` }
+          const repositories = await fetch('/api/admin/repositories', { headers })
+          readStatus = repositories.status
+          if (repositories.ok) names = (await repositories.json()).repositories.map(item => item.name)
+        }
+        const refreshed = await fetch('/api/auth/oidc/refresh', { method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scope: 'organization', organization, userId }) })
+        const result = refreshed.ok ? await refreshed.json() : null
+        if (result) sessionStorage.setItem('orion.ui.token', result.token)
+        return { status: refreshed.status, expiresAt: result?.expiresAt,
+          now: Date.parse(refreshed.headers.get('date')) / 1000, readStatus, names }
+      }, { organization, userId: session.userId, activity })
+    }
+
+    try {
+      await page.addInitScript(({ origin, token }) => {
+        if (location.origin === origin) sessionStorage.setItem('orion.ui.token', token)
+      }, { origin, token: adminToken })
+      await page.goto(origin)
+      await page.getByRole('link', { name: 'People', exact: true }).click()
+      const provider = page.locator('.oidc-settings')
+      await provider.getByLabel('Provider scope').selectOption('organization')
+      await provider.getByRole('combobox', { name: 'Organization', exact: true }).selectOption(organization)
+      for (const [suffix, mandatory] of [['idle', 0], ['mandatory', 12]]) {
+        await provider.getByRole('combobox', { name: 'Provider', exact: true }).selectOption('')
+        await provider.getByLabel('Provider ID', { exact: true }).fill(`${id}-${suffix}`)
+        await provider.getByLabel('Issuer URL', { exact: true }).fill(`${giteaUrl}/`)
+        await provider.getByLabel('Client ID', { exact: true }).fill(application.client_id)
+        await provider.getByLabel('Client secret', { exact: true }).fill(application.client_secret)
+        await provider.getByLabel('Inactivity timeout (hours)', { exact: true }).fill(String(20 / 3600))
+        await provider.getByLabel('Require sign-in every (hours; 0 disables)', { exact: true })
+          .fill(String(mandatory / 3600))
+        await provider.getByRole('button', { name: 'Save provider', exact: true }).click()
+        await expect(provider.getByRole('status')).toHaveText('Provider saved in the selected scope.')
+        await expect.poll(async () => {
+          await provider.getByRole('button', { name: 'Reload providers', exact: true }).click()
+          return provider.getByRole('combobox', { name: 'Provider', exact: true })
+            .locator('option').allTextContents()
+        }, { message: 'The saved provider is activated before the next revision-checked edit' })
+          .toContain(`${id}-${suffix}`)
+      }
+      const active = await signIn(`${id}-idle`, false)
+      const background = await signIn(`${id}-idle`, false)
+      expect(background.userId).toBe(active.userId)
+      let activeDeadline = active.deadline
+      await expect.poll(async () => {
+        const working = await exercise(active, true)
+        expect(working).toMatchObject({ status: 200, readStatus: 200, names: ['oidc-acme/team/repository'] })
+        activeDeadline = working.expiresAt
+        const idle = await exercise(background, false)
+        if (idle.status === 200) expect(idle.expiresAt).toBe(background.deadline)
+        else {
+          expect(idle.status).toBe(401)
+          expect(idle.now).toBeGreaterThanOrEqual(background.deadline)
+        }
+        return idle.status
+      }, { timeout: 35_000, intervals: [1000], message: 'Refresh alone cannot extend the idle deadline' }).toBe(401)
+      expect(activeDeadline).toBeGreaterThan(active.deadline + 5)
+      expect((await exercise(background, false)).status).toBe(401)
+      await background.page.goto(origin)
+      await expect(background.page.getByRole('button', { name: 'Sign in with OIDC', exact: true })).toBeVisible()
+      expect((await exercise(active, true)).status).toBe(200)
+      const unsupported = await signIn(`${id}-mandatory`, true)
+      expect(unsupported.callbackStatus).toBe(400)
+      expect(await unsupported.page.evaluate(() => sessionStorage.getItem('orion.ui.token'))).toBeNull()
+      expect((await unsupported.context.cookies(origin))
+        .some(cookie => cookie.name === '__Host-orion-session')).toBe(false)
+      const rejectedRefresh = await unsupported.page.evaluate(async organization => {
+        const response = await fetch('/api/auth/oidc/refresh', { method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scope: 'organization', organization }) })
+        return response.status
+      }, organization)
+      expect(rejectedRefresh).toBe(401)
+    } catch (failure) {
+      for (const session of sessions) {
+        await test.info().attach('OIDC timeout browser', {
+          body: await session.page.screenshot(), contentType: 'image/png',
+        })
+      }
+      throw failure
+    } finally {
+      for (const session of sessions) await session.context.close()
+      const deleted = await giteaRequest('DELETE', `/api/v1/user/applications/oauth2/${application.id}`, password)
+      expect(deleted.status).toBe(204)
+    }
+  })
+
 async function openOrion(page, step) {
   page.on('requestfailed', request => {
     console.log('Request failed:', request.url(), request.failure()?.errorText)
@@ -415,7 +585,7 @@ test('invited organization member signs in through Gitea without crossing organi
         expect(renewed).toMatchObject({ status: 200, organization, userId: firstIdentity.userId,
           scope: 'organization', identity: { organization, userId: firstIdentity.userId, admin: false },
           names: [ownRepository] })
-        oldCookie = (await userContext.cookies(origin)).find(cookie => cookie.name === '__Host-orion-oidc')
+        oldCookie = (await userContext.cookies(origin)).find(cookie => cookie.name === '__Host-orion-session')
         expect(Boolean(oldCookie), 'The authenticated browser has an Orion refresh cookie').toBe(true)
       }
       await userPage.getByRole('button', { name: 'Sign out', exact: true }).click()

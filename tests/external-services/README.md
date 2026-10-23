@@ -199,8 +199,22 @@ upstream is deleted at the end of that scenario. To run the organization OIDC
 scenario against a manual server, provision
 those empty organizations and repositories first; the created member and
 provider remain there. This automated fixture scenario does not complete the
-public-provider or timeout acceptance checks. The restart checks run only under
-the JVM driver; a standalone browser goal does not restart a manual server.
+public-provider or positive mandatory-reauthentication acceptance checks. The
+restart checks run only under the JVM driver; a standalone browser goal does
+not restart a manual server.
+
+The timeout scenario reuses that organization's invited fixture user and
+configures providers through the UI with a 20-second inactivity timeout. Two
+independent browser sessions show that repository reads extend the deadline
+when mandatory reauthentication is disabled (`0`), while refresh requests alone
+do not. After expiry, replaying the original session cookie still returns 401
+and the UI requires sign-in. A quiet same-origin test document prevents UI
+background requests from adding unintended activity; API requests reach Orion.
+The pinned Gitea does not supply `auth_time`: a provider configured with a
+nonzero mandatory timeout sends `max_age=0`, but Orion rejects its callback,
+issues no authenticated session, and refuses refresh. Positive mandatory expiry
+under continued activity requires an OIDC provider supporting `auth_time` and
+fresh authentication; it remains covered by deterministic HTTP tests meanwhile.
 
 `OBSERVE=1` opens noVNC in your computer's default browser before running tests.
 If automatic opening is unavailable, the command prints the URL and continues.
