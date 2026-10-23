@@ -1,0 +1,35 @@
+{
+  "realm": "orion-fixture",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "users": [
+    {
+      "id": "967caebd-98fd-43e2-9092-c3c9d662ba5b",
+      "username": "fixture",
+      "enabled": true,
+      "email": "keycloak-fixture@example.test",
+      "emailVerified": true,
+      "firstName": "Keycloak",
+      "lastName": "Fixture",
+      "credentials": [
+        { "type": "password", "value": "${KEYCLOAK_PASSWORD}", "temporary": false }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "orion-browser",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${KEYCLOAK_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [ "https://orion.test:9443/api/auth/oidc/callback" ],
+      "defaultClientScopes": [ "basic", "profile", "email" ],
+      "attributes": { "pkce.code.challenge.method": "S256" }
+    }
+  ]
+}

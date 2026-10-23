@@ -1,10 +1,14 @@
 # External integration services
 
-One image runs the external systems Orion needs to contact during integration testing:
+The main fixture image runs external systems Orion contacts during integration testing:
 OpenSSH, Gitea (Git over SSH/HTTPS and OIDC), SeaweedFS (S3), step-ca (ACME),
 and Chromium with noVNC. The image is built from the pinned Gitea release plus
-Alpine packages and pinned step-ca/SeaweedFS binaries. All services share one
-container and a persistent, ignored `.state` directory.
+Alpine packages and pinned step-ca/SeaweedFS binaries. Keycloak 26.8.1 runs from
+its official image in a second container sharing the main container's network.
+Nginx serves it over the existing HTTPS endpoint under `/oidc/`; no additional
+host port is published. The main services keep their data in the ignored `.state`
+directory. Keycloak uses an in-memory database: the realm is reconstructed from
+its configuration and the private credentials file at startup.
 
 ## Start a test round
 
@@ -16,8 +20,14 @@ From this directory:
 ```
 
 `up` builds the image when absent, creates random credentials in
-`.state/credentials.env`, starts the container, waits for Gitea and Chromium, and creates its
-fixture user. `check` exercises the ACME directory, Git HTTPS push/SSH fetch,
+`.state/credentials.env`, starts both containers, waits for Gitea, Keycloak and
+Chromium, and creates the Gitea fixture user. Existing credentials files receive
+the new Keycloak credentials without rotating other secrets. The first start
+pulls `quay.io/keycloak/keycloak:26.8.1` and imports `keycloak-realm.json` with
+credentials resolved from environment variables. Realm configuration changes,
+image changes and command changes recreate its container. Keycloak's JVM heap is capped
+at 384 MiB. `check` exercises both OIDC discovery endpoints and Keycloak's signing
+keys, the ACME directory, Git HTTPS push/SSH fetch,
 SSH password/key login and rejection, S3 access, and browser CA trust.
 Run `./fixture down` after the round. Data and host keys remain in `.state`.
 Rebuild with `./fixture build` after changing the image. Docker is the default;
@@ -34,11 +44,17 @@ directly works after those archives are cached by `./fixture build`.
 | Normal SSH | `ssh -p 2222 fixture@fixture.orion.test`; `SSH_PASSWORD` |
 | Gitea SSH | `ssh://git@fixture.orion.test:2223/fixture/fixture.git`; upload a user key in Gitea |
 | Gitea HTTPS/OIDC | `https://fixture.orion.test:8443`; user `fixture`, `GITEA_PASSWORD` |
+| Keycloak OIDC issuer | `https://fixture.orion.test:8443/oidc/realms/orion-fixture`; user `fixture`, `KEYCLOAK_PASSWORD` |
 | S3 | `https://fixture.orion.test:8333`; `S3_ACCESS_KEY`, `S3_SECRET_KEY` |
 | ACME directory | `https://fixture.orion.test:9000/acme/acme/directory` |
 | Browser in container | `http://localhost:6080/vnc.html?autoconnect=1` |
 
 The credentials are local test secrets. Ports bind to `127.0.0.1` on the host.
+The Keycloak client is `orion-browser`, with `KEYCLOAK_CLIENT_SECRET` and exact
+callback `https://orion.test:9443/api/auth/oidc/callback`. It uses authorization
+code flow with PKCE; password grants and public registration are disabled.
+The default `basic` client scope includes the signed `auth_time` claim.
+Its imported fixture user's subject is defined in `keycloak-realm.json`.
 For macOS clients, `./fixture hosts-install` adds this line to `/etc/hosts`
 after a `sudo` prompt; `./fixture hosts` prints it without changing the host:
 
@@ -199,7 +215,7 @@ upstream is deleted at the end of that scenario. To run the organization OIDC
 scenario against a manual server, provision
 those empty organizations and repositories first; the created member and
 provider remain there. This automated fixture scenario does not complete the
-public-provider or positive mandatory-reauthentication acceptance checks. The
+public-provider acceptance checks. The
 restart checks run only under the JVM driver; a standalone browser goal does
 not restart a manual server.
 
@@ -214,7 +230,19 @@ The pinned Gitea does not supply `auth_time`: a provider configured with a
 nonzero mandatory timeout sends `max_age=0`, but Orion rejects its callback,
 issues no authenticated session, and refuses refresh. Positive mandatory expiry
 under continued activity requires an OIDC provider supporting `auth_time` and
-fresh authentication; it remains covered by deterministic HTTP tests meanwhile.
+fresh authentication. Deterministic HTTP tests also cover these policy boundaries.
+
+The Keycloak scenario covers positive mandatory reauthentication. It binds an
+existing system user to the realm's exact issuer and subject through Orion's UI,
+then compares two browser sessions using the same realm with mandatory
+timeouts of `0` and 16 seconds. Authenticated repository reads and refresh keep
+the first session active, while the second expires at its original mandatory
+deadline. Replaying the expired session cookie fails. With Keycloak SSO cookies
+still present, Orion sends `max_age=0` and the browser must enter its password
+again; the new session can read the permitted repository. This tests signed
+`auth_time` validation with a real provider. Standalone runs require the exact
+callback above and leave the uniquely named Orion users, repositories and
+provider configuration in the selected server.
 
 `OBSERVE=1` opens noVNC in your computer's default browser before running tests.
 If automatic opening is unavailable, the command prints the URL and continues.
@@ -248,19 +276,20 @@ An open manual page can show an old response after its server has stopped.
 
 Each scenario starts with clean cookies and storage in its own browser context;
 closing that context removes its pages and browser state. This does not reset
-Orion's server-side data, Gitea, S3 or the CA. `fixture down` stops the container
-and preserves `.state`; a subsequent `fixture up` starts it again with a new
+Orion's server-side data, Gitea, Keycloak, S3 or the CA. `fixture down` stops both
+containers and preserves `.state`; a subsequent `fixture up` starts them with a new
 Chromium profile. Container recreation also preserves the bind-mounted `.state`.
+Keycloak's transient sessions are discarded when its process stops.
 Replacing `.state` is a full data reset that rotates credentials, the CA and SSH
 host keys; existing trust and host-key pins then need updating.
 
 Run one observed scenario sequence at a time on this desktop. The current fixture
-name and ports are shared across worktrees; stopping or rebuilding that container
+names and ports are shared across worktrees; stopping or rebuilding these containers
 also affects other users of it.
 
 Chromium's CA trust is installed into its NSS database before browser startup.
-Orion's JVM trust is separate: the JVM must also trust the fixture CA for Gitea
-HTTPS and ACME. Browser trust does not configure JVM trust, and browser contexts
+Orion's JVM trust is separate: the JVM must also trust the fixture CA for Gitea,
+Keycloak and ACME. Browser trust does not configure JVM trust, and browser contexts
 keep certificate validation enabled. When the browser moves to its own container,
 pass the service fixture's root CA to that container before launching Chromium.
 

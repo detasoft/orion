@@ -454,6 +454,163 @@ test('existing system user signs in through Gitea OIDC and keeps restricted perm
     }
   })
 
+test('Keycloak enforces fresh authentication and a mandatory deadline despite continued activity',
+  async ({ request, page, browser, adminToken }) => {
+    test.setTimeout(120_000)
+    const credentials = await readFile(
+      new URL('../../external-services/.state/credentials.env', import.meta.url), 'utf8')
+    const password = credentials.match(/^KEYCLOAK_PASSWORD=(.+)$/m)?.[1]
+    const clientSecret = credentials.match(/^KEYCLOAK_CLIENT_SECRET=(.+)$/m)?.[1]
+    expect(Boolean(password && clientSecret), 'The fixture supplies Keycloak credentials').toBe(true)
+    const realm = JSON.parse(await readFile(
+      new URL('../../external-services/keycloak-realm.json', import.meta.url), 'utf8'))
+    const issuer = `${giteaUrl}/oidc/realms/${realm.realm}`
+    const origin = 'https://orion.test:9443'
+    const id = `keycloak-${randomUUID().slice(0, 8)}`
+    const repository = `${id}-readable`
+    const sessions = []
+
+    async function signIn(provider, mandatory, previous) {
+      const context = previous?.context ?? await browser.newContext()
+      const userPage = previous?.page ?? await context.newPage()
+      const session = { context, page: userPage }
+      if (!previous) {
+        sessions.push(session)
+        await context.route(`${origin}/oidc-timeout-harness`, route => route.fulfill({
+          contentType: 'text/html', body: '<!doctype html><title>OIDC timeout test</title>',
+        }))
+      }
+      await userPage.goto(origin)
+      await userPage.getByRole('button', { name: 'Sign in with OIDC', exact: true }).click()
+      await userPage.getByLabel('Sign-in provider').selectOption(provider)
+      const authorization = userPage.waitForRequest(request =>
+        request.url().startsWith(`${issuer}/protocol/openid-connect/auth?`))
+      await userPage.getByRole('button', { name: 'Sign in', exact: true }).click()
+      expect(new URL((await authorization).url()).searchParams.get('max_age')).toBe(mandatory ? '0' : null)
+      // With max_age=0 this password form must appear even when this context already has Keycloak SSO cookies.
+      await userPage.locator('#password').waitFor()
+      const username = userPage.locator('#username')
+      if (await username.isVisible()) {
+        if (await username.isEditable()) await username.fill('fixture')
+        else await expect(username).toHaveValue('fixture')
+      }
+      await userPage.locator('#password').fill(password)
+      const callback = userPage.waitForResponse(response =>
+        new URL(response.url()).pathname === '/api/auth/oidc/callback')
+      await userPage.locator('#kc-login').click()
+      expect((await callback).status()).toBe(303)
+      const completed = userPage.waitForResponse(response =>
+        new URL(response.url()).pathname === '/api/auth/oidc/complete')
+      await userPage.getByRole('button', { name: 'Continue', exact: true }).click()
+      const response = await completed
+      expect(response.status()).toBe(200)
+      const identity = await response.json()
+      expect({ scope: identity.scope, organization: identity.organization, userId: identity.userId })
+        .toEqual({ scope: 'system', organization: '', userId: id })
+      session.deadline = identity.expiresAt
+      await expect(userPage.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible()
+      await userPage.goto(`${origin}/oidc-timeout-harness`)
+      session.cookie = (await context.cookies(origin)).find(cookie => cookie.name === '__Host-orion-session')
+      expect(Boolean(session.cookie), 'Keycloak sign-in creates an Orion session').toBe(true)
+      return session
+    }
+
+    async function exercise(session) {
+      await session.context.addCookies([{ ...session.cookie, expires: -1 }])
+      return session.page.evaluate(async () => {
+        const headers = { Authorization: `Bearer ${sessionStorage.getItem('orion.ui.token')}` }
+        const repositories = await fetch('/api/admin/repositories', { headers })
+        const names = repositories.ok ? (await repositories.json()).repositories.map(item => item.name) : []
+        const refreshed = await fetch('/api/auth/oidc/refresh', { method: 'POST',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'system' }) })
+        const result = refreshed.ok ? await refreshed.json() : null
+        if (result) sessionStorage.setItem('orion.ui.token', result.token)
+        return { status: refreshed.status, expiresAt: result?.expiresAt,
+          readStatus: repositories.status, names, now: Date.parse(refreshed.headers.get('date')) / 1000 }
+      })
+    }
+
+    try {
+      const createdRepository = await request.post(`${orionUrl}/api/admin/repositories`, {
+        headers: { Authorization: `Bearer ${adminToken}` }, data: { name: repository },
+      })
+      expect(createdRepository.status()).toBe(201)
+      const createdUser = await request.post(`${orionUrl}/api/admin/users`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+        data: { id, email: `${id}@example.test`, repositories: [{ repository, read: true }] },
+      })
+      expect(createdUser.status()).toBe(201)
+      await page.addInitScript(({ origin, token }) => {
+        if (location.origin === origin) sessionStorage.setItem('orion.ui.token', token)
+      }, { origin, token: adminToken })
+      await page.goto(origin)
+      await page.getByRole('link', { name: 'People', exact: true }).click()
+      const provider = page.locator('.oidc-settings')
+      await provider.getByLabel('Provider scope').selectOption('system')
+      for (const [suffix, mandatory] of [['unlimited', 0], ['mandatory', 16]]) {
+        await provider.getByRole('combobox', { name: 'Provider', exact: true }).selectOption('')
+        await provider.getByLabel('Provider ID', { exact: true }).fill(`${id}-${suffix}`)
+        await provider.getByLabel('Issuer URL', { exact: true }).fill(issuer)
+        await provider.getByLabel('Client ID', { exact: true }).fill(realm.clients[0].clientId)
+        await provider.getByLabel('Client secret', { exact: true }).fill(clientSecret)
+        await provider.getByLabel('Inactivity timeout (hours)', { exact: true }).fill(String(60 / 3600))
+        await provider.getByLabel('Require sign-in every (hours; 0 disables)', { exact: true })
+          .fill(String(mandatory / 3600))
+        await provider.getByRole('button', { name: 'Save provider', exact: true }).click()
+        await expect(provider.getByRole('status')).toHaveText('Provider saved in the selected scope.')
+        await expect.poll(async () => {
+          await provider.getByRole('button', { name: 'Reload providers', exact: true }).click()
+          return provider.getByRole('combobox', { name: 'Provider', exact: true })
+            .locator('option').allTextContents()
+        }).toContain(`${id}-${suffix}`)
+      }
+      const bindings = page.locator('.system-bindings')
+      await bindings.getByRole('button', { name: 'Reload users' }).click()
+      await bindings.getByLabel('Existing system user').selectOption(id)
+      await bindings.getByRole('button', { name: 'Add binding', exact: true }).click()
+      await bindings.getByLabel('Issuer URL', { exact: true }).fill(issuer)
+      await bindings.getByLabel('Subject', { exact: true }).fill(realm.users[0].id)
+      await bindings.getByRole('button', { name: 'Save bindings' }).click()
+      await expect(bindings.getByRole('status')).toHaveText('Bindings saved.')
+      const unlimited = await signIn(`${id}-unlimited`, false)
+      const limited = await signIn(`${id}-mandatory`, true)
+      let successfulReads = 0
+      let unlimitedDeadline = unlimited.deadline
+      await expect.poll(async () => {
+        const working = await exercise(unlimited)
+        expect(working).toMatchObject({ status: 200, readStatus: 200, names: [repository] })
+        unlimitedDeadline = working.expiresAt
+        const mandatory = await exercise(limited)
+        if (mandatory.status === 200) {
+          expect(mandatory).toMatchObject({ readStatus: 200, expiresAt: limited.deadline, names: [repository] })
+          successfulReads++
+        } else {
+          expect(mandatory.status).toBe(401)
+          expect(mandatory.now).toBeGreaterThanOrEqual(limited.deadline)
+        }
+        return mandatory.status
+      }, { timeout: 30_000, intervals: [1000], message: 'Activity cannot extend mandatory reauthentication' })
+        .toBe(401)
+      expect(successfulReads).toBeGreaterThan(1)
+      expect(unlimitedDeadline).toBeGreaterThan(unlimited.deadline + 5)
+      expect((await exercise(limited)).status).toBe(401)
+      expect((await limited.context.cookies(`${issuer}/`)).some(cookie => cookie.name.startsWith('KEYCLOAK_IDENTITY')))
+        .toBe(true)
+      const reauthenticated = await signIn(`${id}-mandatory`, true, limited)
+      expect(reauthenticated.deadline).toBeGreaterThan(limited.deadline)
+      expect((await exercise(reauthenticated)).status).toBe(200)
+    } catch (failure) {
+      for (const session of sessions) {
+        await test.info().attach('Keycloak browser', {
+          body: await session.page.screenshot(), contentType: 'image/png',
+        })
+      }
+      throw failure
+    } finally {
+      for (const session of sessions) await session.context.close()
+    }
+  })
+
 test('invited organization member signs in through Gitea without crossing organization boundaries',
   async ({ request, page, browser, adminToken }) => {
     const credentials = await readFile(

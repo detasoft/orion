@@ -216,6 +216,29 @@ class OrionOidcOnboardingTest {
     }
 
     @Test
+    void systemActivityExtendsOnlyItsBrowserSessionWhileRefreshDoesNot() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.configureSystem(List.of(f.systemUser("operator", "external-alice", false)));
+            Reply active = f.signInSystem();
+            String activeCookie = f.sessionCookie;
+            f.sessionCookie = null;
+            f.signInSystem();
+            String idleCookie = f.sessionCookie;
+            f.clock.now = f.clock.now.plusSeconds(47 * 3600);
+            f.sessionCookie = activeCookie;
+            Reply activity = f.activity("GET", "/api/admin/repositories", active.json.path("token").asText());
+            assertThat(activity.headers.get("Set-Cookie")).contains("Max-Age=172800");
+            f.sessionCookie = idleCookie;
+            assertThat(f.post("refresh", Map.of("scope", "system"), null).status).isEqualTo(200);
+            f.clock.now = f.clock.now.plusSeconds(2 * 3600);
+            f.sessionCookie = activeCookie;
+            assertThat(f.post("refresh", Map.of("scope", "system"), null).status).isEqualTo(200);
+            f.sessionCookie = idleCookie;
+            assertThat(f.post("refresh", Map.of("scope", "system"), null).status).isEqualTo(401);
+        }
+    }
+
+    @Test
     void systemLoginRejectsMissingWrongAndAmbiguousBindingsWithoutEmailLinking() throws Exception {
         try (Fixture f = new Fixture()) {
             f.signIn("corporate", f.invite("acme"));

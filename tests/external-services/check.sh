@@ -5,6 +5,11 @@ curl -fsS --cacert "$root" https://fixture.orion.test:8443/api/v1/version \
     | jq -e '.version' >/dev/null
 curl -fsS --cacert "$root" https://fixture.orion.test:8443/.well-known/openid-configuration \
     | jq -e '.issuer == "https://fixture.orion.test:8443/"' >/dev/null
+keycloak=https://fixture.orion.test:8443/oidc/realms/orion-fixture
+curl -fsS --cacert "$root" "$keycloak/.well-known/openid-configuration" \
+    | jq -e --arg issuer "$keycloak" '.issuer == $issuer and (.claims_supported | index("auth_time"))' >/dev/null
+curl -fsS --cacert "$root" "$keycloak/protocol/openid-connect/certs" \
+    | jq -e '.keys | any(.kty == "RSA" and .use == "sig")' >/dev/null
 curl -fsS --cacert "$root" https://fixture.orion.test:9000/acme/acme/directory \
     | jq -e '.newOrder' >/dev/null
 curl -fsS http://localhost:6080/vnc.html >/dev/null
@@ -16,7 +21,7 @@ chromium-browser --headless --no-sandbox --disable-gpu --disable-dev-shm-usage \
     --log-level=3 --user-data-dir=/tmp/chromium-cert-check \
     --dump-dom https://fixture.orion.test:8443/api/v1/version 2>/dev/null \
     | grep -F '"version":"1.24.6"' >/dev/null
-echo 'HTTPS, OIDC, ACME directory and noVNC reachable'
+echo 'HTTPS, Gitea and Keycloak OIDC, ACME directory and noVNC reachable'
 
 printf '[fixture.orion.test]:2222 %s\n' \
     "$(cat /state/ssh/ssh_host_ed25519_key.pub)" > /state/ssh_known_hosts_normal

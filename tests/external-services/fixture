@@ -3,6 +3,8 @@ set -eu
 cd "$(dirname "$0")"
 engine=${CONTAINER_ENGINE:-docker}
 name=orion-external-services
+keycloak_name=orion-external-keycloak
+keycloak_image=quay.io/keycloak/keycloak:26.8.1
 state=$(pwd)/.state
 
 prepare() {
@@ -56,10 +58,18 @@ case "${1:-}" in
                 "$(openssl rand -hex 16)" "$(openssl rand -hex 16)" "$(openssl rand -hex 24)" \
                 > "$state/credentials.env"
         fi
+        for credential in KEYCLOAK_PASSWORD KEYCLOAK_CLIENT_SECRET; do
+            if ! grep -q "^${credential}=" "$state/credentials.env"; then
+                printf '%s=%s\n' "$credential" "$(openssl rand -hex 24)" >> "$state/credentials.env"
+            fi
+        done
         if ! "$engine" image inspect orion-external-services:dev >/dev/null 2>&1; then ./fixture build; fi
         if "$engine" container inspect "$name" >/dev/null 2>&1 && \
             [ "$("$engine" container inspect --format '{{.Image}}' "$name")" != \
               "$("$engine" image inspect --format '{{.Id}}' orion-external-services:dev)" ]; then
+            if "$engine" container inspect "$keycloak_name" >/dev/null 2>&1; then
+                "$engine" rm -f "$keycloak_name" >/dev/null
+            fi
             "$engine" stop "$name" >/dev/null 2>&1 || true
             "$engine" rm "$name" >/dev/null
         fi
@@ -76,13 +86,46 @@ case "${1:-}" in
                 -p 127.0.0.1:6080:6080 -p 127.0.0.1:9222:9223 \
                 orion-external-services:dev >/dev/null
         fi
+        if ! "$engine" image inspect "$keycloak_image" >/dev/null 2>&1; then
+            "$engine" pull "$keycloak_image"
+        fi
+        set -- start-dev --import-realm --db=dev-mem --http-host=127.0.0.1 --http-port=8081 \
+            --http-relative-path=/oidc --hostname=https://fixture.orion.test:8443/oidc --proxy-headers=xforwarded
+        keycloak_realm_sha=$(openssl dgst -sha256 keycloak-realm.json | awk '{print $NF}')
+        if "$engine" container inspect "$keycloak_name" >/dev/null 2>&1 && {
+            [ "$("$engine" container inspect --format '{{.Image}}' "$keycloak_name")" != \
+              "$("$engine" image inspect --format '{{.Id}}' "$keycloak_image")" ] || \
+            [ "$("$engine" container inspect --format '{{join .Config.Cmd " "}}' "$keycloak_name")" != \
+              "$*" ] || \
+            [ "$("$engine" container inspect --format '{{index .Config.Labels "orion.keycloak.realm"}}' \
+                "$keycloak_name")" != "$keycloak_realm_sha" ]; }; then
+            "$engine" rm -f "$keycloak_name" >/dev/null
+        fi
+        if "$engine" container inspect "$keycloak_name" >/dev/null 2>&1; then
+            "$engine" start "$keycloak_name" >/dev/null
+        else
+            "$engine" run -d --name "$keycloak_name" \
+                --label "orion.keycloak.realm=$keycloak_realm_sha" \
+                --network "container:$name" --env-file "$state/credentials.env" \
+                -e JAVA_OPTS_KC_HEAP='-Xms64m -Xmx384m' \
+                -v "$(pwd)/keycloak-realm.json:/opt/keycloak/data/import/orion-fixture-realm.json:ro" \
+                "$keycloak_image" "$@" >/dev/null
+        fi
         attempt=0
         until curl -fsS --max-time 2 --cacert "$state/step/certs/root_ca.crt" \
             --resolve fixture.orion.test:8443:127.0.0.1 \
             https://fixture.orion.test:8443/api/v1/version >/dev/null 2>&1 && \
+            curl -fsS --max-time 2 --cacert "$state/step/certs/root_ca.crt" \
+            --resolve fixture.orion.test:8443:127.0.0.1 \
+            https://fixture.orion.test:8443/oidc/realms/orion-fixture/.well-known/openid-configuration \
+                >/dev/null 2>&1 && \
             curl -fsS --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1; do
             attempt=$((attempt + 1))
-            if [ "$attempt" -ge 60 ]; then "$engine" logs --tail 100 "$name"; exit 1; fi
+            if [ "$attempt" -ge 60 ]; then
+                "$engine" logs --tail 100 "$name"
+                "$engine" logs --tail 100 "$keycloak_name"
+                exit 1
+            fi
             sleep 2
         done
         . "$state/credentials.env"
@@ -105,6 +148,9 @@ case "${1:-}" in
         echo 'Orion HTTPS certificate trusted for orion.test'
         ;;
     down)
+        if "$engine" container inspect "$keycloak_name" >/dev/null 2>&1; then
+            "$engine" stop "$keycloak_name"
+        fi
         "$engine" stop "$name"
         if [ "$engine" = podman ] && [ "$(uname -s)" = Darwin ]; then podman machine stop; fi
         ;;

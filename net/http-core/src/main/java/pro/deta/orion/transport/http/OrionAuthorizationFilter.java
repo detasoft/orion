@@ -39,8 +39,7 @@ public class OrionAuthorizationFilter implements Filter {
         if (request instanceof HttpServletRequest httpRequest) {
             SecurityContext context = securityContextFor(httpRequest);
             httpRequest.setAttribute(SECURITY_CONTEXT_ATTRIBUTE, context);
-            if (context.getUserIdentity().getOrganizationId().isPresent()
-                    && response instanceof HttpServletResponse httpResponse) {
+            if (response instanceof HttpServletResponse httpResponse) {
                 String cookie = oidc.recordActivity(httpRequest, context);
                 if (cookie != null) {
                     httpResponse.addHeader("Set-Cookie", cookie);
