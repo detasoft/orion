@@ -21,7 +21,7 @@ class OrionAdminKeyMaterialRouteTest {
     @Test
     void exposesOnlyPublicInventoryToApplicationAdmins() throws Exception {
         KeyMaterialInventoryEntry entry = new KeyMaterialInventoryEntry(
-                "acme-identity", "TLS_IDENTITY", "RSA", 1, "cluster:5:orion",
+                "acme-identity", "TLS_IDENTITY", "RSA", 1,
                 "-----BEGIN PUBLIC KEY-----\npublic\n-----END PUBLIC KEY-----", "fingerprint", List.of());
         OrionKeyMaterial material = new OrionKeyMaterial() {
             @Override

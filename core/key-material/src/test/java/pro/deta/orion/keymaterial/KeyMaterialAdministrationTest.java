@@ -18,7 +18,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class KeyMaterialAdministrationTest {
-    private static final KeyMaterialScope CLUSTER = KeyMaterialScope.cluster("test");
     private static final SigningMaterialSet SIGNING = new SigningMaterialSet(
             descriptor("signing", KeyMaterialPurpose.SERVER_SIGNING), List.of());
 
@@ -195,6 +194,6 @@ class KeyMaterialAdministrationTest {
 
     private static KeyMaterialDescriptor descriptor(String alias, KeyMaterialPurpose purpose) {
         return new KeyMaterialDescriptor(new KeyMaterialAlias(alias), purpose, KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(1), CLUSTER);
+                new KeyMaterialVersion(1));
     }
 }

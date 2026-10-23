@@ -1,7 +1,6 @@
 package pro.deta.orion.transport.http;
 
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletInputStream;
@@ -83,9 +82,9 @@ class AcmeAdministrationTest {
         TestConfiguration desired = new TestConfiguration(EVENTS);
         desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("revision"));
         AcmeConfigurationService configuration = new AcmeConfigurationService(desired.acl(), null, null,
-                new AcmeCertificateService(new BootstrapConfiguration(), desired.acl(),
+                new AcmeCertificateService(desired.acl(),
                         OrionKeyMaterial.unavailable(), null, null),
-                OrionKeyMaterial.unavailable(), new BootstrapConfiguration());
+                OrionKeyMaterial.unavailable());
         ObjectMapper mapper = new ObjectMapper();
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of(
                 new OrionAdminAcmeConfigurationRoute(configuration, mapper))), new OrionHttpResponseWriter(mapper));

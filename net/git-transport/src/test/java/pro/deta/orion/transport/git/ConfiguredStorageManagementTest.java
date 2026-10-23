@@ -53,7 +53,7 @@ class ConfiguredStorageManagementTest {
     void setUp() throws Exception {
         KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(new KeyMaterialAlias("configuration-v1"),
                 KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES,
-                new KeyMaterialVersion(1), KeyMaterialScope.cluster("test"));
+                new KeyMaterialVersion(1));
         material = KeyMaterialService.open(new InMemoryKeyMaterialContentStore(),
                 KeyMaterialOptions.pkcs12("test-password".toCharArray()));
         material.generateSecretKeyIfMissing(descriptor, 256);
@@ -68,7 +68,6 @@ class ConfiguredStorageManagementTest {
                 List.of(), List.of())), List.of(), List.of(), List.of(), List.of());
         storage.set(new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()), List.of(org)));
         editor = new OrionConfigurationEditor(storage,
-                new BootstrapConfiguration(),
                 cipher,
                 OrionKeyMaterial.unavailable(),
                 EVENTS.manager());

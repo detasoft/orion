@@ -330,16 +330,11 @@ public class KeyMaterialService implements AutoCloseable {
     }
 
     public synchronized List<KeyMaterialDescriptor> privateKeyDescriptors(
-            KeyMaterialPurpose purpose,
-            KeyMaterialScope scope) throws GeneralSecurityException {
+            KeyMaterialPurpose purpose) throws GeneralSecurityException {
         requireOpen();
         if (purpose == null) {
             throw new IllegalArgumentException("Key material purpose must not be null");
         }
-        if (scope == null) {
-            throw new IllegalArgumentException("Key material scope must not be null");
-        }
-        String encodedScope = encodeScope(scope);
         List<String> aliases = availableAliases();
         List<KeyMaterialDescriptor> descriptors = new ArrayList<>();
         for (String alias : aliases) {
@@ -351,10 +346,10 @@ public class KeyMaterialService implements AutoCloseable {
                 continue;
             }
             String[] fields = metadata.split(";", -1);
-            if (fields.length != 4) {
+            if (fields.length != 3) {
                 throw new GeneralSecurityException("Typed key material metadata has invalid format: " + alias);
             }
-            if (!purpose.name().equals(fields[0]) || !encodedScope.equals(fields[3])) {
+            if (!purpose.name().equals(fields[0])) {
                 continue;
             }
             KeyMaterialDescriptor descriptor;
@@ -363,8 +358,7 @@ public class KeyMaterialService implements AutoCloseable {
                         new KeyMaterialAlias(alias),
                         purpose,
                         KeyMaterialAlgorithm.valueOf(fields[1]),
-                        new KeyMaterialVersion(Long.parseLong(fields[2])),
-                        scope);
+                        new KeyMaterialVersion(Long.parseLong(fields[2])));
             } catch (IllegalArgumentException failure) {
                 throw new GeneralSecurityException(
                         "Typed key material metadata has invalid format: " + alias,
@@ -389,18 +383,16 @@ public class KeyMaterialService implements AutoCloseable {
             }
             String metadata = descriptorMetadata(alias);
             String[] fields = metadata.split(";", -1);
-            if (fields.length != 4) {
+            if (fields.length != 3) {
                 throw new GeneralSecurityException("Typed key material metadata has invalid format: " + alias);
             }
             KeyMaterialPurpose purpose;
             KeyMaterialAlgorithm algorithm;
             long version;
-            String scope;
             try {
                 purpose = KeyMaterialPurpose.valueOf(fields[0]);
                 algorithm = KeyMaterialAlgorithm.valueOf(fields[1]);
                 version = Long.parseLong(fields[2]);
-                scope = new String(Base64.getUrlDecoder().decode(fields[3]), StandardCharsets.UTF_8);
             } catch (IllegalArgumentException failure) {
                 throw new GeneralSecurityException("Typed key material metadata has invalid format: " + alias,
                         failure);
@@ -424,7 +416,7 @@ public class KeyMaterialService implements AutoCloseable {
                 }
             }
             entries.add(new KeyMaterialInventoryEntry(alias, purpose.name(), algorithm.name(), version,
-                    scope, publicKey, secretKey ? null : HexFormat.of().withDelimiter(":").formatHex(
+                    publicKey, secretKey ? null : HexFormat.of().withDelimiter(":").formatHex(
                             MessageDigest.getInstance("SHA-256").digest(chain[0].getPublicKey().getEncoded())),
                     certificates));
         }
@@ -615,7 +607,7 @@ public class KeyMaterialService implements AutoCloseable {
             requireAlgorithm(descriptor, key.getPrivateKey().getAlgorithm());
         }
         validateMetadata(descriptor.alias().value(), attribute(entry.getAttributes(), DESCRIPTOR_ATTRIBUTE_OID),
-                descriptor.purpose(), descriptor.algorithm(), descriptor.version(), descriptor.scope());
+                descriptor.purpose(), descriptor.algorithm(), descriptor.version());
     }
 
     synchronized void validatePrepared(KeyStore.Entry entry, TrustedCertificateDescriptor descriptor)
@@ -627,7 +619,7 @@ public class KeyMaterialService implements AutoCloseable {
         }
         requireAlgorithm(descriptor, trusted.getTrustedCertificate().getPublicKey().getAlgorithm());
         validateMetadata(descriptor.alias().value(), attribute(entry.getAttributes(), DESCRIPTOR_ATTRIBUTE_OID),
-                descriptor.purpose(), descriptor.algorithm(), descriptor.version(), descriptor.scope());
+                descriptor.purpose(), descriptor.algorithm(), descriptor.version());
     }
 
     synchronized Addition readAddition(String alias) throws GeneralSecurityException {
@@ -754,15 +746,14 @@ public class KeyMaterialService implements AutoCloseable {
     }
 
     private static void validateMetadata(String alias, String metadata, KeyMaterialPurpose purpose,
-            KeyMaterialAlgorithm algorithm, KeyMaterialVersion version, KeyMaterialScope scope)
+            KeyMaterialAlgorithm algorithm, KeyMaterialVersion version)
             throws GeneralSecurityException {
         if (metadata == null) throw new GeneralSecurityException("Typed key material metadata is missing: " + alias);
         String[] fields = metadata.split(";", -1);
-        if (fields.length != 4) throw metadataFailure(alias, "format");
+        if (fields.length != 3) throw metadataFailure(alias, "format");
         requireMetadataField(alias, "purpose", purpose.name(), fields[0]);
         requireMetadataField(alias, "algorithm", algorithm.name(), fields[1]);
         requireMetadataField(alias, "version", Long.toString(version.value()), fields[2]);
-        requireMetadataField(alias, "scope", encodeScope(scope), fields[3]);
     }
 
     private record EntryVersion(String physicalAlias, String alias, long version, long kmsVersion, boolean deleted) {}
@@ -772,9 +763,9 @@ public class KeyMaterialService implements AutoCloseable {
         return revision;
     }
 
-    synchronized KeyMaterialModification modify(KeyMaterialScope.Cluster scope) {
+    synchronized KeyMaterialModification modify() {
         requireOpen();
-        return new KeyMaterialModification(this, scope, Math.incrementExact(revision));
+        return new KeyMaterialModification(this, Math.incrementExact(revision));
     }
 
     synchronized void apply(List<Addition> additions, long nextVersion) throws IOException {
@@ -877,30 +868,23 @@ public class KeyMaterialService implements AutoCloseable {
 
     private static Set<KeyStore.Entry.Attribute> descriptorAttributes(KeyMaterialDescriptor descriptor) {
         return descriptorAttributes(
-                descriptor.purpose(), descriptor.algorithm(), descriptor.version(), descriptor.scope());
+                descriptor.purpose(), descriptor.algorithm(), descriptor.version());
     }
 
     private static Set<KeyStore.Entry.Attribute> descriptorAttributes(
             TrustedCertificateDescriptor descriptor) {
         return descriptorAttributes(
-                descriptor.purpose(), descriptor.algorithm(), descriptor.version(), descriptor.scope());
+                descriptor.purpose(), descriptor.algorithm(), descriptor.version());
     }
 
     private static Set<KeyStore.Entry.Attribute> descriptorAttributes(
             KeyMaterialPurpose purpose,
             KeyMaterialAlgorithm algorithm,
-            KeyMaterialVersion version,
-            KeyMaterialScope scope) {
+            KeyMaterialVersion version) {
         String value = purpose.name()
                 + ";" + algorithm.name()
-                + ";" + version.value()
-                + ";" + encodeScope(scope);
+                + ";" + version.value();
         return Set.of(new PKCS12Attribute(DESCRIPTOR_ATTRIBUTE_OID, value));
-    }
-
-    private static String encodeScope(KeyMaterialScope scope) {
-        return Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(scope.canonicalName().getBytes(StandardCharsets.UTF_8));
     }
 
     private static void requireMetadataField(

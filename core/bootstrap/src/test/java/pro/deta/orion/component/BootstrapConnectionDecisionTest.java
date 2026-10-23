@@ -19,7 +19,6 @@ import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialScope;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
@@ -222,14 +221,12 @@ class BootstrapConnectionDecisionTest {
             provider.resolveProvisional(NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration, false);
             storage = new NativeGitOrionConfigurationStorage(provider, configuration);
             KeyMaterialDescriptor signing = new KeyMaterialDescriptor(new KeyMaterialAlias("signing"),
-                    KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1),
-                    KeyMaterialScope.cluster("test"));
+                    KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1));
             try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
                 material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
                         new SigningMaterialSet(signing, List.of()), 2048, new KeyMaterialCreation(true));
             }
             editor = new OrionConfigurationEditor(storage,
-                new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
                 material.configurationCipher(),
                 material,
                 EVENTS.manager());

@@ -453,7 +453,6 @@ bootstrap:
     ref: refs/heads/main
     path: material.p12
     password: env:ORION_KEY_MATERIAL_PASSWORD
-    clusterId: orion
     serverSigning:
       algorithm: RSA
       active:
@@ -477,7 +476,7 @@ transport:
 ```
 
 SSH host keys are typed `SSH_HOST` entries in the material store. By default,
-the SSH transport serves every cluster-scoped entry of that type and creates
+the SSH transport serves every entry of that type and creates
 `ssh-host-rsa-v1` and `ssh-host-ec-v1` when none exist. A node can select its
 own logical key families explicitly. A logical alias selects the highest stored
 version; a concrete alias with a `-v<version>` suffix selects that exact entry:

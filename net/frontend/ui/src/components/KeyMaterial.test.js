@@ -11,7 +11,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   client.keyMaterial.mockResolvedValue({ entries: [{
     alias: 'acme-identity', purpose: 'TLS_IDENTITY', algorithm: 'RSA',
-    scope: 'cluster:5:orion', version: 1,
+    version: 1,
     publicKeyPem: '-----BEGIN PUBLIC KEY-----\npublic\n-----END PUBLIC KEY-----',
     certificates: [],
   }] })
@@ -183,7 +183,7 @@ it('shows public material, issues a certificate, and refreshes the stored list',
   expect(wrapper.text()).not.toContain('PRIVATE KEY')
   client.keyMaterial.mockResolvedValueOnce({ entries: [{
     alias: 'acme-identity', purpose: 'TLS_IDENTITY', algorithm: 'RSA',
-    scope: 'cluster:5:orion', version: 1, publicKeyPem: 'public',
+    version: 1, publicKeyPem: 'public',
     certificates: [{ subject: '', dnsNames: ['orion.test'], issuer: 'CN=Orion test CA',
       validFrom: '2026-09-25T00:00:00Z', validUntil: '2026-09-26T00:00:00Z',
       sha256Fingerprint: 'AA:BB', serialNumber: '01' }],

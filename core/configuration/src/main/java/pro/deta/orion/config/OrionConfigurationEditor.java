@@ -5,7 +5,6 @@ import jakarta.inject.Singleton;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.keymaterial.*;
-import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
@@ -22,17 +21,15 @@ public final class OrionConfigurationEditor {
     private final OrionEventManager events;
     private final ConfigurationSecretCipher configurationCipher;
     private final OrionKeyMaterial configurationMaterial;
-    private final KeyMaterialScope materialScope;
 
     @Inject
     public OrionConfigurationEditor(OrionVersionedConfigurationStorage storage,
-            BootstrapConfiguration configuration, ConfigurationSecretCipher configurationCipher,
+            ConfigurationSecretCipher configurationCipher,
             OrionKeyMaterial configurationMaterial, OrionEventManager events) {
         this.storage = storage;
         this.events = Objects.requireNonNull(events, "events");
         this.configurationCipher = configurationCipher;
         this.configurationMaterial = configurationMaterial;
-        this.materialScope = KeyMaterialScope.cluster(configuration.getBootstrap().getKeyMaterial().getClusterId());
     }
 
     public OrionDocumentRevision load() {
@@ -111,12 +108,12 @@ public final class OrionConfigurationEditor {
             throws GeneralSecurityException {
         configurationMaterial.require(new KeyMaterialDescriptor(
                 new KeyMaterialAlias(reference.alias()), purpose, KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(reference.version()), materialScope));
+                new KeyMaterialVersion(reference.version())));
     }
 
     private void requireTrust(OrionMaterialReference reference) throws GeneralSecurityException {
         configurationMaterial.require(new TrustedCertificateDescriptor(new KeyMaterialAlias(reference.alias()),
-                KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(reference.version()), materialScope));
+                KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(reference.version())));
     }
 
     public void withAccess(ChangeMetadata metadata, OrionRevision expectedRevision,

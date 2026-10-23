@@ -4,8 +4,7 @@ public record KeyMaterialDescriptor(
         KeyMaterialAlias alias,
         KeyMaterialPurpose purpose,
         KeyMaterialAlgorithm algorithm,
-        KeyMaterialVersion version,
-        KeyMaterialScope scope) {
+        KeyMaterialVersion version) {
     public KeyMaterialDescriptor {
         if (alias == null) {
             throw new IllegalArgumentException("Key material alias must not be null");
@@ -18,9 +17,6 @@ public record KeyMaterialDescriptor(
         }
         if (version == null) {
             throw new IllegalArgumentException("Key material version must not be null");
-        }
-        if (scope == null) {
-            throw new IllegalArgumentException("Key material scope must not be null");
         }
         if (purpose == KeyMaterialPurpose.TRUST_ANCHOR) {
             throw new IllegalArgumentException("Trust anchors require a trusted certificate descriptor");

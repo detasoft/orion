@@ -22,7 +22,6 @@ import pro.deta.orion.keymaterial.KeyMaterialCapabilities;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialScope;
 import pro.deta.orion.keymaterial.KeyMaterialService;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.SigningIdentity;
@@ -56,7 +55,7 @@ public final class TestConfiguration implements AutoCloseable {
             SigningIdentity identity) {
         this.events = events;
         this.cipher = cipher;
-        editor = new OrionConfigurationEditor(storage, bootstrap, cipher, material, events.manager());
+        editor = new OrionConfigurationEditor(storage, cipher, material, events.manager());
         acl = new OrionAccessControlServiceImpl(new OrionPasswordHashingService(), new RootPasswordReset(false),
                 identity, bootstrap, editor);
         events.own(this);
@@ -90,12 +89,7 @@ public final class TestConfiguration implements AutoCloseable {
                             new KeyMaterialAlias("configuration-v1"),
                             KeyMaterialPurpose.CONFIGURATION_CIPHER,
                             KeyMaterialAlgorithm.AES,
-                            new KeyMaterialVersion(1),
-                            KeyMaterialScope.cluster(
-                                    new BootstrapConfiguration()
-                                            .getBootstrap()
-                                            .getKeyMaterial()
-                                            .getClusterId()));
+                            new KeyMaterialVersion(1));
             material.generateSecretKeyIfMissing(descriptor, 256);
             return KeyMaterialCapabilities.open(material, java.util.List.of(descriptor))
                     .configurationCipher(descriptor);

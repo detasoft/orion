@@ -55,9 +55,6 @@ public record SigningMaterialSet(KeyMaterialDescriptor active, List<KeyMaterialD
         if (candidate.algorithm() != expected.algorithm()) {
             throw new IllegalArgumentException("Signing material algorithm does not match active material");
         }
-        if (!candidate.scope().equals(expected.scope())) {
-            throw new IllegalArgumentException("Signing material scope does not match active material");
-        }
     }
 
     private static IllegalArgumentException conflictingAlias(KeyMaterialDescriptor descriptor) {

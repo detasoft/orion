@@ -12,14 +12,6 @@ public record AcmeMaterialConfiguration(
         if (issuerTrustAnchor == null) {
             throw new IllegalArgumentException("ACME issuer trust anchor optional must not be null");
         }
-        if (!(account.scope() instanceof KeyMaterialScope.Cluster)
-                || !(identity.scope() instanceof KeyMaterialScope.Cluster)) {
-            throw new IllegalArgumentException("ACME material must be cluster-scoped");
-        }
-        if (!account.scope().equals(identity.scope())) {
-            throw new IllegalArgumentException("ACME account and TLS identity must have the same scope");
-        }
-        issuerTrustAnchor.ifPresent(issuer -> requireSameScope(identity.scope(), issuer.scope()));
     }
 
     private static void requirePurpose(
@@ -31,9 +23,4 @@ public record AcmeMaterialConfiguration(
         }
     }
 
-    private static void requireSameScope(KeyMaterialScope identity, KeyMaterialScope issuer) {
-        if (!identity.equals(issuer)) {
-            throw new IllegalArgumentException("ACME issuer trust anchor must have the identity scope");
-        }
-    }
 }

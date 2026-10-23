@@ -147,9 +147,7 @@ public final class KeyMaterialCapabilities {
             int accountKeySize, int domainKeySize) throws IOException, GeneralSecurityException {
         KeyMaterialDescriptor account = requireRegistered(accountDescriptor, KeyMaterialPurpose.ACME_ACCOUNT);
         KeyMaterialDescriptor identity = requireRegistered(identityDescriptor, KeyMaterialPurpose.TLS_IDENTITY);
-        requireAcmeScope(account, identity);
-        Optional<TrustedCertificateDescriptor> issuer = requireRegistered(issuerDescriptor);
-        issuer.ifPresent(value -> requireSameScope(identity.scope(), value.scope(), "ACME issuer"));
+        requireRegistered(issuerDescriptor);
         return owner.acquireAcmeKeys(account, accountKeySize, identity, domainKeySize);
     }
 
@@ -637,25 +635,6 @@ public final class KeyMaterialCapabilities {
         }
         return expected.getAlgorithm().equalsIgnoreCase(actual.getAlgorithm())
                 && Arrays.equals(expected.getEncoded(), actual.getEncoded());
-    }
-
-    private static void requireAcmeScope(
-            KeyMaterialDescriptor account,
-            KeyMaterialDescriptor identity) {
-        if (!(account.scope() instanceof KeyMaterialScope.Cluster)
-                || !(identity.scope() instanceof KeyMaterialScope.Cluster)) {
-            throw new IllegalArgumentException("ACME account and TLS identity material must be cluster-scoped");
-        }
-        requireSameScope(account.scope(), identity.scope(), "ACME account and TLS identity");
-    }
-
-    private static void requireSameScope(
-            KeyMaterialScope expected,
-            KeyMaterialScope actual,
-            String label) {
-        if (!expected.equals(actual)) {
-            throw new IllegalArgumentException(label + " material must have the same scope");
-        }
     }
 
     private static char[] randomPassword() {

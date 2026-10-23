@@ -295,7 +295,7 @@ onBeforeUnmount(() => { attempt += 1 })
           <h3>{{ entry.alias }}</h3>
           <span>{{ entry.purpose.replaceAll('_', ' ') }}</span>
         </div>
-        <p>{{ entry.algorithm }} · version {{ entry.version }} · {{ entry.scope }}</p>
+        <p>{{ entry.algorithm }} · version {{ entry.version }}</p>
         <p v-if="entry.publicKeySha256Fingerprint">Public key SHA-256:
           <code>{{ entry.publicKeySha256Fingerprint }}</code></p>
         <p v-if="!entry.certificates.length">No issued certificate</p>

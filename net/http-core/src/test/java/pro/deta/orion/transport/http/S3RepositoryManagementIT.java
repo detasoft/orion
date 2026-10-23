@@ -41,7 +41,7 @@ class S3RepositoryManagementIT {
              NativeGitRepositoryProvider local = NativeGitRepositoryProvider.inMemory(EVENTS.manager())) {
             KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(new KeyMaterialAlias("configuration-v1"),
                     KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES,
-                    new KeyMaterialVersion(1), KeyMaterialScope.cluster("test"));
+                    new KeyMaterialVersion(1));
             material.generateSecretKeyIfMissing(descriptor, 256);
             ConfigurationSecretCipher cipher = KeyMaterialCapabilities.open(material, List.of(descriptor))
                     .configurationCipher(descriptor);

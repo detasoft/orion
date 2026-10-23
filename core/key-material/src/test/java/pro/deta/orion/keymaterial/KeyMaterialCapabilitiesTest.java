@@ -27,9 +27,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class KeyMaterialCapabilitiesTest {
-    private static final KeyMaterialScope CLUSTER = KeyMaterialScope.cluster("orion-prod");
-    private static final KeyMaterialScope NODE = KeyMaterialScope.node("orion-prod", "node-7");
-
     @Test
     void signsAndVerifiesWithoutExposingPrivateKey() throws Exception {
         try (KeyMaterialService service = service()) {
@@ -37,8 +34,7 @@ class KeyMaterialCapabilitiesTest {
                     "server-signing-v1",
                     KeyMaterialPurpose.SERVER_SIGNING,
                     KeyMaterialAlgorithm.RSA,
-                    1,
-                    CLUSTER);
+                    1);
             service.generateKeyIfMissing(signing, 2048);
             KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, List.of(signing));
 
@@ -58,8 +54,7 @@ class KeyMaterialCapabilitiesTest {
                 "server-signing-ed25519-v1",
                 KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.ED25519,
-                1,
-                CLUSTER);
+                1);
         try (KeyMaterialService initial = KeyMaterialService.open(store, options())) {
             initial.generateKeyIfMissing(signing, 0);
             initial.save();
@@ -81,20 +76,17 @@ class KeyMaterialCapabilitiesTest {
                 "provisioning-client-v1",
                 KeyMaterialPurpose.SSH_CLIENT,
                 KeyMaterialAlgorithm.RSA,
-                1,
-                NODE);
+                1);
         KeyMaterialDescriptor ed25519Client = descriptor(
                 "provisioning-client-ed25519-v1",
                 KeyMaterialPurpose.SSH_CLIENT,
                 KeyMaterialAlgorithm.ED25519,
-                1,
-                NODE);
+                1);
         KeyMaterialDescriptor host = descriptor(
                 "provisioning-host-v1",
                 KeyMaterialPurpose.SSH_HOST,
                 KeyMaterialAlgorithm.RSA,
-                1,
-                NODE);
+                1);
         KeyPair generatedRsa;
         KeyPair generatedEd25519;
         try (KeyMaterialService initial = KeyMaterialService.open(store, options())) {
@@ -123,25 +115,14 @@ class KeyMaterialCapabilitiesTest {
                     rsaClient.alias().value(),
                     KeyMaterialPurpose.SSH_HOST,
                     rsaClient.algorithm(),
-                    rsaClient.version().value(),
-                    rsaClient.scope());
-            KeyMaterialDescriptor wrongScope = descriptor(
-                    rsaClient.alias().value(),
-                    rsaClient.purpose(),
-                    rsaClient.algorithm(),
-                    rsaClient.version().value(),
-                    CLUSTER);
+                    rsaClient.version().value());
             KeyMaterialDescriptor wrongAlgorithm = descriptor(
                     rsaClient.alias().value(),
                     rsaClient.purpose(),
                     KeyMaterialAlgorithm.EC,
-                    rsaClient.version().value(),
-                    rsaClient.scope());
+                    rsaClient.version().value());
 
             assertThatThrownBy(() -> capabilities.sshClientKey(wrongPurpose))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("registered");
-            assertThatThrownBy(() -> capabilities.sshClientKey(wrongScope))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("registered");
             assertThatThrownBy(() -> capabilities.sshClientKey(wrongAlgorithm))
@@ -154,8 +135,7 @@ class KeyMaterialCapabilitiesTest {
                     "invalid-client-v1",
                     KeyMaterialPurpose.SSH_CLIENT,
                     KeyMaterialAlgorithm.AES,
-                    1,
-                    NODE))
+                    1))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("AES")
                     .hasMessageContaining("configuration ciphers");
@@ -166,10 +146,10 @@ class KeyMaterialCapabilitiesTest {
     void validatesExistingEntriesBeforeReuseOrActivation() throws Exception {
         try (KeyMaterialService service = service()) {
             KeyMaterialDescriptor rsa = descriptor(
-                    "host-key-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.RSA, 1, NODE);
+                    "host-key-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.RSA, 1);
             service.generateKeyIfMissing(rsa, 2048);
             KeyMaterialDescriptor incompatible = descriptor(
-                    "host-key-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.EC, 1, NODE);
+                    "host-key-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.EC, 1);
 
             assertThatThrownBy(() -> service.generateKeyIfMissing(incompatible, 256))
                     .isInstanceOf(Exception.class)
@@ -183,14 +163,13 @@ class KeyMaterialCapabilitiesTest {
     }
 
     @Test
-    void rejectsReusingExistingAliasWithDifferentVersionOrScopeAfterReload() throws Exception {
+    void rejectsReusingExistingAliasWithDifferentVersionAfterReload() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialDescriptor original = descriptor(
                 "server-signing-v1",
                 KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.RSA,
-                1,
-                CLUSTER);
+                1);
         try (KeyMaterialService initial = KeyMaterialService.open(store, options())) {
             initial.generateKeyIfMissing(original, 2048);
             initial.save();
@@ -201,50 +180,11 @@ class KeyMaterialCapabilitiesTest {
                     "server-signing-v1",
                     KeyMaterialPurpose.SERVER_SIGNING,
                     KeyMaterialAlgorithm.RSA,
-                    2,
-                    CLUSTER);
-            KeyMaterialDescriptor changedScope = descriptor(
-                    "server-signing-v1",
-                    KeyMaterialPurpose.SERVER_SIGNING,
-                    KeyMaterialAlgorithm.RSA,
-                    1,
-                    NODE);
+                    2);
 
             assertThatThrownBy(() -> reloaded.generateKeyIfMissing(changedVersion, 2048))
                     .isInstanceOf(Exception.class)
                     .hasMessageContaining("version");
-            assertThatThrownBy(() -> KeyMaterialCapabilities.open(reloaded, List.of(changedScope)))
-                    .isInstanceOf(Exception.class)
-                    .hasMessageContaining("scope");
-        }
-    }
-
-    @Test
-    void distinguishesClusterAndNodeScopesWhoseDisplayNamesCollideAfterReload() throws Exception {
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        KeyMaterialDescriptor clusterMaterial = descriptor(
-                "ambiguous-scope-v1",
-                KeyMaterialPurpose.SERVER_SIGNING,
-                KeyMaterialAlgorithm.RSA,
-                1,
-                KeyMaterialScope.cluster("a/node:b"));
-        try (KeyMaterialService initial = KeyMaterialService.open(store, options())) {
-            initial.generateKeyIfMissing(clusterMaterial, 2048);
-            initial.save();
-        }
-
-        KeyMaterialDescriptor nodeMaterial = descriptor(
-                "ambiguous-scope-v1",
-                KeyMaterialPurpose.SERVER_SIGNING,
-                KeyMaterialAlgorithm.RSA,
-                1,
-                KeyMaterialScope.node("a", "b"));
-        assertThat(clusterMaterial.scope().canonicalName())
-                .isNotEqualTo(nodeMaterial.scope().canonicalName());
-        try (KeyMaterialService reloaded = KeyMaterialService.open(store, options())) {
-            assertThatThrownBy(() -> KeyMaterialCapabilities.open(reloaded, List.of(nodeMaterial)))
-                    .isInstanceOf(Exception.class)
-                    .hasMessageContaining("scope");
         }
     }
 
@@ -252,15 +192,14 @@ class KeyMaterialCapabilitiesTest {
     void exposesTlsSshAndCaThroughPurposeSpecificCapabilities() throws Exception {
         try (KeyMaterialService service = service()) {
             KeyMaterialDescriptor tls = descriptor(
-                    "https-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1, NODE);
+                    "https-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
             KeyMaterialDescriptor ssh = descriptor(
-                    "ssh-host-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.RSA, 1, NODE);
+                    "ssh-host-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.RSA, 1);
             KeyMaterialDescriptor ca = descriptor(
                     "orion-ca-v1",
                     KeyMaterialPurpose.CERTIFICATE_AUTHORITY,
                     KeyMaterialAlgorithm.RSA,
-                    1,
-                    CLUSTER);
+                    1);
             service.generateKeyIfMissing(tls, 2048);
             service.generateKeyIfMissing(ssh, 2048);
             service.generateKeyIfMissing(ca, 2048);
@@ -290,9 +229,9 @@ class KeyMaterialCapabilitiesTest {
     void lazilyCreatesAndDurablyReusesAcmeKeysTogether() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialDescriptor account = descriptor(
-                "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1, CLUSTER);
+                "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor identity = descriptor(
-                "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1, CLUSTER);
+                "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
         byte[] accountPublic;
         byte[] identityPublic;
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
@@ -324,9 +263,9 @@ class KeyMaterialCapabilitiesTest {
     void doesNotDurablySaveOnlyOneAcmeKeyWhenGenerationFails() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialDescriptor account = descriptor(
-                "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1, CLUSTER);
+                "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor identity = descriptor(
-                "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.EC, 1, CLUSTER);
+                "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.EC, 1);
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
             KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, List.of(account, identity));
 
@@ -340,11 +279,11 @@ class KeyMaterialCapabilitiesTest {
     void rejectsNonAcmeAndNonTlsDescriptorsForAcmeCapability() throws Exception {
         try (KeyMaterialService service = service()) {
             KeyMaterialDescriptor account = descriptor(
-                    "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1, CLUSTER);
+                    "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1);
             KeyMaterialDescriptor signing = descriptor(
-                    "signing-v1", KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, 1, CLUSTER);
+                    "signing-v1", KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, 1);
             KeyMaterialDescriptor identity = descriptor(
-                    "https-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1, CLUSTER);
+                    "https-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
             service.generateKeyIfMissing(signing, 2048);
             KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(
                     service, List.of(account, signing, identity));
@@ -362,9 +301,9 @@ class KeyMaterialCapabilitiesTest {
     void validatesInstallsAndReloadsAcmeCertificateChainWithoutRootInIdentity() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialDescriptor account = descriptor(
-                "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1, CLUSTER);
+                "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor identity = descriptor(
-                "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1, CLUSTER);
+                "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
         TrustedCertificateDescriptor rootDescriptor = trustedCertificate("public-root-v1");
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
         TestCertificateChain.Authority intermediate = TestCertificateChain.intermediate("Intermediate", root);
@@ -402,9 +341,9 @@ class KeyMaterialCapabilitiesTest {
     void rejectsInvalidAcmeCertificateChainsBeforeSaving() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialDescriptor account = descriptor(
-                "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1, CLUSTER);
+                "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor identity = descriptor(
-                "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1, CLUSTER);
+                "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
         TrustedCertificateDescriptor rootDescriptor = trustedCertificate("public-root-v1");
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
         TestCertificateChain.Authority otherRoot = TestCertificateChain.root("Other Root");
@@ -449,7 +388,7 @@ class KeyMaterialCapabilitiesTest {
     void keepsServerIssuerAndClientTrustRolesSeparate() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialDescriptor identity = descriptor(
-                "https-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1, CLUSTER);
+                "https-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
         TrustedCertificateDescriptor serverRoot = trustedCertificate("server-root-v1");
         TrustedCertificateDescriptor clientRoot = trustedCertificate("client-root-v1");
         TestCertificateChain.Authority serverAuthority = TestCertificateChain.root("Server Root");
@@ -523,8 +462,7 @@ class KeyMaterialCapabilitiesTest {
                 "configuration-v1",
                 KeyMaterialPurpose.CONFIGURATION_CIPHER,
                 KeyMaterialAlgorithm.AES,
-                1,
-                CLUSTER);
+                1);
         ConfigurationSecretContext context = new ConfigurationSecretContext("github-token", "access-token");
         byte[] plaintext = "database-password".getBytes(StandardCharsets.UTF_8);
         ConfigurationSecretEnvelopeCodec codec = new ConfigurationSecretEnvelopeCodec();
@@ -561,8 +499,7 @@ class KeyMaterialCapabilitiesTest {
                 "configuration-v1",
                 KeyMaterialPurpose.CONFIGURATION_CIPHER,
                 KeyMaterialAlgorithm.AES,
-                1,
-                CLUSTER);
+                1);
         try (KeyMaterialService service = service()) {
             service.generateSecretKeyIfMissing(cipher, 256);
             ConfigurationSecretCipher capability = KeyMaterialCapabilities
@@ -587,8 +524,7 @@ class KeyMaterialCapabilitiesTest {
                 "configuration-v1",
                 KeyMaterialPurpose.CONFIGURATION_CIPHER,
                 KeyMaterialAlgorithm.AES,
-                1,
-                CLUSTER);
+                1);
         try (KeyMaterialService service = service()) {
             service.generateSecretKeyIfMissing(cipher, 256);
             ConfigurationSecretCipher capability = KeyMaterialCapabilities
@@ -614,8 +550,7 @@ class KeyMaterialCapabilitiesTest {
                 "configuration-v1",
                 KeyMaterialPurpose.CONFIGURATION_CIPHER,
                 KeyMaterialAlgorithm.AES,
-                1,
-                CLUSTER);
+                1);
         try (KeyMaterialService service = service()) {
             service.generateSecretKeyIfMissing(cipher, 256);
             ConfigurationSecretCipher capability = KeyMaterialCapabilities
@@ -650,7 +585,7 @@ class KeyMaterialCapabilitiesTest {
     void rejectsPurposeSpecificCapabilityMismatch() throws Exception {
         try (KeyMaterialService service = service()) {
             KeyMaterialDescriptor ssh = descriptor(
-                    "ssh-host-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.RSA, 1, NODE);
+                    "ssh-host-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.RSA, 1);
             service.generateKeyIfMissing(ssh, 2048);
             KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, List.of(ssh));
 
@@ -667,14 +602,12 @@ class KeyMaterialCapabilitiesTest {
                     "server-signing-v1",
                     KeyMaterialPurpose.SERVER_SIGNING,
                     KeyMaterialAlgorithm.RSA,
-                    1,
-                    CLUSTER);
+                    1);
             KeyMaterialDescriptor ca = descriptor(
                     "orion-ca-v1",
                     KeyMaterialPurpose.CERTIFICATE_AUTHORITY,
                     KeyMaterialAlgorithm.RSA,
-                    1,
-                    CLUSTER);
+                    1);
             service.generateKeyIfMissing(signing, 2048);
             service.generateKeyIfMissing(ca, 2048);
             KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, List.of(signing, ca));
@@ -772,15 +705,14 @@ class KeyMaterialCapabilitiesTest {
             String alias,
             KeyMaterialPurpose purpose,
             KeyMaterialAlgorithm algorithm,
-            long version,
-            KeyMaterialScope scope) {
+            long version) {
         return new KeyMaterialDescriptor(
-                new KeyMaterialAlias(alias), purpose, algorithm, new KeyMaterialVersion(version), scope);
+                new KeyMaterialAlias(alias), purpose, algorithm, new KeyMaterialVersion(version));
     }
 
     private static TrustedCertificateDescriptor trustedCertificate(String alias) {
         return new TrustedCertificateDescriptor(
-                new KeyMaterialAlias(alias), KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1), CLUSTER);
+                new KeyMaterialAlias(alias), KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1));
     }
 
     private static Certificate nonX509Certificate() {

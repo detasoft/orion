@@ -12,7 +12,6 @@ import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialScope;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.internal.UserEmail;
@@ -64,7 +63,7 @@ class PlaywrightExternalServicesIT {
 
         BootstrapConfiguration configuration = serverConfiguration(tempDir.resolve("orion"));
         KeyPair rootKey = KeyUtils.generateRSAKeyPair().valueOrFailure("test root key");
-        AcmeMaterialConfiguration material = acmeMaterial(configuration);
+        AcmeMaterialConfiguration material = acmeMaterial();
         try (TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(configuration)) {
             identity.material().acquireAcmeKeys(material, 2048, 2048);
             runPlaywright(configuration, identity, rootKey, fixtureRoot, caRoot);
@@ -87,16 +86,14 @@ class PlaywrightExternalServicesIT {
         });
     }
 
-    private static AcmeMaterialConfiguration acmeMaterial(BootstrapConfiguration configuration) {
-        KeyMaterialScope scope = KeyMaterialScope.cluster(
-                configuration.getBootstrap().getKeyMaterial().getClusterId());
+    private static AcmeMaterialConfiguration acmeMaterial() {
         return new AcmeMaterialConfiguration(
                 new KeyMaterialDescriptor(new KeyMaterialAlias("acme-account"),
                         KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA,
-                        new KeyMaterialVersion(1), scope),
+                        new KeyMaterialVersion(1)),
                 new KeyMaterialDescriptor(new KeyMaterialAlias("acme-identity"),
                         KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA,
-                        new KeyMaterialVersion(1), scope),
+                        new KeyMaterialVersion(1)),
                 Optional.empty());
     }
 

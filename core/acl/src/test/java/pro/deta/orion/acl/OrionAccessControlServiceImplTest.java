@@ -326,7 +326,7 @@ class OrionAccessControlServiceImplTest {
         try {
             OrionConfigurationEditor editor =
                     new OrionConfigurationEditor(
-                            storage, new BootstrapConfiguration(), testCipher(), testMaterial(), storage.events);
+                            storage, testCipher(), testMaterial(), storage.events);
             OrionConfigurationModification modification =
                     editor.edit(storage.snapshot.revision(), ChangeMetadata.EMPTY);
             try (Subscription subscription = editor.subscribe(published::add)) {
@@ -412,7 +412,7 @@ class OrionAccessControlServiceImplTest {
         InMemoryStorage storage =
                 new InMemoryStorage(snapshot(serialize(new AccessControl()), Optional.empty()));
         BootstrapConfiguration configuration = new BootstrapConfiguration();
-        OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, configuration,
+        OrionConfigurationEditor editor = new OrionConfigurationEditor(storage,
                 testCipher(), testMaterial(), storage.events);
         OrionAccessControlServiceImpl service =
                 new OrionAccessControlServiceImpl(
@@ -443,8 +443,7 @@ class OrionAccessControlServiceImplTest {
     void reloadFailureAfterSaveConsumesTheEditWithoutClaimingRollback() {
         FailingReloadStorage storage = new FailingReloadStorage(
                 snapshot(serialize(new AccessControl()), Optional.empty()));
-        OrionConfigurationEditor editor = new OrionConfigurationEditor(storage,
-                new BootstrapConfiguration(), testCipher(), testMaterial(), new OrionEventManager());
+        OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, testCipher(), testMaterial(), new OrionEventManager());
         OrionConfigurationModification modification =
                 editor.edit(new OrionRevision.Absent(), ChangeMetadata.EMPTY);
         try {
@@ -1318,7 +1317,7 @@ class OrionAccessControlServiceImplTest {
         InMemoryStorage storage = new InMemoryStorage(null);
         BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getBootstrap().getAccessControl().setCreateDefaultIfMissing(true);
-        OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, configuration,
+        OrionConfigurationEditor editor = new OrionConfigurationEditor(storage,
                 testCipher(), testMaterial(), storage.events);
         OrionAccessControlServiceImpl service =
                 new OrionAccessControlServiceImpl(
@@ -1396,7 +1395,7 @@ class OrionAccessControlServiceImplTest {
                         testServerIdentity(),
                         configuration,
                         new OrionConfigurationEditor(
-                                storage, configuration, testCipher(), testMaterial(), events));
+                                storage, testCipher(), testMaterial(), events));
         ByteArrayOutputStream processOutput = new ByteArrayOutputStream();
         PrintStream originalOut = System.out;
         try (PrintStream output = new PrintStream(processOutput, true, StandardCharsets.UTF_8)) {
@@ -1478,7 +1477,7 @@ class OrionAccessControlServiceImplTest {
                 new OrionDocumentRevision(Result.of(document), new OrionRevision.Stored("version-one")));
         BootstrapConfiguration configuration = new BootstrapConfiguration();
         OrionConfigurationEditor editor =
-                new OrionConfigurationEditor(storage, configuration, testCipher(), material, storage.events);
+                new OrionConfigurationEditor(storage, testCipher(), material, storage.events);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(hashing,
                 new RootPasswordReset(false), identity, configuration, editor);
         try {

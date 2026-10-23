@@ -111,7 +111,6 @@ class OrionKeyMaterialFactoryTest {
         configuration.getBootstrap().setBaseDir(tempDir.toString());
         configuration.getBootstrap().getKeyMaterial().setLocation("security/orion.p12");
         configuration.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);
-        configuration.getBootstrap().getKeyMaterial().setClusterId("test-cluster");
         configuration.getBootstrap()
                 .getKeyMaterial()
                 .getServerSigning()

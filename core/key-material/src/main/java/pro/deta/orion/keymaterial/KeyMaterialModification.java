@@ -17,14 +17,12 @@ import java.util.Optional;
 /** Collects append-only additions for one KMS version; deletion adds a new, marked version of an entry. */
 public final class KeyMaterialModification implements Modification {
     private final KeyMaterialService owner;
-    private final KeyMaterialScope.Cluster scope;
     private final long version;
     private final List<Addition> additions = new ArrayList<>();
     private boolean finished;
 
-    KeyMaterialModification(KeyMaterialService owner, KeyMaterialScope.Cluster scope, long version) {
+    KeyMaterialModification(KeyMaterialService owner, long version) {
         this.owner = owner;
-        this.scope = scope;
         this.version = version;
     }
 
@@ -35,7 +33,7 @@ public final class KeyMaterialModification implements Modification {
     public synchronized void generateKey(KeyMaterialDescriptor descriptor, int keySize)
             throws GeneralSecurityException {
         requireOpen();
-        requireScope(descriptor);
+        requireDescriptor(descriptor);
         Addition existing = find(descriptor.alias().value());
         if (existing != null) {
             requireAvailable(existing);
@@ -48,7 +46,7 @@ public final class KeyMaterialModification implements Modification {
     public synchronized void importKey(KeyMaterialDescriptor descriptor, KeyPair keyPair)
             throws GeneralSecurityException {
         requireOpen();
-        requireScope(descriptor);
+        requireDescriptor(descriptor);
         requireAbsent(descriptor.alias().value());
         add(descriptor.alias().value(), owner.preparePrivateKey(descriptor, keyPair), false);
     }
@@ -57,7 +55,7 @@ public final class KeyMaterialModification implements Modification {
             throws GeneralSecurityException {
         try {
             requireOpen();
-            requireScope(descriptor);
+            requireDescriptor(descriptor);
             if (privateKeyPem == null || privateKeyPem.length == 0) {
                 throw new IllegalArgumentException("Private key input must not be empty");
             }
@@ -73,7 +71,7 @@ public final class KeyMaterialModification implements Modification {
     public synchronized void importSecretKey(KeyMaterialDescriptor descriptor, SecretKey key)
             throws GeneralSecurityException {
         requireOpen();
-        requireScope(descriptor);
+        requireDescriptor(descriptor);
         requireAbsent(descriptor.alias().value());
         add(descriptor.alias().value(), owner.prepareSecretKey(descriptor, key), false);
     }
@@ -81,7 +79,7 @@ public final class KeyMaterialModification implements Modification {
     public synchronized void setTrustedCertificate(TrustedCertificateDescriptor descriptor,
             X509Certificate certificate) throws GeneralSecurityException {
         requireOpen();
-        requireScope(descriptor);
+        requireDescriptor(descriptor);
         Addition existing = find(descriptor.alias().value());
         if (existing != null) {
             requireAvailable(existing);
@@ -94,7 +92,7 @@ public final class KeyMaterialModification implements Modification {
             List<? extends Certificate> chain, Optional<TrustedCertificateDescriptor> issuer)
             throws GeneralSecurityException {
         requireOpen();
-        requireScope(identity);
+        requireDescriptor(identity);
         if (identity.purpose() != KeyMaterialPurpose.TLS_IDENTITY
                 && identity.purpose() != KeyMaterialPurpose.CERTIFICATE_AUTHORITY) {
             throw new IllegalArgumentException("Certificate chains require TLS identity or CA material");
@@ -106,7 +104,7 @@ public final class KeyMaterialModification implements Modification {
         Optional<X509Certificate> root = Optional.empty();
         if (issuer.isPresent()) {
             TrustedCertificateDescriptor descriptor = issuer.orElseThrow();
-            requireScope(descriptor);
+            requireDescriptor(descriptor);
             Addition trusted = requireEntry(descriptor.alias().value());
             owner.validatePrepared(trusted.entry(), descriptor);
             root = Optional.of((X509Certificate) ((KeyStore.TrustedCertificateEntry) trusted.entry())
@@ -120,7 +118,7 @@ public final class KeyMaterialModification implements Modification {
 
     public synchronized void delete(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
         requireOpen();
-        requireScope(descriptor);
+        requireDescriptor(descriptor);
         Addition existing = requireEntry(descriptor.alias().value());
         owner.validatePrepared(existing.entry(), descriptor);
         add(existing.alias(), existing.entry(), true);
@@ -128,7 +126,7 @@ public final class KeyMaterialModification implements Modification {
 
     public synchronized void delete(TrustedCertificateDescriptor descriptor) throws GeneralSecurityException {
         requireOpen();
-        requireScope(descriptor);
+        requireDescriptor(descriptor);
         Addition existing = requireEntry(descriptor.alias().value());
         owner.validatePrepared(existing.entry(), descriptor);
         add(existing.alias(), existing.entry(), true);
@@ -184,20 +182,12 @@ public final class KeyMaterialModification implements Modification {
         owner.requireOpen();
     }
 
-    private void requireScope(KeyMaterialScope actual) {
-        if (!scope.equals(actual)) {
-            throw new IllegalArgumentException("Key material reference does not belong to the owner cluster");
-        }
-    }
-
-    private void requireScope(KeyMaterialDescriptor descriptor) {
+    private void requireDescriptor(KeyMaterialDescriptor descriptor) {
         if (descriptor == null) throw new IllegalArgumentException("Key material descriptor must not be null");
-        requireScope(descriptor.scope());
     }
 
-    private void requireScope(TrustedCertificateDescriptor descriptor) {
+    private void requireDescriptor(TrustedCertificateDescriptor descriptor) {
         if (descriptor == null) throw new IllegalArgumentException("Trusted certificate descriptor must not be null");
-        requireScope(descriptor.scope());
     }
 
     record Addition(String alias, KeyStore.Entry entry, long version, boolean deleted) {}

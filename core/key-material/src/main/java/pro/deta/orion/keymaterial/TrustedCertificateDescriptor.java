@@ -3,8 +3,7 @@ package pro.deta.orion.keymaterial;
 public record TrustedCertificateDescriptor(
         KeyMaterialAlias alias,
         KeyMaterialAlgorithm algorithm,
-        KeyMaterialVersion version,
-        KeyMaterialScope scope) {
+        KeyMaterialVersion version) {
     public TrustedCertificateDescriptor {
         if (alias == null) {
             throw new IllegalArgumentException("Trusted certificate alias must not be null");
@@ -14,9 +13,6 @@ public record TrustedCertificateDescriptor(
         }
         if (version == null) {
             throw new IllegalArgumentException("Trusted certificate version must not be null");
-        }
-        if (scope == null) {
-            throw new IllegalArgumentException("Trusted certificate scope must not be null");
         }
     }
 

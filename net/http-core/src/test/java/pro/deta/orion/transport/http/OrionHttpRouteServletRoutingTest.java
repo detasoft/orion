@@ -1,7 +1,5 @@
 package pro.deta.orion.transport.http;
 
-
-
 import pro.deta.orion.config.OrionConfigurationEditor;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,7 +18,6 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.auth.DefaultAccessControl;
-import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.test.integration.TestConfiguration;
@@ -275,7 +272,6 @@ class OrionHttpRouteServletRoutingTest {
     private static OrionHttpRoute acmeRoute(TestConfiguration desired) {
         return new OrionAdminAcmeCertificateRoute(
                 new AcmeCertificateService(
-                        new BootstrapConfiguration(),
                         desired.acl(),
                         OrionKeyMaterial.unavailable(),
                         new AcmeCertificateIssuer(null),

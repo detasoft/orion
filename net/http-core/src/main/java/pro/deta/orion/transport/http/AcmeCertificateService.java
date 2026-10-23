@@ -16,10 +16,8 @@ import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialScope;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
-import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
@@ -42,7 +40,6 @@ public class AcmeCertificateService {
     private static final Logger LOG = LoggerFactory.getLogger(AcmeCertificateService.class);
     private static final int RSA_KEY_SIZE = KeyMaterialConstants.RSA_KEY_SIZE_BITS;
 
-    private final String clusterId;
     private final OrionAccessControlService configurationService;
     private final OrionKeyMaterial keyMaterial;
     private final AcmeCertificateIssuer certificateIssuer;
@@ -55,14 +52,10 @@ public class AcmeCertificateService {
 
     @Inject
     public AcmeCertificateService(
-            BootstrapConfiguration bootstrapConfiguration,
             OrionAccessControlService configurationService,
             OrionKeyMaterial keyMaterial,
             AcmeCertificateIssuer certificateIssuer,
             ConfigurationSecrets secrets) {
-        this.clusterId = required(
-                bootstrapConfiguration.getBootstrap().getKeyMaterial().getClusterId(),
-                "Key material cluster id is required");
         this.configurationService = configurationService;
         this.keyMaterial = keyMaterial;
         this.certificateIssuer = certificateIssuer;
@@ -321,42 +314,35 @@ public class AcmeCertificateService {
 
     private AcmeMaterialConfiguration materialFrom(OrionHttpsConfiguration https) {
         OrionAcmeConfiguration acme = https.acme().orElseThrow();
-        KeyMaterialScope scope = KeyMaterialScope.cluster(clusterId);
         KeyMaterialDescriptor account = descriptor(
                 acme.accountMaterial().orElseThrow(
                         () -> new ConfigurationUnavailableException("ACME account material is not configured")),
-                KeyMaterialPurpose.ACME_ACCOUNT,
-                scope);
+                KeyMaterialPurpose.ACME_ACCOUNT);
         KeyMaterialDescriptor identity = descriptor(
                 https.identity().orElseThrow(
                         () -> new ConfigurationUnavailableException("ACME TLS identity material is not configured")),
-                KeyMaterialPurpose.TLS_IDENTITY,
-                scope);
+                KeyMaterialPurpose.TLS_IDENTITY);
         Optional<TrustedCertificateDescriptor> issuer = https.serverIssuerTrustAnchor()
-                .map(reference -> trustedCertificate(reference, scope));
+                .map(AcmeCertificateService::trustedCertificate);
         return new AcmeMaterialConfiguration(account, identity, issuer);
     }
 
     private static KeyMaterialDescriptor descriptor(
             OrionMaterialReference reference,
-            KeyMaterialPurpose purpose,
-            KeyMaterialScope scope) {
+            KeyMaterialPurpose purpose) {
         return new KeyMaterialDescriptor(
                 new KeyMaterialAlias(reference.alias()),
                 purpose,
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(reference.version()),
-                scope);
+                new KeyMaterialVersion(reference.version()));
     }
 
     private static TrustedCertificateDescriptor trustedCertificate(
-            OrionMaterialReference reference,
-            KeyMaterialScope scope) {
+            OrionMaterialReference reference) {
         return new TrustedCertificateDescriptor(
                 new KeyMaterialAlias(reference.alias()),
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(reference.version()),
-                scope);
+                new KeyMaterialVersion(reference.version()));
     }
 
     private static List<String> domainsFrom(IssueRequest request, OrionAcmeConfiguration configuration) {

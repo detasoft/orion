@@ -65,7 +65,6 @@ class OrionConfigurationBootstrapShapeTest {
                     auth:
                       credentialKind: private-key
                       credential: file:/run/secrets/orion-material-key
-                    clusterId: orion-cluster
                     serverSigning:
                       algorithm: RSA
                       active:
@@ -125,7 +124,6 @@ class OrionConfigurationBootstrapShapeTest {
         assertEquals(
                 "file:/run/secrets/orion-material-key",
                 configuration.getBootstrap().getKeyMaterial().getAuth().get("credential"));
-        assertEquals("orion-cluster", configuration.getBootstrap().getKeyMaterial().getClusterId());
         assertEquals(
                 "server-signing-v2",
                 configuration.getBootstrap().getKeyMaterial().getServerSigning().getActive().getAlias());

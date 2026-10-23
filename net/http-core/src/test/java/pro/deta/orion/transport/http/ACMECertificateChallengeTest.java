@@ -8,7 +8,6 @@ import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
-import pro.deta.orion.keymaterial.KeyMaterialScope;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
@@ -66,7 +65,6 @@ public class ACMECertificateChallengeTest {
         WaitingChallengeIssuer issuer = new WaitingChallengeIssuer(challengeService);
         try (OrionKeyMaterial material = keyMaterial()) {
             AcmeCertificateService service = new AcmeCertificateService(
-                    bootstrap(),
                     desiredStateWithAcme().acl(),
                     material,
                     issuer, null);
@@ -178,12 +176,6 @@ public class ACMECertificateChallengeTest {
         return desiredState;
     }
 
-    private static BootstrapConfiguration bootstrap() {
-        BootstrapConfiguration configuration = new BootstrapConfiguration();
-        configuration.getBootstrap().getKeyMaterial().setClusterId("test-cluster");
-        return configuration;
-    }
-
     private static TestConfiguration desiredStateWithAcme() {
         OrionAcmeConfiguration acme = new OrionAcmeConfiguration(
                 true,
@@ -270,8 +262,7 @@ public class ACMECertificateChallengeTest {
 
     private static OrionKeyMaterial keyMaterial() throws Exception {
         KeyMaterialDescriptor signing = new KeyMaterialDescriptor(new KeyMaterialAlias("server-signing-v1"),
-                KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1),
-                KeyMaterialScope.cluster("test-cluster"));
+                KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1));
         return OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
                 KeyMaterialOptions.pkcs12("test-password".toCharArray()),
                 new SigningMaterialSet(signing, List.of()), 2048, new KeyMaterialCreation(true));

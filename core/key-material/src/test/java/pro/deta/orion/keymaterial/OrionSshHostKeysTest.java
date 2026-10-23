@@ -9,8 +9,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionSshHostKeysTest {
-    private static final KeyMaterialScope.Cluster CLUSTER = new KeyMaterialScope.Cluster("orion-prod");
-
     @Test
     void createsDefaultsOnFirstAccessAndReloadsThem() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
@@ -100,8 +98,7 @@ class OrionSshHostKeysTest {
                 new KeyMaterialAlias("server-signing-v1"),
                 KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(1),
-                CLUSTER);
+                new KeyMaterialVersion(1));
     }
 
     private static KeyMaterialDescriptor sshHostKey(
@@ -112,7 +109,6 @@ class OrionSshHostKeysTest {
                 new KeyMaterialAlias(alias),
                 KeyMaterialPurpose.SSH_HOST,
                 algorithm,
-                new KeyMaterialVersion(version),
-                CLUSTER);
+                new KeyMaterialVersion(version));
     }
 }

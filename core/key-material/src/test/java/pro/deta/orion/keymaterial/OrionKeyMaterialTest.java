@@ -15,8 +15,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionKeyMaterialTest {
-    private static final KeyMaterialScope CLUSTER = KeyMaterialScope.cluster("orion-prod");
-
     @Test
     void createsActiveIdentityOnlyForANewStoreAndReloadsIt() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
@@ -145,8 +143,7 @@ class OrionKeyMaterialTest {
                 "server-signing-ed25519",
                 KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.ED25519,
-                1,
-                CLUSTER);
+                1);
 
         assertThatThrownBy(() -> OrionKeyMaterial.open(
                 store,
@@ -167,9 +164,9 @@ class OrionKeyMaterialTest {
                 2048,
                 new KeyMaterialCreation(true));
         KeyMaterialDescriptor account = descriptor(
-                "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1, CLUSTER);
+                "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor identity = descriptor(
-                "https-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1, CLUSTER);
+                "https-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
         AcmeMaterialConfiguration acme = new AcmeMaterialConfiguration(account, identity, Optional.empty());
         TlsMaterialConfiguration tls = new TlsMaterialConfiguration(
                 identity, Optional.empty(), List.of(), TlsClientAuthentication.DISABLED);
@@ -189,7 +186,7 @@ class OrionKeyMaterialTest {
         assertThat(certificate.createContext().getProtocol()).isEqualTo("TLS");
         assertThat(store.readCalls).isEqualTo(1);
         KeyMaterialDescriptor staleAccount = descriptor(account.alias().value(), account.purpose(),
-                account.algorithm(), 2, account.scope());
+                account.algorithm(), 2);
         AcmeMaterialConfiguration stale = new AcmeMaterialConfiguration(staleAccount, identity, Optional.empty());
         assertThatThrownBy(() -> material.certificateIdentity(stale))
                 .isInstanceOf(GeneralSecurityException.class).hasMessageContaining("version");
@@ -203,38 +200,8 @@ class OrionKeyMaterialTest {
                 .hasMessageContaining("closed");
     }
 
-    @Test
-    void rejectsLateBoundMaterialOutsideTheOwnerClusterScope() throws Exception {
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(
-                    store,
-                    options(),
-                    new SigningMaterialSet(rsa("server-signing-v1", 1), List.of()),
-                    2048,
-                    new KeyMaterialCreation(true))) {
-            KeyMaterialDescriptor account = descriptor(
-                    "acme-account-v1",
-                    KeyMaterialPurpose.ACME_ACCOUNT,
-                    KeyMaterialAlgorithm.RSA,
-                    1,
-                    KeyMaterialScope.cluster("other"));
-            KeyMaterialDescriptor identity = descriptor(
-                    "https-v1",
-                    KeyMaterialPurpose.TLS_IDENTITY,
-                    KeyMaterialAlgorithm.RSA,
-                    1,
-                    KeyMaterialScope.cluster("other"));
-            AcmeMaterialConfiguration configuration = new AcmeMaterialConfiguration(
-                    account, identity, Optional.empty());
-
-            assertThatThrownBy(() -> material.acquireAcmeKeys(configuration, 2048, 2048))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("owner cluster");
-        }
-    }
-
     private static KeyMaterialDescriptor rsa(String alias, long version) {
-        return descriptor(alias, KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, version, CLUSTER);
+        return descriptor(alias, KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, version);
     }
 
     @Test
@@ -390,8 +357,8 @@ class OrionKeyMaterialTest {
 
     private static AcmeMaterialConfiguration acmeConfiguration() {
         return new AcmeMaterialConfiguration(
-                descriptor("acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1, CLUSTER),
-                descriptor("https-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1, CLUSTER),
+                descriptor("acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1),
+                descriptor("https-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1),
                 Optional.empty());
     }
 
@@ -419,14 +386,12 @@ class OrionKeyMaterialTest {
             String alias,
             KeyMaterialPurpose purpose,
             KeyMaterialAlgorithm algorithm,
-            long version,
-            KeyMaterialScope scope) {
+            long version) {
         return new KeyMaterialDescriptor(
                 new KeyMaterialAlias(alias),
                 purpose,
                 algorithm,
-                new KeyMaterialVersion(version),
-                scope);
+                new KeyMaterialVersion(version));
     }
 
     @Test

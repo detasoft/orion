@@ -1093,8 +1093,7 @@ class OrionOidcOnboardingTest {
             });
             provider.start();
             KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(new KeyMaterialAlias("signing"),
-                    KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1),
-                    KeyMaterialScope.cluster("test"));
+                    KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1));
             try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
                 material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
                         new SigningMaterialSet(descriptor, List.of()), 2048, new KeyMaterialCreation(true));
@@ -1131,7 +1130,6 @@ class OrionOidcOnboardingTest {
             OrionXml.write(document, xml);
             storage.snapshot = new OrionDocumentRevision(Result.of(document), new OrionRevision.Stored("0"));
             editor = new OrionConfigurationEditor(storage,
-                new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
                 material.configurationCipher(),
                 material,
                 EVENTS.manager());

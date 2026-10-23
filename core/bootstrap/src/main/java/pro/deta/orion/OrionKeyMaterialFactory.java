@@ -9,7 +9,6 @@ import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialResourceResolver;
-import pro.deta.orion.keymaterial.KeyMaterialScope;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
@@ -98,12 +97,12 @@ public final class OrionKeyMaterialFactory {
         } catch (IllegalArgumentException failure) {
             throw new IllegalArgumentException("Unsupported server signing algorithm", failure);
         }
-        KeyMaterialScope scope = KeyMaterialScope.cluster(required(material.getClusterId(), "cluster id"));
-        KeyMaterialDescriptor active = descriptor(signing.getActive(), algorithm, scope, "active");
+
+        KeyMaterialDescriptor active = descriptor(signing.getActive(), algorithm, "active");
         List<KeyMaterialDescriptor> verification = new ArrayList<>();
         if (signing.getVerification() != null) {
             for (SigningKeyReferenceConfig reference : signing.getVerification()) {
-                verification.add(descriptor(reference, algorithm, scope, "verification"));
+                verification.add(descriptor(reference, algorithm, "verification"));
             }
         }
         return new SigningMaterialSet(active, verification);
@@ -112,7 +111,6 @@ public final class OrionKeyMaterialFactory {
     private static KeyMaterialDescriptor descriptor(
             SigningKeyReferenceConfig reference,
             KeyMaterialAlgorithm algorithm,
-            KeyMaterialScope scope,
             String role) {
         if (reference == null) {
             throw new IllegalArgumentException("Server signing " + role + " reference must not be null");
@@ -121,8 +119,7 @@ public final class OrionKeyMaterialFactory {
                 new KeyMaterialAlias(required(reference.getAlias(), role + " alias")),
                 KeyMaterialPurpose.SERVER_SIGNING,
                 algorithm,
-                new KeyMaterialVersion(reference.getVersion()),
-                scope);
+                new KeyMaterialVersion(reference.getVersion()));
     }
 
     private static String resolveAgainstBaseDirectory(

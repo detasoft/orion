@@ -40,7 +40,6 @@ import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialScope;
 import pro.deta.orion.keymaterial.KeyMaterialService;
 import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
@@ -314,8 +313,7 @@ class BootstrapContextTest {
                         new KeyMaterialAlias("server-signing-v2"),
                         KeyMaterialPurpose.SERVER_SIGNING,
                         KeyMaterialAlgorithm.RSA,
-                        new KeyMaterialVersion(2),
-                        KeyMaterialScope.cluster("orion"));
+                        new KeyMaterialVersion(2));
                 try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("correct-password".toCharArray());
                      KeyMaterialService material = KeyMaterialService.open(
                              new NativeGitKeyMaterialContentStore(
@@ -1539,8 +1537,7 @@ class BootstrapContextTest {
             OrionDocumentRevision approved) {
         return BootstrapContext.adoptProxies(
                 new OrionConfigurationEditor(
-                        storage,
-                        new BootstrapConfiguration(), context.configurationCipher(), context.keyMaterial(),
+                        storage, context.configurationCipher(), context.keyMaterial(),
                         EVENTS.rawManager()),
                 context.repositoryFactory(), context.configurationCipher(), approved);
     }

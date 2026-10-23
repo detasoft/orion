@@ -10,7 +10,6 @@ import pro.deta.orion.keymaterial.KeyMaterialCapabilities;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialScope;
 import pro.deta.orion.keymaterial.KeyMaterialService;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -57,8 +56,7 @@ final class S3ConfigurationFixture implements AutoCloseable {
                         EVENTS.manager());
         provider = new NativeGitRepositoryProvider(factory);
         KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(new KeyMaterialAlias("configuration-v1"),
-                KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES, new KeyMaterialVersion(1),
-                KeyMaterialScope.cluster("test"));
+                KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES, new KeyMaterialVersion(1));
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-material".toCharArray())) {
             material = KeyMaterialService.open(new InMemoryKeyMaterialContentStore(), options);
         }

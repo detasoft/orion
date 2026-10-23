@@ -20,7 +20,6 @@ import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialScope;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.CertificateIdentity;
@@ -52,7 +51,6 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
     private static final long STOP_TIMEOUT_MILLIS = 1_000;
 
     private final HttpTransportConfig httpTransportConfig;
-    private final KeyMaterialScope clusterScope;
     private final OrionAccessControlService configurationService;
     private final OrionKeyMaterial keyMaterial;
     private final AgentSessionServer agentServer;
@@ -71,8 +69,6 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
             OrionAuthorizationFilter authorizationFilter,
             AgentSessionServer agentServer) {
         this.httpTransportConfig = orionConfiguration.getTransport().getHttp();
-        this.clusterScope = KeyMaterialScope.cluster(
-                orionConfiguration.getBootstrap().getKeyMaterial().getClusterId());
         this.configurationService = configurationService;
         this.keyMaterial = keyMaterial;
         this.rootServlet = rootServlet;
@@ -338,15 +334,13 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
                 new KeyMaterialAlias(reference.alias()),
                 purpose,
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(reference.version()),
-                clusterScope);
+                new KeyMaterialVersion(reference.version()));
     }
 
     private TrustedCertificateDescriptor trustedCertificate(OrionMaterialReference reference) {
         return new TrustedCertificateDescriptor(
                 new KeyMaterialAlias(reference.alias()),
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(reference.version()),
-                clusterScope);
+                new KeyMaterialVersion(reference.version()));
     }
 }

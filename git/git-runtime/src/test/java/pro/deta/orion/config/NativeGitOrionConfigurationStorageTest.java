@@ -14,7 +14,6 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.bootstrap.config.BootstrapConfigurationSourceConfig;
-import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.util.Result;
 
 import pro.deta.orion.internal.ChangeMetadata;
@@ -274,7 +273,6 @@ class NativeGitOrionConfigurationStorageTest {
     private static OrionConfigurationEditor editor(OrionVersionedConfigurationStorage storage) {
         return new OrionConfigurationEditor(
                 storage,
-                new BootstrapConfiguration(),
                 pro.deta.orion.keymaterial.ConfigurationSecretCipher.unavailable(),
                 pro.deta.orion.keymaterial.OrionKeyMaterial.unavailable(),
                 EVENTS.manager());

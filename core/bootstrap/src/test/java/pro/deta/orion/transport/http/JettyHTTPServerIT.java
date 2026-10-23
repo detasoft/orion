@@ -66,7 +66,6 @@ import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialScope;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
@@ -146,7 +145,6 @@ class JettyHTTPServerIT {
     private static final AgentProtocolCodec AGENT_CODEC =
             new AgentProtocolCodec(AgentProtocolLimits.defaults());
     private static final int HTTPS_START_ATTEMPTS = 3;
-    private static final String CLUSTER = "test-cluster";
     private static final KeyMaterialDescriptor SIGNING = descriptor(
             "server-signing-v1", KeyMaterialPurpose.SERVER_SIGNING);
     private static final KeyMaterialDescriptor ACCOUNT = descriptor(
@@ -1148,7 +1146,6 @@ class JettyHTTPServerIT {
 
     static BootstrapConfiguration httpConfiguration(boolean enabled) {
         BootstrapConfiguration configuration = new BootstrapConfiguration();
-        configuration.getBootstrap().getKeyMaterial().setClusterId(CLUSTER);
         configuration.getTransport().setHttp(new HttpTransportConfig("127.0.0.1", 0));
         configuration.getTransport().getHttp().setEnabled(enabled);
         return configuration;
@@ -1170,16 +1167,14 @@ class JettyHTTPServerIT {
                 new KeyMaterialAlias(alias),
                 purpose,
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(1),
-                KeyMaterialScope.cluster(CLUSTER));
+                new KeyMaterialVersion(1));
     }
 
     private static TrustedCertificateDescriptor trusted(String alias) {
         return new TrustedCertificateDescriptor(
                 new KeyMaterialAlias(alias),
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(1),
-                KeyMaterialScope.cluster(CLUSTER));
+                new KeyMaterialVersion(1));
     }
 
     private static OrionMaterialReference reference(KeyMaterialDescriptor descriptor) {

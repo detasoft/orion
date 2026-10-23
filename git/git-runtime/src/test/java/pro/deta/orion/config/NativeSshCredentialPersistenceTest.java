@@ -72,7 +72,6 @@ class NativeSshCredentialPersistenceTest {
         generator.initialize(2048);
         KeyPair key = generator.generateKeyPair();
         OrionConfigurationEditor editor = new OrionConfigurationEditor(storage,
-                new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
                 pro.deta.orion.keymaterial.ConfigurationSecretCipher.unavailable(),
                 pro.deta.orion.keymaterial.OrionKeyMaterial.unavailable(),
                 EVENTS.manager());
@@ -108,7 +107,6 @@ class NativeSshCredentialPersistenceTest {
                                 "acl",
                                 "refs/heads/main",
                                 "users.xml"),
-                        new BootstrapConfiguration(),
                         pro.deta.orion.keymaterial.ConfigurationSecretCipher.unavailable(),
                         pro.deta.orion.keymaterial.OrionKeyMaterial.unavailable(),
                         EVENTS.manager()));

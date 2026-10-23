@@ -82,8 +82,7 @@ class KeyMaterialServiceTest {
         X509Certificate issuerCertificate = TestCertificateChain.root("Public Root").certificate();
         TrustedCertificateDescriptor descriptor = trustedCertificate(
                 KeyMaterialTestConstants.ORION_CA_CERT_2026_05_ALIAS,
-                1,
-                KeyMaterialScope.cluster("orion-prod"));
+                1);
 
         assertThatThrownBy(() -> service.setTrustedCertificate(descriptor, storageCertificate))
                 .hasMessageContaining("certificate authority");
@@ -103,13 +102,12 @@ class KeyMaterialServiceTest {
     void validatesTypedTrustedCertificateMetadataAndEntryType() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         TrustedCertificateDescriptor original = trustedCertificate(
-                "public-root-v1", 1, KeyMaterialScope.cluster("orion-prod"));
+                "public-root-v1", 1);
         KeyMaterialDescriptor privateEntry = new KeyMaterialDescriptor(
                 new KeyMaterialAlias("private-entry-v1"),
                 KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(1),
-                KeyMaterialScope.cluster("orion-prod"));
+                new KeyMaterialVersion(1));
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
             service.setTrustedCertificate(original, root.certificate());
@@ -119,21 +117,16 @@ class KeyMaterialServiceTest {
 
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
             TrustedCertificateDescriptor wrongVersion = trustedCertificate(
-                    original.alias().value(), 2, original.scope());
-            TrustedCertificateDescriptor wrongScope = trustedCertificate(
-                    original.alias().value(), 1, KeyMaterialScope.cluster("other"));
+                    original.alias().value(), 2);
             TrustedCertificateDescriptor wrongAlgorithm = new TrustedCertificateDescriptor(
                     original.alias(),
                     KeyMaterialAlgorithm.EC,
-                    original.version(),
-                    original.scope());
+                    original.version());
             TrustedCertificateDescriptor wrongEntryType = trustedCertificate(
-                    privateEntry.alias().value(), 1, privateEntry.scope());
+                    privateEntry.alias().value(), 1);
 
             assertThatThrownBy(() -> service.validateExisting(wrongVersion))
                     .hasMessageContaining("version");
-            assertThatThrownBy(() -> service.validateExisting(wrongScope))
-                    .hasMessageContaining("scope");
             assertThatThrownBy(() -> service.validateExisting(wrongAlgorithm))
                     .hasMessageContaining("algorithm");
             assertThatThrownBy(() -> service.validateExisting(wrongEntryType))
@@ -142,33 +135,26 @@ class KeyMaterialServiceTest {
     }
 
     @Test
-    void discoversTypedPrivateKeysByPurposeAndScope() throws Exception {
+    void discoversTypedPrivateKeysByPurpose() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        KeyMaterialScope node = KeyMaterialScope.node("orion-prod", "node-7");
+
         KeyMaterialDescriptor rsa = descriptor(
-                "ssh-host-z-rsa-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.RSA, node);
+                "ssh-host-z-rsa-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.RSA);
         KeyMaterialDescriptor ec = descriptor(
-                "ssh-host-a-ec-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.EC, node);
-        KeyMaterialDescriptor otherNode = descriptor(
-                "ssh-host-other-v1",
-                KeyMaterialPurpose.SSH_HOST,
-                KeyMaterialAlgorithm.RSA,
-                KeyMaterialScope.node("orion-prod", "node-8"));
+                "ssh-host-a-ec-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.EC);
         KeyMaterialDescriptor signing = descriptor(
                 "server-signing-v1",
                 KeyMaterialPurpose.SERVER_SIGNING,
-                KeyMaterialAlgorithm.RSA,
-                KeyMaterialScope.cluster("orion-prod"));
+                KeyMaterialAlgorithm.RSA);
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
             service.generateKeyIfMissing(rsa, 2048);
             service.generateKeyIfMissing(ec, 256);
-            service.generateKeyIfMissing(otherNode, 2048);
             service.generateKeyIfMissing(signing, 2048);
             service.save();
         }
 
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            assertThat(service.privateKeyDescriptors(KeyMaterialPurpose.SSH_HOST, node))
+            assertThat(service.privateKeyDescriptors(KeyMaterialPurpose.SSH_HOST))
                     .containsExactly(ec, rsa);
         }
     }
@@ -176,12 +162,12 @@ class KeyMaterialServiceTest {
     @Test
     void inventoriesPublicMaterialWithoutExposingPrivateOrSecretKeys() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        KeyMaterialScope scope = KeyMaterialScope.cluster("orion-prod");
+
         KeyMaterialDescriptor identity = descriptor(
-                "tls-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, scope);
+                "tls-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA);
         KeyMaterialDescriptor cipher = descriptor(
-                "configuration-v1", KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES, scope);
-        TrustedCertificateDescriptor trust = trustedCertificate("issuer-v1", 1, scope);
+                "configuration-v1", KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES);
+        TrustedCertificateDescriptor trust = trustedCertificate("issuer-v1", 1);
         TestCertificateChain.Authority issuer = TestCertificateChain.root("Public Root");
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
             KeyPair keyPair = service.generateKeyIfMissing(identity, 2048);
@@ -224,8 +210,7 @@ class KeyMaterialServiceTest {
                 new KeyMaterialAlias(KeyMaterialTestConstants.BAD_SERVER_SIGNING_ALIAS),
                 KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(1),
-                KeyMaterialScope.cluster("orion-prod"));
+                new KeyMaterialVersion(1));
 
         assertThatThrownBy(() -> service.setPrivateKey(
                 descriptor,
@@ -329,25 +314,21 @@ class KeyMaterialServiceTest {
 
     private static TrustedCertificateDescriptor trustedCertificate(
             String alias,
-            long version,
-            KeyMaterialScope scope) {
+            long version) {
         return new TrustedCertificateDescriptor(
                 new KeyMaterialAlias(alias),
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(version),
-                scope);
+                new KeyMaterialVersion(version));
     }
 
     private static KeyMaterialDescriptor descriptor(
             String alias,
             KeyMaterialPurpose purpose,
-            KeyMaterialAlgorithm algorithm,
-            KeyMaterialScope scope) {
+            KeyMaterialAlgorithm algorithm) {
         return new KeyMaterialDescriptor(
                 new KeyMaterialAlias(alias),
                 purpose,
                 algorithm,
-                new KeyMaterialVersion(1),
-                scope);
+                new KeyMaterialVersion(1));
     }
 }

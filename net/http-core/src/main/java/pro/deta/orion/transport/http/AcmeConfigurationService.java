@@ -17,9 +17,7 @@ import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialScope;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
-import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
@@ -47,18 +45,16 @@ public final class AcmeConfigurationService {
     private final OrionConfigurationEditor editor;
     private final AcmeCertificateService certificates;
     private final OrionKeyMaterial material;
-    private final KeyMaterialScope scope;
 
     @Inject
     public AcmeConfigurationService(OrionAccessControlService configurationService, ConfigurationSecrets secrets,
             OrionConfigurationEditor editor, AcmeCertificateService certificates,
-            OrionKeyMaterial material, BootstrapConfiguration bootstrap) {
+            OrionKeyMaterial material) {
         this.configurationService = configurationService;
         this.secrets = secrets;
         this.editor = editor;
         this.certificates = certificates;
         this.material = material;
-        this.scope = KeyMaterialScope.cluster(bootstrap.getBootstrap().getKeyMaterial().getClusterId());
     }
 
     public View view() {
@@ -132,9 +128,9 @@ public final class AcmeConfigurationService {
             try {
                 material.require(new KeyMaterialDescriptor(new KeyMaterialAlias(requestedAccount.alias()),
                         KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA,
-                        new KeyMaterialVersion(requestedAccount.version()), scope));
+                        new KeyMaterialVersion(requestedAccount.version())));
             } catch (GeneralSecurityException invalid) {
-                throw new IllegalArgumentException("Select an existing RSA ACME account key from this cluster");
+                throw new IllegalArgumentException("Select an existing RSA ACME account key");
             }
         }
         Optional<String> kid = Optional.ofNullable(input.eabKeyId()).map(String::trim).filter(s -> !s.isEmpty());

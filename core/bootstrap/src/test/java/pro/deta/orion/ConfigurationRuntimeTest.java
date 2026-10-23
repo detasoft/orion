@@ -30,7 +30,6 @@ public class ConfigurationRuntimeTest {
         assertEquals("refs/heads/main", oc.getBootstrap().getKeyMaterial().selectedRef());
         assertEquals("material.p12", oc.getBootstrap().getKeyMaterial().getPath());
         assertEquals("env:ORION_KEY_MATERIAL_PASSWORD", oc.getBootstrap().getKeyMaterial().getPassword());
-        assertEquals("orion", oc.getBootstrap().getKeyMaterial().getClusterId());
         assertEquals("repos", oc.getStorage().getLocation());
         assertTrue(oc.getTransport().getGit().isEnabled());
         assertEquals(9419, oc.getTransport().getGit().getPort());

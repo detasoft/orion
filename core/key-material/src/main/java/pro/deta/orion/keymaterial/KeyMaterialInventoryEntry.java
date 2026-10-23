@@ -8,7 +8,6 @@ public record KeyMaterialInventoryEntry(
         String purpose,
         String algorithm,
         long version,
-        String scope,
         String publicKeyPem,
         String publicKeySha256Fingerprint,
         List<CertificateDetails> certificates) {
