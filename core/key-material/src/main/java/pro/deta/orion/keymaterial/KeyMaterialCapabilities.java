@@ -132,14 +132,8 @@ public final class KeyMaterialCapabilities {
 
             @Override
             public boolean verify(byte[] payload, byte[] signature) throws GeneralSecurityException {
-                requireBytes(payload, "Payload");
-                requireBytes(signature, "Signature");
                 for (KeyMaterialDescriptor descriptor : immutable) {
-                    Signature verifier = Signature.getInstance(
-                            descriptor.algorithm().requireSignatureAlgorithm());
-                    verifier.initVerify(owner.getKeyPair(descriptor.alias().value()).getPublic());
-                    verifier.update(payload);
-                    if (verifier.verify(signature)) {
+                    if (verifyWith(descriptor, payload, signature)) {
                         return true;
                     }
                 }
@@ -353,6 +347,16 @@ public final class KeyMaterialCapabilities {
         signer.initSign(owner.getKeyPair(descriptor.alias().value()).getPrivate());
         signer.update(payload);
         return signer.sign();
+    }
+
+    boolean verifyWith(KeyMaterialDescriptor descriptor, byte[] payload, byte[] signature)
+            throws GeneralSecurityException {
+        requireBytes(payload, "Payload");
+        requireBytes(signature, "Signature");
+        Signature verifier = Signature.getInstance(descriptor.algorithm().requireSignatureAlgorithm());
+        verifier.initVerify(owner.getKeyPair(descriptor.alias().value()).getPublic());
+        verifier.update(payload);
+        return verifier.verify(signature);
     }
 
     SSLContext createTlsContext(

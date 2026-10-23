@@ -66,7 +66,7 @@ public final class CertificateIdentity {
         return selected.createTlsContext(identity, chain, clientTrust);
     }
 
-    private boolean isStorageCertificate(X509Certificate certificate) {
+    static boolean isStorageCertificate(X509Certificate certificate) {
         return certificate.getBasicConstraints() < 0
                 && certificate.getSubjectX500Principal().equals(certificate.getIssuerX500Principal())
                 && certificate.getSubjectX500Principal().getName()

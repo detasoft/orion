@@ -14,9 +14,12 @@ import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.PrivateKey;
+import java.security.PublicKey;
 import java.security.interfaces.RSAPrivateCrtKey;
 import java.security.spec.RSAPublicKeySpec;
 import java.security.spec.RSAPrivateCrtKeySpec;
+import java.security.cert.X509Certificate;
+import javax.net.ssl.SSLContext;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -24,10 +27,12 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 
 /**
- * Owns runtime key material and selects signing, certificate and configuration cipher identities.
- * The configuration cipher is persisted on first seal;
+ * Owns runtime key material, reads committed entries and prepares isolated modifications.
+ * The legacy configuration cipher is persisted on first seal;
  * a failed material save invalidates this owner so a caller must reopen the durable state before retrying.
  */
 public class OrionKeyMaterial implements AutoCloseable {
@@ -43,6 +48,14 @@ public class OrionKeyMaterial implements AutoCloseable {
         this.owner = owner;
         this.clusterScope = clusterScope;
         this.signingIdentity = signingIdentity;
+    }
+
+    public static OrionKeyMaterial open(KeyMaterialContentStore store, KeyMaterialOptions options,
+            KeyMaterialScope scope) throws IOException, GeneralSecurityException {
+        Objects.requireNonNull(scope, "scope");
+        KeyMaterialScope.Cluster cluster = requireClusterScope(scope);
+        return new OrionKeyMaterial(
+                KeyMaterialService.open(store, options), cluster, SigningIdentity.unavailable());
     }
 
     public static OrionKeyMaterial open(
@@ -101,6 +114,179 @@ public class OrionKeyMaterial implements AutoCloseable {
         return signingIdentity;
     }
 
+    public KeyMaterialScope.Cluster scope() {
+        requireAvailable();
+        return clusterScope;
+    }
+
+    public long version() {
+        requireAvailable();
+        return owner.revision();
+    }
+
+    public KeyMaterialModification modify() {
+        requireAvailable();
+        return owner.modify(clusterScope);
+    }
+
+    public void withModification(KeyMaterialModification.Operation operation)
+            throws IOException, GeneralSecurityException {
+        Objects.requireNonNull(operation, "operation");
+        KeyMaterialModification modification = modify();
+        try {
+            operation.accept(modification);
+        } finally {
+            modification.discard();
+        }
+    }
+
+    public boolean contains(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
+        Objects.requireNonNull(descriptor, "descriptor");
+        requireOwnerScope(descriptor.scope());
+        synchronized (owner) {
+            if (!owner.containsAlias(descriptor.alias().value())) return false;
+            owner.validateExisting(descriptor);
+            return true;
+        }
+    }
+
+    public boolean contains(TrustedCertificateDescriptor descriptor) throws GeneralSecurityException {
+        Objects.requireNonNull(descriptor, "descriptor");
+        requireOwnerScope(descriptor.scope());
+        synchronized (owner) {
+            if (!owner.containsAlias(descriptor.alias().value())) return false;
+            owner.validateExisting(descriptor);
+            return true;
+        }
+    }
+
+    public List<KeyMaterialDescriptor> privateKeyDescriptors(KeyMaterialPurpose purpose)
+            throws GeneralSecurityException {
+        requireAvailable();
+        Objects.requireNonNull(purpose, "purpose");
+        return owner.privateKeyDescriptors(purpose, clusterScope);
+    }
+
+    public KeyPair keyPair(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
+        requireAvailable();
+        synchronized (owner) {
+            require(descriptor);
+            if (descriptor.algorithm() == KeyMaterialAlgorithm.AES) {
+                throw new IllegalArgumentException("Symmetric key material has no key pair");
+            }
+            return owner.getKeyPair(descriptor.alias().value());
+        }
+    }
+
+    public PublicKey publicKey(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
+        return keyPair(descriptor).getPublic();
+    }
+
+    public byte[] sign(KeyMaterialDescriptor descriptor, byte[] payload) throws GeneralSecurityException {
+        requireAvailable();
+        synchronized (owner) {
+            KeyMaterialCapabilities selected = signingOperations(descriptor);
+            return selected.signWith(descriptor, payload);
+        }
+    }
+
+    public boolean verify(KeyMaterialDescriptor descriptor, byte[] payload, byte[] signature)
+            throws GeneralSecurityException {
+        requireAvailable();
+        synchronized (owner) {
+            KeyMaterialCapabilities selected = signingOperations(descriptor);
+            return selected.verifyWith(descriptor, payload, signature);
+        }
+    }
+
+    private KeyMaterialCapabilities signingOperations(KeyMaterialDescriptor descriptor)
+            throws GeneralSecurityException {
+        Objects.requireNonNull(descriptor, "descriptor");
+        requireOwnerScope(descriptor.scope());
+        if (descriptor.purpose() != KeyMaterialPurpose.SERVER_SIGNING
+                && descriptor.purpose() != KeyMaterialPurpose.CERTIFICATE_AUTHORITY) {
+            throw new IllegalArgumentException("Signatures require server signing or CA material");
+        }
+        return KeyMaterialCapabilities.open(owner, List.of(descriptor));
+    }
+
+    public ConfigurationSecretEnvelope seal(KeyMaterialDescriptor descriptor, byte[] plaintext,
+            ConfigurationSecretContext context) throws GeneralSecurityException {
+        requireAvailable();
+        synchronized (owner) {
+            requireCipher(descriptor);
+            return KeyMaterialCapabilities.open(owner, List.of(descriptor))
+                    .sealConfigurationSecret(descriptor, plaintext, context);
+        }
+    }
+
+    public byte[] open(KeyMaterialDescriptor descriptor, ConfigurationSecretEnvelope envelope,
+            ConfigurationSecretContext context) throws GeneralSecurityException {
+        requireAvailable();
+        synchronized (owner) {
+            requireCipher(descriptor);
+            return KeyMaterialCapabilities.open(owner, List.of(descriptor))
+                    .openConfigurationSecret(descriptor, envelope, context);
+        }
+    }
+
+    private void requireCipher(KeyMaterialDescriptor descriptor) {
+        Objects.requireNonNull(descriptor, "descriptor");
+        requireOwnerScope(descriptor.scope());
+        if (descriptor.purpose() != KeyMaterialPurpose.CONFIGURATION_CIPHER) {
+            throw new IllegalArgumentException("Encryption requires configuration cipher material");
+        }
+    }
+
+    public List<X509Certificate> certificateChain(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
+        Objects.requireNonNull(descriptor, "descriptor");
+        requireOwnerScope(descriptor.scope());
+        synchronized (owner) {
+            return KeyMaterialCapabilities.open(owner, List.of(descriptor)).x509CertificateChain(descriptor);
+        }
+    }
+
+    public Optional<List<X509Certificate>> issuedCertificateChain(KeyMaterialDescriptor descriptor)
+            throws GeneralSecurityException {
+        Objects.requireNonNull(descriptor, "descriptor");
+        requireOwnerScope(descriptor.scope());
+        synchronized (owner) {
+            if (!owner.containsAlias(descriptor.alias().value())) return Optional.empty();
+            List<X509Certificate> chain = certificateChain(descriptor);
+            if (chain.size() == 1 && CertificateIdentity.isStorageCertificate(chain.getFirst())) {
+                return Optional.empty();
+            }
+            return Optional.of(chain);
+        }
+    }
+
+    public X509Certificate trustedCertificate(TrustedCertificateDescriptor descriptor)
+            throws GeneralSecurityException {
+        Objects.requireNonNull(descriptor, "descriptor");
+        requireOwnerScope(descriptor.scope());
+        return owner.getTrustedCertificate(descriptor);
+    }
+
+    public SSLContext createTlsContext(TlsMaterialConfiguration configuration) throws GeneralSecurityException {
+        requireAvailable();
+        synchronized (owner) {
+            return certificateIdentity(configuration).createContext();
+        }
+    }
+
+    public List<KeyPair> sshHostKeyPairs(List<SshHostKeyReference> references) throws GeneralSecurityException {
+        requireAvailable();
+        if (references == null) throw new IllegalArgumentException("SSH host key references must not be null");
+        synchronized (owner) {
+            List<KeyMaterialDescriptor> available = privateKeyDescriptors(KeyMaterialPurpose.SSH_HOST);
+            List<KeyMaterialDescriptor> selected = references.isEmpty()
+                    ? available : selectSshHostKeys(available, references);
+            List<KeyPair> keys = new ArrayList<>();
+            for (KeyMaterialDescriptor descriptor : selected) keys.add(keyPair(descriptor));
+            return List.copyOf(keys);
+        }
+    }
+
     public void createKey(String alias, KeyMaterialPurpose purpose, char[] privateKeyPem)
             throws IOException, GeneralSecurityException {
         try {
@@ -133,7 +319,7 @@ public class OrionKeyMaterial implements AutoCloseable {
         }
     }
 
-    private static KeyPair readRsaPrivateKey(char[] input) {
+    static KeyPair readRsaPrivateKey(char[] input) {
         try {
             if (input.length > 16384) throw new IllegalArgumentException();
             int start = 0;
@@ -227,12 +413,14 @@ public class OrionKeyMaterial implements AutoCloseable {
 
     public void require(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
         if (owner == null) throw new GeneralSecurityException("Configuration material is unavailable");
+        Objects.requireNonNull(descriptor, "descriptor");
         requireOwnerScope(descriptor.scope());
         owner.validateExisting(descriptor);
     }
 
     public void require(TrustedCertificateDescriptor descriptor) throws GeneralSecurityException {
         if (owner == null) throw new GeneralSecurityException("Configuration material is unavailable");
+        Objects.requireNonNull(descriptor, "descriptor");
         requireOwnerScope(descriptor.scope());
         owner.validateExisting(descriptor);
     }
@@ -244,10 +432,14 @@ public class OrionKeyMaterial implements AutoCloseable {
 
     public ConfigurationSecretCipher configurationCipher() {
         if (owner == null) return ConfigurationSecretCipher.unavailable();
-        KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(new KeyMaterialAlias("configuration-v1"),
+        return new ConfigurationSecretCipher(configurationCipherKey(), this);
+    }
+
+    public KeyMaterialDescriptor configurationCipherKey() {
+        requireAvailable();
+        return new KeyMaterialDescriptor(new KeyMaterialAlias("configuration-v1"),
                 KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES,
                 new KeyMaterialVersion(1), clusterScope);
-        return new ConfigurationSecretCipher(descriptor, this);
     }
 
     ConfigurationSecretEnvelope sealConfigurationSecret(KeyMaterialDescriptor descriptor,
