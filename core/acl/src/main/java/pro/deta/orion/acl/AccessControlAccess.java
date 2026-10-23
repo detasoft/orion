@@ -2,7 +2,6 @@ package pro.deta.orion.acl;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
-import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.config.OrionConfigurationModification;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
@@ -113,12 +112,6 @@ public class AccessControlAccess implements Modification {
                     "Stored SSH credential is invalid",
                     List.of(),
                     e);
-        } catch (OrionConfigurationConcurrentUpdateException e) {
-            return SshCredentialUpdateResult.failure(
-                    SshCredentialFailureCode.CONCURRENT_UPDATE,
-                    "Access control changed concurrently",
-                    List.of(),
-                    e);
         } catch (RuntimeException e) {
             return SshCredentialUpdateResult.failure(
                     SshCredentialFailureCode.PERSISTENCE_FAILED,
@@ -200,12 +193,6 @@ public class AccessControlAccess implements Modification {
             return SshCredentialUpdateResult.failure(
                     SshCredentialFailureCode.INVALID_STORED_KEY,
                     "Stored SSH credential is invalid",
-                    List.of(),
-                    e);
-        } catch (OrionConfigurationConcurrentUpdateException e) {
-            return SshCredentialUpdateResult.failure(
-                    SshCredentialFailureCode.CONCURRENT_UPDATE,
-                    "Access control changed concurrently",
                     List.of(),
                     e);
         } catch (RuntimeException e) {
