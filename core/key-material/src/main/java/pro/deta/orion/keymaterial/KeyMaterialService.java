@@ -290,15 +290,6 @@ public class KeyMaterialService implements AutoCloseable {
         return new KeyPair(entry.getCertificate().getPublicKey(), entry.getPrivateKey());
     }
 
-    synchronized void importKey(KeyMaterialDescriptor descriptor, KeyPair keyPair) throws GeneralSecurityException {
-        requireOpen();
-        requireDescriptor(descriptor);
-        if (readAddition(descriptor.alias().value()) != null) {
-            throw new IllegalArgumentException("Key material name already exists");
-        }
-        appendLegacy(descriptor.alias().value(), preparePrivateKey(descriptor, keyPair));
-    }
-
     public synchronized void generateSecretKeyIfMissing(
             KeyMaterialDescriptor descriptor,
             int keySize) throws GeneralSecurityException {

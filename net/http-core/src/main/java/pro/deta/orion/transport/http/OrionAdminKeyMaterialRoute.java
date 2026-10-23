@@ -6,6 +6,10 @@ import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
+import pro.deta.orion.keymaterial.KeyMaterialAlias;
+import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialVersion;
 
 import java.io.IOException;
 import java.security.GeneralSecurityException;
@@ -47,12 +51,33 @@ public final class OrionAdminKeyMaterialRoute extends BaseAdminRoute {
             if (bytes.length > 32768) return OrionHttpResponse.empty(413);
             input = mapper.readValue(bytes, CreateKey.class);
             if (input == null) throw new IllegalArgumentException("Key settings are required");
-            material.createKey(input.alias(), input.purpose(), input.privateKeyPem());
+            if (input.alias() == null || !input.alias().matches("[a-z0-9][a-z0-9._-]{0,127}")) {
+                throw new IllegalArgumentException("Invalid key material name");
+            }
+            if (input.purpose() != KeyMaterialPurpose.ACME_ACCOUNT
+                    && input.purpose() != KeyMaterialPurpose.TLS_IDENTITY) {
+                throw new IllegalArgumentException("Only ACME account and TLS identity keys can be created");
+            }
+            KeyMaterialAlias alias = new KeyMaterialAlias(input.alias());
+            KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(alias,
+                    input.purpose(), KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1));
+            char[] privateKeyPem = input.privateKeyPem();
+            material.withModification(modification -> {
+                if (material.contains(alias)) {
+                    throw new IllegalArgumentException("Key material name already exists");
+                }
+                if (privateKeyPem == null || privateKeyPem.length == 0) {
+                    modification.generateKey(descriptor, 3072);
+                } else {
+                    modification.importKey(descriptor, privateKeyPem);
+                }
+                modification.apply();
+            });
             return OrionHttpResponse.empty(201).withHeader("Cache-Control", "no-store");
         } catch (IllegalArgumentException | JsonProcessingException invalid) {
             return OrionHttpResponse.text(400,
                     "Check the unique key name, purpose and RSA private key PEM or Certbot JSON (2048–8192 bits).");
-        } catch (IOException | GeneralSecurityException failure) {
+        } catch (IOException | GeneralSecurityException | IllegalStateException failure) {
             return OrionHttpResponse.text(503, "Could not save key material.");
         } finally {
             if (bytes != null) Arrays.fill(bytes, (byte) 0);

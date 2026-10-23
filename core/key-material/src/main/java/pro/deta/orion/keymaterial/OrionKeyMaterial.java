@@ -137,6 +137,12 @@ public class OrionKeyMaterial implements AutoCloseable {
         }
     }
 
+    public boolean contains(KeyMaterialAlias alias) throws GeneralSecurityException {
+        requireAvailable();
+        Objects.requireNonNull(alias, "alias");
+        return owner.containsAlias(alias.value());
+    }
+
     public boolean contains(TrustedCertificateDescriptor descriptor) throws GeneralSecurityException {
         Objects.requireNonNull(descriptor, "descriptor");
         requireAvailable();
@@ -269,38 +275,6 @@ public class OrionKeyMaterial implements AutoCloseable {
             List<KeyPair> keys = new ArrayList<>();
             for (KeyMaterialDescriptor descriptor : selected) keys.add(keyPair(descriptor));
             return List.copyOf(keys);
-        }
-    }
-
-    public void createKey(String alias, KeyMaterialPurpose purpose, char[] privateKeyPem)
-            throws IOException, GeneralSecurityException {
-        try {
-            if (owner == null) throw new GeneralSecurityException("Key material administration is unavailable");
-            if (alias == null || !alias.matches("[a-z0-9][a-z0-9._-]{0,127}")) {
-                throw new IllegalArgumentException("Invalid key material name");
-            }
-            if (purpose != KeyMaterialPurpose.ACME_ACCOUNT && purpose != KeyMaterialPurpose.TLS_IDENTITY) {
-                throw new IllegalArgumentException("Only ACME account and TLS identity keys can be created");
-            }
-            KeyPair imported = privateKeyPem == null || privateKeyPem.length == 0
-                    ? null : readRsaPrivateKey(privateKeyPem);
-            KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(new KeyMaterialAlias(alias),
-                    purpose, KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1));
-            synchronized (owner) {
-                if (owner.containsAlias(alias)) {
-                    throw new IllegalArgumentException("Key material name already exists");
-                }
-                if (imported == null) owner.generateKeyIfMissing(descriptor, 3072);
-                else owner.importKey(descriptor, imported);
-                try {
-                    owner.save();
-                } catch (IOException | GeneralSecurityException | RuntimeException failure) {
-                    owner.close();
-                    throw failure;
-                }
-            }
-        } finally {
-            if (privateKeyPem != null) Arrays.fill(privateKeyPem, '\0');
         }
     }
 

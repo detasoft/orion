@@ -51,7 +51,11 @@ class AcmeConfigurationServiceTest {
     @Test
     void selectsStoredAccountKeyPersistsItsReferenceAndReusesItForIssuance() throws Exception {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
-            owner.createKey("existing-account", KeyMaterialPurpose.ACME_ACCOUNT, null);
+            owner.withModification(modification -> {
+                modification.generateKey(new KeyMaterialDescriptor(new KeyMaterialAlias("existing-account"),
+                        KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1)), 3072);
+                modification.apply();
+            });
             OrionMaterialReference reference = new OrionMaterialReference("existing-account", 1);
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
             TestConfiguration desired = new TestConfiguration(EVENTS, bootstrap, owner.configurationCipher(),
@@ -135,7 +139,11 @@ class AcmeConfigurationServiceTest {
     void switchingExplicitAccountDoesNotReuseSavedEabCredentials() throws Exception {
         OrionDocument initial = OrionDocument.withAccessControl(new AccessControl());
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
-            owner.createKey("other-account", KeyMaterialPurpose.ACME_ACCOUNT, null);
+            owner.withModification(modification -> {
+                modification.generateKey(new KeyMaterialDescriptor(new KeyMaterialAlias("other-account"),
+                        KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1)), 3072);
+                modification.apply();
+            });
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
             TestConfiguration desired = new TestConfiguration(EVENTS, bootstrap, owner.configurationCipher(),
                     owner, owner.signingIdentity());
