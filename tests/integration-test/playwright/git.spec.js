@@ -1,12 +1,24 @@
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { request as httpsRequest } from 'node:https'
 import { promisify } from 'node:util'
 import { browserUrl, orionUrl, test, expect } from './fixtures.js'
 
 const run = promisify(execFile)
 const giteaUrl = 'https://fixture.orion.test:8443'
+
+async function restartOrion(directory, number) {
+  await writeFile(join(directory, `restart-${number}.request`), 'restart')
+  await expect.poll(async () => {
+    try { return await readFile(join(directory, `restart-${number}.ready`), 'utf8') }
+    catch (failure) {
+      if (failure.code === 'ENOENT') return ''
+      throw failure
+    }
+  }, { timeout: 45_000, message: `Orion completes restart ${number}` }).toBe('ready')
+}
 
 async function giteaRequest(method, path, password, data) {
   const ca = await readFile(new URL('../../external-services/.state/step/certs/root_ca.crt', import.meta.url))
@@ -381,7 +393,46 @@ test('invited organization member signs in through Gitea without crossing organi
         return (await fetch('/api/auth/me', { headers })).json()
       })
       expect(returningIdentity).toMatchObject({ organization, userId: firstIdentity.userId, admin: false })
+      const restartDirectory = process.env.ORION_OIDC_RESTART_DIRECTORY
+      let oldCookie
+      if (restartDirectory) {
+        await restartOrion(restartDirectory, 1)
+        await userPage.reload()
+        await expect(userPage.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible()
+        const renewed = await userPage.evaluate(async ({ organization, userId }) => {
+          const response = await fetch('/api/auth/oidc/refresh', { method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scope: 'organization', organization, userId }) })
+          const result = await response.json()
+          if (response.status !== 200) return { status: response.status }
+          const headers = { Authorization: `Bearer ${result.token}` }
+          const identity = await fetch('/api/auth/me', { headers })
+          const repositories = await fetch('/api/admin/repositories', { headers })
+          return { status: response.status, organization: result.organization, userId: result.userId,
+            scope: result.scope, identity: await identity.json(),
+            names: (await repositories.json()).repositories.map(item => item.name) }
+        }, { organization, userId: firstIdentity.userId })
+        expect(renewed).toMatchObject({ status: 200, organization, userId: firstIdentity.userId,
+          scope: 'organization', identity: { organization, userId: firstIdentity.userId, admin: false },
+          names: [ownRepository] })
+        oldCookie = (await userContext.cookies(origin)).find(cookie => cookie.name === '__Host-orion-oidc')
+        expect(Boolean(oldCookie), 'The authenticated browser has an Orion refresh cookie').toBe(true)
+      }
       await userPage.getByRole('button', { name: 'Sign out', exact: true }).click()
+      await expect(userPage.getByRole('button', { name: 'Sign in with OIDC', exact: true })).toBeVisible()
+      expect(await userPage.evaluate(() => sessionStorage.getItem('orion.ui.token'))).toBeNull()
+      if (restartDirectory) {
+        await restartOrion(restartDirectory, 2)
+        // Replay the pre-logout cookie: an empty cookie would not prove durable revocation.
+        await userContext.addCookies([oldCookie])
+        const status = await userPage.evaluate(async ({ organization, userId }) => {
+          const response = await fetch('/api/auth/oidc/refresh', { method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scope: 'organization', organization, userId }) })
+          return response.status
+        }, { organization, userId: firstIdentity.userId })
+        expect(status).toBe(401)
+      }
     } catch (failure) {
       if (userPage) {
         await test.info().attach('Organization OIDC user page', {

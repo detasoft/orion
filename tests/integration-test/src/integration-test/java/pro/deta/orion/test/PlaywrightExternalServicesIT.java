@@ -133,12 +133,15 @@ class PlaywrightExternalServicesIT {
             KeyPair rootKey, Path fixtureRoot, Path caRoot) throws Exception {
         SSLContext previousContext = SSLContext.getDefault();
         SSLSocketFactory previousFactory = HttpsURLConnection.getDefaultSSLSocketFactory();
+        Path restartDirectory = Files.createDirectory(tempDir.resolve("oidc-restarts"));
+        Path browserOutput = fixtureRoot.getParent().resolve("integration-test/target/browser-oidc-restart.log");
+        Process browser = null;
         try {
             SSLContext fixtureContext = trustFixtureCa(caRoot);
             SSLContext.setDefault(fixtureContext);
             HttpsURLConnection.setDefaultSSLSocketFactory(fixtureContext.getSocketFactory());
-            for (String goal : List.of("browser-acme-test", "browser-test")) {
-                boolean issueCertificate = goal.equals("browser-acme-test");
+            for (String phase : List.of("certificate", "browser", "refresh", "revoked")) {
+                boolean issueCertificate = phase.equals("certificate");
                 OrionComponent component = TestRuntimeBootstrap.componentBuilder(
                                 configuration, identity.capability(), identity.sshHostKeys())
                         .keyMaterial(identity.material())
@@ -161,7 +164,22 @@ class PlaywrightExternalServicesIT {
                             "GET", new URL("http://127.0.0.1:8000/api/auth/me"), TestBearerTokens.bearer(token));
                     assertThat(identityResponse.status()).isEqualTo(200);
                     assertThat(identityResponse.body()).contains("\"admin\":true");
-                    runPlaywrightGoal(fixtureRoot, token, goal);
+                    if (issueCertificate) {
+                        runPlaywrightGoal(fixtureRoot, token, "browser-acme-test", "");
+                    } else if (phase.equals("browser")) {
+                        browser = startPlaywrightGoal(fixtureRoot, token, "browser-test",
+                                "invited organization member", browserOutput);
+                        awaitRestartRequest(browser, restartDirectory.resolve("restart-1.request"), browserOutput);
+                    } else if (phase.equals("refresh")) {
+                        Files.writeString(restartDirectory.resolve("restart-1.ready"), "ready");
+                        awaitRestartRequest(browser, restartDirectory.resolve("restart-2.request"), browserOutput);
+                    } else {
+                        Files.writeString(restartDirectory.resolve("restart-2.ready"), "ready");
+                        awaitPlaywrightExit(browser, browserOutput);
+                        // The Git proxy scenario removes its upstream; run it after the final restart.
+                        runPlaywrightGoal(fixtureRoot, token, "browser-test",
+                                "^(?!.*invited organization member).*");
+                    }
                     if (!issueCertificate) {
                         List<OrionDocument.Organization> organizations = component.orionAccessControlService()
                                 .configuration().result()
@@ -188,6 +206,7 @@ class PlaywrightExternalServicesIT {
                 }
             }
         } finally {
+            if (browser != null && browser.isAlive()) browser.destroyForcibly();
             HttpsURLConnection.setDefaultSSLSocketFactory(previousFactory);
             SSLContext.setDefault(previousContext);
         }
@@ -269,23 +288,43 @@ class PlaywrightExternalServicesIT {
                 });
     }
 
-    private void runPlaywrightGoal(Path fixtureRoot, String token, String goal) throws Exception {
+    private void runPlaywrightGoal(Path fixtureRoot, String token, String goal, String filter) throws Exception {
         Path output = fixtureRoot.getParent().resolve("integration-test/target/" + goal + ".log");
+        Process process = startPlaywrightGoal(fixtureRoot, token, goal, filter, output);
+        try {
+            awaitPlaywrightExit(process, output);
+        } finally {
+            if (process.isAlive()) process.destroyForcibly();
+        }
+    }
+
+    private Process startPlaywrightGoal(Path fixtureRoot, String token, String goal, String filter, Path output)
+            throws IOException {
         ProcessBuilder command = new ProcessBuilder(
-                "make", "-s", goal, "URL=http://127.0.0.1:8000")
+                "make", "-s", goal, "URL=http://127.0.0.1:8000", "TEST=" + filter)
                 .directory(fixtureRoot.normalize().getParent().getParent().toFile())
                 .redirectErrorStream(true)
                 .redirectOutput(output.toFile());
         command.environment().put("ORION_TOKEN", token);
-        Process process = command.start();
-        try {
-            if (!process.waitFor(4, TimeUnit.MINUTES)) {
-                throw new AssertionError("Playwright external-services tests timed out: " + output);
+        command.environment().put("ORION_OIDC_RESTART_DIRECTORY", tempDir.resolve("oidc-restarts").toString());
+        return command.start();
+    }
+
+    private static void awaitPlaywrightExit(Process process, Path output) throws Exception {
+        if (!process.waitFor(4, TimeUnit.MINUTES)) {
+            throw new AssertionError("Playwright external-services tests timed out: " + output);
+        }
+        assertThat(process.exitValue()).as(Files.readString(output)).isZero();
+    }
+
+    private static void awaitRestartRequest(Process process, Path marker, Path output) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(1);
+        while (!Files.exists(marker)) {
+            if (process.waitFor(100, TimeUnit.MILLISECONDS)) {
+                throw new AssertionError("Browser exited before requesting restart: " + Files.readString(output));
             }
-            assertThat(process.exitValue()).as(Files.readString(output)).isZero();
-        } finally {
-            if (process.isAlive()) {
-                process.destroyForcibly();
+            if (System.nanoTime() >= deadline) {
+                throw new AssertionError("Browser did not request restart: " + marker);
             }
         }
     }

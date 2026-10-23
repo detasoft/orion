@@ -185,12 +185,22 @@ A fresh browser context signs in with Gitea and completes the invited profile.
 The member sees only their organization's repository; direct Git requests to
 the other organization and invitation administration return 403. A second
 sign-in without an invitation reuses the same identity without profile setup.
-The JVM test reloads persisted configuration and checks that only one member
-exists and the invitation was consumed. Its temporary Gitea OAuth2 application
-is deleted afterward. To run this scenario against a manual server, provision
+The JVM test reads persisted configuration and checks that only one member
+exists and the invitation was consumed. During the isolated Maven round, the
+same browser context also stays open across two Orion component restarts using
+the same data directory and key material. After the first restart, the member
+reloads the UI, renews the session, and reads their own repository with the new
+access token. After logout and the second restart, replaying the pre-logout
+refresh cookie returns 401, proving that revocation survived restart. Temporary
+files coordinate readiness only; cookies and tokens remain in browser memory.
+The temporary Gitea OAuth2 application is deleted after the OIDC scenario.
+The OIDC restart scenario runs before the Git proxy scenario, whose temporary
+upstream is deleted at the end of that scenario. To run the organization OIDC
+scenario against a manual server, provision
 those empty organizations and repositories first; the created member and
 provider remain there. This automated fixture scenario does not complete the
-public-provider, timeout, or active-session restart acceptance checks.
+public-provider or timeout acceptance checks. The restart checks run only under
+the JVM driver; a standalone browser goal does not restart a manual server.
 
 `OBSERVE=1` opens noVNC in your computer's default browser before running tests.
 If automatic opening is unavailable, the command prints the URL and continues.
