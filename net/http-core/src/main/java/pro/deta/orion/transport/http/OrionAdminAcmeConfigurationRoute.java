@@ -11,11 +11,11 @@ import java.util.Arrays;
 
 /** Admin ACME settings endpoint; never returns EAB secret values. */
 public final class OrionAdminAcmeConfigurationRoute extends BaseAdminRoute {
-    private final AcmeConfigurationService configuration;
+    private final AcmeCertificateService configuration;
     private final ObjectMapper mapper;
 
     @Inject
-    public OrionAdminAcmeConfigurationRoute(AcmeConfigurationService configuration, ObjectMapper mapper) {
+    public OrionAdminAcmeConfigurationRoute(AcmeCertificateService configuration, ObjectMapper mapper) {
         super("/api/admin/acme/configuration", OrionHttpRouteDefinition.Method.GET,
                 OrionHttpRouteDefinition.Method.POST);
         this.configuration = configuration;
@@ -30,7 +30,7 @@ public final class OrionAdminAcmeConfigurationRoute extends BaseAdminRoute {
     @Override
     protected OrionHttpResponse doPost(HttpServletRequest request) {
         byte[] bytes = null;
-        AcmeConfigurationService.Settings settings = null;
+        AcmeCertificateService.Settings settings = null;
         try {
             if (request.getContentType() == null
                     || !request.getContentType().split(";", 2)[0].equalsIgnoreCase("application/json")) {
@@ -38,7 +38,7 @@ public final class OrionAdminAcmeConfigurationRoute extends BaseAdminRoute {
             }
             bytes = request.getInputStream().readNBytes(16385);
             if (bytes.length > 16384) return OrionHttpResponse.empty(413);
-            settings = mapper.readValue(bytes, AcmeConfigurationService.Settings.class);
+            settings = mapper.readValue(bytes, AcmeCertificateService.Settings.class);
             SecurityContext context = (SecurityContext) request.getAttribute(
                     OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
             return OrionHttpResponse.ok(configuration.save(settings, context.getUserIdentity().getUserId()))

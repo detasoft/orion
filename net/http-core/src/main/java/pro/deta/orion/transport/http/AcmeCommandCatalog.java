@@ -25,20 +25,18 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
-/** SSH entry points use the same settings and issuance owners as the admin HTTP routes. */
+/** SSH entry points use the same ACME service as the admin HTTP routes. */
 public final class AcmeCommandCatalog {
-    private final AcmeConfigurationService configuration;
     private final AcmeCertificateService certificates;
 
     @Inject
-    public AcmeCommandCatalog(AcmeConfigurationService configuration, AcmeCertificateService certificates) {
-        this.configuration = configuration;
+    public AcmeCommandCatalog(AcmeCertificateService certificates) {
         this.certificates = certificates;
     }
 
     public CommandNode commandTree() {
         return CommandNode.builder()
-                .action(definition("show", Set.of(), Set.of(), ignored -> view(configuration.view())))
+                .action(definition("show", Set.of(), Set.of(), ignored -> view(certificates.view())))
                 .action(definition("configure", Set.of("revision", "provider", "directory-url", "email", "domains",
                         "eab-kid", "eab-hmac-key", "account-key", "account-key-version"),
                         Set.of("eab-hmac-key"), this::configure))
@@ -72,7 +70,7 @@ public final class AcmeCommandCatalog {
             OrionMaterialReference account = parameters.containsKey("account-key")
                     ? new OrionMaterialReference(parameters.get("account-key"),
                             Long.parseLong(parameters.get("account-key-version"))) : null;
-            return view(configuration.save(new AcmeConfigurationService.Settings(parameters.get("revision"),
+            return view(certificates.save(new AcmeCertificateService.Settings(parameters.get("revision"),
                     parameters.get("provider"), parameters.get("directory-url"), parameters.get("email"),
                     Arrays.asList(parameters.getOrDefault("domains", "").split(",", -1)),
                     parameters.get("eab-kid"), key, account), invocation.context().securityContext()
@@ -114,7 +112,7 @@ public final class AcmeCommandCatalog {
         return new CommandResult.Failure(CommandFailureCode.HANDLER_FAILED, message, List.of());
     }
 
-    private static CommandResult view(AcmeConfigurationService.View view) {
+    private static CommandResult view(AcmeCertificateService.View view) {
         Map<String, CommandValue> fields = new LinkedHashMap<>();
         fields.put("revision", CommandValue.text(view.revision()));
         fields.put("enabled", CommandValue.bool(view.enabled()));
