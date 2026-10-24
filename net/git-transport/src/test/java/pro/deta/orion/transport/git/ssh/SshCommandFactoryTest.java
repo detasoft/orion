@@ -1,6 +1,9 @@
 package pro.deta.orion.transport.git.ssh;
 
-import pro.deta.orion.util.Result;
+import pro.deta.orion.test.util.TestEvents;
+
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.test.integration.TestConfiguration;
 import java.util.Optional;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -53,7 +56,6 @@ import pro.deta.orion.transport.git.auth.RootSshKeyEnrollmentSession;
 import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
 
 import pro.deta.orion.config.OrionConfigurationModification;
-import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.internal.ChangeMetadata;
 import java.io.ByteArrayInputStream;
@@ -81,8 +83,8 @@ import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICA
 
 @Timeout(5)
 class SshCommandFactoryTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
+    private static final TestEvents EVENTS =
+            new TestEvents();
 
     @org.junit.jupiter.api.AfterEach
     void stopTestEvents() {
@@ -417,22 +419,14 @@ class SshCommandFactoryTest {
         AtomicInteger enrollments = new AtomicInteger();
         OrionAccessControlService accessControl =
                 new OrionAccessControlService() {
-                    @Override
-                    public OrionDocumentRevision configuration() {
-                        return new OrionDocumentRevision(
-                                Result.of(pro.deta.orion.schema.orion.v2.OrionDocument.withAccessControl(
-                                        new pro.deta.orion.schema.acl.AccessControl())),
-                                new OrionRevision.Absent());
-                    }
 
                     @Override
                     public AccessControlAccess createAccess(
                             OrionRevision revision, ChangeMetadata metadata) {
-                        OrionDocumentRevision snapshot = configuration();
                         return new AccessControlAccess(
                                 new OrionConfigurationModification(
-                                        snapshot.result().valueOrFailure("Cannot read test configuration"),
-                                        snapshot.revision(),
+                                        OrionDocument.withAccessControl(new pro.deta.orion.schema.acl.AccessControl()),
+                                        revision,
                                         document ->
                                                 revision instanceof OrionRevision.Stored stored
                                                         ? stored
@@ -687,7 +681,7 @@ class SshCommandFactoryTest {
                 new PlainCommandRenderer(),
                 new DefaultGitNativeRepositoryService(provider),
                 null,
-                null);
+                null, new TestConfiguration(EVENTS).editor());
     }
 
     private static Environment environment(Map<String, String> values) {
@@ -718,7 +712,7 @@ class SshCommandFactoryTest {
                 new PlainCommandRenderer(),
                 null,
                 null,
-                accessControlService);
+                accessControlService, new TestConfiguration(EVENTS).editor());
     }
 
     private static ExitOutcome run(

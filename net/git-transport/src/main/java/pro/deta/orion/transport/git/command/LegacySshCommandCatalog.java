@@ -82,7 +82,7 @@ public final class LegacySshCommandCatalog {
                 runtimeStateMachine,
                 repositoryProvider,
                 shutdownAction,
-                new SshCredentialCommandCatalog(accessControlService),
+                new SshCredentialCommandCatalog(accessControlService, editor),
                 readOnlyDomainCommandCatalog,
                 decisionCommandCatalog,
                 agentServer);

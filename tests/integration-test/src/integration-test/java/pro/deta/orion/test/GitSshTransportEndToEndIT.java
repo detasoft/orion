@@ -37,6 +37,8 @@ import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.component.OrionComponent;
+import pro.deta.orion.config.OrionConfigurationEditor;
+import pro.deta.orion.config.OrionConfigurationEditor.ConfigurationStatus;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -165,8 +167,7 @@ class GitSshTransportEndToEndIT {
         FileUtils.wipeDirectory(orionRoot);
         seedAclRepository(orionRoot, configurationPushAccessControl(false));
         startedOrion = startOrion(e2eConfiguration(orionRoot));
-        String activeA = startedOrion.accessControlService()
-                .configurationStatus().activeRevision().orElseThrow();
+        String activeA = startedOrion.editor().status().activeRevision().orElseThrow();
 
         try (SshdSessionFactory ssh = acceptingPublicKeySshFactory(
                 tempDir.resolve("configuration-ssh-home"), TRUSTED_USER_KEY);
@@ -179,8 +180,7 @@ class GitSshTransportEndToEndIT {
             ObjectId invalidB = createCommit(source, "orion.xml", "<orion", "invalid configuration");
             pushConfiguration(source, ssh);
 
-            OrionAccessControlServiceImpl.ConfigurationStatus invalid = startedOrion.accessControlService()
-                    .configurationStatus();
+            ConfigurationStatus invalid = startedOrion.editor().status();
             assertThat(invalid.storedRevision()).contains(invalidB.name());
             assertThat(invalid.activeRevision()).contains(activeA);
             assertThat(invalid.validation()).isEqualTo("invalid");
@@ -190,8 +190,7 @@ class GitSshTransportEndToEndIT {
                     serializeAccessControl(configurationPushAccessControl(true)), "repaired configuration");
             pushConfiguration(source, ssh);
 
-            OrionAccessControlServiceImpl.ConfigurationStatus recovered = startedOrion.accessControlService()
-                    .configurationStatus();
+            ConfigurationStatus recovered = startedOrion.editor().status();
             assertThat(recovered.storedRevision()).contains(validC.name());
             assertThat(recovered.activeRevision()).contains(validC.name());
             assertThat(recovered.validation()).isEqualTo("valid");
@@ -1086,6 +1085,7 @@ class GitSshTransportEndToEndIT {
                     lifecycle,
                     component.nativeGitRepositoryProvider(),
                     component.orionAccessControlService(),
+                    component.configurationEditor(),
                     identity,
                     component.httpTransport().boundHttpPort(),
                     component.sshTransport().boundPort());
@@ -1721,6 +1721,7 @@ class GitSshTransportEndToEndIT {
     private record StartedOrion(BootstrapConfiguration configuration, OrionApplicationLifecycle lifecycle,
                                 NativeGitRepositoryProvider gitRepositoryProvider,
                                 OrionAccessControlServiceImpl accessControlService,
+                                OrionConfigurationEditor editor,
                                 TestServerIdentityMaterial identity, int httpPort, int sshPort) {
         private KeyPair serverIdentityKey() {
             return identity.keyPair();

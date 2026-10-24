@@ -4,9 +4,11 @@ import java.util.Set;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
+import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.keymaterial.*;
+import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
@@ -14,15 +16,19 @@ import pro.deta.orion.util.Result;
 import pro.deta.orion.util.Subscription;
 import java.security.GeneralSecurityException;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Consumer;
 
-/** Owns configuration reads, change subscriptions, and candidates saved against their captured revisions. */
+/** Owns the last valid configuration, storage event processing, and edits against captured revisions. */
+@Slf4j
 @Singleton
-public final class OrionConfigurationEditor {
+public final class OrionConfigurationEditor implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
     private final OrionVersionedConfigurationStorage storage;
     private final OrionEventManager events;
     private final ConfigurationSecretCipher configurationCipher;
     private final OrionKeyMaterial configurationMaterial;
+    private volatile OrionDocumentRevision activeConfiguration;
+    private volatile Subscription changeSubscription;
 
     @Inject
     public OrionConfigurationEditor(OrionVersionedConfigurationStorage storage,
@@ -38,13 +44,97 @@ public final class OrionConfigurationEditor {
         return storage.load();
     }
 
-    public Subscription subscribe(Consumer<OrionDocumentRevision> listener) {
-        Objects.requireNonNull(listener, "listener");
-        return events.subscribe(ConfigurationChanged.class, event -> {
-            if (event.storage() == storage) {
-                listener.accept(event.snapshot());
+    @Override
+    public synchronized void onStart() {
+        if (changeSubscription != null) {
+            throw new IllegalStateException("Configuration editor is already running");
+        }
+        changeSubscription = events.subscribe(ConfigurationChanged.class, this::onConfigurationChange);
+        try {
+            OrionDocumentRevision snapshot = load();
+            if (snapshot.result() instanceof Result.Failure<OrionDocument> failure
+                    && failure.code() == Result.FailureCode.NOT_FOUND) {
+                activeConfiguration = null;
+                return;
             }
-        });
+            activate(snapshot);
+        } catch (RuntimeException failure) {
+            onStop();
+            throw failure;
+        }
+    }
+
+    @Override
+    public synchronized void onStop() {
+        if (changeSubscription != null) {
+            changeSubscription.close();
+            changeSubscription = null;
+        }
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return true;
+    }
+
+    @Override
+    public boolean isRunning() {
+        return changeSubscription != null;
+    }
+
+    public boolean isInitialized() {
+        return activeConfiguration != null;
+    }
+
+    public OrionDocumentRevision current() {
+        OrionDocumentRevision snapshot = activeConfiguration;
+        if (snapshot == null) {
+            throw new IllegalStateException("Configuration is not initialized");
+        }
+        return snapshot;
+    }
+
+    public ConfigurationStatus status() {
+        OrionDocumentRevision active = activeConfiguration;
+        Optional<String> activeRevision = active == null ? Optional.empty() : revisionValue(active.revision());
+        OrionDocumentRevision read = load();
+        return switch (read.result()) {
+            case Result.Success<OrionDocument> ignored -> new ConfigurationStatus(
+                    revisionValue(read.revision()), activeRevision,
+                    document(read) instanceof Result.Success<?> ? "valid" : "invalid");
+            case Result.Failure<OrionDocument> ignored ->
+                    new ConfigurationStatus(revisionValue(read.revision()), activeRevision, "unavailable");
+        };
+    }
+
+    private static Optional<String> revisionValue(OrionRevision revision) {
+        return switch (revision) {
+            case OrionRevision.Absent ignored -> Optional.empty();
+            case OrionRevision.Stored stored -> Optional.of(stored.value());
+        };
+    }
+
+    public record ConfigurationStatus(
+            Optional<String> storedRevision, Optional<String> activeRevision, String validation) {}
+
+    private synchronized void onConfigurationChange(ConfigurationChanged event) {
+        if (changeSubscription == null || event.storage() != storage) {
+            return;
+        }
+        OrionDocumentRevision snapshot = event.snapshot();
+        if (activeConfiguration != null && snapshot.revision().equals(activeConfiguration.revision())) {
+            return;
+        }
+        try {
+            activate(snapshot);
+        } catch (RuntimeException failure) {
+            log.warn("Retaining the last valid configuration after reload failure", failure);
+        }
+    }
+
+    private void activate(OrionDocumentRevision snapshot) {
+        document(snapshot).failOnFailure("Invalid configuration");
+        activeConfiguration = snapshot;
     }
 
     public OrionConfigurationModification edit(
@@ -66,7 +156,7 @@ public final class OrionConfigurationEditor {
                 updated -> storage.save(snapshot.revision(), validateConfiguration(updated), metadata));
     }
 
-    public Result<OrionDocument> document(OrionDocumentRevision snapshot) {
+    private Result<OrionDocument> document(OrionDocumentRevision snapshot) {
         if (snapshot.result() instanceof Result.Failure<OrionDocument> failure) {
             return failure;
         }

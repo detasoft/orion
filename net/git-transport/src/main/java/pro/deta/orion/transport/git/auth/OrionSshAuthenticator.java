@@ -7,6 +7,7 @@ import org.apache.sshd.server.auth.keyboard.InteractiveChallenge;
 import org.apache.sshd.server.auth.pubkey.PublickeyAuthenticator;
 import org.apache.sshd.server.session.ServerSession;
 import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.acl.AccessControlAccess;
 import pro.deta.orion.internal.ChangeMetadata;
@@ -42,10 +43,12 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator {
             new AttributeRepository.AttributeKey<>();
 
     private final OrionAccessControlService accessControlService;
+    private final OrionConfigurationEditor editor;
 
     @Inject
-    public OrionSshAuthenticator(OrionAccessControlService accessControlService) {
+    public OrionSshAuthenticator(OrionAccessControlService accessControlService, OrionConfigurationEditor editor) {
         this.accessControlService = accessControlService;
+        this.editor = editor;
     }
 
     @Override
@@ -145,7 +148,7 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator {
             return false;
         }
         if (authentication.rootRecoveryGeneration() == null) {
-            OrionDocumentRevision snapshot = accessControlService.configuration();
+            OrionDocumentRevision snapshot = editor.current();
             String email = "";
             for (User user : snapshot.result()
                     .valueOrFailure("Cannot read configuration document")

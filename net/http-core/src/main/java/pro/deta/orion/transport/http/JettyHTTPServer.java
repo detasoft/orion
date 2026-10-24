@@ -17,7 +17,7 @@ import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
 import org.eclipse.jetty.ee10.servlet.ServletHolder;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
-import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
@@ -50,7 +50,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
     private static final long STOP_TIMEOUT_MILLIS = 1_000;
 
     private final HttpTransportConfig httpTransportConfig;
-    private final OrionAccessControlService configurationService;
+    private final OrionConfigurationEditor editor;
     private final OrionKeyMaterial keyMaterial;
     private final AgentSessionServer agentServer;
     private final OrionHttpRouteServlet rootServlet;
@@ -62,13 +62,13 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
     @Inject
     public JettyHTTPServer(
             BootstrapConfiguration orionConfiguration,
-            OrionAccessControlService configurationService,
+            OrionConfigurationEditor editor,
             OrionKeyMaterial keyMaterial,
             OrionHttpRouteServlet rootServlet,
             OrionAuthorizationFilter authorizationFilter,
             AgentSessionServer agentServer) {
         this.httpTransportConfig = orionConfiguration.getTransport().getHttp();
-        this.configurationService = configurationService;
+        this.editor = editor;
         this.keyMaterial = keyMaterial;
         this.rootServlet = rootServlet;
         this.authorizationFilter = authorizationFilter;
@@ -301,7 +301,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
     }
 
     private Optional<OrionHttpsConfiguration> httpsConfiguration() {
-        return configurationService.configuration().result()
+        return editor.current().result()
                 .valueOrFailure("Cannot read configuration document")
                 .system().https();
     }

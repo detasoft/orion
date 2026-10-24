@@ -27,12 +27,12 @@ class JettyHTTPServerStateMachineTest {
         TestConfiguration desiredState = new TestConfiguration(EVENTS);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of(), List.of(),
-                List.of()),
+                List.of(), List.of()),
                 List.of()), Optional.of("test-revision"));
         JettyHTTPServer server =
                 new JettyHTTPServer(
                         new BootstrapConfiguration(),
-                        desiredState.acl(),
+                        desiredState.editor(),
                         OrionKeyMaterial.unavailable(),
                         null,
                         null,

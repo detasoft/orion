@@ -2,6 +2,7 @@ package pro.deta.orion.component;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.acl.OrionAccessControlStateMachine;
+import pro.deta.orion.config.OrionConfigurationEditorStateMachine;
 import pro.deta.orion.decision.Decision;
 import pro.deta.orion.decision.DecisionAction;
 import pro.deta.orion.decision.DecisionRegistry;
@@ -92,6 +93,7 @@ class OrionRuntimeStateMachineTest {
     private static OrionRuntimeStateMachine runtime(DecisionRegistry decisions,
             OrionExecutorStateMachine executor, OrionEventManagerStateMachine events) {
         return new OrionRuntimeStateMachine(executor, events,
+                new OrionConfigurationEditorStateMachine(OrionRuntimeStateMachineTest::unstartedService),
                 new OrionAccessControlStateMachine(OrionRuntimeStateMachineTest::unstartedService),
                 new AgentSessionServerStateMachine(OrionRuntimeStateMachineTest::unstartedService),
                 new TransportLifecycleStateMachine(

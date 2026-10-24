@@ -3,7 +3,7 @@ package pro.deta.orion.transport.http;
 import jakarta.inject.Inject;
 import jakarta.inject.Provider;
 import jakarta.servlet.http.HttpServletRequest;
-import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.TransportConfig;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
@@ -15,7 +15,7 @@ import java.util.Set;
 
 public class OrionAdminTransportsRoute extends BaseAdminRoute {
     private final BootstrapConfiguration configuration;
-    private final OrionAccessControlService configurationService;
+    private final OrionConfigurationEditor editor;
     private final Provider<JettyHTTPServer> httpServer;
     private final Provider<GitSshTransportService> sshServer;
     private final Provider<GitNativeTransportService> nativeGitServer;
@@ -23,13 +23,13 @@ public class OrionAdminTransportsRoute extends BaseAdminRoute {
     @Inject
     public OrionAdminTransportsRoute(
             BootstrapConfiguration configuration,
-            OrionAccessControlService configurationService,
+            OrionConfigurationEditor editor,
             Provider<JettyHTTPServer> httpServer,
             Provider<GitSshTransportService> sshServer,
             Provider<GitNativeTransportService> nativeGitServer) {
         super(OrionAdminPaths.TRANSPORTS, OrionHttpRouteDefinition.Method.GET);
         this.configuration = configuration;
-        this.configurationService = configurationService;
+        this.editor = editor;
         this.httpServer = httpServer;
         this.sshServer = sshServer;
         this.nativeGitServer = nativeGitServer;
@@ -120,7 +120,7 @@ public class OrionAdminTransportsRoute extends BaseAdminRoute {
     }
 
     private TransportDescriptor httpsDescriptor() {
-        OrionHttpsConfiguration https = configurationService.configuration()
+        OrionHttpsConfiguration https = editor.current()
                 .result().valueOrFailure("Cannot read configuration document")
                 .system()
                 .https()

@@ -81,8 +81,8 @@ class AcmeAdministrationTest {
     void listsPresetsAndSettingsThroughUiApiAndSsh() throws Exception {
         TestConfiguration desired = new TestConfiguration(EVENTS);
         desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("revision"));
-        AcmeConfigurationService configuration = new AcmeConfigurationService(desired.acl(), null, null,
-                new AcmeCertificateService(desired.acl(),
+        AcmeConfigurationService configuration = new AcmeConfigurationService(null, desired.editor(),
+                new AcmeCertificateService(desired.editor(),
                         OrionKeyMaterial.unavailable(), null, null),
                 OrionKeyMaterial.unavailable());
         ObjectMapper mapper = new ObjectMapper();

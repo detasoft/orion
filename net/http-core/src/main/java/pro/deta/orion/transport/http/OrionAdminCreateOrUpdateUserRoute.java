@@ -44,7 +44,7 @@ public class OrionAdminCreateOrUpdateUserRoute extends BaseAdminRoute {
 
     @Override
     protected OrionHttpResponse doGet(HttpServletRequest req) {
-        OrionDocumentRevision snapshot = accessControlService.configuration();
+        OrionDocumentRevision snapshot = editor.current();
         List<Map<String, Object>> users = new ArrayList<>();
         for (User user : snapshot.result()
                 .valueOrFailure("Cannot read configuration document")
@@ -77,7 +77,7 @@ public class OrionAdminCreateOrUpdateUserRoute extends BaseAdminRoute {
         }
         try {
             AccessControlAccess access = accessControlService.createAccess(
-                    accessControlService.configuration().revision(),
+                    editor.current().revision(),
                     new ChangeMetadata(new UserEmail(request.id(), request.email()),
                             "createOrUpdateUser() " + request.id()));
             try {

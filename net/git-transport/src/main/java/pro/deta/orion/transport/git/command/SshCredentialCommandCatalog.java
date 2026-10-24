@@ -4,6 +4,7 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import org.apache.sshd.common.config.keys.KeyUtils;
 import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.internal.UserEmail;
@@ -43,10 +44,12 @@ public final class SshCredentialCommandCatalog {
     private static final Set<String> REMOVE_PARAMETERS = Set.of("force");
 
     private final OrionAccessControlService accessControlService;
+    private final OrionConfigurationEditor editor;
 
     @Inject
-    public SshCredentialCommandCatalog(OrionAccessControlService accessControlService) {
+    public SshCredentialCommandCatalog(OrionAccessControlService accessControlService, OrionConfigurationEditor editor) {
         this.accessControlService = Objects.requireNonNull(accessControlService, "accessControlService");
+        this.editor = Objects.requireNonNull(editor, "editor");
     }
 
     public CommandNode commandTree() {
@@ -148,7 +151,7 @@ public final class SshCredentialCommandCatalog {
             java.util.function.Function<AccessControlAccess, SshCredentialUpdateResult> mutation) {
         String userId = userId(invocation);
         try {
-            OrionDocumentRevision snapshot = accessControlService.configuration();
+            OrionDocumentRevision snapshot = editor.current();
             String email = "";
             for (User user : snapshot.result()
                     .valueOrFailure("Cannot read configuration document")

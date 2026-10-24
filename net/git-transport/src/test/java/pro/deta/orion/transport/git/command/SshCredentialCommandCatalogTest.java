@@ -1,5 +1,9 @@
 package pro.deta.orion.transport.git.command;
-import pro.deta.orion.util.Result;
+
+import org.junit.jupiter.api.AfterEach;
+
+import pro.deta.orion.test.util.TestEvents;
+import pro.deta.orion.test.integration.TestConfiguration;
 import pro.deta.orion.acl.AccessControlAccess;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -32,7 +36,6 @@ import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.CommandValue;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.config.OrionConfigurationModification;
-import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.internal.ChangeMetadata;
 import java.security.KeyPairGenerator;
@@ -43,10 +46,18 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class SshCredentialCommandCatalogTest {
+    private final TestEvents events = new TestEvents();
+    private final TestConfiguration configuration = new TestConfiguration(events);
+
+    @AfterEach
+    void closeConfiguration() {
+        events.close();
+    }
+
     private final RecordingService service = new RecordingService();
     private final DefaultCommandDispatcher dispatcher = new DefaultCommandDispatcher(
             new CommandLineParser(),
-            new SshCredentialCommandCatalog(service).commandTree(),
+            new SshCredentialCommandCatalog(service, configuration.editor()).commandTree(),
             new pro.deta.orion.command.CommandRowQuery());
 
     @Test
@@ -243,10 +254,9 @@ class SshCredentialCommandCatalogTest {
 
         @Override
         public AccessControlAccess createAccess(OrionRevision revision, ChangeMetadata metadata) {
-            OrionDocumentRevision snapshot = configuration();
             return new AccessControlAccess(
                     new OrionConfigurationModification(
-                            snapshot.result().valueOrFailure("Cannot read test configuration"), snapshot.revision(),
+                            OrionDocument.withAccessControl(new pro.deta.orion.schema.acl.AccessControl()), revision,
                             document ->
                                     revision instanceof OrionRevision.Stored stored
                                             ? stored
@@ -317,12 +327,5 @@ class SshCredentialCommandCatalogTest {
             throw new UnsupportedOperationException();
         }
 
-        @Override
-        public OrionDocumentRevision configuration() {
-            return new OrionDocumentRevision(
-                    Result.of(pro.deta.orion.schema.orion.v2.OrionDocument.withAccessControl(
-                            new pro.deta.orion.schema.acl.AccessControl())),
-                    new OrionRevision.Absent());
-        }
     }
 }

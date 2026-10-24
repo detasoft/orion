@@ -22,7 +22,6 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.TokenRefreshResult;
-import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.internal.ChangeMetadata;
 import java.io.ByteArrayInputStream;
@@ -212,7 +211,7 @@ class OrionAuthorizationFilterTest {
     }
 
     private OrionAuthorizationFilter filter(OrionAccessControlService accessControlService) {
-        OrionOidcRoute oidc = new OrionOidcRoute(null, null, null, new ObjectMapper(),
+        OrionOidcRoute oidc = new OrionOidcRoute(null, null, null, null, new ObjectMapper(),
                 Clock.systemUTC(), sessionDirectory, null);
         return new OrionAuthorizationFilter(accessControlService, oidc);
     }
@@ -288,13 +287,6 @@ class OrionAuthorizationFilterTest {
             throw new UnsupportedOperationException();
         }
 
-        @Override
-        public OrionDocumentRevision configuration() {
-            return new OrionDocumentRevision(
-                    Result.of(pro.deta.orion.schema.orion.v2.OrionDocument.withAccessControl(
-                            new pro.deta.orion.schema.acl.AccessControl())),
-                    new OrionRevision.Absent());
-        }
 
     }
 

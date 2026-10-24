@@ -1,5 +1,10 @@
 package pro.deta.orion.transport.git.auth;
-import pro.deta.orion.util.Result;
+
+import org.junit.jupiter.api.AfterEach;
+
+import pro.deta.orion.test.util.TestEvents;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.test.integration.TestConfiguration;
 import pro.deta.orion.acl.AccessControlAccess;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
@@ -31,7 +36,6 @@ import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.config.OrionConfigurationModification;
-import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.internal.ChangeMetadata;
 import java.io.IOException;
@@ -51,6 +55,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionSshAuthenticatorTest {
+    private static final TestEvents EVENTS = new TestEvents();
+
+    @AfterEach
+    void closeConfiguration() {
+        EVENTS.close();
+    }
+
     private static final long AUTH_TIMEOUT_SECONDS = 5;
     private static final List<org.apache.sshd.client.auth.UserAuthFactory> PUBLIC_KEY_ONLY =
             List.of(UserAuthPublicKeyFactory.INSTANCE);
@@ -265,7 +276,8 @@ class OrionSshAuthenticatorTest {
         KeyPair secondCandidate = keyPair();
         RecordingAccessControlService accessControl = new RecordingAccessControlService();
         accessControl.addUser("alice", current.getPublic());
-        OrionSshAuthenticator authenticator = new OrionSshAuthenticator(accessControl);
+        OrionSshAuthenticator authenticator =
+                new OrionSshAuthenticator(accessControl, new TestConfiguration(EVENTS).editor());
         ServerSession session = serverSession();
 
         assertThat(authenticator.authenticate("alice", firstCandidate.getPublic(), session)).isTrue();
@@ -295,7 +307,8 @@ class OrionSshAuthenticatorTest {
         KeyPair unselected = keyPair();
         RecordingAccessControlService accessControl = new RecordingAccessControlService();
         accessControl.addUser("alice");
-        OrionSshAuthenticator authenticator = new OrionSshAuthenticator(accessControl);
+        OrionSshAuthenticator authenticator =
+                new OrionSshAuthenticator(accessControl, new TestConfiguration(EVENTS).editor());
         ServerSession session = serverSession();
         for (KeyPair candidate : List.of(selected, unselected)) {
             assertThat(authenticator.authenticate("alice", candidate.getPublic(), session)).isTrue();
@@ -427,7 +440,8 @@ class OrionSshAuthenticatorTest {
         private final SshServer server = SshServer.setUpDefaultServer();
 
         private Fixture() throws Exception {
-            OrionSshAuthenticator authenticator = new OrionSshAuthenticator(accessControl);
+            OrionSshAuthenticator authenticator =
+                    new OrionSshAuthenticator(accessControl, new TestConfiguration(EVENTS).editor());
             KeyPair hostKey = keyPair();
             server.setHost("127.0.0.1");
             server.setPort(0);
@@ -519,10 +533,9 @@ class OrionSshAuthenticatorTest {
 
         @Override
         public AccessControlAccess createAccess(OrionRevision revision, ChangeMetadata metadata) {
-            OrionDocumentRevision snapshot = configuration();
             return new AccessControlAccess(
                     new OrionConfigurationModification(
-                            snapshot.result().valueOrFailure("Cannot read test configuration"), snapshot.revision(),
+                            OrionDocument.withAccessControl(new pro.deta.orion.schema.acl.AccessControl()), revision,
                             document ->
                                     revision instanceof OrionRevision.Stored stored
                                             ? stored
@@ -612,14 +625,6 @@ class OrionSshAuthenticatorTest {
                 AuthenticationResult.Success renewalAuthority,
                 long expiresInSeconds) {
             throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public OrionDocumentRevision configuration() {
-            return new OrionDocumentRevision(
-                    Result.of(pro.deta.orion.schema.orion.v2.OrionDocument.withAccessControl(
-                            new pro.deta.orion.schema.acl.AccessControl())),
-                    new OrionRevision.Absent());
         }
 
         private AuthenticationResult success(String username) {

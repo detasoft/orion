@@ -9,7 +9,6 @@ import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.internal.UserEmail;
@@ -32,16 +31,14 @@ import java.util.UUID;
 
 /** Admin-only provider editing; secrets stay encrypted and are omitted from all responses. */
 public final class OrionAdminOidcRoute extends BaseAdminRoute {
-    private final OrionAccessControlService configurationService;
     private final OrionConfigurationEditor editor;
     private final ConfigurationSecrets secrets;
     private final ObjectMapper mapper;
 
     @Inject
-    public OrionAdminOidcRoute(OrionAccessControlService configurationService, OrionConfigurationEditor editor,
+    public OrionAdminOidcRoute(OrionConfigurationEditor editor,
             ConfigurationSecrets secrets, ObjectMapper mapper) {
         super("/api/admin/oidc", OrionHttpRouteDefinition.Method.GET, OrionHttpRouteDefinition.Method.POST);
-        this.configurationService = configurationService;
         this.editor = editor;
         this.secrets = secrets;
         this.mapper = mapper;
@@ -49,7 +46,7 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
 
     @Override
     protected OrionHttpResponse doGet(HttpServletRequest request) {
-        OrionDocumentRevision snapshot = configurationService.configuration();
+        OrionDocumentRevision snapshot = editor.current();
         List<Map<String, Object>> organizations = new ArrayList<>();
         for (OrionDocument.Organization organization : snapshot.result()
                 .valueOrFailure("Cannot read configuration document")

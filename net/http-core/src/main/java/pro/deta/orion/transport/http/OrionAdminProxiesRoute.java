@@ -13,7 +13,6 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.command.audit.CommandAuditRecord;
 import pro.deta.orion.command.audit.CommandAuditSink;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory.SyncObservation;
@@ -41,7 +40,6 @@ import java.util.UUID;
 
 /** Administers system proxy bindings through revision-checked configuration updates and safe audit records. */
 public final class OrionAdminProxiesRoute extends BaseAdminRoute {
-    private final OrionAccessControlService configurationService;
     private final NativeGitRepositoryFactory provider;
     private final OrionConfigurationEditor editor;
     private final ConfigurationSecrets secrets;
@@ -49,11 +47,10 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
     private final ObjectMapper mapper;
 
     @Inject
-    public OrionAdminProxiesRoute(OrionAccessControlService configurationService, NativeGitRepositoryFactory provider,
+    public OrionAdminProxiesRoute(NativeGitRepositoryFactory provider,
             OrionConfigurationEditor editor, ConfigurationSecrets secrets,
             CommandAuditSink audit, ObjectMapper mapper) {
         super(OrionAdminPaths.PROXIES, OrionHttpRouteDefinition.Method.GET, OrionHttpRouteDefinition.Method.POST);
-        this.configurationService = configurationService;
         this.provider = provider;
         this.editor = editor;
         this.secrets = secrets;
@@ -63,7 +60,7 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
 
     @Override
     protected OrionHttpResponse doGet(HttpServletRequest req) {
-        OrionDocumentRevision snapshot = configurationService.configuration();
+        OrionDocumentRevision snapshot = editor.current();
         List<AliasResponse> aliases = new ArrayList<>();
         for (GitProxyBinding binding : snapshot.result()
                 .valueOrFailure("Cannot read configuration document")
@@ -102,7 +99,7 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
                     throw new IllegalArgumentException("Retry accepts no configuration changes");
                 }
                 OrionRevision expected = new OrionRevision.Stored(request.revision());
-                snapshot = configurationService.configuration();
+                snapshot = editor.current();
                 if (!snapshot.revision().equals(expected)) {
                     throw new OrionConfigurationConcurrentUpdateException("Configuration revision changed", null);
                 }
@@ -123,7 +120,7 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
                 }
             }
             if (!action.equals("retry") && !OrionUtils.waitForCondition(
-                    () -> configurationService.configuration().revision().equals(snapshot.revision()))) {
+                    () -> editor.current().revision().equals(snapshot.revision()))) {
                 throw new IllegalStateException("Saved proxy configuration was not activated");
             }
             GitProxyBinding binding = find(snapshot.result()
@@ -158,13 +155,13 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
     }
 
     private SyncObservation retry(OrionDocumentRevision snapshot, GitProxyBinding binding) {
-        if (!configurationService.configuration().revision().equals(snapshot.revision())) {
+        if (!editor.current().revision().equals(snapshot.revision())) {
             throw new OrionConfigurationConcurrentUpdateException("Configuration changed before retry", null);
         }
         Result<SyncObservation> result = provider.retry(binding.alias(),
-                () -> configurationService.configuration().result()
+                () -> editor.current().result()
                         .valueOrFailure("Cannot read configuration document"), secrets);
-        if (!configurationService.configuration().revision().equals(snapshot.revision())) {
+        if (!editor.current().revision().equals(snapshot.revision())) {
             throw new OrionConfigurationConcurrentUpdateException("Configuration changed during retry", null);
         }
         if (result instanceof Result.Success<SyncObservation> success) return success.value();

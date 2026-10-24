@@ -9,6 +9,7 @@ import org.apache.sshd.server.channel.ChannelSession;
 import org.apache.sshd.server.command.Command;
 import org.apache.sshd.server.command.CommandFactory;
 import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.acl.AccessControlAccess;
 import pro.deta.orion.internal.ChangeMetadata;
@@ -64,6 +65,7 @@ public class SshCommandFactory implements CommandFactory {
     private final DefaultGitNativeRepositoryService repositoryService;
     private final GitTransportConfig gitTransportConfig;
     private final OrionAccessControlService accessControlService;
+    private final OrionConfigurationEditor editor;
 
     @Inject
     public SshCommandFactory(
@@ -72,13 +74,15 @@ public class SshCommandFactory implements CommandFactory {
             PlainCommandRenderer commandRenderer,
             DefaultGitNativeRepositoryService repositoryService,
             GitTransportConfig gitTransportConfig,
-            OrionAccessControlService accessControlService) {
+            OrionAccessControlService accessControlService,
+            OrionConfigurationEditor editor) {
         this.orionExecutor = orionExecutor;
         this.commandDispatcher = commandDispatcher;
         this.commandRenderer = commandRenderer;
         this.repositoryService = repositoryService;
         this.gitTransportConfig = gitTransportConfig;
         this.accessControlService = accessControlService;
+        this.editor = editor;
     }
 
     @Override
@@ -127,7 +131,7 @@ public class SshCommandFactory implements CommandFactory {
             }
             SshKeyEnrollmentResult result;
             try {
-                OrionDocumentRevision snapshot = accessControlService.configuration();
+                OrionDocumentRevision snapshot = editor.current();
                 String email = "root@orion.pro";
                 for (pro.deta.orion.schema.acl.User user : snapshot.result()
                         .valueOrFailure("Cannot read configuration document")

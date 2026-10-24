@@ -169,7 +169,7 @@ class OrionAdminAcmeCertificateRouteTest {
                 IssuedAcmeCertificate issued,
                 Optional<IssuedAcmeCertificate> saved) {
             super(
-                    new TestConfiguration(EVENTS).acl(),
+                    new TestConfiguration(EVENTS).editor(),
                     OrionKeyMaterial.unavailable(),
                     new AcmeCertificateIssuer(null), null);
             this.issued = issued;
@@ -190,7 +190,7 @@ class OrionAdminAcmeCertificateRouteTest {
     private static final class BusyAcmeCertificateService extends AcmeCertificateService {
         private BusyAcmeCertificateService() {
             super(
-                    new TestConfiguration(EVENTS).acl(),
+                    new TestConfiguration(EVENTS).editor(),
                     OrionKeyMaterial.unavailable(),
                     new AcmeCertificateIssuer(null), null);
         }

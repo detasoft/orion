@@ -7,7 +7,7 @@ import jakarta.inject.Singleton;
 import pro.deta.orion.util.LogScope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
@@ -40,7 +40,7 @@ public class AcmeCertificateService {
     private static final Logger LOG = LoggerFactory.getLogger(AcmeCertificateService.class);
     private static final int RSA_KEY_SIZE = KeyMaterialConstants.RSA_KEY_SIZE_BITS;
 
-    private final OrionAccessControlService configurationService;
+    private final OrionConfigurationEditor editor;
     private final OrionKeyMaterial keyMaterial;
     private final AcmeCertificateIssuer certificateIssuer;
     private final ConfigurationSecrets secrets;
@@ -52,11 +52,11 @@ public class AcmeCertificateService {
 
     @Inject
     public AcmeCertificateService(
-            OrionAccessControlService configurationService,
+            OrionConfigurationEditor editor,
             OrionKeyMaterial keyMaterial,
             AcmeCertificateIssuer certificateIssuer,
             ConfigurationSecrets secrets) {
-        this.configurationService = configurationService;
+        this.editor = editor;
         this.keyMaterial = keyMaterial;
         this.certificateIssuer = certificateIssuer;
         this.secrets = secrets;
@@ -120,7 +120,7 @@ public class AcmeCertificateService {
             if (eabKey != null) Arrays.fill(eabKey, '\0');
         }
         if (Thread.currentThread().isInterrupted() || (automatic && maintenanceStopped)
-                || !settings.snapshot().system().https().equals(configurationService.configuration().result()
+                || !settings.snapshot().system().https().equals(editor.current().result()
                         .valueOrFailure("Cannot read configuration document")
                         .system().https())) {
             throw new AcmeCertificateIssueException("Certificate issuance cancelled or ACME settings changed");
@@ -271,7 +271,7 @@ public class AcmeCertificateService {
 
     private IssueSettings settingsFrom(IssueRequest request) {
         IssueRequest effectiveRequest = request == null ? IssueRequest.EMPTY : request;
-        OrionDocument snapshot = configurationService.configuration().result()
+        OrionDocument snapshot = editor.current().result()
                 .valueOrFailure("Cannot read configuration document");
         OrionHttpsConfiguration https = snapshot
                 .system()

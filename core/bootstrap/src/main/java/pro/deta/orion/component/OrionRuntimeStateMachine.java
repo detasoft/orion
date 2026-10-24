@@ -4,6 +4,7 @@ import jakarta.inject.Inject;
 import jakarta.inject.Named;
 import jakarta.inject.Singleton;
 import pro.deta.orion.acl.OrionAccessControlStateMachine;
+import pro.deta.orion.config.OrionConfigurationEditorStateMachine;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.event.OrionEventManagerStateMachine;
 import pro.deta.orion.internal.OrionExecutorStateMachine;
@@ -27,9 +28,10 @@ import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 /**
  * Root lifecycle state machine for the Orion process.
  *
- * <p>@AiRule Keep startup order explicit: executor, event manager, ACL, Agent session server, then transports.
- * The executor is needed for lifecycle work. The event manager must be running before ACL registers and
- * publishes reload events. After ACL loads, adopt and activate bootstrap proxies before Agent authentication
+ * <p>@AiRule Keep startup order explicit: executor, event manager, configuration editor, ACL,
+ * Agent session server, then transports. The executor is needed for lifecycle work. The event manager must be
+ * running before the editor subscribes to storage events. The editor observes configuration before ACL
+ * bootstraps its credentials. After ACL loads, adopt and activate bootstrap proxies before Agent authentication
  * or public transports start. Failure in either phase must stop startup, except for registered connection
  * decisions on persistent proxies: these proxies stay unavailable while management starts to resolve them. Transports are
  * the final externally visible services. Shutdown must use the reverse order so transports close before Agent
@@ -43,18 +45,20 @@ public final class OrionRuntimeStateMachine extends AggregateLifecycleStateMachi
     public OrionRuntimeStateMachine(
             OrionExecutorStateMachine executor,
             OrionEventManagerStateMachine eventManager,
+            OrionConfigurationEditorStateMachine configuration,
             OrionAccessControlStateMachine accessControl,
             AgentSessionServerStateMachine agentSessionServer,
             TransportLifecycleStateMachine transports,
             @Named("bootstrap-proxies") Runnable bootstrapProxies,
             DecisionRegistry decisions) {
-        super(rootStateMachine(executor, eventManager, accessControl, agentSessionServer, transports,
+        super(rootStateMachine(executor, eventManager, configuration, accessControl, agentSessionServer, transports,
                 bootstrapProxies, decisions));
     }
 
     private static AggregateStateMachine rootStateMachine(
             OrionExecutorStateMachine executor,
             OrionEventManagerStateMachine eventManager,
+            OrionConfigurationEditorStateMachine configuration,
             OrionAccessControlStateMachine accessControl,
             AgentSessionServerStateMachine agentSessionServer,
             TransportLifecycleStateMachine transports,
@@ -63,6 +67,7 @@ public final class OrionRuntimeStateMachine extends AggregateLifecycleStateMachi
         List<RuntimeChild> startOrder = List.of(
                 child("executor", executor::start, executor::stop, executor::currentState),
                 child("event-manager", eventManager::start, eventManager::stop, eventManager::currentState),
+                child("configuration", configuration::start, configuration::stop, configuration::currentState),
                 child("access-control", () -> {
                     accessControl.start();
                     if (!RUNNING.equals(accessControl.currentState())) {
@@ -85,6 +90,7 @@ public final class OrionRuntimeStateMachine extends AggregateLifecycleStateMachi
                 .childPropagationMode(StateMachineDefinition.ChildPropagationMode.NONE)
                 .child("executor", executor.stateMachine())
                 .child("event-manager", eventManager.stateMachine())
+                .child("configuration", configuration.stateMachine())
                 .child("access-control", accessControl.stateMachine())
                 .child("agent-session-server", agentSessionServer.stateMachine())
                 .child("transports", transports.stateMachine())

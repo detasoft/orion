@@ -2,22 +2,22 @@ package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
-import pro.deta.orion.acl.OrionAccessControlServiceImpl;
+import pro.deta.orion.config.OrionConfigurationEditor;
 
 import java.util.Map;
 
 public final class OrionAdminConfigurationStatusRoute extends BaseAdminRoute {
-    private final OrionAccessControlServiceImpl accessControlService;
+    private final OrionConfigurationEditor editor;
 
     @Inject
-    public OrionAdminConfigurationStatusRoute(OrionAccessControlServiceImpl accessControlService) {
+    public OrionAdminConfigurationStatusRoute(OrionConfigurationEditor editor) {
         super(OrionAdminPaths.CONFIGURATION_STATUS, OrionHttpRouteDefinition.Method.GET);
-        this.accessControlService = accessControlService;
+        this.editor = editor;
     }
 
     @Override
     protected OrionHttpResponse doGet(HttpServletRequest request) {
-        OrionAccessControlServiceImpl.ConfigurationStatus status = accessControlService.configurationStatus();
+        OrionConfigurationEditor.ConfigurationStatus status = editor.status();
         return OrionHttpResponse.ok(Map.of(
                 "storedRevision", status.storedRevision().orElse(""),
                 "activeRevision", status.activeRevision().orElse(""),

@@ -1,4 +1,8 @@
 package pro.deta.orion.transport.git.command;
+
+import pro.deta.orion.test.integration.TestConfiguration;
+
+import pro.deta.orion.test.util.TestEvents;
 import pro.deta.orion.acl.AccessControlAccess;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -55,7 +59,6 @@ import pro.deta.orion.transport.git.command.read.OperatorQueryResult;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.internal.ChangeMetadata;
 import java.nio.file.Path;
@@ -71,13 +74,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class LegacySshCommandCatalogTest {
+    private final TestEvents events = new TestEvents();
     @TempDir
     Path root;
     private AgentSessionServer agentServer;
     private final RecordingAccessControlService accessControl = new RecordingAccessControlService();
     private final AtomicBoolean shutdown = new AtomicBoolean();
     private final DecisionRegistry decisions = new DecisionRegistry(8, Runnable::run, (actor, scope) -> true);
-    private final CommandNode commandTree = new LegacySshCommandCatalog(accessControl, null,
+    private final CommandNode commandTree = new LegacySshCommandCatalog(accessControl,
+            new TestConfiguration(events).editor(),
                         new AggregateStateMachine(StateMachineDefinition.define().name("runtime").build()),
             new RepositoryProvider(),
             () -> shutdown.set(true),
@@ -93,6 +98,7 @@ class LegacySshCommandCatalogTest {
     @AfterEach
     void closeDecisions() {
         decisions.close();
+        events.close();
     }
 
     @ParameterizedTest
@@ -449,13 +455,6 @@ class LegacySshCommandCatalogTest {
             throw new UnsupportedOperationException();
         }
 
-        @Override
-        public OrionDocumentRevision configuration() {
-            return new OrionDocumentRevision(
-                    Result.of(pro.deta.orion.schema.orion.v2.OrionDocument.withAccessControl(
-                            new pro.deta.orion.schema.acl.AccessControl())),
-                    new OrionRevision.Absent());
-        }
     }
 
     private static final class RepositoryProvider extends NativeGitRepositoryProvider {

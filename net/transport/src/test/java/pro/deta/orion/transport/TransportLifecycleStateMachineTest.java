@@ -165,10 +165,10 @@ class TransportLifecycleStateMachineTest {
         TestConfiguration desiredState = new TestConfiguration(EVENTS);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of(), List.of(),
-                List.of()),
+                List.of(), List.of()),
                 List.of()), Optional.of("test-revision"));
         return new JettyHTTPServerStateMachine(() -> new JettyHTTPServer(
-                disabled, desiredState.acl(), OrionKeyMaterial.unavailable(), null, null, null),
+                disabled, desiredState.editor(), OrionKeyMaterial.unavailable(), null, null, null),
                 () -> { throw new AssertionError("Disabled HTTP must not start ACME maintenance"); },
                 () -> { throw new AssertionError("Disabled HTTP must not start Git cleanup"); });
     }

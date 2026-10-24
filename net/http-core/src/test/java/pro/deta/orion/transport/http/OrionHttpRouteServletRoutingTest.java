@@ -272,7 +272,7 @@ class OrionHttpRouteServletRoutingTest {
     private static OrionHttpRoute acmeRoute(TestConfiguration desired) {
         return new OrionAdminAcmeCertificateRoute(
                 new AcmeCertificateService(
-                        desired.acl(),
+                        desired.editor(),
                         OrionKeyMaterial.unavailable(),
                         new AcmeCertificateIssuer(null),
                         null),

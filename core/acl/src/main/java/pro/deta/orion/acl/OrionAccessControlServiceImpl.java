@@ -1,6 +1,5 @@
 package pro.deta.orion.acl;
 
-import pro.deta.orion.util.Subscription;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.config.*;
 import jakarta.inject.Inject;
@@ -44,6 +43,7 @@ import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OidcProvider;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
 import pro.deta.orion.util.Result;
+import pro.deta.orion.util.OrionUtils;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
@@ -62,10 +62,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private final RootPasswordReset rootPasswordReset;
     private final OrionConfigurationEditor editor;
     private final boolean createDefaultIfMissing;
-    private volatile OrionDocumentRevision activeConfiguration;
     private final JwtAccessTokenService jwtAccessTokenService;
     private final AtomicReference<char[]> plainRootToken = new AtomicReference<>();
-    private volatile Subscription changeSubscription;
 
     @Inject
     public OrionAccessControlServiceImpl(
@@ -91,14 +89,14 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private synchronized void loadAccessControlOnStart() {
         try {
-            changeSubscription = editor.subscribe(this::onConfigurationChange);
-            OrionDocumentRevision read = editor.load();
+            if (!editor.isRunning()) {
+                throw new IllegalStateException("Configuration editor must be running before ACL bootstrap");
+            }
+            OrionDocumentRevision read = editor.isInitialized() ? editor.current() : editor.load();
             switch (read.result()) {
                 case Result.Success<OrionDocument> ignored -> {
                     if (rootPasswordReset.enabled()) {
                         resetRootPassword(read);
-                    } else {
-                        activateConfiguration(read);
                     }
                 }
                 case Result.Failure<OrionDocument> failure -> {
@@ -125,12 +123,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     @Override
-    public synchronized void onStop() {
-        if (changeSubscription != null) {
-            changeSubscription.close();
-            changeSubscription = null;
-        }
-        // ACL state remains available until process shutdown.
+    public void onStop() {
+        // Configuration observation belongs to the editor's independent lifecycle.
     }
 
     @Override
@@ -140,41 +134,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public boolean isRunning() {
-        return activeConfiguration != null;
-    }
-
-    @Override
-    public OrionDocumentRevision configuration() {
-        OrionDocumentRevision snapshot = activeConfiguration;
-        if (snapshot == null) {
-            throw new IllegalStateException("ACL configuration is not initialized");
-        }
-        return snapshot;
-    }
-
-    public ConfigurationStatus configurationStatus() {
-        OrionDocumentRevision active = activeConfiguration;
-        Optional<String> activeRevision = active == null ? Optional.empty() : revisionValue(active.revision());
-        OrionDocumentRevision read = editor.load();
-        return switch (read.result()) {
-            case Result.Success<OrionDocument> ignored -> new ConfigurationStatus(
-                    revisionValue(read.revision()), activeRevision,
-                    editor.document(read) instanceof Result.Success<?> ? "valid" : "invalid");
-            case Result.Failure<OrionDocument> ignored ->
-                    new ConfigurationStatus(
-                            revisionValue(read.revision()), activeRevision, "unavailable");
-        };
-    }
-
-    private static Optional<String> revisionValue(OrionRevision revision) {
-        return switch (revision) {
-            case OrionRevision.Absent ignored -> Optional.empty();
-            case OrionRevision.Stored stored -> Optional.of(stored.value());
-        };
-    }
-
-    public record ConfigurationStatus(
-            Optional<String> storedRevision, Optional<String> activeRevision, String validation) {
+        return editor.isInitialized();
     }
 
     private void printAndClearPlainTextPasswordMessage(PrintStream out, char[] secureChars) {
@@ -201,14 +161,14 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     private AccessControl currentAccessControl() {
-        return configuration().result()
+        return editor.current().result()
                 .valueOrFailure("Cannot read configuration document")
                 .system().accessControl();
     }
 
     public boolean canAdminister(PrincipalAddress actor,
             Optional<ConfigurationScope> scope) {
-        return canAdminister(actor, scope, configuration().result()
+        return canAdminister(actor, scope, editor.current().result()
                 .valueOrFailure("Cannot read configuration document"));
     }
 
@@ -446,7 +406,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     public Optional<String> systemOidcGeneration(String userId, OidcProvider provider, String subject) {
-        return systemOidcGeneration(configuration().result()
+        return systemOidcGeneration(editor.current().result()
                 .valueOrFailure("Cannot read configuration document")
                 .system(), userId, provider, subject);
     }
@@ -483,7 +443,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     private TokenAuthenticationResult verifySystemOidcToken(String userId, String generation, String tokenId) {
-        OrionDocument.SystemConfiguration system = configuration().result()
+        OrionDocument.SystemConfiguration system = editor.current().result()
                 .valueOrFailure("Cannot read configuration document")
                 .system();
         AccessControl snapshot = system.accessControl();
@@ -530,7 +490,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private TokenAuthenticationResult verifyOrganizationToken(String organizationId, String userId,
             String generation, String tokenId) {
-        for (OrionDocument.Organization organization : configuration().result()
+        for (OrionDocument.Organization organization : editor.current().result()
                 .valueOrFailure("Cannot read configuration document")
                 .organizations()) {
             if (!organization.id().value().equals(organizationId)) {
@@ -548,7 +508,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                     for (OidcProvider provider : organization.oidcProviders()) {
                         if (provider.issuer().toString().equals(credential.keyId())) {
                             return TokenAuthenticationResult.success(new InternalUserImpl(userId,
-                                    organization.id(), () -> configuration().result()
+                                    organization.id(), () -> editor.current().result()
                                             .valueOrFailure("Cannot read configuration document")),
                                     new AccessTokenIdentity(tokenId, organizationId + "/" + userId));
                         }
@@ -638,18 +598,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()), List.of(organization));
     }
 
-    private synchronized void onConfigurationChange(OrionDocumentRevision snapshot) {
-        if (changeSubscription == null || snapshot.revision().equals(configuration().revision())) return;
-        try {
-            activateConfiguration(snapshot);
-        } catch (RuntimeException failure) {
-            log.warn("Retaining the last valid ACL configuration after reload failure", failure);
+    private void awaitRootPassword(User root) {
+        if (!OrionUtils.waitForCondition(() -> editor.isInitialized()
+                && currentAccessControl().users().contains(root))) {
+            throw new IllegalStateException("Root password was not activated after saving configuration");
         }
-    }
-
-    private void activateConfiguration(OrionDocumentRevision snapshot) {
-        editor.document(snapshot).failOnFailure("Invalid ACL configuration");
-        activeConfiguration = snapshot;
     }
 
     private void resetRootPassword(OrionDocumentRevision snapshot) {
@@ -691,7 +644,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                         .replaceAccessControl(updated);
                 modification.modify(prepared);
                 modification.apply();
-                activateConfiguration(new OrionDocumentRevision(Result.of(prepared), modification.revision()));
+                awaitRootPassword(root);
             } finally {
                 modification.discard();
             }

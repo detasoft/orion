@@ -10,7 +10,6 @@ import org.shredzone.acme4j.Session;
 import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.config.OrionConfigurationModification;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.internal.UserEmail;
@@ -40,17 +39,15 @@ public final class AcmeConfigurationService {
             new Preset("zerossl", "ZeroSSL", "https://acme.zerossl.com/v2/DV90", true),
             new Preset("google", "Google Trust Services", "https://dv.acme-v02.api.pki.goog/directory", true),
             new Preset("custom", "Other ACME server", "", false));
-    private final OrionAccessControlService configurationService;
     private final ConfigurationSecrets secrets;
     private final OrionConfigurationEditor editor;
     private final AcmeCertificateService certificates;
     private final OrionKeyMaterial material;
 
     @Inject
-    public AcmeConfigurationService(OrionAccessControlService configurationService, ConfigurationSecrets secrets,
+    public AcmeConfigurationService(ConfigurationSecrets secrets,
             OrionConfigurationEditor editor, AcmeCertificateService certificates,
             OrionKeyMaterial material) {
-        this.configurationService = configurationService;
         this.secrets = secrets;
         this.editor = editor;
         this.certificates = certificates;
@@ -58,7 +55,7 @@ public final class AcmeConfigurationService {
     }
 
     public View view() {
-        return view(configurationService.configuration());
+        return view(editor.current());
     }
 
     private View view(OrionDocumentRevision snapshot) {
