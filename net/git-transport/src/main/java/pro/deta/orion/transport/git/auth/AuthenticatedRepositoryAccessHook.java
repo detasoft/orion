@@ -47,6 +47,13 @@ public final class AuthenticatedRepositoryAccessHook
     }
 
     @Override
+    public boolean allowsUnrestrictedRead(String repositoryName) {
+        return SubjectAccessRules.authenticated().evaluate(securityContext).allowed()
+                && RepositoryAccessRules.readUnrestricted()
+                        .evaluate(securityContext, RepositoryResource.of(repositoryName)).allowed();
+    }
+
+    @Override
     public void beforeFetch(
             String repositoryName,
             List<String> branchNames) {

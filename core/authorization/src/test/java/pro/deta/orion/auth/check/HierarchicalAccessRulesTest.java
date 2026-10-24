@@ -36,6 +36,43 @@ class HierarchicalAccessRulesTest {
     private static final RepositoryResource REPOSITORY = RepositoryResource.of("acme/team/repo");
 
     @Test
+    void unrestrictedReadRejectsAssignedBranchDeniesEvenWithWildcardAllow() {
+        ScopedGrant allow = new ScopedGrant(new GrantId("read"), ScopedGrant.Effect.ALLOW,
+                List.of(expression(READ, "true"), expression(BRANCH, "*")));
+        ScopedGrant deny = new ScopedGrant(new GrantId("deny"), ScopedGrant.Effect.DENY,
+                List.of(expression(READ, "true"), expression(BRANCH, "secret")));
+        SecurityContext context = context(document(List.of("acme/developer"), List.of(), List.of(allow, deny)));
+
+        assertThat(fetch(context, "main")).isTrue();
+        assertThat(fetch(context, "secret")).isFalse();
+        assertThat(RepositoryAccessRules.readUnrestricted().evaluate(context, REPOSITORY).allowed()).isFalse();
+    }
+
+    @Test
+    void unrestrictedReadUsesAssignedReadGrantsAndIgnoresOtherActions() {
+        ScopedGrant allow = grant("read", ScopedGrant.Effect.ALLOW, READ);
+        ScopedGrant restricted = new ScopedGrant(new GrantId("restricted"), ScopedGrant.Effect.ALLOW,
+                List.of(expression(READ, "true"), expression(BRANCH, "main")));
+        ScopedGrant wildcard = new ScopedGrant(new GrantId("wildcard"), ScopedGrant.Effect.ALLOW,
+                List.of(expression(READ, "true"), expression(BRANCH, "*")));
+        ScopedGrant createDeny = new ScopedGrant(new GrantId("deny"), ScopedGrant.Effect.DENY,
+                List.of(expression(CREATE, "true"), expression(BRANCH, "secret")));
+        SecurityContext full = context(document(List.of("acme/developer"), List.of(),
+                List.of(allow, createDeny)));
+        SecurityContext limited = context(document(List.of("acme/developer"), List.of(),
+                List.of(allow, restricted)));
+        SecurityContext allBranches = context(document(List.of("acme/developer"), List.of(),
+                List.of(allow, restricted, wildcard)));
+
+        assertThat(RepositoryAccessRules.readUnrestricted().evaluate(full, REPOSITORY).allowed()).isTrue();
+        assertThat(RepositoryAccessRules.readUnrestricted().evaluate(limited, REPOSITORY).allowed()).isFalse();
+        assertThat(RepositoryAccessRules.readUnrestricted().evaluate(allBranches, REPOSITORY).allowed())
+                .isTrue();
+        assertThat(RepositoryAccessRules.readUnrestricted().evaluate(full,
+                RepositoryResource.of("other/team/repo")).allowed()).isFalse();
+    }
+
+    @Test
     void inheritedRoleAuthorizesRepositoryOperationsAndAbsentRepositoryCreation() {
         SecurityContext context = context(document(List.of("acme/developer"), List.of(),
                 List.of(grant("write", ScopedGrant.Effect.ALLOW, READ_WRITE, CREATE, FORCE))));

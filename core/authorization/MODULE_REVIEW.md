@@ -1,45 +1,5 @@
 # Module Review: `core/authorization`
 
-## 4. Direct pack downloads bypass branch-level read restrictions
-
-**Problem.** A user allowed to read only `main` can request an existing repository pack by its checksum.
-The HTTP handler checks repository read permission and streams the complete stored pack without evaluating
-its objects against branch access. A pack containing objects reachable only from a denied branch is therefore
-readable when its checksum is known. Learning that checksum is a prerequisite, not an authorization check.
-
-**Sources.** `OrionGitPackfileHandler.handle()` and `canRead()` in the
-[HTTP pack handler](../../net/http-core/src/main/java/pro/deta/orion/transport/http/OrionGitPackfileHandler.java)
-call only [repository read](src/main/java/pro/deta/orion/auth/check/rule/RepositoryAccessRules.java).
-Normal upload-pack instead uses `NativeGitRepositoryContext.checkFetchAccess()` in the
-[repository context](../../net/git-transport/src/main/java/pro/deta/orion/transport/git/NativeGitRepositoryContext.java)
-and `AuthenticatedRepositoryAccessHook.beforeFetch()` in the
-[access hook](../../net/git-transport/src/main/java/pro/deta/orion/transport/git/auth/AuthenticatedRepositoryAccessHook.java).
-[HTTP transport tests](../../net/http-core/src/test/java/pro/deta/orion/transport/http/OrionGitRouteNativeTest.java)
-exercise packfile URI negotiation, while [rule tests](src/test/java/pro/deta/orion/auth/check/AccessRulesTest.java)
-exercise branch restrictions separately; these do not establish denial for a direct mixed-branch pack download.
-
-**Documented behavior.** [README](../../README.md) requires repository and branch grants inside organization
-boundaries. `FetchPack.selectPackUris()` in the
-[pack builder](../../git/git-parser/src/main/java/pro/deta/orion/git/parser/v2/fetch/FetchPack.java)
-selects only packs fully covered by the negotiated object set, but the download handler does not require
-evidence of that negotiation.
-
-**Contract.** Downloading stored bytes must not broaden the object access permitted by fetch authorization.
-Preserve authenticated repository checks and public-repository filtering.
-
-**Minimal repair.** First deny direct pack serving when full-pack authorization cannot be established, using
-the existing grants and object/reachability owners. Cover an allowed pack and a known-checksum pack containing
-denied-branch objects through HTTP. Avoid introducing a second policy engine or relying on checksum secrecy.
-
-**Alternatives and consequences.** Per-object authorization can retain this optimization but adds graph work.
-Disabling pack URLs for restricted subjects is smaller, provided the serving endpoint also denies manually
-constructed URLs. Changing advertisement alone leaves the bypass intact.
-
-**Confidence.** High for the missing check; static inspection only, without an HTTP exploit reproduction.
-
-**Priority signals.** Importance: high, because stored objects can cross a branch read boundary. Repair ease:
-medium; containment is local, while preserving optimized downloads requires complete-pack authorization.
-
 ## 5. FORCE authorization drops the target branch and branch-scoped DENY grants
 
 **Problem.** Give an organization user write access to `main` and `dev`, then assign `FORCE` only for `dev`.

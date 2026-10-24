@@ -362,6 +362,31 @@ public class AccessRulesTest {
     }
 
     @Test
+    void unrestrictedReadRejectsBranchRestrictionsEvenAlongsideAnUnqualifiedGrant() {
+        RepositoryResource repository = RepositoryResource.of("project");
+        SecurityContext reader = securityContext(new InternalUserImpl("reader", List.of(
+                repositoryGrant("project"), repositoryGrant("project", "main"))));
+
+        assertThat(RepositoryAccessRules.read().evaluate(reader, repository).allowed()).isTrue();
+        assertThat(RepositoryAccessRules.readUnrestricted().evaluate(reader, repository).allowed()).isFalse();
+        assertThat(RepositoryAccessRules.readUnrestricted()
+                .evaluate(SecurityContext.createContext(), repository).allowed()).isFalse();
+    }
+
+    @Test
+    void unrestrictedReadPreservesUnqualifiedAndWildcardReadAccess() {
+        RepositoryResource repository = RepositoryResource.of("project");
+        for (List<Grant> grants : List.of(
+                List.of(repositoryGrant("project")),
+                List.of(repositoryGrant("project", "*"), repositoryGrant("project", "main")),
+                List.of(repositoryGrant("project"), repositoryGrant("other", "main")))) {
+            SecurityContext reader = securityContext(new InternalUserImpl("reader", grants));
+            assertThat(RepositoryAccessRules.readUnrestricted().evaluate(reader, repository).allowed())
+                    .isTrue();
+        }
+    }
+
+    @Test
     void branchAccessAllowsRepositoryGrantWithoutBranchRestriction() {
         SecurityContext reader = securityContext(new InternalUserImpl("reader", List.of(repositoryGrant("project"))));
 

@@ -28,6 +28,10 @@ import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Authorization.GIT;
 import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.GET;
 
+/**
+ * Serves stored packs only to unrestricted readers, since one pack can contain objects from several branches.
+ * Branch-restricted readers receive an authorized pack through ordinary fetch rather than loose objects.
+ */
 final class OrionGitPackfileHandler {
     public static final String PACK_CONTENT_TYPE =
             "application/x-git-packed-objects";
@@ -108,7 +112,7 @@ final class OrionGitPackfileHandler {
             accessEnforcer().require(
                     securityContext,
                     RepositoryResource.of(repositoryName),
-                    RepositoryAccessRules.read());
+                    RepositoryAccessRules.readUnrestricted());
             return true;
         } catch (OrionSecurityException error) {
             return false;

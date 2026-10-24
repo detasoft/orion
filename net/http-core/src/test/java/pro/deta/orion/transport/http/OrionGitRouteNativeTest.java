@@ -17,7 +17,10 @@ import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
+import pro.deta.orion.git.parser.v2.index.IndexedObject;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
+import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.acl.Grant;
@@ -41,6 +44,7 @@ import java.util.Set;
 import java.util.zip.GZIPOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionGitRouteNativeTest {
     private static final pro.deta.orion.test.util.TestEvents EVENTS =
@@ -90,7 +94,90 @@ class OrionGitRouteNativeTest {
                 .contains("version 2\n")
                 .contains("fetch=")
                 .contains("ref-in-want")
+                .contains("packfile-uris")
                 .contains("sideband-all");
+    }
+
+    @Test
+    void branchRestrictedDiscoveryDoesNotAdvertisePackfileUris() throws Exception {
+        NativeGitRepositoryProvider provider = provider();
+        publishObject(provider);
+        OrionGitRoute route = new OrionGitRoute(new DefaultGitNativeRepositoryService(provider),
+                autoPackfileUriConfig(), provider);
+        ResponseRecorder response = new ResponseRecorder();
+
+        service(route, request("GET", "/r/team/project.git/info/refs", null, "git-upload-pack",
+                Map.of("Git-Protocol", "version=2"), new byte[0], branchRestrictedContext()), response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(response.body()).contains("fetch=", "ref-in-want").doesNotContain("packfile-uris");
+    }
+
+    @Test
+    void branchRestrictedFetchRejectsUnadvertisedPackfileUris() throws Exception {
+        NativeGitRepositoryProvider provider = provider();
+        PublishedObjectFixture fixture = publishObject(provider);
+        OrionGitRoute route = new OrionGitRoute(new DefaultGitNativeRepositoryService(provider),
+                autoPackfileUriConfig(), provider);
+        ResponseRecorder response = new ResponseRecorder();
+
+        assertThatThrownBy(() -> service(route, request("POST", "/r/team/project.git/git-upload-pack",
+                "application/x-git-upload-pack-request", null, Map.of("Git-Protocol", "version=2"),
+                fetchRequest(fixture.objectId()), branchRestrictedContext()), response.proxy()))
+                .isInstanceOf(IOException.class)
+                .hasMessage("Fetch capability was not advertised: packfile-uris");
+
+        assertThat(response.body()).doesNotContain("packfile-uris\n", "https://", "PACK");
+    }
+
+    @Test
+    void branchRestrictedFetchStillReturnsAnInlinePack() throws Exception {
+        NativeGitRepositoryProvider provider = provider();
+        PublishedObjectFixture fixture = publishObject(provider);
+        NativeGitRepository repository = provider.find(REPOSITORY_NAME).valueOrFailure("repository");
+        ObjectId secret = repository.writeObject(GitObjectType.BLOB, "secret".getBytes(StandardCharsets.UTF_8));
+        repository.updateRef("refs/heads/secret", NULL_ID, secret.toHex());
+        OrionGitRoute route = new OrionGitRoute(new DefaultGitNativeRepositoryService(provider),
+                autoPackfileUriConfig(), provider);
+        ByteArrayOutputStream body = new ByteArrayOutputStream();
+        writePacket(body, "command=fetch\n");
+        body.writeBytes("0001".getBytes(StandardCharsets.US_ASCII));
+        writePacket(body, "want " + fixture.objectId().toHex() + "\n");
+        writePacket(body, "done\n");
+        body.writeBytes("0000".getBytes(StandardCharsets.US_ASCII));
+        ResponseRecorder response = new ResponseRecorder();
+
+        service(route, request("POST", "/r/team/project.git/git-upload-pack",
+                "application/x-git-upload-pack-request", null, Map.of("Git-Protocol", "version=2"),
+                body.toByteArray(), branchRestrictedContext()), response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(response.body()).contains("packfile\n", "PACK").doesNotContain("packfile-uris\n");
+        ByteArrayOutputStream packBytes = new ByteArrayOutputStream();
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(
+                new ByteArrayInputStream(response.body.toByteArray()))) {
+            boolean packStarted = false;
+            GitPktLine packet;
+            while ((packet = GitPktLine.readNextFrom(input).orElseThrow()) != GitPktLine.Control.FLUSH) {
+                if (packet instanceof GitPktLine.Data data) {
+                    if (packStarted) {
+                        assertThat(data.content()[0]).isEqualTo((byte) 1);
+                        packBytes.write(data.content(), 1, data.content().length - 1);
+                    } else if (data.text().equals("packfile")) {
+                        packStarted = true;
+                    }
+                }
+            }
+        }
+        NativeGitRepository downloaded = provider.create("downloaded").valueOrFailure("download repository");
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(
+                new ByteArrayInputStream(packBytes.toByteArray()))) {
+            PackMetadata received = downloaded.ingestAndPublish(input);
+            List<IndexedObject> objects = downloaded.index().withAccess(
+                    access -> access.objects(received.packId()));
+            assertThat(objects).extracting(IndexedObject::objectId)
+                    .containsExactly(fixture.objectId()).doesNotContain(secret);
+        }
     }
 
     @Test
@@ -676,6 +763,13 @@ class OrionGitRouteNativeTest {
 
     private static SecurityContext repositorySecurityContext() {
         return repositorySecurityContext(REPOSITORY_NAME);
+    }
+
+    private static SecurityContext branchRestrictedContext() {
+        Grant grant = new Grant("main-reader", List.of(
+                new GrantExpression(GrantKey.REPOSITORY, REPOSITORY_NAME),
+                new GrantExpression(GrantKey.BRANCH, "main")));
+        return SecurityContext.createContext().withUserIdentity(new InternalUserImpl("reader", List.of(grant)));
     }
 
     private static SecurityContext repositorySecurityContext(String name) {

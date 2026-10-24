@@ -27,6 +27,11 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+/**
+ * Applies repository authorization to Git commands and stored-pack URLs. Branch-restricted readers use
+ * ordinary fetch, which checks branch access and produces an inline pack; read isolation does not require
+ * serving loose objects. Stored packs remain available to readers with unrestricted repository access.
+ */
 final class NativeGitRepositoryContext extends GitRepositoryContext {
     private final String name;
     private final Optional<String> packUriBase;
@@ -46,7 +51,13 @@ final class NativeGitRepositoryContext extends GitRepositoryContext {
     }
 
     @Override
+    public boolean supportsPackfileUris() {
+        return accessHook.allowsUnrestrictedRead(name);
+    }
+
+    @Override
     public Optional<URI> packUri(PackChecksum id) {
+        if (!supportsPackfileUris()) return Optional.empty();
         return packUriBase.map(base -> {
             while (base.endsWith("/")) {
                 base = base.substring(0, base.length() - 1);

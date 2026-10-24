@@ -49,7 +49,7 @@ final class GrantAccess {
     }
 
     static AccessDecision scopedRepositoryAccess(UserIdentity identity, RepositoryResource repository,
-            GrantKey action, String branch) {
+            GrantKey action, String branch, boolean requireAllBranches) {
         RepositoryAddress address;
         try {
             address = RepositoryAddress.parse(repository.repositoryName());
@@ -65,7 +65,7 @@ final class GrantAccess {
                 new UserId(identity.getUserId()), ConfigurationScope.repository(address),
                 action == GrantKey.CREATE);
         boolean restricted = false;
-        if (branch != null) {
+        if (branch != null || requireAllBranches) {
             for (ScopedAccess.AssignedGrant grant : grants) {
                 if (grant.effect() == ScopedGrant.Effect.ALLOW
                         && matchesRepositoryAction(grant.expressions(), repository.repositoryName(), action)
@@ -80,10 +80,12 @@ final class GrantAccess {
             if (!matchesRepositoryAction(expressions, repository.repositoryName(), action)) continue;
             boolean branchRestricted = hasKey(expressions, GrantKey.BRANCH);
             if (grant.effect() == ScopedGrant.Effect.DENY) {
-                if (!branchRestricted || branch != null && matchesBranch(expressions, branch)) {
+                if (!branchRestricted || requireAllBranches
+                        || branch != null && matchesBranch(expressions, branch)) {
                     return AccessDecision.deny("scoped deny grant matched");
                 }
-            } else if (branch == null || !restricted || matchesBranch(expressions, branch)) {
+            } else if (branch == null && !requireAllBranches || !restricted
+                    || matchesBranch(expressions, requireAllBranches ? "*" : branch)) {
                 allowed = true;
             }
         }

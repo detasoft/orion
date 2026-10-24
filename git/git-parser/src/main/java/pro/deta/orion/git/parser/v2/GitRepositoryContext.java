@@ -29,6 +29,7 @@ import java.util.Set;
  * Repository hooks used by Git commands. Fetch access receives already resolved wants and the same
  * refs snapshot used to resolve them. Checks must not mutate negotiation state or resolve names again;
  * the authorized object IDs remain the targets used to prepare the fetch response.
+ * Packfile URI support controls capability advertisement and request validation independently of normal fetch.
  */
 public class GitRepositoryContext implements AutoCloseable {
     private final GitStorageAccess storage;
@@ -83,6 +84,10 @@ public class GitRepositoryContext implements AutoCloseable {
 
     public Optional<URI> packUri(PackChecksum id) {
         return Optional.empty();
+    }
+
+    public boolean supportsPackfileUris() {
+        return true;
     }
 
     public void checkFetchAccess(NegotiationContext context, RefsSnapshot snapshot) throws IOException {

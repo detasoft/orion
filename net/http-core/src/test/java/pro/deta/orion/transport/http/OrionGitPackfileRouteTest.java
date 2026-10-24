@@ -19,6 +19,17 @@ import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.GrantKey;
+import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.User;
+import pro.deta.orion.schema.orion.v2.GrantAddress;
+import pro.deta.orion.schema.orion.v2.GrantId;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
+import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
+import pro.deta.orion.schema.orion.v2.RoleId;
+import pro.deta.orion.schema.orion.v2.ScopedGrant;
+import pro.deta.orion.schema.orion.v2.ScopedRole;
+import pro.deta.orion.schema.orion.v2.TeamId;
 import pro.deta.orion.bootstrap.config.GitTransportConfig;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 import pro.deta.orion.util.Result;
@@ -34,6 +45,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -49,6 +62,73 @@ class OrionGitPackfileRouteTest {
 
     @TempDir
     private Path tempDir;
+
+    @Test
+    void rejectsKnownPackBeforeStorageReadForBranchRestrictedReader() throws Exception {
+        NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.file(tempDir, EVENTS.manager());
+        NativeGitRepository repository = backend.create("team/project").valueOrFailure("repository");
+        PublishedPackFixture pack = publishPack(repository);
+        RecordingProvider provider = new RecordingProvider(backend);
+        Grant restricted = new Grant("main-reader", List.of(
+                new GrantExpression(GrantKey.REPOSITORY, "team/project"),
+                new GrantExpression(GrantKey.BRANCH, "main")));
+        SecurityContext reader = SecurityContext.createContext()
+                .withUserIdentity(new InternalUserImpl("reader", List.of(restricted)));
+        ResponseRecorder response = new ResponseRecorder();
+
+        service(gitRoute(provider), request("GET",
+                "/r/team/project.git/objects/pack/" + pack.packId().toHex() + ".pack", reader),
+                response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
+        assertThat(response.body.size()).isZero();
+        assertThat(provider.readCalls).isZero();
+    }
+
+    @Test
+    void wildcardBranchReaderCanDownloadStoredPack() throws Exception {
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(tempDir, EVENTS.manager());
+        NativeGitRepository repository = provider.create("team/project").valueOrFailure("repository");
+        PublishedPackFixture pack = publishPack(repository);
+        Grant wildcard = new Grant("reader", List.of(
+                new GrantExpression(GrantKey.REPOSITORY, "team/project"),
+                new GrantExpression(GrantKey.BRANCH, "*")));
+        SecurityContext reader = SecurityContext.createContext()
+                .withUserIdentity(new InternalUserImpl("reader", List.of(wildcard)));
+        ResponseRecorder response = new ResponseRecorder();
+
+        service(gitRoute(provider), request("GET",
+                "/r/team/project.git/objects/pack/" + pack.packId().toHex() + ".pack", reader),
+                response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(response.body.toByteArray()).isEqualTo(pack.packBytes());
+    }
+
+    @Test
+    void assignedBranchDenyRevokesStoredPackAccessForExistingOrganizationIdentity() throws Exception {
+        NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.file(tempDir, EVENTS.manager());
+        NativeGitRepository repository = backend.create("acme/team/project").valueOrFailure("repository");
+        PublishedPackFixture pack = publishPack(repository);
+        RecordingProvider provider = new RecordingProvider(backend);
+        AtomicReference<OrionDocument> current = new AtomicReference<>(organizationDocument(false));
+        SecurityContext reader = SecurityContext.createContext().withUserIdentity(
+                new InternalUserImpl("reader", new OrganizationId("acme"), current::get));
+        OrionGitRoute route = gitRoute(provider);
+        String path = "/r/acme/team/project.git/objects/pack/" + pack.packId().toHex() + ".pack";
+        ResponseRecorder allowed = new ResponseRecorder();
+        service(route, request("GET", path, reader), allowed.proxy());
+        assertThat(allowed.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(allowed.body.toByteArray()).isEqualTo(pack.packBytes());
+
+        current.set(organizationDocument(true));
+        ResponseRecorder denied = new ResponseRecorder();
+        service(route, request("GET", path, reader), denied.proxy());
+
+        assertThat(denied.status).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
+        assertThat(denied.body.size()).isZero();
+        assertThat(provider.readCalls).isEqualTo(1);
+    }
 
     @Test
     void hidesInternalPackEvenFromReaderWithRepositoryGrant() throws Exception {
@@ -186,6 +266,28 @@ class OrionGitPackfileRouteTest {
 
     private static OrionGitRoute gitRoute(NativeGitRepositoryProvider provider) {
         return new OrionGitRoute(new DefaultGitNativeRepositoryService(provider), new GitTransportConfig(), provider);
+    }
+
+    private static OrionDocument organizationDocument(boolean denySecret) {
+        ScopedGrant allow = new ScopedGrant(new GrantId("read"), ScopedGrant.Effect.ALLOW,
+                List.of(new GrantExpression(GrantKey.READ, "true"), new GrantExpression(GrantKey.BRANCH, "*")));
+        ScopedGrant deny = new ScopedGrant(new GrantId("deny"), ScopedGrant.Effect.DENY,
+                List.of(new GrantExpression(GrantKey.READ, "true"),
+                        new GrantExpression(GrantKey.BRANCH, "secret")));
+        ScopedRole role = new ScopedRole(new RoleId("reader"), List.of(), denySecret
+                ? List.of(GrantAddress.parse("acme/read"), GrantAddress.parse("acme/deny"))
+                : List.of(GrantAddress.parse("acme/read")));
+        User user = new User("reader", null, null, null, List.of(), List.of("acme/reader"), List.of());
+        OrionDocument.Repository repository = new OrionDocument.Repository("project", "",
+                OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
+                List.of(), List.of(), List.of(), List.of(), Optional.empty());
+        OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
+                List.of(repository));
+        OrionDocument.Organization organization = new OrionDocument.Organization(new OrganizationId("acme"), "",
+                List.of(user), List.of(allow, deny), List.of(role), List.of(team),
+                List.of(), List.of(), List.of(), List.of());
+        return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()),
+                List.of(organization));
     }
 
     private static PublishedPackFixture publishPack(

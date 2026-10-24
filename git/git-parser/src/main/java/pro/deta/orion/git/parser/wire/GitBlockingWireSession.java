@@ -71,7 +71,7 @@ public final class GitBlockingWireSession {
 
     private void advertise(InitialRequestData request, GitRepositoryContext repository) throws IOException {
         GitProtocolVersion version = version(request);
-        GitCapabilities capabilities = capabilities(request);
+        GitCapabilities capabilities = capabilities(request, repository);
         if (version == GitProtocolVersion.V2) {
             wire.writeTextLine("version 2");
             if (configuration.protocolV2().lsRefs()) {
@@ -109,7 +109,7 @@ public final class GitBlockingWireSession {
     private void serveRequest(InitialRequestData request, GitRepositoryContext repository, GitTransport transport)
             throws IOException {
         GitProtocolContext protocol = wire.protocolContext(version(request), transport);
-        GitCapabilities capabilities = capabilities(request);
+        GitCapabilities capabilities = capabilities(request, repository);
         if (request.service() == InitialRequestService.RECEIVE_PACK) {
             new PushCommand(repository, capabilities).action(protocol);
         } else if (protocol.version() == GitProtocolVersion.V2) {
@@ -200,7 +200,7 @@ public final class GitBlockingWireSession {
                 ? GitProtocolVersion.V0 : version;
     }
 
-    private GitCapabilities capabilities(InitialRequestData request) {
+    private GitCapabilities capabilities(InitialRequestData request, GitRepositoryContext repository) {
         if (request.service() == InitialRequestService.RECEIVE_PACK) {
             return receivePackCapabilities(configuration);
         }
@@ -217,7 +217,7 @@ public final class GitBlockingWireSession {
         if (v2.shallow()) {
             values.add(GitCapabilityValue.value(GitCapability.SHALLOW));
         }
-        if (v2.packfileUris()) {
+        if (v2.packfileUris() && repository.supportsPackfileUris()) {
             values.add(GitCapabilityValue.value(GitCapability.PACKFILE_URIS));
         }
         if (v2.filter()) {

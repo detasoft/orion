@@ -63,7 +63,7 @@ public final class BranchAccessRules {
         if (securityContext.getUserIdentity().getOrganizationId().isPresent()) {
             return GrantAccess.scopedRepositoryAccess(securityContext.getUserIdentity(), repository,
                     requireReadWrite ? GrantKey.READ_WRITE : GrantKey.READ,
-                    resource.branchName());
+                    resource.branchName(), false);
         }
         AccessDecision parentDecision = parentRule.evaluate(securityContext, repository);
         if (!parentDecision.allowed()) {
