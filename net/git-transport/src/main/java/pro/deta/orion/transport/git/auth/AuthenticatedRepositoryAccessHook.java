@@ -104,13 +104,19 @@ public final class AuthenticatedRepositoryAccessHook
             boolean force) {
         RepositoryResource repositoryResource = RepositoryResource.of(repositoryName);
         if (refName.startsWith(BRANCH_REF_PREFIX)) {
-            String branchName = refName.substring(BRANCH_REF_PREFIX.length());
+            BranchResource branchResource = BranchResource.of(
+                    repositoryResource, refName.substring(BRANCH_REF_PREFIX.length()));
             require(() -> accessEnforcer().require(
                     securityContext,
-                    BranchResource.of(repositoryResource, branchName),
+                    branchResource,
                     BranchAccessRules.push()));
-        }
-        if (force) {
+            if (force) {
+                require(() -> accessEnforcer().require(
+                        securityContext,
+                        branchResource,
+                        BranchAccessRules.force()));
+            }
+        } else if (force) {
             require(() -> accessEnforcer().require(
                     securityContext,
                     repositoryResource,

@@ -36,6 +36,36 @@ class HierarchicalAccessRulesTest {
     private static final RepositoryResource REPOSITORY = RepositoryResource.of("acme/team/repo");
 
     @Test
+    void forceGrantIsConfinedToItsBranchIndependentlyOfWriteAccess() {
+        ScopedGrant write = grant("write", ScopedGrant.Effect.ALLOW, READ_WRITE);
+        ScopedGrant force = new ScopedGrant(new GrantId("force"), ScopedGrant.Effect.ALLOW,
+                List.of(expression(FORCE, "true"), expression(BRANCH, "dev")));
+        SecurityContext context = context(document(List.of("acme/developer"), List.of(),
+                List.of(write, force)));
+
+        assertThat(push(context, "main")).isTrue();
+        assertThat(BranchAccessRules.force().evaluate(context, BranchResource.of(REPOSITORY, "dev")).allowed())
+                .isTrue();
+        assertThat(BranchAccessRules.force().evaluate(context, BranchResource.of(REPOSITORY, "main")).allowed())
+                .isFalse();
+    }
+
+    @Test
+    void inheritedForceDenyBlocksOnlyItsBranchRegardlessOfGrantOrder() {
+        ScopedGrant allow = grant("allow", ScopedGrant.Effect.ALLOW, READ_WRITE, FORCE);
+        ScopedGrant deny = new ScopedGrant(new GrantId("deny"), ScopedGrant.Effect.DENY,
+                List.of(expression(FORCE, "true"), expression(BRANCH, "main")));
+        for (List<ScopedGrant> grants : List.of(List.of(allow, deny), List.of(deny, allow))) {
+            SecurityContext context = context(document(List.of("acme/developer"), List.of(), grants));
+            assertThat(push(context, "main")).isTrue();
+            assertThat(BranchAccessRules.force().evaluate(context, BranchResource.of(REPOSITORY, "main"))
+                    .allowed()).isFalse();
+            assertThat(BranchAccessRules.force().evaluate(context, BranchResource.of(REPOSITORY, "dev"))
+                    .allowed()).isTrue();
+        }
+    }
+
+    @Test
     void unrestrictedReadRejectsAssignedBranchDeniesEvenWithWildcardAllow() {
         ScopedGrant allow = new ScopedGrant(new GrantId("read"), ScopedGrant.Effect.ALLOW,
                 List.of(expression(READ, "true"), expression(BRANCH, "*")));

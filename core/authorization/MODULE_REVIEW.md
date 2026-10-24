@@ -1,41 +1,5 @@
 # Module Review: `core/authorization`
 
-## 5. FORCE authorization drops the target branch and branch-scoped DENY grants
-
-**Problem.** Give an organization user write access to `main` and `dev`, then assign `FORCE` only for `dev`.
-A forced update of `main` passes: branch push checks write access, but force authorization evaluates with a
-null branch. Conversely, an assigned `DENY FORCE` restricted to `main` does not match that force decision.
-
-**Sources.** `AuthenticatedRepositoryAccessHook.beforeUpdate()` in the
-[access hook](../../net/git-transport/src/main/java/pro/deta/orion/transport/git/auth/AuthenticatedRepositoryAccessHook.java)
-calls `RepositoryAccessRules.force()` without a branch. The
-[force rule](src/main/java/pro/deta/orion/auth/check/rule/RepositoryAccessRules.java) passes null to
-`GrantAccess.scopedRepositoryAccess()` in the
-[shared matcher](src/main/java/pro/deta/orion/auth/check/rule/GrantAccess.java), which accepts branch-qualified
-allows and skips branch-qualified denies when no branch is supplied.
-[Hook tests](../../net/git-transport/src/test/java/pro/deta/orion/transport/git/auth/AuthenticatedRepositoryAccessHookTest.java)
-check missing force grants; [hierarchical tests](src/test/java/pro/deta/orion/auth/check/HierarchicalAccessRulesTest.java)
-check branch write denies, without combining branch-scoped force allows and denies.
-
-**Documented behavior.** [README](../../README.md) requires force permission in addition to push permission.
-[ScopedAccess](src/main/java/pro/deta/orion/auth/check/ScopedAccess.java) states that matching assigned denies
-override allows. No documented rule explains silently discarding a force grant's branch qualifier.
-
-**Contract.** Evaluate destructive updates against their actual target. Either support branch-qualified force
-grants consistently or reject that combination explicitly; do not interpret it as a broader allow.
-
-**Minimal repair.** Carry the branch into force matching through the existing branch rule path. Verify allowed
-`dev`, denied `main`, and an inherited branch-specific force deny through `beforeUpdate()`.
-
-**Alternatives and consequences.** Declaring force repository-wide requires validation and a configuration
-contract decision for existing qualified grants. It is smaller than branch support but removes expressiveness.
-Neither alternative requires a new authorization service.
-
-**Confidence.** High from the deterministic call chain; the counterexample was not executed.
-
-**Priority signals.** Importance: high, because destructive updates ignore a configured scope or deny.
-Repair ease: medium, involving an existing rule contract and its transport caller.
-
 ## 6. Boolean-looking privilege values are accepted but ignored
 
 **Problem.** In an ALLOW grant, `READ_WRITE=false`, `FORCE=false`, or `ADMIN=false` still activates the
@@ -228,3 +192,49 @@ explicitly approved. A second repository ownership registry would duplicate conf
 
 **Priority signals.** Importance: medium to high, because successful creation produces an inaccessible
 resource for the intended principal. Repair ease: medium, with configuration/storage lifecycle implications.
+
+## 11. Ref advertisements expose branches and tags outside the subject's read scope
+
+**Problem.** Give a repository reader access only to `main`, with another branch named `secret` and a tag
+pointing into its history. Legacy advertisement and protocol v2 `ls-refs` still disclose both names and object
+IDs. Annotated-tag peeling and `HEAD`/symref output can additionally disclose a hidden target. Rejecting a
+later fetch does not remove metadata already sent during discovery.
+
+**Sources.** `GitBlockingWireSession.legacyAdvertisement()` in the
+[wire session](../../git/git-parser/src/main/java/pro/deta/orion/git/parser/wire/GitBlockingWireSession.java)
+and `RefsCommand.action()` in the
+[v2 refs command](../../git/git-parser/src/main/java/pro/deta/orion/git/parser/v2/command/RefsCommand.java)
+enumerate an unrestricted `RefSelection.All` snapshot. Both serve real SSH/HTTP clients.
+`NativeGitRepositoryContext.checkFetchAccess()` in the
+[repository context](../../net/git-transport/src/main/java/pro/deta/orion/transport/git/NativeGitRepositoryContext.java)
+checks branch reachability only when objects are requested. Existing
+[wire tests](../../net/git-transport/src/test/java/pro/deta/orion/transport/git/GitBlockingWireSessionTest.java)
+exercise advertisement and `ls-refs` using an unrestricted access hook; they do not establish subject-specific
+filtering. [GrantKey](../schema/src/main/java/pro/deta/orion/schema/acl/GrantKey.java) has no separate tag action.
+
+**Documented behavior.** [README](../../README.md) requires repository and branch grants within organization
+boundaries. The [access-policy plan](../../docs/plans/tasks/11_git/07_access-policy-and-protected-refs.md)
+calls for filtering upload-pack and receive-pack advertisements, with `HEAD` and peeled targets visible only
+when their targets are visible. Those planned guarantees are not implemented by the current enumerators.
+
+**Contract.** Advertise only refs allowed by the subject's applicable read policy. Preserve the wire format,
+request prefixes, unrestricted-reader behavior, and one coherent refs snapshot. Hide all tags for readers
+whose access is restricted by branch, including lightweight and annotated tags whose targets are reachable
+from an allowed branch. A separate tag grant is not part of the authorization model. Hidden names and IDs
+must not escape through `HEAD`, symrefs, or peeling.
+
+**Minimal repair.** Add one subject-aware ref-filtering boundary reused by legacy advertisement and v2
+`ls-refs`, including receive-pack discovery. Reuse existing branch/read rules and the unrestricted-read check
+rather than implementing policy separately in each transport. Cover visible and denied branches, hidden
+lightweight and annotated tags even with shared reachable targets, hidden `HEAD` targets, and unrestricted
+readers through wire tests.
+
+**Alternatives and consequences.** Filtering only `ls-refs` leaves legacy clients and receive-pack discovery
+exposed. Filtering names without associated `HEAD`/peeled metadata is incomplete. A broad new Git policy
+service is unnecessary for this boundary. An unborn symbolic `HEAD` must also respect its branch rule.
+
+**Confidence.** High for unrestricted enumeration in both production paths; static inspection only, without
+a subject-restricted wire reproduction yet.
+
+**Priority signals.** Importance: high for ref-name and object-ID confidentiality. Repair ease: medium, because
+the shared repository boundary must cover two protocol versions and their metadata without duplicating ACLs.

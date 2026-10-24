@@ -362,6 +362,42 @@ public class AccessRulesTest {
     }
 
     @Test
+    void forceUsesItsOwnBranchGrantsWithoutBorrowingReadOrWriteBranches() {
+        Grant write = repositoryGrantDraft("project").addKey(GrantKey.READ_WRITE, "true")
+                .addKey(GrantKey.BRANCH, "*").toAccessControl();
+        Grant force = repositoryGrantDraft("project").addKey(GrantKey.FORCE, "true")
+                .addKey(GrantKey.BRANCH, "dev").toAccessControl();
+        SecurityContext user = securityContext(new InternalUserImpl("writer",
+                List.of(write, force, repositoryGrant("project", "main"))));
+        RepositoryResource repository = RepositoryResource.of("project");
+
+        assertThat(BranchAccessRules.force().evaluate(user, BranchResource.of(repository, "dev")).allowed())
+                .isTrue();
+        assertThat(BranchAccessRules.force().evaluate(user, BranchResource.of(repository, "main")).allowed())
+                .isFalse();
+        assertThat(BranchAccessRules.force().evaluate(user,
+                BranchResource.of(RepositoryResource.of("other"), "dev")).allowed()).isFalse();
+        assertThatCode(() -> requireBranchPush(user, "project", "main")).doesNotThrowAnyException();
+        SecurityContext withoutForce = securityContext(new InternalUserImpl("writer", List.of(write)));
+        assertThat(BranchAccessRules.force().evaluate(withoutForce, BranchResource.of(repository, "dev"))
+                .allowed()).isFalse();
+    }
+
+    @Test
+    void unqualifiedAndWildcardForceGrantsPermitEveryBranch() {
+        Grant write = repositoryGrantDraft("project").addKey(GrantKey.READ_WRITE, "true")
+                .addKey(GrantKey.BRANCH, "dev").toAccessControl();
+        for (String branch : List.of("", "*")) {
+            GrantFixture force = repositoryGrantDraft("project").addKey(GrantKey.FORCE, "true");
+            if (!branch.isEmpty()) force.addKey(GrantKey.BRANCH, branch);
+            SecurityContext user = securityContext(new InternalUserImpl("writer",
+                    List.of(write, force.toAccessControl())));
+            assertThat(BranchAccessRules.force().evaluate(user,
+                    BranchResource.of(RepositoryResource.of("project"), "main")).allowed()).isTrue();
+        }
+    }
+
+    @Test
     void unrestrictedReadRejectsBranchRestrictionsEvenAlongsideAnUnqualifiedGrant() {
         RepositoryResource repository = RepositoryResource.of("project");
         SecurityContext reader = securityContext(new InternalUserImpl("reader", List.of(

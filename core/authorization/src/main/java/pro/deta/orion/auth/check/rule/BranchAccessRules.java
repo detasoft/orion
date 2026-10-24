@@ -17,12 +17,15 @@ import static pro.deta.orion.auth.check.MatcherUtils.filterGrants;
 /**
  * Rules for branch-level access. A branch is evaluated through its parent repository first, so a matching
  * branch expression cannot bypass the repository expression in the same ACL grant.
+ * Push and force restrictions come only from grants for that operation; read grants cannot expand either.
  */
 public final class BranchAccessRules {
     private static final AccessRule<BranchResource> FETCH =
             new NamedAccessRule<>("branch fetch", BranchAccessRules::evaluateFetch);
     private static final AccessRule<BranchResource> PUSH =
             new NamedAccessRule<>("branch push", BranchAccessRules::evaluatePush);
+    private static final AccessRule<BranchResource> FORCE =
+            new NamedAccessRule<>("branch force", BranchAccessRules::evaluateForce);
 
     private BranchAccessRules() {
     }
@@ -35,12 +38,16 @@ public final class BranchAccessRules {
         return PUSH;
     }
 
+    public static AccessRule<BranchResource> force() {
+        return FORCE;
+    }
+
     private static AccessDecision evaluateFetch(SecurityContext securityContext, BranchResource resource) {
         return evaluateBranchAccess(
                 securityContext,
                 resource,
                 RepositoryAccessRules.read(),
-                false,
+                GrantKey.READ,
                 "parent repository read denied");
     }
 
@@ -49,21 +56,29 @@ public final class BranchAccessRules {
                 securityContext,
                 resource,
                 RepositoryAccessRules.write(),
-                true,
+                GrantKey.READ_WRITE,
                 "parent repository write denied");
+    }
+
+    private static AccessDecision evaluateForce(SecurityContext securityContext, BranchResource resource) {
+        return evaluateBranchAccess(
+                securityContext,
+                resource,
+                RepositoryAccessRules.force(),
+                GrantKey.FORCE,
+                "parent repository force denied");
     }
 
     private static AccessDecision evaluateBranchAccess(
             SecurityContext securityContext,
             BranchResource resource,
             AccessRule<RepositoryResource> parentRule,
-            boolean requireReadWrite,
+            GrantKey action,
             String parentDeniedReason) {
         RepositoryResource repository = resource.parentResource();
         if (securityContext.getUserIdentity().getOrganizationId().isPresent()) {
             return GrantAccess.scopedRepositoryAccess(securityContext.getUserIdentity(), repository,
-                    requireReadWrite ? GrantKey.READ_WRITE : GrantKey.READ,
-                    resource.branchName(), false);
+                    action, resource.branchName(), false);
         }
         AccessDecision parentDecision = parentRule.evaluate(securityContext, repository);
         if (!parentDecision.allowed()) {
@@ -73,8 +88,8 @@ public final class BranchAccessRules {
         List<Grant> branchGrants = GrantAccess.branchRestrictedRepositoryGrants(
                 securityContext.getUserIdentity(),
                 repository.repositoryName());
-        if (requireReadWrite) {
-            branchGrants = filterGrants(branchGrants, GrantMatcher.of(GrantKey.READ_WRITE));
+        if (action != GrantKey.READ) {
+            branchGrants = filterGrants(branchGrants, GrantMatcher.of(action));
         }
         if (branchGrants.isEmpty()) {
             return AccessDecision.allow("parent repository grant has no branch restriction");
