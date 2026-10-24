@@ -91,7 +91,6 @@ public class App {
                         .rootPasswordReset(options.rootPasswordReset())
                         .signingMaterial(bootstrap.signingMaterial())
                         .keyMaterial(bootstrap.keyMaterial())
-                        .configurationSecretCipher(bootstrap.configurationCipher())
                         .sshHostKeyCapability(sshHostKeys)
                         .nativeGitRepositoryProvider(bootstrap.repositoryFactory())
                         .configuredRepositoryFactory(bootstrap.storageFactory())

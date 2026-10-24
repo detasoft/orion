@@ -89,7 +89,7 @@ class BootstrapProxyTransportIT {
                     new InMemoryKeyMaterialContentStore(), new KeyMaterialCreation(true))) {
                 var probeConfiguration = new AtomicReference<>(OrionXml.read(
                         new ByteArrayInputStream(originalConfiguration)));
-                var probeSecrets = new ConfigurationSecrets(probeConfiguration::get, probeMaterial.configurationCipher());
+                var probeSecrets = new ConfigurationSecrets(probeConfiguration::get, probeMaterial);
                 probeConfiguration.set(upstreamProvider.adoptProvisional(probeConfiguration.get(), probeSecrets));
                 upstreamProvider.activate(probeConfiguration::get, probeSecrets);
                 assertCacheIsNotRoutable(configuration, environment, upstreamCache);

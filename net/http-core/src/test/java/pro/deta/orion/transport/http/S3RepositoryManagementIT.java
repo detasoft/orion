@@ -1,6 +1,5 @@
 package pro.deta.orion.transport.http;
 
-import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -37,16 +36,10 @@ class S3RepositoryManagementIT {
     @Test
     void encryptedManagementPersistsActivatesCreatesAndReopensMetadataInMinio() throws Exception {
         try (MinioS3TestServer server = MinioS3TestServer.start("orion-management-" + UUID.randomUUID());
-             KeyMaterialService material = KeyMaterialService.open(new InMemoryKeyMaterialContentStore(),
+             OrionKeyMaterial material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
                      KeyMaterialOptions.pkcs12("test-password".toCharArray()));
              S3Transport transport = new S3Transport();
              NativeGitRepositoryProvider local = NativeGitRepositoryProvider.inMemory(EVENTS.manager())) {
-            KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor("configuration-v1",
-                    Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES,
-                    1);
-            material.generateSecretKeyIfMissing(descriptor, 256);
-            ConfigurationSecretCipher cipher = KeyMaterialCapabilities.open(material, List.of(descriptor))
-                    .configurationCipher(descriptor);
             ConfiguredNativeGitRepositoryFactory configuredFactory =
                     new ConfiguredNativeGitRepositoryFactory(
                             pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(
@@ -59,11 +52,11 @@ class S3RepositoryManagementIT {
                     List.of(), List.of(), List.of())), List.of(), List.of(), List.of(), List.of());
             StorageManagementFixture.State fixture =
                     StorageManagementFixture.open(
-                            EVENTS, configured, List.of(organization), cipher);
+                            EVENTS, configured, List.of(organization), material);
             ConfigurationSecrets secrets =
                     new ConfigurationSecrets(
                             () -> fixture.desired().acl().configuration().result()
-                                    .valueOrFailure("Cannot read configuration document"), cipher);
+                                    .valueOrFailure("Cannot read configuration document"), material);
             configuredFactory.activate(
                     () -> fixture.desired().acl().configuration().result()
                             .valueOrFailure("Cannot read configuration document"),

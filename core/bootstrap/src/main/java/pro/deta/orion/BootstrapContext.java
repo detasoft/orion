@@ -17,7 +17,6 @@ import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.keymaterial.SshHostKeyReference;
@@ -157,7 +156,7 @@ public final class BootstrapContext implements AutoCloseable {
     public static Optional<OrionDocumentRevision> adoptProxies(
             OrionConfigurationEditor editor,
             NativeGitRepositoryFactory repositoryProvider,
-            ConfigurationSecretCipher cipher,
+            OrionKeyMaterial keyMaterial,
             OrionDocumentRevision approved) {
         Objects.requireNonNull(editor, "configuration editor");
         Objects.requireNonNull(approved, "approved configuration");
@@ -174,7 +173,7 @@ public final class BootstrapContext implements AutoCloseable {
             if (file.revision() instanceof OrionRevision.Absent) {
                 throw new IllegalStateException("Proxy adoption requires a configuration revision");
             }
-            ConfigurationSecrets secrets = new ConfigurationSecrets(() -> current, cipher);
+            ConfigurationSecrets secrets = new ConfigurationSecrets(() -> current, keyMaterial);
             OrionDocument candidate = repositoryProvider.adoptProvisional(current, secrets);
             if (candidate == current) {
                 return Optional.of(file);
@@ -217,10 +216,6 @@ public final class BootstrapContext implements AutoCloseable {
 
     public OrionKeyMaterial keyMaterial() {
         return keyMaterial;
-    }
-
-    public ConfigurationSecretCipher configurationCipher() {
-        return keyMaterial.configurationCipher();
     }
 
     public SigningMaterialSet signingMaterial() {

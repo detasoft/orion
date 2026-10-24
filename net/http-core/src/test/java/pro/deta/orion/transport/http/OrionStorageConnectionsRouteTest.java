@@ -1,6 +1,5 @@
 package pro.deta.orion.transport.http;
 
-import java.util.Set;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -29,16 +28,10 @@ class OrionStorageConnectionsRouteTest {
 
     @Test
     void createsAndInspectsSystemConnectionWithEncryptedWriteOnlyCredentials() throws Exception {
-        try (KeyMaterialService material = KeyMaterialService.open(new InMemoryKeyMaterialContentStore(),
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
                 KeyMaterialOptions.pkcs12("test-password".toCharArray()))) {
-            KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor("configuration-v1",
-                    Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES,
-                    1);
-            material.generateSecretKeyIfMissing(descriptor, 256);
-            ConfigurationSecretCipher cipher = KeyMaterialCapabilities.open(material, List.of(descriptor))
-                    .configurationCipher(descriptor);
             StorageManagementFixture.State fixture = StorageManagementFixture.open(EVENTS,
-                    NativeGitRepositoryProvider.inMemory(EVENTS.manager()), List.of(), cipher);
+                    NativeGitRepositoryProvider.inMemory(EVENTS.manager()), List.of(), material);
             OrionStorageConnectionsRoute route = new OrionStorageConnectionsRoute(fixture.management(), mapper);
             String body = """
                     {"revision":"v1","create":true,"connection":{"name":"archive","region":"us-east-1",

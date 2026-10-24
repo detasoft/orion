@@ -16,15 +16,14 @@ import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.config.OrionVersionedConfigurationStorage;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.internal.ChangeMetadata;
-import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
+import pro.deta.orion.keymaterial.ConfigurationSecretContext;
+import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialCapabilities;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialService;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -38,24 +37,16 @@ public final class TestConfiguration implements AutoCloseable {
     private final MemoryStorage storage = new MemoryStorage();
     private final OrionConfigurationEditor editor;
     private final OrionAccessControlServiceImpl acl;
-    private final ConfigurationSecretCipher cipher;
+    private final OrionKeyMaterial material;
 
     public TestConfiguration(TestEvents events) {
-        this(events, new BootstrapConfiguration(), defaultCipher(events),
-                new OrionKeyMaterial() {
-                    @Override
-                    public void require(KeyMaterialDescriptor descriptor) {}
-
-                    @Override
-                    public void require(TrustedCertificateDescriptor descriptor) {}
-                });
+        this(events, new BootstrapConfiguration(), defaultMaterial(events));
     }
 
-    public TestConfiguration(TestEvents events, BootstrapConfiguration bootstrap,
-            ConfigurationSecretCipher cipher, OrionKeyMaterial material) {
+    public TestConfiguration(TestEvents events, BootstrapConfiguration bootstrap, OrionKeyMaterial material) {
         this.events = events;
-        this.cipher = cipher;
-        editor = new OrionConfigurationEditor(storage, cipher, material, events.manager());
+        this.material = material;
+        editor = new OrionConfigurationEditor(storage, material, events.manager());
         SigningMaterialSet signing = new SigningMaterialSet(
                 new KeyMaterialDescriptor("signing", Set.of(KeyMaterialPurpose.SERVER_SIGNING),
                         KeyMaterialAlgorithm.RSA, 1), List.of());
@@ -79,25 +70,39 @@ public final class TestConfiguration implements AutoCloseable {
 
     public ConfigurationSecrets secrets() {
         return new ConfigurationSecrets(() -> acl.configuration().result()
-                .valueOrFailure("Cannot read configuration document"), cipher);
+                .valueOrFailure("Cannot read configuration document"), material);
     }
 
-    private static ConfigurationSecretCipher defaultCipher(TestEvents events) {
+    private static OrionKeyMaterial defaultMaterial(TestEvents events) {
         try {
-            KeyMaterialService material = KeyMaterialService.open(new InMemoryKeyMaterialContentStore(),
+            OrionKeyMaterial material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
                     KeyMaterialOptions.pkcs12("test-password".toCharArray()));
             events.own(material);
-            KeyMaterialDescriptor descriptor =
-                    new KeyMaterialDescriptor(
-                            "configuration-v1",
-                            Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER),
-                            KeyMaterialAlgorithm.AES,
-                            1);
-            material.generateSecretKeyIfMissing(descriptor, 256);
-            return KeyMaterialCapabilities.open(material, java.util.List.of(descriptor))
-                    .configurationCipher(descriptor);
+            return new OrionKeyMaterial() {
+                @Override
+                public void require(KeyMaterialDescriptor descriptor) {}
+
+                @Override
+                public void require(TrustedCertificateDescriptor descriptor) {}
+
+                @Override
+                public ConfigurationSecretEnvelope seal(
+                        KeyMaterialDescriptor descriptor, byte[] plaintext,
+                        ConfigurationSecretContext context)
+                        throws java.security.GeneralSecurityException {
+                    return material.seal(descriptor, plaintext, context);
+                }
+
+                @Override
+                public byte[] open(KeyMaterialDescriptor descriptor,
+                        ConfigurationSecretEnvelope envelope,
+                        ConfigurationSecretContext context)
+                        throws java.security.GeneralSecurityException {
+                    return material.open(descriptor, envelope, context);
+                }
+            };
         } catch (java.io.IOException | java.security.GeneralSecurityException failure) {
-            throw new IllegalStateException("Cannot initialize test configuration cipher", failure);
+            throw new IllegalStateException("Cannot initialize test key material", failure);
         }
     }
 

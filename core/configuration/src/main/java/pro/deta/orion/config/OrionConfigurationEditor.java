@@ -25,18 +25,15 @@ import java.util.function.Consumer;
 public final class OrionConfigurationEditor implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
     private final OrionVersionedConfigurationStorage storage;
     private final OrionEventManager events;
-    private final ConfigurationSecretCipher configurationCipher;
     private final OrionKeyMaterial configurationMaterial;
     private volatile OrionDocumentRevision activeConfiguration;
     private volatile Subscription changeSubscription;
 
     @Inject
     public OrionConfigurationEditor(OrionVersionedConfigurationStorage storage,
-            ConfigurationSecretCipher configurationCipher,
             OrionKeyMaterial configurationMaterial, OrionEventManager events) {
         this.storage = storage;
         this.events = Objects.requireNonNull(events, "events");
-        this.configurationCipher = configurationCipher;
         this.configurationMaterial = configurationMaterial;
     }
 
@@ -188,7 +185,7 @@ public final class OrionConfigurationEditor implements ServiceLifecycleStateMach
                             KeyMaterialPurpose.ACME_ACCOUNT);
                 }
             }
-            new ConfigurationSecrets(() -> document, configurationCipher).validate(document);
+            new ConfigurationSecrets(() -> document, configurationMaterial).validate(document);
             return document;
         } catch (GeneralSecurityException error) {
             throw new IllegalStateException(

@@ -9,7 +9,7 @@ import jakarta.inject.Named;
 import jakarta.inject.Singleton;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory;
@@ -20,7 +20,6 @@ import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.OrionKeyMaterialFactory;
-import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.acl.RootPasswordReset;
@@ -67,7 +66,6 @@ public interface OrionComponent {
         @BindsInstance Builder rootPasswordReset(RootPasswordReset rootPasswordReset);
         @BindsInstance Builder signingMaterial(SigningMaterialSet material);
         @BindsInstance Builder keyMaterial(OrionKeyMaterial material);
-        @BindsInstance Builder configurationSecretCipher(ConfigurationSecretCipher cipher);
         @BindsInstance Builder sshHostKeyCapability(SshHostKeyCapability capability);
         @BindsInstance Builder nativeGitRepositoryProvider(NativeGitRepositoryFactory repositoryProvider);
         @BindsInstance Builder s3Transport(S3Transport transport);
@@ -92,7 +90,6 @@ public interface OrionComponent {
                     .signingMaterial(OrionKeyMaterialFactory.signingMaterial(
                             configuration.getBootstrap().getKeyMaterial()))
                     .keyMaterial(OrionKeyMaterial.unavailable())
-                    .configurationSecretCipher(ConfigurationSecretCipher.unavailable())
                     .sshHostKeyCapability(SshHostKeyCapability.unavailable())
                     .nativeGitRepositoryProvider(repositoryProvider)
                     .configuredRepositoryFactory(configured)

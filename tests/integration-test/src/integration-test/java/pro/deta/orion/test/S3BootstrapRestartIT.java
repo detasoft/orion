@@ -87,7 +87,7 @@ class S3BootstrapRestartIT {
                 OrionDocument document = OrionDocument.withAccessControl(
                         DefaultAccessControl.create("cold-start-test-password-hash"));
                 ConfigurationSecrets secrets = new ConfigurationSecrets(() -> document,
-                        material.configurationCipher());
+                        material);
                 ByteArrayOutputStream output = new ByteArrayOutputStream();
                 OrionXml.write(secrets.createSystem(document, SECRET_ID, SECRET_VALUE.toCharArray()), output);
                 xml = output.toByteArray();
@@ -141,7 +141,7 @@ class S3BootstrapRestartIT {
                                             TestRuntimeBootstrap.configurationXml(
                                                     component.orionAccessControlService())));
                     ConfigurationSecrets secrets = new ConfigurationSecrets(() -> loaded,
-                            bootstrap.configurationCipher());
+                            bootstrap.keyMaterial());
                     assertThat(secrets.resolveSystem(SECRET_ID)).isEqualTo(SECRET_VALUE.toCharArray());
                     NativeGitRepository repository = bootstrap.repositoryProvider().find("orion")
                             .valueOrFailure("loaded S3 bootstrap repository");
@@ -184,7 +184,7 @@ class S3BootstrapRestartIT {
                     OrionDocument document = current.result()
                             .valueOrFailure("Cannot read configuration document");
                     ConfigurationSecrets secrets = new ConfigurationSecrets(() -> document,
-                            bootstrap.configurationCipher());
+                            bootstrap.keyMaterial());
                     OrionDocument updated = secrets.createSystem(document, SECRET_ID, SECRET_VALUE.toCharArray());
                     TestRuntimeBootstrap.updateConfiguration(
                             component,
@@ -247,7 +247,7 @@ class S3BootstrapRestartIT {
                     assertThat(loadedConfiguration).isEqualTo(savedConfiguration);
                     OrionDocument loaded = OrionXml.read(new ByteArrayInputStream(loadedConfiguration));
                     ConfigurationSecrets secrets = new ConfigurationSecrets(() -> loaded,
-                            bootstrap.configurationCipher());
+                            bootstrap.keyMaterial());
                     assertThat(secrets.resolveSystem(SECRET_ID)).isEqualTo(SECRET_VALUE.toCharArray());
                     NativeGitRepository repository = bootstrap.repositoryProvider().find("orion")
                             .valueOrFailure("reopened S3 bootstrap repository");

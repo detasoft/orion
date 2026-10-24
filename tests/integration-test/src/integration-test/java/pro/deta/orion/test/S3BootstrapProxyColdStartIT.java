@@ -102,7 +102,7 @@ class S3BootstrapProxyColdStartIT {
                     OrionDocument document = OrionDocument.withAccessControl(
                             DefaultAccessControl.create("proxy-cold-start-password-hash"));
                     ConfigurationSecrets secrets = new ConfigurationSecrets(() -> document,
-                            seeded.configurationCipher());
+                            seeded.keyMaterial());
                     ByteArrayOutputStream output = new ByteArrayOutputStream();
                     OrionXml.write(secrets.createSystem(document, SECRET_ID, SECRET_VALUE.toCharArray()), output);
                     xml = output.toByteArray();
@@ -148,7 +148,7 @@ class S3BootstrapProxyColdStartIT {
                                         component.orionAccessControlService());
                         OrionDocument loaded = OrionXml.read(new ByteArrayInputStream(loadedConfiguration));
                         ConfigurationSecrets secrets = new ConfigurationSecrets(() -> loaded,
-                                bootstrap.configurationCipher());
+                                bootstrap.keyMaterial());
                         assertThat(secrets.resolveSystem(SECRET_ID)).isEqualTo(SECRET_VALUE.toCharArray());
                         assertThat(bootstrap.repositoryProvider().repositoryNames()).doesNotContain(cacheName);
                         NativeGitRepository cache = bootstrap.repositoryProvider().openForRead(cacheName)

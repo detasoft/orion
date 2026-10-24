@@ -11,12 +11,8 @@ import pro.deta.orion.git.client.GitClientTransportException;
 import pro.deta.orion.git.client.GitClientTransportSession;
 import pro.deta.orion.git.client.GitCredentials;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
-import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialCapabilities;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
-import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialService;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecretReference;
@@ -47,21 +43,17 @@ class GitHubRemoteProfileTest {
     private static final RepositoryAddress REPOSITORY = RepositoryAddress.parse("acme/platform/api");
     private final AtomicReference<OrionDocument> current = new AtomicReference<>();
     private final AtomicInteger resolutions = new AtomicInteger();
-    private KeyMaterialService material;
+    private OrionKeyMaterial material;
     private ConfigurationSecrets secrets;
 
     @BeforeEach
     void configureStoredCredential() throws Exception {
-        material = KeyMaterialService.open(new InMemoryKeyMaterialContentStore(),
+        material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
                 KeyMaterialOptions.pkcs12("test-password".toCharArray()));
-        KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor("configuration-v1",
-                Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES,
-                1);
-        material.generateSecretKeyIfMissing(descriptor, 256);
         secrets = new ConfigurationSecrets(() -> {
             resolutions.incrementAndGet();
             return current.get();
-        }, KeyMaterialCapabilities.open(material, List.of(descriptor)).configurationCipher(descriptor));
+        }, material);
         OrionDocument.Repository repository = new OrionDocument.Repository("api", null,
                 "refs/heads/main", RepositoryPolicy.safeDefaults(), List.of(), List.of(), List.of(), List.of(),
                         java.util.Optional.empty());

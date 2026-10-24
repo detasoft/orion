@@ -80,7 +80,7 @@ class RuntimeHttpGitRouteIT {
             OrionDocument document = new OrionDocument(base.system(), List.of(
                     gitOrganization("acme"), gitOrganization("other")));
             ConfigurationSecrets secrets = new ConfigurationSecrets(() -> base,
-                    orion.identity().material().configurationCipher());
+                    orion.identity().material());
             for (String organization : List.of("acme", "other")) {
                 document = secrets.replace(document, ConfigurationScope.organization(new OrganizationId(organization)),
                         "oidc", "test-client-secret".toCharArray());

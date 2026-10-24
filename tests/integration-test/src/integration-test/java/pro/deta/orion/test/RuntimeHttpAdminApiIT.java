@@ -66,7 +66,7 @@ class RuntimeHttpAdminApiIT {
             OrionDocument stored = OrionXml.read(new ByteArrayInputStream(persisted));
             assertThat(stored.system().secrets()).hasSize(1);
             ConfigurationSecrets secrets = new ConfigurationSecrets(() -> stored,
-                    orion.identity().material().configurationCipher());
+                    orion.identity().material());
             String secretId = stored.system().proxies().getFirst().secret(stored.system()).orElseThrow();
             assertThat(secrets.resolveSystem(stored, secretId))
                     .isEqualTo("private-proxy-value".toCharArray());

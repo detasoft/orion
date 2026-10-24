@@ -44,7 +44,7 @@ class BootstrapProxyAdoptionTest {
     void keepsSharedBootstrapSourcesPrivateWithoutCreatingAnAlias() throws Exception {
         try (OrionKeyMaterial material = material()) {
             AtomicReference<OrionDocument> current = new AtomicReference<>(empty());
-            ConfigurationSecrets secrets = new ConfigurationSecrets(current::get, material.configurationCipher());
+            ConfigurationSecrets secrets = new ConfigurationSecrets(current::get, material);
             var provider = provider("external-token");
             String configurationName = provider.prepareProvisional(
                     "configuration", source("https://git.example/repo"));
@@ -75,7 +75,7 @@ class BootstrapProxyAdoptionTest {
     void keepsAnExistingAliasAndRotatedCredentialOnRestart() throws Exception {
         try (OrionKeyMaterial material = material()) {
             AtomicReference<OrionDocument> current = new AtomicReference<>(empty());
-            ConfigurationSecrets secrets = new ConfigurationSecrets(current::get, material.configurationCipher());
+            ConfigurationSecrets secrets = new ConfigurationSecrets(current::get, material);
             current.set(secrets.createSystem(current.get(), "managed-token", "rotated-token".toCharArray()));
             GitProxyBinding binding = binding("operator-selected", "https://git.example/repo", "managed-token");
             current.set(withProxy(current.get(), binding));
@@ -90,7 +90,7 @@ class BootstrapProxyAdoptionTest {
     void rejectsAnOccupiedAliasBeforeAddingSecrets() throws Exception {
         try (OrionKeyMaterial material = material()) {
             var current = new AtomicReference<>(empty());
-            ConfigurationSecrets secrets = new ConfigurationSecrets(current::get, material.configurationCipher());
+            ConfigurationSecrets secrets = new ConfigurationSecrets(current::get, material);
             current.set(secrets.createSystem(current.get(), "existing", "existing-token".toCharArray()));
             current.set(withProxy(current.get(), binding("configuration", "https://git.example/other", "existing")));
             var provider = provider("external-token");
@@ -106,7 +106,7 @@ class BootstrapProxyAdoptionTest {
     void rejectsAnOccupiedGeneratedSecretIdentity() throws Exception {
         try (OrionKeyMaterial material = material()) {
             var current = new AtomicReference<>(empty());
-            ConfigurationSecrets secrets = new ConfigurationSecrets(current::get, material.configurationCipher());
+            ConfigurationSecrets secrets = new ConfigurationSecrets(current::get, material);
             current.set(secrets.createSystem(current.get(), "material-credential", "other".toCharArray()));
             var provider = provider("external-token");
             provider.prepareProvisional("material", source("https://git.example/repo"));
@@ -123,7 +123,7 @@ class BootstrapProxyAdoptionTest {
                     Optional.empty(), List.of(new ConfigurationSecret("token", "invalid-envelope")),
                     List.of(binding("configuration", "https://git.example/repo", "token")), List.of(),
                     List.of()), List.of());
-            ConfigurationSecrets secrets = new ConfigurationSecrets(() -> current, material.configurationCipher());
+            ConfigurationSecrets secrets = new ConfigurationSecrets(() -> current, material);
             var provider = provider("external-token");
             provider.prepareProvisional("configuration", source("https://git.example/repo"));
             assertThatThrownBy(() -> provider.adoptProvisional(current, secrets))

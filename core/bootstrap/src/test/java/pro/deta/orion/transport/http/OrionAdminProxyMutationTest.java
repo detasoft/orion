@@ -757,7 +757,6 @@ class OrionAdminProxyMutationTest {
                         new SigningMaterialSet(signing, List.of()), 2048, new KeyMaterialCreation(true));
             }
             editor = new OrionConfigurationEditor(storage,
-                material.configurationCipher(),
                 material,
                 EVENTS.manager());
             acl =
@@ -771,7 +770,7 @@ class OrionAdminProxyMutationTest {
             secrets =
                     new ConfigurationSecrets(
                             () -> acl.configuration().result()
-                                    .valueOrFailure("Cannot read configuration document"), material.configurationCipher());
+                                    .valueOrFailure("Cannot read configuration document"), material);
             if (bootstrapSource != null) {
                 provider.resolveProvisional(NativeGitRepositoryFactory.MATERIAL_SOURCE, bootstrapSource, false);
             }

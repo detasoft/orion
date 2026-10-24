@@ -5,17 +5,15 @@ import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialCapabilities;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialService;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
@@ -56,14 +54,12 @@ class ConfigurationSecretsTest {
     private final AtomicReference<OrionDocument> current = new AtomicReference<>(document());
     private final AtomicReference<byte[]> cipherInput = new AtomicReference<>();
     private final AtomicReference<byte[]> cipherOutput = new AtomicReference<>();
-    private KeyMaterialService keyMaterial;
+    private OrionKeyMaterial keyMaterial;
     private ConfigurationSecrets secrets;
 
     @BeforeEach
     void open() throws Exception {
-        keyMaterial = KeyMaterialService.open(material, options());
-        keyMaterial.generateSecretKeyIfMissing(CIPHER, 256);
-        keyMaterial.save();
+        keyMaterial = OrionKeyMaterial.open(material, options());
         secrets = resolver(keyMaterial);
     }
 
@@ -107,7 +103,7 @@ class ConfigurationSecretsTest {
         assertThat(output.toString(StandardCharsets.UTF_8)).doesNotContain("tøken");
         current.set(OrionXml.read(new ByteArrayInputStream(output.toByteArray())));
 
-        try (KeyMaterialService reopened = KeyMaterialService.open(material, options())) {
+        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(material, options())) {
             char[] resolved = resolver(reopened).resolve(REPOSITORY, REFERENCE);
             assertThat(resolved).isEqualTo("tøken-🔑\r\n".toCharArray());
             assertThat(cipherOutput.get()).containsOnly((byte) 0);
@@ -315,9 +311,7 @@ class ConfigurationSecretsTest {
 
     @Test
     void rejectsAuthenticatedInvalidUtf8AndClearsTheDecryptedBuffer() throws Exception {
-        ConfigurationSecretCipher cipher = KeyMaterialCapabilities.open(keyMaterial, List.of(CIPHER))
-                .configurationCipher(CIPHER);
-        String envelope = new ConfigurationSecretEnvelopeCodec().serialize(cipher.seal(
+        String envelope = new ConfigurationSecretEnvelopeCodec().serialize(keyMaterial.seal(CIPHER,
                 new byte[]{'r', 'a', 'w', '-', 's', 'e', 'c', 'r', 'e', 't', (byte) 0xc3},
                 new ConfigurationSecretContext("repository/acme/platform/api/github-token", "credential")));
         replaceStoredSecret(new ConfigurationSecret("github-token", envelope));
@@ -328,26 +322,21 @@ class ConfigurationSecretsTest {
         assertThat(cipherOutput.get()).containsOnly((byte) 0);
     }
 
-    private ConfigurationSecrets resolver(KeyMaterialService service) throws Exception {
-        ConfigurationSecretCipher cipher = KeyMaterialCapabilities.open(service, List.of(CIPHER))
-                .configurationCipher(CIPHER);
-        return new ConfigurationSecrets(current::get, new ConfigurationSecretCipher() {
+    private ConfigurationSecrets resolver(OrionKeyMaterial service) throws Exception {
+        return new ConfigurationSecrets(current::get, new OrionKeyMaterial() {
             @Override
-            public KeyMaterialDescriptor descriptor() {
-                return cipher.descriptor();
-            }
-
-            @Override
-            public ConfigurationSecretEnvelope seal(byte[] plaintext, ConfigurationSecretContext context)
+            public ConfigurationSecretEnvelope seal(KeyMaterialDescriptor descriptor, byte[] plaintext,
+                    ConfigurationSecretContext context)
                     throws GeneralSecurityException {
                 cipherInput.set(plaintext);
-                return cipher.seal(plaintext, context);
+                return service.seal(descriptor, plaintext, context);
             }
 
             @Override
-            public byte[] open(ConfigurationSecretEnvelope envelope, ConfigurationSecretContext context)
+            public byte[] open(KeyMaterialDescriptor descriptor, ConfigurationSecretEnvelope envelope,
+                    ConfigurationSecretContext context)
                     throws GeneralSecurityException {
-                byte[] plaintext = cipher.open(envelope, context);
+                byte[] plaintext = service.open(descriptor, envelope, context);
                 cipherOutput.set(plaintext);
                 return plaintext;
             }

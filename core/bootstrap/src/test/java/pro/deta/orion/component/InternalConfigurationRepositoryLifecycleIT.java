@@ -26,7 +26,6 @@ import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
 import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
@@ -987,7 +986,6 @@ class InternalConfigurationRepositoryLifecycleIT {
                         configuration.getBootstrap().getKeyMaterial()))
                 .keyMaterial(serverIdentity)
                 .eventManager(events)
-                .configurationSecretCipher(ConfigurationSecretCipher.unavailable())
                 .sshHostKeyCapability(SshHostKeyCapability.unavailable())
                 .nativeGitRepositoryProvider(provider)
                 .configuredRepositoryFactory(configured)

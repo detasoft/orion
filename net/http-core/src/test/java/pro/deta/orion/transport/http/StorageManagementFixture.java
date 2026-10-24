@@ -25,23 +25,22 @@ final class StorageManagementFixture {
             pro.deta.orion.test.util.TestEvents events,
             NativeGitRepositoryProvider repositories,
             List<OrionDocument.Organization> orgs) {
-        return open(events, repositories, orgs, ConfigurationSecretCipher.unavailable()).management();
+        return open(events, repositories, orgs, OrionKeyMaterial.unavailable()).management();
     }
 
     static State open(
             pro.deta.orion.test.util.TestEvents events,
             NativeGitRepositoryProvider repositories,
             List<OrionDocument.Organization> orgs,
-            ConfigurationSecretCipher cipher) {
+            OrionKeyMaterial material) {
         User root = new User("root", "", "", "", List.of(), List.of(),
                 DefaultAccessControl.create("unused").grants());
         User admin = new User("admin", "", "", "", List.of(), List.of(), root.grants());
         OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(
                 new AccessControl(List.of(root, admin), List.of(), List.of())), orgs);
-        TestConfiguration configuration = new TestConfiguration(events, new BootstrapConfiguration(), cipher,
-                OrionKeyMaterial.unavailable());
+        TestConfiguration configuration = new TestConfiguration(events, new BootstrapConfiguration(), material);
         configuration.publish(document, Optional.of("v1"));
-        return new State(new ConfiguredStorageManagement(configuration.acl(), configuration.editor(), cipher,
+        return new State(new ConfiguredStorageManagement(configuration.acl(), configuration.editor(), material,
                 repositories), configuration);
     }
 

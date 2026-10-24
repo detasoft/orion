@@ -16,7 +16,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
-import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
@@ -113,7 +113,7 @@ class ProxyNativeGitRepositoryTest {
         OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
                 Optional.empty(), List.of(), List.of(binding), List.of(),
                 List.of()), List.of());
-        ConfigurationSecrets secrets = new ConfigurationSecrets(() -> document, ConfigurationSecretCipher.unavailable());
+        ConfigurationSecrets secrets = new ConfigurationSecrets(() -> document, OrionKeyMaterial.unavailable());
         IOException origin = new IOException("connection rejected");
         PrincipalAddress actor = PrincipalAddress.parse("system/operator");
         try (DecisionRegistry registry = new DecisionRegistry(1, Runnable::run, (principal, scope) -> true)) {

@@ -18,10 +18,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
-import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
-import pro.deta.orion.keymaterial.ConfigurationSecretContext;
-import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
@@ -1033,21 +1030,6 @@ class ProxyAwareNativeGitRepositoryProviderTest {
     }
 
     private static ConfigurationSecrets secrets(OrionDocument document) {
-        return new ConfigurationSecrets(() -> document, new ConfigurationSecretCipher() {
-            @Override
-            public KeyMaterialDescriptor descriptor() {
-                throw new AssertionError("File transport does not need a cipher");
-            }
-
-            @Override
-            public ConfigurationSecretEnvelope seal(byte[] plaintext, ConfigurationSecretContext context) {
-                throw new AssertionError("File transport does not need a cipher");
-            }
-
-            @Override
-            public byte[] open(ConfigurationSecretEnvelope envelope, ConfigurationSecretContext context) {
-                throw new AssertionError("File transport does not need a cipher");
-            }
-        });
+        return new ConfigurationSecrets(() -> document, OrionKeyMaterial.unavailable());
     }
 }

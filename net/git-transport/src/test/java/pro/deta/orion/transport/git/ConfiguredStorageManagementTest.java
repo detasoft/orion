@@ -42,8 +42,7 @@ class ConfiguredStorageManagementTest {
     private final OrganizationId organization = new OrganizationId("acme");
     private final NativeGitRepositoryProvider repositories =
             NativeGitRepositoryProvider.inMemory(EVENTS.manager());
-    private KeyMaterialService material;
-    private ConfigurationSecretCipher cipher;
+    private OrionKeyMaterial material;
     private ConfiguredStorageManagement management;
     private OrionConfigurationEditor editor;
     private OrionAccessControlServiceImpl acl;
@@ -51,13 +50,8 @@ class ConfiguredStorageManagementTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor("configuration-v1",
-                Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES,
-                1);
-        material = KeyMaterialService.open(new InMemoryKeyMaterialContentStore(),
+        material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
                 KeyMaterialOptions.pkcs12("test-password".toCharArray()));
-        material.generateSecretKeyIfMissing(descriptor, 256);
-        cipher = KeyMaterialCapabilities.open(material, List.of(descriptor)).configurationCipher(descriptor);
         User user = new User("alice", "", "", "", List.of(), List.of(), List.of(
                 grant(GrantKey.CONNECTION, "*", GrantKey.CREATE),
                 grant(GrantKey.CONNECTION, "*", GrantKey.READ_WRITE),
@@ -68,8 +62,7 @@ class ConfiguredStorageManagementTest {
                 List.of(), List.of())), List.of(), List.of(), List.of(), List.of());
         storage.set(new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()), List.of(org)));
         editor = new OrionConfigurationEditor(storage,
-                cipher,
-                OrionKeyMaterial.unavailable(),
+                material,
                 EVENTS.manager());
         acl =
                 new OrionAccessControlServiceImpl(
@@ -82,7 +75,7 @@ class ConfiguredStorageManagementTest {
                         new BootstrapConfiguration(),
                         editor);
         acl.onStart();
-        management = new ConfiguredStorageManagement(acl, editor, cipher, repositories);
+        management = new ConfiguredStorageManagement(acl, editor, material, repositories);
         actor = SecurityContext.createContext().withUserIdentity(
                 new InternalUserImpl("alice", organization, () -> acl.configuration().result()
                         .valueOrFailure("Cannot read configuration document")));
@@ -104,7 +97,7 @@ class ConfiguredStorageManagementTest {
         Connection.S3 connection = (Connection.S3) activeDocument().organizations()
                 .getFirst().connections().getFirst();
         char[] resolved = new ConfigurationSecrets(() -> acl.configuration().result()
-                .valueOrFailure("Cannot read configuration document"), cipher)
+                .valueOrFailure("Cannot read configuration document"), material)
                 .resolveOrganization(activeDocument(), organization, connection.secretKey().orElseThrow());
         assertThat(resolved).isEqualTo("private-access-secret".toCharArray());
         Arrays.fill(resolved, '\0');
@@ -160,7 +153,7 @@ class ConfiguredStorageManagementTest {
         assertThat(OrionDocument.findConnection(replaced.organizations().getFirst().connections(), "shared"))
                 .isEqualTo(shared);
         assertThat(replacement.secretKey().orElseThrow()).isNotEqualTo(oldReference);
-        assertThat(new ConfigurationSecrets(() -> replaced, cipher)
+        assertThat(new ConfigurationSecrets(() -> replaced, material)
                 .resolveOrganization(replaced, organization, oldReference)).isEqualTo("original-secret".toCharArray());
         assertThat(management.saveConnection(actor, Optional.of(organization), revision(), false,
                 new StorageManagement.S3Input("archive", null, "eu-west-1", false, null, null, null, false)))
@@ -281,7 +274,7 @@ class ConfiguredStorageManagementTest {
                         return repositories.create(name);
                     }
                 };
-        ConfiguredStorageManagement operation = new ConfiguredStorageManagement(acl, editor, cipher, observed);
+        ConfiguredStorageManagement operation = new ConfiguredStorageManagement(acl, editor, material, observed);
         StorageManagement.Outcome<?> failed = operation.createRepository(actor, "acme/team/archive", Optional.of(s3Binding()));
         EVENTS.await();
         assertFailure(failed, StorageManagement.FailureCode.STORAGE_RETRY);

@@ -1,17 +1,12 @@
 package pro.deta.orion.git.s3;
 
-import java.util.Set;
 
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
-import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialCapabilities;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
-import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialService;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.v2.Connection;
@@ -43,7 +38,7 @@ final class S3ConfigurationFixture implements AutoCloseable {
     final NativeGitRepositoryProvider local;
     final ConfiguredNativeGitRepositoryFactory factory;
     final NativeGitRepositoryProvider provider;
-    final KeyMaterialService material;
+    final OrionKeyMaterial material;
     final ConfigurationSecrets secrets;
 
     S3ConfigurationFixture(Path directory) throws Exception {
@@ -55,15 +50,11 @@ final class S3ConfigurationFixture implements AutoCloseable {
                         transport,
                         EVENTS.manager());
         provider = new NativeGitRepositoryProvider(factory);
-        KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor("configuration-v1",
-                Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES, 1);
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-material".toCharArray())) {
-            material = KeyMaterialService.open(new InMemoryKeyMaterialContentStore(), options);
+            material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options);
         }
-        material.generateSecretKeyIfMissing(descriptor, 256);
-        material.save();
         secrets = new ConfigurationSecrets(current::get,
-                KeyMaterialCapabilities.open(material, List.of(descriptor)).configurationCipher(descriptor));
+                material);
         factory.activate(current::get, secrets, ignored -> false);
     }
 

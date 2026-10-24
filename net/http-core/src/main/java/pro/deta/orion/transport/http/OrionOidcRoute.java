@@ -19,7 +19,7 @@ import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.OidcProvider;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
-import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
 import pro.deta.orion.util.ConfigurationContext;
@@ -54,7 +54,7 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     private final Map<String, Session> sessions = new HashMap<>();
     private final Clock clock;
     private final Path sessionDirectory;
-    private final ConfigurationSecretCipher sessionCipher;
+    private final OrionKeyMaterial keyMaterial;
     private final ConfigurationSecretEnvelopeCodec sessionCodec = new ConfigurationSecretEnvelopeCodec();
     private boolean sessionsLoaded;
     private final Map<String, Attempt> attempts = new HashMap<>();
@@ -69,18 +69,18 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     @Inject
     public OrionOidcRoute(OrganizationAccounts accounts, OrionAccessControlServiceImpl acl,
             ConfigurationSecrets secrets, ObjectMapper mapper,
-            ConfigurationContext configuration, ConfigurationSecretCipher cipher) {
+            ConfigurationContext configuration, OrionKeyMaterial keyMaterial) {
         this(accounts, acl, secrets, mapper, Clock.systemUTC(),
-                configuration.getBaseDir().resolve("oidc-sessions"), cipher);
+                configuration.getBaseDir().resolve("oidc-sessions"), keyMaterial);
     }
 
     OrionOidcRoute(OrganizationAccounts accounts, OrionAccessControlServiceImpl acl,
             ConfigurationSecrets secrets, ObjectMapper mapper, Clock clock,
-            Path sessionDirectory, ConfigurationSecretCipher sessionCipher) {
+            Path sessionDirectory, OrionKeyMaterial keyMaterial) {
         super("/api/auth/**", OrionHttpRouteDefinition.Method.GET, OrionHttpRouteDefinition.Method.POST);
         this.clock = clock;
         this.sessionDirectory = sessionDirectory;
-        this.sessionCipher = sessionCipher;
+        this.keyMaterial = keyMaterial;
         this.accounts = accounts;
         this.acl = acl;
         this.secrets = secrets;
@@ -508,7 +508,8 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
                         if (Files.isSymbolicLink(file) || Files.size(file) > 65536) {
                             throw new IllegalArgumentException("Invalid session file");
                         }
-                        plaintext = sessionCipher.open(sessionCodec.parse(Files.readString(file)), sessionContext(key));
+                        plaintext = keyMaterial.open(keyMaterial.configurationCipherKey(),
+                                sessionCodec.parse(Files.readString(file)), sessionContext(key));
                         Session session = mapper.readValue(plaintext, Session.class);
                         long now = clock.instant().getEpochSecond();
                         if (session.authenticatedAt() <= 0 || session.lastActiveAt() < session.authenticatedAt()
@@ -538,7 +539,8 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
         Path temporary = null;
         try {
             plaintext = mapper.writeValueAsBytes(session);
-            String envelope = sessionCodec.serialize(sessionCipher.seal(plaintext, sessionContext(key)));
+            String envelope = sessionCodec.serialize(keyMaterial.seal(
+                    keyMaterial.configurationCipherKey(), plaintext, sessionContext(key)));
             if (envelope.length() > 65536) throw new IOException("Browser session is too large");
             temporary = Files.createTempFile(sessionDirectory, ".session-", ".tmp");
             Files.writeString(temporary, envelope);

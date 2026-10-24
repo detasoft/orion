@@ -310,7 +310,7 @@ class PersistentProxyActivationTest {
                 material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
                         new SigningMaterialSet(signing, List.of()), 2048, new KeyMaterialCreation(true));
             }
-            secrets = new ConfigurationSecrets(current::get, material.configurationCipher());
+            secrets = new ConfigurationSecrets(current::get, material);
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             server.createContext("/repository.git", exchange -> {
                 authorization.add(exchange.getRequestHeaders().getFirst("Authorization"));

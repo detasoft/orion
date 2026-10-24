@@ -227,7 +227,6 @@ class BootstrapConnectionDecisionTest {
                         new SigningMaterialSet(signing, List.of()), 2048, new KeyMaterialCreation(true));
             }
             editor = new OrionConfigurationEditor(storage,
-                material.configurationCipher(),
                 material,
                 EVENTS.manager());
             acl =
@@ -241,14 +240,14 @@ class BootstrapConnectionDecisionTest {
             secrets =
                     new ConfigurationSecrets(
                             () -> acl.configuration().result()
-                                    .valueOrFailure("Cannot read configuration document"), material.configurationCipher());
+                                    .valueOrFailure("Cannot read configuration document"), material);
         }
 
         void start() {
             OrionRuntimeModule.bootstrapProxies(
                             configured,
                             provider,
-                            material.configurationCipher(), secrets,
+                            material, secrets,
                     acl, editor, decisions,
                     OrionRuntimeModule.connectionFailures(decisions),
                     OrionRuntimeModule.proxyHostKeyDecisions(acl, editor, record -> { })).run();

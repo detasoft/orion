@@ -7,7 +7,6 @@ import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
 import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -96,7 +95,6 @@ final class TestRuntimeBootstrap {
                         configuration.getBootstrap().getKeyMaterial()))
                 .keyMaterial(material)
                 .eventManager(events)
-                .configurationSecretCipher(ConfigurationSecretCipher.unavailable())
                 .sshHostKeyCapability(sshHostKeys)
                 .nativeGitRepositoryProvider(provider)
                 .configuredRepositoryFactory(configured)

@@ -34,7 +34,7 @@ import java.util.Optional;
 
 /**
  * Owns runtime key material, reads committed entries and prepares isolated modifications.
- * The legacy configuration cipher is persisted on first seal;
+ * The configuration wrapping key is persisted on first seal;
  * a failed material save invalidates this owner so a caller must reopen the durable state before retrying.
  */
 public class OrionKeyMaterial implements AutoCloseable {
@@ -211,8 +211,12 @@ public class OrionKeyMaterial implements AutoCloseable {
     public ConfigurationSecretEnvelope seal(KeyMaterialDescriptor descriptor, byte[] plaintext,
             ConfigurationSecretContext context) throws GeneralSecurityException {
         requireAvailable();
+        if (plaintext == null || plaintext.length == 0 || context == null) {
+            throw new IllegalArgumentException("Configuration secret and context must not be empty");
+        }
         synchronized (owner) {
             requireCipher(descriptor);
+            prepareConfigurationCipher(descriptor);
             return KeyMaterialCapabilities.open(owner, List.of(descriptor))
                     .sealConfigurationSecret(descriptor, plaintext, context);
         }
@@ -394,43 +398,23 @@ public class OrionKeyMaterial implements AutoCloseable {
         return owner.inventory(requiredPurposes);
     }
 
-    public ConfigurationSecretCipher configurationCipher() {
-        if (owner == null) return ConfigurationSecretCipher.unavailable();
-        return new ConfigurationSecretCipher(configurationCipherKey(), this);
-    }
-
     public KeyMaterialDescriptor configurationCipherKey() {
-        requireAvailable();
         return new KeyMaterialDescriptor("configuration-v1",
                 Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES,
                 1);
     }
 
-    ConfigurationSecretEnvelope sealConfigurationSecret(KeyMaterialDescriptor descriptor,
-            byte[] plaintext, ConfigurationSecretContext context) throws GeneralSecurityException {
-        if (plaintext == null || plaintext.length == 0 || context == null) {
-            throw new IllegalArgumentException("Configuration secret and context must not be empty");
-        }
-        synchronized (owner) {
-            if (!owner.containsAlias(descriptor.alias(), Set.of())) {
-                try {
-                    owner.generateSecretKeyIfMissing(descriptor, 256);
-                    owner.save();
-                } catch (IOException | GeneralSecurityException | RuntimeException failure) {
-                    owner.close();
-                    throw new GeneralSecurityException("Cannot persist configuration cipher", failure);
-                }
+    private void prepareConfigurationCipher(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
+        if (!owner.containsAlias(descriptor.alias(), Set.of())) {
+            try {
+                withModification(modification -> {
+                    modification.generateKey(descriptor, 256);
+                    modification.apply();
+                });
+            } catch (IOException | GeneralSecurityException | RuntimeException failure) {
+                owner.close();
+                throw new GeneralSecurityException("Cannot persist configuration cipher", failure);
             }
-            return KeyMaterialCapabilities.open(owner, List.of(descriptor))
-                    .configurationCipher(descriptor).seal(plaintext, context);
-        }
-    }
-
-    byte[] openConfigurationSecret(KeyMaterialDescriptor descriptor, ConfigurationSecretEnvelope envelope,
-            ConfigurationSecretContext context) throws GeneralSecurityException {
-        synchronized (owner) {
-            return KeyMaterialCapabilities.open(owner, List.of(descriptor))
-                    .configurationCipher(descriptor).open(envelope, context);
         }
     }
 

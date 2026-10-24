@@ -27,7 +27,7 @@ import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.util.OrionUtils;
 import pro.deta.orion.internal.OrionExecutor;
-import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory.BootstrapChange;
@@ -70,7 +70,7 @@ public class OrionRuntimeModule {
     @Named("bootstrap-proxies")
     static Runnable bootstrapProxies(
             ConfiguredNativeGitRepositoryFactory configured,
-            NativeGitRepositoryFactory provider, ConfigurationSecretCipher cipher,
+            NativeGitRepositoryFactory provider, OrionKeyMaterial keyMaterial,
             ConfigurationSecrets secrets, OrionAccessControlService configurationService, OrionConfigurationEditor editor,
             DecisionRegistry decisions,
             ConnectionFailureHandler connectionFailures,
@@ -79,7 +79,7 @@ public class OrionRuntimeModule {
             provider.connectionFailures(connectionFailures, hostKeyDecisions);
             Optional<OrionDocumentRevision> adopted =
                     BootstrapContext.adoptProxies(
-                            editor, provider, cipher, configurationService.configuration());
+                            editor, provider, keyMaterial, configurationService.configuration());
             if (adopted.isPresent() && !OrionUtils.waitForCondition(
                             () ->
                                     configurationService
@@ -239,9 +239,9 @@ public class OrionRuntimeModule {
     @Provides
     @Singleton
     static ConfigurationSecrets configurationSecrets(OrionAccessControlService configurationService,
-            ConfigurationSecretCipher cipher) {
+            OrionKeyMaterial keyMaterial) {
         return new ConfigurationSecrets(() -> configurationService.configuration().result()
-                .valueOrFailure("Cannot read configuration document"), cipher);
+                .valueOrFailure("Cannot read configuration document"), keyMaterial);
     }
 
     @Provides

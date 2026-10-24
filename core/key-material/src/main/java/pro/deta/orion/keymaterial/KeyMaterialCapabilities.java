@@ -233,11 +233,6 @@ public final class KeyMaterialCapabilities {
         };
     }
 
-    public ConfigurationSecretCipher configurationCipher(KeyMaterialDescriptor descriptor) {
-        KeyMaterialDescriptor registered = requireRegistered(descriptor, KeyMaterialPurpose.CONFIGURATION_CIPHER);
-        return new ConfigurationSecretCipher(registered, this);
-    }
-
     ConfigurationSecretEnvelope sealConfigurationSecret(
             KeyMaterialDescriptor descriptor,
             byte[] plaintext,

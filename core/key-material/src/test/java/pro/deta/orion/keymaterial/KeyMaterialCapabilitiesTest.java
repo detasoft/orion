@@ -497,19 +497,12 @@ class KeyMaterialCapabilitiesTest {
         byte[] plaintext = "database-password".getBytes(StandardCharsets.UTF_8);
         ConfigurationSecretEnvelopeCodec codec = new ConfigurationSecretEnvelopeCodec();
         String serializedEnvelope;
-        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            service.generateSecretKeyIfMissing(cipher, 256);
-            service.save();
-            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, List.of(cipher));
-
-            ConfigurationSecretEnvelope envelope = capabilities
-                    .configurationCipher(cipher)
-                    .seal(plaintext, context);
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options())) {
+            ConfigurationSecretEnvelope envelope = service.seal(cipher, plaintext, context);
             serializedEnvelope = codec.serialize(envelope);
         }
 
-        try (KeyMaterialService reloaded = KeyMaterialService.open(store, options())) {
-            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(reloaded, List.of(cipher));
+        try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(store, options())) {
             ConfigurationSecretEnvelope envelope = codec.parse(serializedEnvelope);
 
             assertThat(envelope.keyAlias()).isEqualTo(cipher.alias());
@@ -518,7 +511,7 @@ class KeyMaterialCapabilitiesTest {
             assertThat(envelope.encryptionAlgorithm()).isEqualTo("AES/GCM/NoPadding");
             assertThat(envelope.encoding()).isEqualTo("base64url");
             assertThat(envelope.ciphertext()).isNotEqualTo(plaintext);
-            assertThat(capabilities.configurationCipher(cipher).open(envelope, context))
+            assertThat(reloaded.open(cipher, envelope, context))
                     .isEqualTo(plaintext);
         }
     }
@@ -530,21 +523,17 @@ class KeyMaterialCapabilitiesTest {
                 KeyMaterialPurpose.CONFIGURATION_CIPHER,
                 KeyMaterialAlgorithm.AES,
                 1);
-        try (KeyMaterialService service = service()) {
-            service.generateSecretKeyIfMissing(cipher, 256);
-            ConfigurationSecretCipher capability = KeyMaterialCapabilities
-                    .open(service, List.of(cipher))
-                    .configurationCipher(cipher);
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options())) {
             byte[] plaintext = "same-password".getBytes(StandardCharsets.UTF_8);
 
-            ConfigurationSecretEnvelope first = capability.seal(plaintext, context());
-            ConfigurationSecretEnvelope second = capability.seal(plaintext, context());
+            ConfigurationSecretEnvelope first = service.seal(cipher, plaintext, context());
+            ConfigurationSecretEnvelope second = service.seal(cipher, plaintext, context());
 
             assertThat(first.wrappedDataKey()).isNotEqualTo(second.wrappedDataKey());
             assertThat(first.nonce()).isNotEqualTo(second.nonce());
             assertThat(first.ciphertext()).isNotEqualTo(second.ciphertext());
-            assertThat(capability.open(first, context())).isEqualTo(plaintext);
-            assertThat(capability.open(second, context())).isEqualTo(plaintext);
+            assertThat(service.open(cipher, first, context())).isEqualTo(plaintext);
+            assertThat(service.open(cipher, second, context())).isEqualTo(plaintext);
         }
     }
 
@@ -555,12 +544,8 @@ class KeyMaterialCapabilitiesTest {
                 KeyMaterialPurpose.CONFIGURATION_CIPHER,
                 KeyMaterialAlgorithm.AES,
                 1);
-        try (KeyMaterialService service = service()) {
-            service.generateSecretKeyIfMissing(cipher, 256);
-            ConfigurationSecretCipher capability = KeyMaterialCapabilities
-                    .open(service, List.of(cipher))
-                    .configurationCipher(cipher);
-            ConfigurationSecretEnvelope envelope = capability.seal(
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options())) {
+            ConfigurationSecretEnvelope envelope = service.seal(cipher,
                     "password".getBytes(StandardCharsets.UTF_8), context());
             List<ConfigurationSecretContext> changed = List.of(
                     new ConfigurationSecretContext("other", "access-token"),
@@ -568,7 +553,7 @@ class KeyMaterialCapabilitiesTest {
 
             for (ConfigurationSecretContext candidate : changed) {
                 assertSecretFailure(
-                        () -> capability.open(envelope, candidate),
+                        () -> service.open(cipher, envelope, candidate),
                         ConfigurationSecretException.Reason.AUTHENTICATION_FAILED);
             }
         }
@@ -581,32 +566,28 @@ class KeyMaterialCapabilitiesTest {
                 KeyMaterialPurpose.CONFIGURATION_CIPHER,
                 KeyMaterialAlgorithm.AES,
                 1);
-        try (KeyMaterialService service = service()) {
-            service.generateSecretKeyIfMissing(cipher, 256);
-            ConfigurationSecretCipher capability = KeyMaterialCapabilities
-                    .open(service, List.of(cipher))
-                    .configurationCipher(cipher);
-            ConfigurationSecretEnvelope envelope = capability.seal(
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options())) {
+            ConfigurationSecretEnvelope envelope = service.seal(cipher,
                     "do-not-report".getBytes(StandardCharsets.UTF_8), context());
 
             assertSecretFailure(
-                    () -> capability.open(
+                    () -> service.open(cipher,
                             withWrappedKey(envelope, changed(envelope.wrappedDataKey())),
                             context()),
                     ConfigurationSecretException.Reason.AUTHENTICATION_FAILED);
             assertSecretFailure(
-                    () -> capability.open(withNonce(envelope, changed(envelope.nonce())), context()),
+                    () -> service.open(cipher, withNonce(envelope, changed(envelope.nonce())), context()),
                     ConfigurationSecretException.Reason.AUTHENTICATION_FAILED);
             assertSecretFailure(
-                    () -> capability.open(withCiphertext(envelope, changed(envelope.ciphertext())), context()),
+                    () -> service.open(cipher, withCiphertext(envelope, changed(envelope.ciphertext())), context()),
                     ConfigurationSecretException.Reason.AUTHENTICATION_FAILED);
             assertSecretFailure(
-                    () -> capability.open(
+                    () -> service.open(cipher,
                             withAlias(envelope, "configuration-v2"),
                             context()),
                     ConfigurationSecretException.Reason.MATERIAL_MISMATCH);
             assertSecretFailure(
-                    () -> capability.open(withVersion(envelope, 2), context()),
+                    () -> service.open(cipher, withVersion(envelope, 2), context()),
                     ConfigurationSecretException.Reason.MATERIAL_MISMATCH);
         }
     }

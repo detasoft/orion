@@ -1,6 +1,6 @@
 package pro.deta.orion.config;
 
-import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
@@ -30,12 +30,12 @@ import java.util.function.Supplier;
  */
 public final class ConfigurationSecrets {
     private final Supplier<OrionDocument> current;
-    private final ConfigurationSecretCipher cipher;
+    private final OrionKeyMaterial keyMaterial;
     private final ConfigurationSecretEnvelopeCodec codec = new ConfigurationSecretEnvelopeCodec();
 
-    public ConfigurationSecrets(Supplier<OrionDocument> current, ConfigurationSecretCipher cipher) {
+    public ConfigurationSecrets(Supplier<OrionDocument> current, OrionKeyMaterial keyMaterial) {
         this.current = Objects.requireNonNull(current, "current configuration");
-        this.cipher = Objects.requireNonNull(cipher, "configuration cipher");
+        this.keyMaterial = Objects.requireNonNull(keyMaterial, "key material");
     }
 
     public char[] resolve(RepositoryAddress repository, ConfigurationSecretReference reference) {
@@ -110,7 +110,8 @@ public final class ConfigurationSecrets {
             if (secret.id().equals(id)) {
                 byte[] plaintext = null;
                 try {
-                    plaintext = cipher.open(codec.parse(secret.envelope()), context(owner, id));
+                    plaintext = keyMaterial.open(keyMaterial.configurationCipherKey(),
+                            codec.parse(secret.envelope()), context(owner, id));
                     return decode(plaintext);
                 } catch (GeneralSecurityException | CharacterCodingException failure) {
                     throw new IllegalStateException("Configuration secret cannot be decrypted");
@@ -148,7 +149,7 @@ public final class ConfigurationSecrets {
             }
             plaintext = encode(value);
             ConfigurationSecret secret = new ConfigurationSecret(id,
-                    codec.serialize(cipher.seal(plaintext, context(owner, id))));
+                    codec.serialize(keyMaterial.seal(keyMaterial.configurationCipherKey(), plaintext, context(owner, id))));
             List<ConfigurationSecret> updated = new ArrayList<>(existing);
             if (replace) {
                 updated.set(position, secret);

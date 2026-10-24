@@ -214,7 +214,7 @@ class RuntimeHttpAdminAclUpdateIT {
             assertThat(stored.organizations().getFirst().secrets()).hasSize(1);
             assertThat(stored.organizations().getFirst().secrets().getFirst().envelope()).isNotBlank();
             ConfigurationSecrets secrets = new ConfigurationSecrets(() -> stored,
-                    orion.identity().material().configurationCipher());
+                    orion.identity().material());
             assertThat(secrets.resolveOrganization(stored, new OrganizationId("acme"),
                     stored.organizations().getFirst().oidcProviders().getFirst().secret()))
                     .isEqualTo("private-oidc-value".toCharArray());

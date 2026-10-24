@@ -872,7 +872,7 @@ class OrionOidcOnboardingTest {
             assertThat(provider).isNotNull();
             ConfigurationSecrets secrets = new ConfigurationSecrets(() -> f.acl.configuration().result()
                     .valueOrFailure("Cannot read configuration document"),
-                    f.material.configurationCipher());
+                    f.material);
             assertThat(secrets.resolveOrganization(f.acl.configuration().result()
                     .valueOrFailure("Cannot read configuration document"), id, provider.secret()))
                     .isEqualTo("private-google-secret".toCharArray());
@@ -1003,7 +1003,7 @@ class OrionOidcOnboardingTest {
             assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null, f.admin).status).isEqualTo(200);
             ConfigurationSecrets secrets = new ConfigurationSecrets(() -> f.acl.configuration().result()
                     .valueOrFailure("Cannot read configuration document"),
-                    f.material.configurationCipher());
+                    f.material);
             for (String org : List.of("acme", "default")) {
                 OrganizationId id = new OrganizationId(org);
                 assertThat(secrets.resolveOrganization(f.acl.configuration().result()
@@ -1122,7 +1122,7 @@ class OrionOidcOnboardingTest {
                         new SigningMaterialSet(descriptor, List.of()), 2048, new KeyMaterialCreation(true));
             }
             secrets = new ConfigurationSecrets(this::document,
-                    material.configurationCipher());
+                    material);
             OrionHttpsConfiguration https = new OrionHttpsConfiguration(false, "localhost", 443,
                     URI.create("https://orion.test"), Optional.empty(), Optional.empty(),
                     OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), Optional.empty());
@@ -1153,7 +1153,6 @@ class OrionOidcOnboardingTest {
             OrionXml.write(document, xml);
             storage.snapshot = new OrionDocumentRevision(Result.of(document), new OrionRevision.Stored("0"));
             editor = new OrionConfigurationEditor(storage,
-                material.configurationCipher(),
                 material,
                 EVENTS.manager());
             acl =
@@ -1170,7 +1169,7 @@ class OrionOidcOnboardingTest {
 
         void restart() {
             OrionOidcRoute oidc = new OrionOidcRoute(accounts, acl, secrets, mapper, clock,
-                    sessions, material.configurationCipher());
+                    sessions, material);
             filter = new OrionAuthorizationFilter(acl, oidc);
             servlet =
                     new OrionHttpRouteServlet(

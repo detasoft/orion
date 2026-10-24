@@ -1544,9 +1544,9 @@ class BootstrapContextTest {
             OrionDocumentRevision approved) {
         return BootstrapContext.adoptProxies(
                 new OrionConfigurationEditor(
-                        storage, context.configurationCipher(), context.keyMaterial(),
+                        storage, context.keyMaterial(),
                         EVENTS.rawManager()),
-                context.repositoryFactory(), context.configurationCipher(), approved);
+                context.repositoryFactory(), context.keyMaterial(), approved);
     }
 
     private static OrionDocumentRevision approved(OrionVersionedConfigurationStorage storage) {
@@ -1562,7 +1562,6 @@ class BootstrapContextTest {
                 .keyMaterial(context.keyMaterial())
                 .eventManager(EVENTS.rawManager())
                 .sshHostKeyCapability(context.sshHostKeys(List.of()))
-                .configurationSecretCipher(context.configurationCipher())
                 .nativeGitRepositoryProvider(context.repositoryFactory())
                 .configuredRepositoryFactory(context.storageFactory())
                 .s3Transport(context.s3Transport())

@@ -36,7 +36,6 @@ import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
@@ -331,7 +330,7 @@ class OrionAccessControlServiceImplTest {
         try {
             OrionConfigurationEditor editor =
                     new OrionConfigurationEditor(
-                            storage, testCipher(), testMaterial(), storage.events);
+                            storage, testMaterial(), storage.events);
             OrionConfigurationModification modification =
                     editor.edit(storage.snapshot.revision(), ChangeMetadata.EMPTY);
             try (Subscription subscription = editor.subscribe(published::add)) {
@@ -417,8 +416,7 @@ class OrionAccessControlServiceImplTest {
         InMemoryStorage storage =
                 new InMemoryStorage(snapshot(serialize(new AccessControl()), Optional.empty()));
         BootstrapConfiguration configuration = new BootstrapConfiguration();
-        OrionConfigurationEditor editor = new OrionConfigurationEditor(storage,
-                testCipher(), testMaterial(), storage.events);
+        OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, testMaterial(), storage.events);
         OrionAccessControlServiceImpl service =
                 new OrionAccessControlServiceImpl(
                         new OrionPasswordHashingService(),
@@ -448,7 +446,7 @@ class OrionAccessControlServiceImplTest {
     void reloadFailureAfterSaveConsumesTheEditWithoutClaimingRollback() {
         FailingReloadStorage storage = new FailingReloadStorage(
                 snapshot(serialize(new AccessControl()), Optional.empty()));
-        OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, testCipher(), testMaterial(), new OrionEventManager());
+        OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, testMaterial(), new OrionEventManager());
         OrionConfigurationModification modification =
                 editor.edit(new OrionRevision.Absent(), ChangeMetadata.EMPTY);
         try {
@@ -1322,8 +1320,7 @@ class OrionAccessControlServiceImplTest {
         InMemoryStorage storage = new InMemoryStorage(null);
         BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getBootstrap().getAccessControl().setCreateDefaultIfMissing(true);
-        OrionConfigurationEditor editor = new OrionConfigurationEditor(storage,
-                testCipher(), testMaterial(), storage.events);
+        OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, testMaterial(), storage.events);
         OrionAccessControlServiceImpl service =
                 new OrionAccessControlServiceImpl(
                         new OrionPasswordHashingService(),
@@ -1400,7 +1397,7 @@ class OrionAccessControlServiceImplTest {
                         testServerIdentity(), SIGNING,
                         configuration,
                         new OrionConfigurationEditor(
-                                storage, testCipher(), testMaterial(), events));
+                                storage, testMaterial(), events));
         ByteArrayOutputStream processOutput = new ByteArrayOutputStream();
         PrintStream originalOut = System.out;
         try (PrintStream output = new PrintStream(processOutput, true, StandardCharsets.UTF_8)) {
@@ -1482,7 +1479,7 @@ class OrionAccessControlServiceImplTest {
                 new OrionDocumentRevision(Result.of(document), new OrionRevision.Stored("version-one")));
         BootstrapConfiguration configuration = new BootstrapConfiguration();
         OrionConfigurationEditor editor =
-                new OrionConfigurationEditor(storage, testCipher(), material, storage.events);
+                new OrionConfigurationEditor(storage, material, storage.events);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(hashing,
                 new RootPasswordReset(false), identity, SIGNING, configuration, editor);
         try {
@@ -1717,27 +1714,14 @@ class OrionAccessControlServiceImplTest {
         }
     }
 
-    private static ConfigurationSecretCipher testCipher() {
-        return new ConfigurationSecretCipher() {
-            @Override
-            public KeyMaterialDescriptor descriptor() {
-                throw new UnsupportedOperationException();
-            }
-
-            @Override
-            public ConfigurationSecretEnvelope seal(byte[] plaintext, ConfigurationSecretContext context) {
-                throw new UnsupportedOperationException();
-            }
-
-            @Override
-            public byte[] open(ConfigurationSecretEnvelope envelope, ConfigurationSecretContext context) {
-                return new byte[]{'x'};
-            }
-        };
-    }
-
     private static OrionKeyMaterial testMaterial() {
         return new OrionKeyMaterial() {
+            @Override
+            public byte[] open(KeyMaterialDescriptor descriptor, ConfigurationSecretEnvelope envelope,
+                    ConfigurationSecretContext context) {
+                return new byte[]{'x'};
+            }
+
             @Override
             public void require(KeyMaterialDescriptor descriptor) {
             }

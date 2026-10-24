@@ -142,7 +142,6 @@ class PlaywrightExternalServicesIT {
                 OrionComponent component = TestRuntimeBootstrap.componentBuilder(
                                 configuration, identity.material(), identity.sshHostKeys())
                         .keyMaterial(identity.material())
-                        .configurationSecretCipher(identity.material().configurationCipher())
                         .build();
                 OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
                 try {

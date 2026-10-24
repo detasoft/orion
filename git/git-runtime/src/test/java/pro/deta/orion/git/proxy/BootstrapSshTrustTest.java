@@ -94,7 +94,7 @@ class BootstrapSshTrustTest {
             String repository = fixture.provider.prepareProvisional(sourceId, fixture.source(""));
             AtomicReference<OrionDocument> current = new AtomicReference<>(
                     OrionDocument.withAccessControl(new AccessControl()));
-            ConfigurationSecrets secrets = new ConfigurationSecrets(current::get, material.configurationCipher());
+            ConfigurationSecrets secrets = new ConfigurationSecrets(current::get, material);
             current.set(fixture.provider.adoptProvisional(current.get(), secrets));
             if (sourceId.equals("configuration")) {
                 assertThat(repository).isEqualTo("bootstrap");
@@ -126,7 +126,7 @@ class BootstrapSshTrustTest {
             String repository = fixture.provider.prepareProvisional("material", fixture.source(fixture.key()));
             AtomicReference<OrionDocument> current = new AtomicReference<>(
                     OrionDocument.withAccessControl(new AccessControl()));
-            ConfigurationSecrets secrets = new ConfigurationSecrets(current::get, material.configurationCipher());
+            ConfigurationSecrets secrets = new ConfigurationSecrets(current::get, material);
             current.set(fixture.provider.adoptProvisional(current.get(), secrets));
             GitProxyBinding actual = current.get().system().proxies().getFirst();
             String oldKey = PublicKeyEntry.toString(KeyPairGenerator.getInstance("EC").generateKeyPair().getPublic());
