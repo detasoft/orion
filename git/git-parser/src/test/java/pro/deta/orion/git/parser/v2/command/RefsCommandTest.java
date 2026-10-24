@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.git.parser.v2.GitRepositoryContext;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
@@ -202,7 +203,8 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
             new GitPktLine.Data("unborn\n".getBytes(StandardCharsets.UTF_8)).writeTo(request);
             GitPktLine.Control.FLUSH.writeTo(request);
             try (BufferedByteInputV2 input = input(bytes.toByteArray())) {
-                assertThatThrownBy(() -> new RefsCommand(storage, index, new GitCapabilities())
+                assertThatThrownBy(() -> new RefsCommand(
+                        new GitRepositoryContext(storage, index), new GitCapabilities())
                         .action(context(input, new ByteArrayOutputStream()))).isInstanceOf(IOException.class);
             }
             try (BufferedByteInputV2 input = input("0000".getBytes(StandardCharsets.US_ASCII))) {
@@ -253,7 +255,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
     private RefsCommand command(GitStorageAccess storage, GitIndexAccess index) {
         GitCapabilities advertised = new GitCapabilities();
         advertised.add(GitCapabilityValue.value(GitCapability.LS_REFS, "unborn"));
-        return new RefsCommand(storage, index, advertised);
+        return new RefsCommand(new GitRepositoryContext(storage, index), advertised);
     }
 
     private List<String> execute(GitStorageAccess storage, GitIndexAccess index, String... arguments) throws IOException {

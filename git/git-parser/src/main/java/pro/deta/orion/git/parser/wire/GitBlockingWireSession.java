@@ -37,6 +37,7 @@ import java.util.Optional;
 import java.util.Set;
 
 public final class GitBlockingWireSession {
+    private static final RefId HEAD = new RefId("HEAD");
     private static final byte[] SERVER_OPTION_PREFIX = "server-option=".getBytes(StandardCharsets.US_ASCII);
     public static final int DEFAULT_INPUT_BUFFER_SIZE = 16 * 1024;
     private final GitNativeRepositoryService repositories;
@@ -150,7 +151,7 @@ public final class GitBlockingWireSession {
             if (command.equals("command=fetch") && configuration.protocolV2().fetch()) {
                 new FetchCommand(repository, capabilities).action(protocol);
             } else if (command.equals("command=ls-refs") && configuration.protocolV2().lsRefs()) {
-                new RefsCommand(repository.storage(), repository.index(), capabilities).action(protocol);
+                new RefsCommand(repository, capabilities).action(protocol);
             } else {
                 throw new IOException("Protocol v2 command was not advertised");
             }
@@ -238,21 +239,25 @@ public final class GitBlockingWireSession {
     private GitV1Advertisement legacyAdvertisement(GitRepositoryContext repository,
             GitCapabilities capabilities, InitialRequestService service) throws IOException {
         RefsSnapshot snapshot = repository.index().snapshotRefs(new RefSelection.All());
+        Set<RefId> visible = repository.visibleRefs(snapshot);
         List<GitAdvertisedRef> refs = new ArrayList<>();
         ObjectId head = snapshot.head() instanceof Head.Symbolic symbolic
                 ? snapshot.refs().get(symbolic.target())
                 : ((Head.Detached) snapshot.head()).target();
-        if (head != null) {
+        if (visible.contains(HEAD) && head != null) {
             refs.add(GitAdvertisedRef.direct(head.toHex(), "HEAD"));
         }
         if (service == InitialRequestService.UPLOAD_PACK && configuration.uploadPack().symref()
-                && snapshot.head() instanceof Head.Symbolic symbolic) {
-            capabilities.add(GitCapabilityValue.value(GitCapability.SYMREF, "HEAD:" + symbolic.target().value()));
+                && visible.contains(HEAD) && snapshot.head() instanceof Head.Symbolic symbolic) {
+            capabilities.add(GitCapabilityValue.value(
+                    GitCapability.SYMREF, "HEAD:" + symbolic.target().value()));
         }
         List<RefId> names = new ArrayList<>(snapshot.refs().keySet());
         names.sort(Comparator.comparing(RefId::value));
         for (RefId name : names) {
-            refs.add(GitAdvertisedRef.direct(snapshot.refs().get(name).toHex(), name.value()));
+            if (visible.contains(name)) {
+                refs.add(GitAdvertisedRef.direct(snapshot.refs().get(name).toHex(), name.value()));
+            }
         }
         if (service == InitialRequestService.UPLOAD_PACK) {
             GitObjectGraph graph = new GitObjectGraph(repository.storage(), repository.index());

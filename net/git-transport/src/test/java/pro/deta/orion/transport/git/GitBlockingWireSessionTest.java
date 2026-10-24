@@ -3,15 +3,20 @@ package pro.deta.orion.transport.git;
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
 
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.auth.InternalUserImpl;
+import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
+import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
@@ -20,12 +25,27 @@ import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.util.Result;
-
+import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
+import pro.deta.orion.schema.acl.User;
+import pro.deta.orion.schema.orion.v2.GrantAddress;
+import pro.deta.orion.schema.orion.v2.GrantId;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
+import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
+import pro.deta.orion.schema.orion.v2.RoleId;
+import pro.deta.orion.schema.orion.v2.ScopedGrant;
+import pro.deta.orion.schema.orion.v2.ScopedRole;
+import pro.deta.orion.schema.orion.v2.TeamId;
+import pro.deta.orion.transport.git.auth.AuthenticatedRepositoryAccessHook;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -50,6 +70,202 @@ class GitBlockingWireSessionTest {
     private static final String MAIN_ID = "88d050b1908057b53d38b42702ebc659e3d7f696";
     private static final String WANT = "2".repeat(40);
     private static final String NULL_ID = "0".repeat(40);
+
+    @Test
+    void advertisementsHideDeniedBranchNamesAndAllTagsForRestrictedReaders() throws Exception {
+        NativeGitRepositoryProvider provider = providerWithVisibilityRefs();
+        NativeGitRepository repository = provider.find("project").valueOrFailure("repository");
+        GitNativeRepositoryAccessHook reader = visibilityHook("main");
+        for (InitialRequestData request : List.of(uploadV1Request(), explicitUploadV1Request(),
+                receiveV1Request(), explicitReceiveV1Request(), uploadV2Request())) {
+            String response = refAdvertisement(provider, reader, request, false);
+            assertThat(response).contains(MAIN_ID + " refs/heads/main", MAIN_ID + " HEAD")
+                    .doesNotContain("refs/heads/secret", "refs/heads/shared", "refs/tags/", "refs/internal/");
+            assertThat(response).doesNotContain(repository.refs().get("refs/heads/secret"),
+                    repository.refs().get("refs/tags/annotated"), repository.refs().get("refs/tags/secret"));
+        }
+        assertThat(refAdvertisement(provider, reader, uploadV2Request(), true))
+                .contains(MAIN_ID + " refs/heads/main", "HEAD symref-target:refs/heads/main")
+                .doesNotContain("refs/heads/secret", "refs/heads/shared", "refs/tags/", "refs/internal/");
+    }
+
+    @Test
+    void unrestrictedAdvertisementsKeepBranchesTagsAndPeeledTargets() throws Exception {
+        NativeGitRepositoryProvider provider = providerWithVisibilityRefs();
+        GitNativeRepositoryAccessHook reader = visibilityHook(null);
+        for (InitialRequestData request : List.of(uploadV1Request(), uploadV2Request(), receiveV1Request())) {
+            String response = refAdvertisement(provider, reader, request, false);
+            assertThat(response).contains("refs/heads/main", "refs/heads/secret", "refs/heads/shared",
+                    "refs/tags/lightweight", "refs/tags/annotated", "refs/tags/secret");
+            if (request.service() == InitialRequestService.UPLOAD_PACK) {
+                assertThat(response).contains(request.parameters().get("version") != null
+                        ? "peeled:" + MAIN_ID : MAIN_ID + " refs/tags/annotated^{}");
+            }
+        }
+    }
+
+    @Test
+    void organizationBranchDenyFiltersBothProtocolVersionsAndReceiveDiscovery() throws Exception {
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        NativeGitRepository repository = provider.create("acme/team/project").valueOrFailure("repository");
+        ObjectId id = repository.writeObject(GitObjectType.BLOB, "shared".getBytes(StandardCharsets.UTF_8));
+        for (String ref : List.of("refs/heads/main", "refs/heads/secret", "refs/tags/lightweight")) {
+            repository.updateRef(ref, NULL_ID, id.toHex());
+        }
+        setHead(repository, new Head.Symbolic(new RefId("refs/heads/secret")));
+        ScopedGrant allow = new ScopedGrant(new GrantId("read"), ScopedGrant.Effect.ALLOW,
+                List.of(new GrantExpression(GrantKey.READ_WRITE, "true"),
+                        new GrantExpression(GrantKey.BRANCH, "*")));
+        ScopedGrant deny = new ScopedGrant(new GrantId("deny"), ScopedGrant.Effect.DENY,
+                List.of(new GrantExpression(GrantKey.READ, "true"),
+                        new GrantExpression(GrantKey.BRANCH, "secret")));
+        ScopedRole role = new ScopedRole(new RoleId("reader"), List.of(),
+                List.of(GrantAddress.parse("acme/read"), GrantAddress.parse("acme/deny")));
+        User user = new User("reader", null, null, null, List.of(), List.of("acme/reader"), List.of());
+        OrionDocument.Repository configured = new OrionDocument.Repository("project", "", "refs/heads/main",
+                RepositoryPolicy.safeDefaults(), List.of(), List.of(), List.of(), List.of(), Optional.empty());
+        OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
+                List.of(configured));
+        OrionDocument.Organization organization = new OrionDocument.Organization(new OrganizationId("acme"), "",
+                List.of(user), List.of(allow, deny), List.of(role), List.of(team),
+                List.of(), List.of(), List.of(), List.of());
+        OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()),
+                List.of(organization));
+        GitNativeRepositoryAccessHook hook = new AuthenticatedRepositoryAccessHook(
+                SecurityContext.createContext().withUserIdentity(
+                        new InternalUserImpl("reader", organization.id(), () -> document)));
+
+        for (InitialRequestData initial : List.of(uploadV1Request(), uploadV2Request(), receiveV1Request())) {
+            InitialRequestData request = new InitialRequestData(initial.service(), "acme/team/project",
+                    initial.host(), initial.parameters());
+            assertThat(refAdvertisement(provider, hook, request, false))
+                    .contains(id + " refs/heads/main")
+                    .doesNotContain("refs/heads/secret", "refs/tags/", " HEAD", "symref=");
+        }
+    }
+
+    @Test
+    void symbolicHeadOfHiddenBranchStaysHiddenEvenWhenItsObjectIsReadable() throws Exception {
+        NativeGitRepositoryProvider provider = providerWithVisibilityRefs();
+        NativeGitRepository repository = provider.find("project").valueOrFailure("repository");
+        setHead(repository, new Head.Symbolic(new RefId("refs/heads/shared")));
+        for (InitialRequestData request : List.of(uploadV1Request(), uploadV2Request(), receiveV1Request())) {
+            assertThat(refAdvertisement(provider, visibilityHook("main"), request, false))
+                    .contains(MAIN_ID + " refs/heads/main")
+                    .doesNotContain(" HEAD", "symref=", "symref-target:", "refs/heads/shared");
+        }
+    }
+
+    @Test
+    void unbornHeadUsesItsBranchPermissionAndPrefixesCannotRevealHiddenRefs() throws Exception {
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        provider.create("project").valueOrFailure("repository");
+        assertThat(refAdvertisement(provider, visibilityHook("main"), uploadV2Request(), false))
+                .contains("unborn HEAD symref-target:refs/heads/main");
+        assertThat(refAdvertisement(provider, visibilityHook("dev"), uploadV2Request(), false))
+                .isEqualTo("0000");
+        assertThat(refAdvertisement(provider, visibilityHook("dev"), uploadV1Request(), false))
+                .contains(NULL_ID + " capabilities^{}").doesNotContain("HEAD", "refs/heads/main");
+
+        NativeGitRepositoryProvider populated = providerWithVisibilityRefs();
+        assertThat(refAdvertisement(populated, visibilityHook("main"), uploadV2Request(), false,
+                "ref-prefix refs/tags/", "ref-prefix refs/heads/secret"))
+                .isEqualTo("0000");
+        assertThat(refAdvertisement(populated, visibilityHook("main"), uploadV2Request(), false,
+                "ref-prefix refs/heads/main"))
+                .contains(MAIN_ID + " refs/heads/main").doesNotContain(" HEAD", "refs/tags/");
+    }
+
+    @Test
+    void detachedHeadRequiresReachabilityFromAReadableBranch() throws Exception {
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
+        ObjectId tree = repository.writeObject(GitObjectType.TREE, new byte[0]);
+        ObjectId ancestor = visibilityCommit(repository, tree, Optional.empty(), "ancestor");
+        ObjectId tip = visibilityCommit(repository, tree, Optional.of(ancestor), "tip");
+        ObjectId secret = visibilityCommit(repository, tree, Optional.empty(), "secret");
+        repository.updateRef("refs/heads/main", NULL_ID, tip.toHex());
+        repository.updateRef("refs/heads/secret", NULL_ID, secret.toHex());
+        for (InitialRequestData request : List.of(uploadV1Request(), uploadV2Request(), receiveV1Request())) {
+            setHead(repository, new Head.Detached(new CommitId(ancestor.toBytes())));
+            assertThat(refAdvertisement(provider, visibilityHook("main"), request, false))
+                    .contains(ancestor + " HEAD", tip + " refs/heads/main").doesNotContain(secret.toHex());
+            setHead(repository, new Head.Detached(new CommitId(secret.toBytes())));
+            assertThat(refAdvertisement(provider, visibilityHook("main"), request, false))
+                    .contains(tip + " refs/heads/main").doesNotContain(" HEAD", secret.toHex());
+        }
+    }
+
+    private static NativeGitRepositoryProvider providerWithVisibilityRefs() {
+        NativeGitRepositoryProvider provider = providerWithMainRef();
+        NativeGitRepository repository = provider.find("project").valueOrFailure("repository");
+        ObjectId secret = repository.writeObject(GitObjectType.BLOB, "secret".getBytes(StandardCharsets.UTF_8));
+        repository.updateRef("refs/heads/secret", NULL_ID, secret.toHex());
+        repository.updateRef("refs/heads/shared", NULL_ID, MAIN_ID);
+        repository.updateRef("refs/tags/lightweight", NULL_ID, MAIN_ID);
+        for (String tag : List.of("annotated", "secret")) {
+            String target = tag.equals("secret") ? secret.toHex() : MAIN_ID;
+            ObjectId id = repository.writeObject(GitObjectType.TAG,
+                    ("object " + target + "\ntype blob\ntag " + tag + "\n\nmessage\n")
+                            .getBytes(StandardCharsets.UTF_8));
+            repository.updateRef("refs/tags/" + tag, NULL_ID, id.toHex());
+        }
+        repository.updateRef("refs/internal/secret", NULL_ID, secret.toHex());
+        return provider;
+    }
+
+    private static ObjectId visibilityCommit(NativeGitRepository repository, ObjectId tree,
+            Optional<ObjectId> parent, String message) {
+        String contents = "tree " + tree + "\n" + parent.map(id -> "parent " + id + "\n").orElse("")
+                + "author Reader <reader@example.test> 1 +0000\n"
+                + "committer Reader <reader@example.test> 1 +0000\n\n" + message + "\n";
+        return repository.writeObject(GitObjectType.COMMIT, contents.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void setHead(NativeGitRepository repository, Head head) throws IOException {
+        repository.index().withAccess(index -> {
+            index.updateHead(head);
+            index.apply();
+            return null;
+        });
+    }
+
+    private static GitNativeRepositoryAccessHook visibilityHook(String branch) {
+        List<GrantExpression> expressions = new ArrayList<>(List.of(
+                new GrantExpression(GrantKey.REPOSITORY, "project"),
+                new GrantExpression(GrantKey.READ_WRITE, "true")));
+        if (branch != null) expressions.add(new GrantExpression(GrantKey.BRANCH, branch));
+        return new AuthenticatedRepositoryAccessHook(SecurityContext.createContext().withUserIdentity(
+                new InternalUserImpl("reader", List.of(new Grant("read", expressions)))));
+    }
+
+    private static String refAdvertisement(NativeGitRepositoryProvider provider,
+            GitNativeRepositoryAccessHook hook, InitialRequestData request, boolean ssh, String... prefixes)
+            throws Exception {
+        RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+        boolean protocolV2Upload = request.service() == InitialRequestService.UPLOAD_PACK
+                && "2".equals(request.parameters().get("version"));
+        if (!protocolV2Upload) {
+            session(null, output, provider, hook).advertise(request);
+        } else {
+            try (QueueByteSource input = new QueueByteSource(Duration.ofSeconds(1))) {
+                ByteArrayBuilder command = new ByteArrayBuilder();
+                command.write(command("ls-refs"));
+                for (String argument : List.of("symrefs", "peel", "unborn")) {
+                    command.writePacket(argument + "\n");
+                }
+                for (String prefix : prefixes) {
+                    command.writePacket(prefix + "\n");
+                }
+                command.writeAscii("0000");
+                input.feed(command.bytes());
+                input.end();
+                if (ssh) session(input, output, provider, hook).serveCommand(request);
+                else session(input, output, provider, hook).serveSmartHttpPost(request);
+            }
+        }
+        return output.ascii();
+    }
 
     @Test
     void receivePreservesOriginalPackThroughTheWireAndProvider() throws Exception {
@@ -1089,12 +1305,17 @@ class GitBlockingWireSessionTest {
             QueueByteSource input,
             RecordingBufferedByteOutput output,
             NativeGitRepositoryProvider provider) {
+        return session(input, output, provider, GitNativeRepositoryAccessHook.ALLOW_ALL);
+    }
+
+    private static GitBlockingWireSession session(QueueByteSource input, RecordingBufferedByteOutput output,
+            NativeGitRepositoryProvider provider, GitNativeRepositoryAccessHook hook) {
         GitBlockingWireTransport wire = input == null
                 ? new GitBlockingWireTransport(output)
                 : new GitBlockingWireTransport(new BufferedByteInputV2(input), output);
         return new GitBlockingWireSession(
                 data -> new DefaultGitNativeRepositoryService(provider).open(
-                        data, GitNativeRepositoryAccessHook.ALLOW_ALL),
+                        data, hook),
                 GitWireConfiguration.allSupported(),
                 wire);
     }

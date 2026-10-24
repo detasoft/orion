@@ -31,8 +31,11 @@ import java.util.Set;
  * Applies repository authorization to Git commands and stored-pack URLs. Branch-restricted readers use
  * ordinary fetch, which checks branch access and produces an inline pack; read isolation does not require
  * serving loose objects. Stored packs remain available to readers with unrestricted repository access.
+ * Restricted readers see only readable branches and HEAD when its target is readable; all tags and other
+ * ref namespaces are hidden. A detached HEAD must be an ancestor of a readable branch.
  */
 final class NativeGitRepositoryContext extends GitRepositoryContext {
+    private static final String BRANCH_PREFIX = "refs/heads/";
     private final String name;
     private final Optional<String> packUriBase;
     private final NativeGitRepository repository;
@@ -53,6 +56,40 @@ final class NativeGitRepositoryContext extends GitRepositoryContext {
     @Override
     public boolean supportsPackfileUris() {
         return accessHook.allowsUnrestrictedRead(name);
+    }
+
+    @Override
+    public Set<RefId> visibleRefs(RefsSnapshot snapshot) throws IOException {
+        if (accessHook.allowsUnrestrictedRead(name)) return super.visibleRefs(snapshot);
+        Set<RefId> visible = new LinkedHashSet<>();
+        for (RefId ref : snapshot.refs().keySet()) {
+            if (allowsBranchRead(ref)) visible.add(ref);
+        }
+        boolean headVisible = false;
+        if (snapshot.head() instanceof Head.Symbolic head) {
+            headVisible = visible.contains(head.target())
+                    || !snapshot.refs().containsKey(head.target()) && allowsBranchRead(head.target());
+        } else if (snapshot.head() instanceof Head.Detached head) {
+            GitObjectGraph graph = new GitObjectGraph(storage(), index());
+            for (RefId ref : visible) {
+                if (graph.isAncestor(head.target(), snapshot.refs().get(ref))) {
+                    headVisible = true;
+                    break;
+                }
+            }
+        }
+        if (headVisible) visible.add(new RefId("HEAD"));
+        return Set.copyOf(visible);
+    }
+
+    private boolean allowsBranchRead(RefId ref) {
+        if (!ref.value().startsWith(BRANCH_PREFIX)) return false;
+        try {
+            accessHook.beforeFetch(name, List.of(ref.value().substring(BRANCH_PREFIX.length())));
+            return true;
+        } catch (GitNativeRepositoryAccessHook.AccessDeniedException denied) {
+            return false;
+        }
     }
 
     @Override

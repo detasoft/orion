@@ -30,6 +30,8 @@ import java.util.Set;
  * refs snapshot used to resolve them. Checks must not mutate negotiation state or resolve names again;
  * the authorized object IDs remain the targets used to prepare the fetch response.
  * Packfile URI support controls capability advertisement and request validation independently of normal fetch.
+ * Ref visibility selects names from the supplied snapshot, including HEAD when visible, without mutating
+ * or reloading that snapshot. Commands use the same selection for refs, symrefs, and peeled metadata.
  */
 public class GitRepositoryContext implements AutoCloseable {
     private final GitStorageAccess storage;
@@ -88,6 +90,12 @@ public class GitRepositoryContext implements AutoCloseable {
 
     public boolean supportsPackfileUris() {
         return true;
+    }
+
+    public Set<RefId> visibleRefs(RefsSnapshot snapshot) throws IOException {
+        Set<RefId> names = new HashSet<>(snapshot.refs().keySet());
+        names.add(new RefId("HEAD"));
+        return Set.copyOf(names);
     }
 
     public void checkFetchAccess(NegotiationContext context, RefsSnapshot snapshot) throws IOException {

@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.command;
 
+import pro.deta.orion.git.parser.v2.GitRepositoryContext;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
@@ -7,13 +8,11 @@ import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.RefSelection;
 import pro.deta.orion.git.parser.v2.lsrefs.LsRefsArgument;
 import pro.deta.orion.git.parser.v2.lsrefs.LsRefsRequest;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
 import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
-import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -21,16 +20,17 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 public final class RefsCommand implements GitCommand {
     private static final RefId HEAD = new RefId("HEAD");
-    private final GitIndexAccess index;
+    private final GitRepositoryContext repository;
     private final GitObjectGraph graph;
     private final boolean unbornAllowed;
 
-    public RefsCommand(GitStorageAccess storage, GitIndexAccess index, GitCapabilities advertisedCapabilities) {
-        this.index = Objects.requireNonNull(index, "index");
-        graph = new GitObjectGraph(storage, index);
+    public RefsCommand(GitRepositoryContext repository, GitCapabilities advertisedCapabilities) {
+        this.repository = Objects.requireNonNull(repository, "repository");
+        graph = new GitObjectGraph(repository.storage(), repository.index());
         Objects.requireNonNull(advertisedCapabilities, "advertisedCapabilities");
         unbornAllowed = List.of(advertisedCapabilities.value(GitCapability.LS_REFS).orElse("").split(" "))
                 .contains(LsRefsArgument.UNBORN.wireName());
@@ -45,15 +45,16 @@ public final class RefsCommand implements GitCommand {
         if (request.unborn() && !unbornAllowed) {
             throw new IOException("ls-refs unborn was not advertised");
         }
-        RefsSnapshot snapshot = index.snapshotRefs(new RefSelection.All());
+        RefsSnapshot snapshot = repository.index().snapshotRefs(new RefSelection.All());
+        Set<RefId> visible = repository.visibleRefs(snapshot);
         GitProtocolContext.Writer writer = protocolContext.writer();
-        if (request.matches(HEAD.value())) {
+        if (visible.contains(HEAD) && request.matches(HEAD.value())) {
             writeHead(snapshot, request, writer);
         }
         List<RefId> names = new ArrayList<>(snapshot.refs().keySet());
         names.sort(Comparator.comparing(RefId::value));
         for (RefId name : names) {
-            if (request.matches(name.value())) {
+            if (visible.contains(name) && request.matches(name.value())) {
                 ObjectId id = snapshot.refs().get(name);
                 writer.writeRef(name, Optional.of(id), Optional.empty(),
                         request.peel() ? graph.peel(id) : Optional.empty());

@@ -114,6 +114,46 @@ class OrionGitRouteNativeTest {
     }
 
     @Test
+    void branchRestrictedHttpDiscoveryAndLsRefsHideSecretBranchesAndAllTags() throws Exception {
+        NativeGitRepositoryProvider provider = provider();
+        PublishedObjectFixture fixture = publishObject(provider);
+        NativeGitRepository repository = provider.find(REPOSITORY_NAME).valueOrFailure("repository");
+        ObjectId secret = repository.writeObject(GitObjectType.BLOB, "secret".getBytes(StandardCharsets.UTF_8));
+        repository.updateRef("refs/heads/secret", NULL_ID, secret.toHex());
+        repository.updateRef("refs/tags/readable-target", NULL_ID, fixture.objectId().toHex());
+        ObjectId tag = repository.writeObject(GitObjectType.TAG,
+                ("object " + secret + "\ntype blob\ntag private\n\nprivate tag\n")
+                        .getBytes(StandardCharsets.UTF_8));
+        repository.updateRef("refs/tags/private", NULL_ID, tag.toHex());
+        OrionGitRoute route = new OrionGitRoute(new DefaultGitNativeRepositoryService(provider),
+                autoPackfileUriConfig(), provider);
+        ResponseRecorder legacy = new ResponseRecorder();
+
+        service(route, request("GET", "/r/team/project.git/info/refs", null, "git-upload-pack",
+                Map.of(), new byte[0], branchRestrictedContext()), legacy.proxy());
+
+        assertThat(legacy.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(legacy.body()).contains(fixture.objectId() + " refs/heads/main")
+                .doesNotContain("refs/heads/secret", "refs/tags/", secret.toHex(), tag.toHex());
+        ByteArrayOutputStream command = new ByteArrayOutputStream();
+        writePacket(command, "command=ls-refs\n");
+        command.writeBytes("0001".getBytes(StandardCharsets.US_ASCII));
+        writePacket(command, "symrefs\n");
+        writePacket(command, "peel\n");
+        command.writeBytes("0000".getBytes(StandardCharsets.US_ASCII));
+        ResponseRecorder v2 = new ResponseRecorder();
+
+        service(route, request("POST", "/r/team/project.git/git-upload-pack",
+                "application/x-git-upload-pack-request", null, Map.of("Git-Protocol", "version=2"),
+                command.toByteArray(), branchRestrictedContext()), v2.proxy());
+
+        assertThat(v2.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(v2.body()).contains(fixture.objectId() + " refs/heads/main",
+                "HEAD symref-target:refs/heads/main")
+                .doesNotContain("refs/heads/secret", "refs/tags/", secret.toHex(), tag.toHex(), "peeled:");
+    }
+
+    @Test
     void branchRestrictedFetchRejectsUnadvertisedPackfileUris() throws Exception {
         NativeGitRepositoryProvider provider = provider();
         PublishedObjectFixture fixture = publishObject(provider);
