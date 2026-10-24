@@ -238,7 +238,7 @@ class KeyMaterialCapabilitiesTest {
             TestCertificateChain.Authority authority = TestCertificateChain.root("tls-root");
             X509Certificate leaf = TestCertificateChain.leaf(
                     "localhost", service.getKeyPair(tls.alias()), authority);
-            service.installAcmeCertificateChain(tls, List.of(leaf), Optional.empty(), Optional.empty());
+            service.installCertificateChain(tls, List.of(leaf), Optional.empty(), Optional.empty());
             SSLContext context = capabilities.certificateIdentity(
                     tls,
                     Optional.empty(),
@@ -256,7 +256,7 @@ class KeyMaterialCapabilitiesTest {
     }
 
     @Test
-    void lazilyCreatesAndDurablyReusesAcmeKeysTogether() throws Exception {
+    void lazilyCreatesAndDurablyReusesKeysTogether() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialDescriptor account = descriptor(
                 "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1);
@@ -265,73 +265,56 @@ class KeyMaterialCapabilitiesTest {
         byte[] accountPublic;
         byte[] identityPublic;
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, List.of(account, identity));
-
-            AcmeKeyMaterial material = capabilities.acquireAcmeKeys(account, identity, Optional.empty(), 2048, 2048);
-            accountPublic = material.accountKeyPair().getPublic().getEncoded();
-            identityPublic = material.domainKeyPair().getPublic().getEncoded();
+            generateKeys(service, account, identity);
+            accountPublic = service.getKeyPair(account.alias()).getPublic().getEncoded();
+            identityPublic = service.getKeyPair(identity.alias()).getPublic().getEncoded();
 
             assertThat(store.read().orElseThrow().version()).isEqualTo("1");
-            AcmeKeyMaterial reused = capabilities.acquireAcmeKeys(account, identity, Optional.empty(), 2048, 2048);
-            assertThat(reused.accountKeyPair().getPublic().getEncoded())
+            generateKeys(service, account, identity);
+            assertThat(service.getKeyPair(account.alias()).getPublic().getEncoded())
                     .isEqualTo(accountPublic);
             assertThat(store.read().orElseThrow().version()).isEqualTo("1");
         }
 
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            AcmeKeyMaterial material = KeyMaterialCapabilities
-                    .open(service, List.of(account, identity))
-                    .acquireAcmeKeys(account, identity, Optional.empty(), 2048, 2048);
-
-            assertThat(material.accountKeyPair().getPublic().getEncoded()).isEqualTo(accountPublic);
-            assertThat(material.domainKeyPair().getPublic().getEncoded()).isEqualTo(identityPublic);
+            generateKeys(service, account, identity);
+            assertThat(service.getKeyPair(account.alias()).getPublic().getEncoded()).isEqualTo(accountPublic);
+            assertThat(service.getKeyPair(identity.alias()).getPublic().getEncoded()).isEqualTo(identityPublic);
             assertThat(store.read().orElseThrow().version()).isEqualTo("1");
         }
     }
 
     @Test
-    void doesNotDurablySaveOnlyOneAcmeKeyWhenGenerationFails() throws Exception {
+    void doesNotDurablySaveOnlyOneKeyWhenGenerationFails() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialDescriptor account = descriptor(
                 "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor identity = descriptor(
                 "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.EC, 1);
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, List.of(account, identity));
-
-            assertThatThrownBy(() -> capabilities.acquireAcmeKeys(account, identity, Optional.empty(), 2048, 2048))
+            assertThatThrownBy(() -> generateKeys(service, account, identity))
                     .isInstanceOf(Exception.class);
             assertThat(store.read()).isEmpty();
         }
     }
 
     @Test
-    void rejectsNonAcmeAndNonTlsDescriptorsForAcmeCapability() throws Exception {
+    void rejectsNonTlsDescriptorsForCertificateIdentity() throws Exception {
         try (KeyMaterialService service = service()) {
-            KeyMaterialDescriptor account = descriptor(
-                    "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1);
             KeyMaterialDescriptor signing = descriptor(
                     "signing-v1", KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, 1);
-            KeyMaterialDescriptor identity = descriptor(
-                    "https-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
             service.generateKeyIfMissing(signing, 2048);
-            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(
-                    service, List.of(account, signing, identity));
-
-            assertThatThrownBy(() -> capabilities.acquireAcmeKeys(signing, identity, Optional.empty(), 2048, 2048))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("ACME_ACCOUNT");
-            assertThatThrownBy(() -> capabilities.acquireAcmeKeys(account, signing, Optional.empty(), 2048, 2048))
+            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, List.of(signing));
+            assertThatThrownBy(() -> capabilities.certificateIdentity(signing, Optional.empty(),
+                    List.of(), TlsClientAuthentication.DISABLED))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("TLS_IDENTITY");
         }
     }
 
     @Test
-    void validatesInstallsAndReloadsAcmeCertificateChainWithoutRootInIdentity() throws Exception {
+    void validatesInstallsAndReloadsCertificateChainWithoutRootInIdentity() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        KeyMaterialDescriptor account = descriptor(
-                "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor identity = descriptor(
                 "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
         TrustedCertificateDescriptor rootDescriptor = trustedCertificate("public-root-v1");
@@ -340,11 +323,12 @@ class KeyMaterialCapabilitiesTest {
 
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
             KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(
-                    service, List.of(account, identity), List.of(rootDescriptor));
+                    service, List.of(identity), List.of(rootDescriptor));
             CertificateIdentity capability = capabilities.certificateIdentity(identity,
                     Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED);
-            KeyPair domainKey = capabilities.acquireAcmeKeys(
-                    account, identity, Optional.of(rootDescriptor), 2048, 2048).domainKeyPair();
+            service.generateKeyIfMissing(identity, 2048);
+            service.save();
+            KeyPair domainKey = service.getKeyPair(identity.alias());
             X509Certificate leaf = TestCertificateChain.leaf("orion.example", domainKey, intermediate);
 
             capability.installCertificateChain(
@@ -358,7 +342,7 @@ class KeyMaterialCapabilitiesTest {
 
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
             KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(
-                    service, List.of(account, identity), List.of(rootDescriptor));
+                    service, List.of(identity), List.of(rootDescriptor));
             CertificateIdentity capability = capabilities.certificateIdentity(identity,
                     Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED);
             assertThat(capability.certificateChain()).hasSize(2);
@@ -368,10 +352,8 @@ class KeyMaterialCapabilitiesTest {
     }
 
     @Test
-    void rejectsInvalidAcmeCertificateChainsBeforeSaving() throws Exception {
+    void rejectsInvalidCertificateChainsBeforeSaving() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        KeyMaterialDescriptor account = descriptor(
-                "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor identity = descriptor(
                 "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
         TrustedCertificateDescriptor rootDescriptor = trustedCertificate("public-root-v1");
@@ -380,11 +362,12 @@ class KeyMaterialCapabilitiesTest {
         TestCertificateChain.Authority intermediate = TestCertificateChain.intermediate("Intermediate", root);
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
             KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(
-                    service, List.of(account, identity), List.of(rootDescriptor));
+                    service, List.of(identity), List.of(rootDescriptor));
             CertificateIdentity capability = capabilities.certificateIdentity(identity,
                     Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED);
-            KeyPair domainKey = capabilities.acquireAcmeKeys(
-                    account, identity, Optional.of(rootDescriptor), 2048, 2048).domainKeyPair();
+            service.generateKeyIfMissing(identity, 2048);
+            service.save();
+            KeyPair domainKey = service.getKeyPair(identity.alias());
             KeyPair otherKey = KeyPairGenerator.getInstance("RSA").generateKeyPair();
             X509Certificate validLeaf = TestCertificateChain.leaf("orion.example", domainKey, intermediate);
             X509Certificate wrongLeaf = TestCertificateChain.leaf("other.example", otherKey, intermediate);
@@ -626,6 +609,18 @@ class KeyMaterialCapabilitiesTest {
             assertThatThrownBy(() -> capabilities.verification(List.of(signing, ca)))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("purpose");
+        }
+    }
+
+    private static void generateKeys(KeyMaterialService service, KeyMaterialDescriptor first,
+            KeyMaterialDescriptor second) throws Exception {
+        KeyMaterialModification modification = service.modify();
+        try {
+            modification.generateKey(first, 2048);
+            modification.generateKey(second, 2048);
+            modification.apply();
+        } finally {
+            modification.discard();
         }
     }
 

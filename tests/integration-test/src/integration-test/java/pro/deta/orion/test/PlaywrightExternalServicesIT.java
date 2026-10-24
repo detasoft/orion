@@ -9,7 +9,6 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.component.OrionComponent;
-import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
@@ -63,13 +62,20 @@ class PlaywrightExternalServicesIT {
 
         BootstrapConfiguration configuration = serverConfiguration(tempDir.resolve("orion"));
         KeyPair rootKey = KeyUtils.generateRSAKeyPair().valueOrFailure("test root key");
-        AcmeMaterialConfiguration material = acmeMaterial();
+        KeyMaterialDescriptor account = new KeyMaterialDescriptor("acme-account",
+                Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 1);
+        KeyMaterialDescriptor certificateIdentity = new KeyMaterialDescriptor("acme-identity",
+                Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 1);
         try (TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(configuration)) {
-            identity.material().acquireAcmeKeys(material, 2048, 2048);
+            identity.material().withModification(modification -> {
+                modification.generateKey(account, 2048);
+                modification.generateKey(certificateIdentity, 2048);
+                modification.apply();
+            });
             runPlaywright(configuration, identity, rootKey, fixtureRoot, caRoot);
         }
         try (TestServerIdentityMaterial reopened = TestServerIdentityMaterial.open(configuration)) {
-            assertThat(reopened.material().certificateIdentity(material).issuedCertificateChain()).isPresent();
+            assertThat(reopened.material().issuedCertificateChain(certificateIdentity)).isPresent();
         }
     }
 
@@ -84,17 +90,6 @@ class PlaywrightExternalServicesIT {
             options.getTransport().getSsh().setAddress("0.0.0.0");
             options.getTransport().getSsh().setPort(8022);
         });
-    }
-
-    private static AcmeMaterialConfiguration acmeMaterial() {
-        return new AcmeMaterialConfiguration(
-                new KeyMaterialDescriptor("acme-account",
-                        Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA,
-                        1),
-                new KeyMaterialDescriptor("acme-identity",
-                        Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA,
-                        1),
-                Optional.empty());
     }
 
     private static void configureAcme(OrionComponent component, BootstrapConfiguration configuration)
@@ -122,7 +117,7 @@ class PlaywrightExternalServicesIT {
                                         document.system().secrets(),
                                         document.system().proxies(),
                                         document.system().connections(),
-                                        document.system().oidcProviders()),
+                                        document.system().oidcProviders(), document.system().invitations()),
                                 document.organizations()));
     }
 
@@ -177,8 +172,7 @@ class PlaywrightExternalServicesIT {
                                 "^(?!.*invited organization member).*");
                     }
                     if (!issueCertificate) {
-                        List<OrionDocument.Organization> organizations = component.orionAccessControlService()
-                                .configuration().result()
+                        List<OrionDocument.Organization> organizations = component.configurationEditor().current().result()
                                         .valueOrFailure("Cannot read configuration document")
                                         .organizations();
                         assertThat(organizations).extracting(organization -> organization.id().value())
@@ -211,7 +205,7 @@ class PlaywrightExternalServicesIT {
     private static void configureOrganizations(OrionComponent component) {
         TestRuntimeBootstrap.updateConfiguration(
                 component,
-                component.orionAccessControlService().configuration().revision(),
+                component.configurationEditor().current().revision(),
                 new pro.deta.orion.internal.ChangeMetadata(
                         UserEmail.EMPTY, "configure browser test organizations"),
                 document -> {
@@ -256,7 +250,7 @@ class PlaywrightExternalServicesIT {
     private static void enableHttps(OrionComponent component) {
         TestRuntimeBootstrap.updateConfiguration(
                 component,
-                component.orionAccessControlService().configuration().revision(),
+                component.configurationEditor().current().revision(),
                 new pro.deta.orion.internal.ChangeMetadata(UserEmail.EMPTY, "enable test HTTPS"),
                 document -> {
                     OrionDocument.SystemConfiguration system = document.system();
@@ -279,7 +273,7 @@ class PlaywrightExternalServicesIT {
                                     system.secrets(),
                                     system.proxies(),
                                     system.connections(),
-                                    system.oidcProviders()),
+                                    system.oidcProviders(), system.invitations()),
                             document.organizations());
                 });
     }

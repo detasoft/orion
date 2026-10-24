@@ -11,7 +11,6 @@ import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
@@ -252,7 +251,7 @@ public class AcmeCertificateService {
     }
 
     private CertificateMaterial certificateMaterial(
-            AcmeMaterialConfiguration configuration,
+            Material configuration,
             List<X509Certificate> issuedChain) throws GeneralSecurityException {
         List<X509Certificate> chain = new ArrayList<>(issuedChain);
         Optional<X509Certificate> issuer = Optional.empty();
@@ -322,7 +321,7 @@ public class AcmeCertificateService {
         }
     }
 
-    private void prepareMaterial(AcmeMaterialConfiguration configuration)
+    private void prepareMaterial(Material configuration)
             throws IOException, GeneralSecurityException {
         keyMaterial.withModification(modification -> {
             if (configuration.issuerTrustAnchor().isPresent()) {
@@ -340,7 +339,7 @@ public class AcmeCertificateService {
         });
     }
 
-    private AcmeMaterialConfiguration materialFrom(OrionHttpsConfiguration https) {
+    private Material materialFrom(OrionHttpsConfiguration https) {
         OrionAcmeConfiguration acme = https.acme().orElseThrow();
         KeyMaterialDescriptor account = descriptor(
                 acme.accountMaterial().orElseThrow(
@@ -352,7 +351,7 @@ public class AcmeCertificateService {
                 KeyMaterialPurpose.TLS_IDENTITY);
         Optional<TrustedCertificateDescriptor> issuer = https.serverIssuerTrustAnchor()
                 .map(AcmeCertificateService::trustedCertificate);
-        return new AcmeMaterialConfiguration(account, identity, issuer);
+        return new Material(account, identity, issuer);
     }
 
     private static KeyMaterialDescriptor descriptor(
@@ -483,7 +482,7 @@ public class AcmeCertificateService {
             long authorizationTimeoutSeconds,
             long orderTimeoutSeconds,
             boolean agreeToTermsOfService,
-            AcmeMaterialConfiguration material,
+            Material material,
             OrionDocument snapshot,
             String eabKeyId,
             String eabSecret) {
@@ -492,6 +491,12 @@ public class AcmeCertificateService {
     private record CertificateMaterial(
             List<X509Certificate> chain,
             Optional<X509Certificate> issuerTrustAnchor) {
+    }
+
+    private record Material(
+            KeyMaterialDescriptor account,
+            KeyMaterialDescriptor identity,
+            Optional<TrustedCertificateDescriptor> issuerTrustAnchor) {
     }
 
     static final class ConfigurationUnavailableException extends RuntimeException {

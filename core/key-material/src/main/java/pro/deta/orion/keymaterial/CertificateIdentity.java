@@ -55,7 +55,7 @@ public final class CertificateIdentity {
         Optional<X509Certificate> root = KeyMaterialCapabilities.requireIssuerCertificate(issuer, issuerTrustAnchor);
         KeyMaterialCapabilities.validateCertificateChain(validated,
                 owner.getKeyPair(identity.alias()).getPublic(), root);
-        owner.installAcmeCertificateChain(identity, validated, issuer, root);
+        owner.installCertificateChain(identity, validated, issuer, root);
     }
 
     public SSLContext createContext() throws GeneralSecurityException {

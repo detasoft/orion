@@ -8,7 +8,6 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
-import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.security.InvalidKeyException;
 import java.security.KeyPair;
@@ -141,15 +140,6 @@ public final class KeyMaterialCapabilities {
                 return false;
             }
         };
-    }
-
-    AcmeKeyMaterial acquireAcmeKeys(KeyMaterialDescriptor accountDescriptor,
-            KeyMaterialDescriptor identityDescriptor, Optional<TrustedCertificateDescriptor> issuerDescriptor,
-            int accountKeySize, int domainKeySize) throws IOException, GeneralSecurityException {
-        KeyMaterialDescriptor account = requireRegistered(accountDescriptor, KeyMaterialPurpose.ACME_ACCOUNT);
-        KeyMaterialDescriptor identity = requireRegistered(identityDescriptor, KeyMaterialPurpose.TLS_IDENTITY);
-        requireRegistered(issuerDescriptor);
-        return owner.acquireAcmeKeys(account, accountKeySize, identity, domainKeySize);
     }
 
     CertificateIdentity certificateIdentity(KeyMaterialDescriptor descriptor,
@@ -491,8 +481,7 @@ public final class KeyMaterialCapabilities {
     }
 
     private static boolean canBeCreatedLazily(KeyMaterialDescriptor descriptor) {
-        return Set.of(KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialPurpose.TLS_IDENTITY)
-                .containsAll(descriptor.purposes());
+        return descriptor.purposes().equals(Set.of(KeyMaterialPurpose.TLS_IDENTITY));
     }
 
     private static Map<String, TrustedCertificateDescriptor> registerTrustedCertificates(

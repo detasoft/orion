@@ -157,7 +157,7 @@ class OrionKeyMaterialTest {
     }
 
     @Test
-    void sharesCertificateIdentityBetweenAcmeAndTls() throws Exception {
+    void sharesInstalledCertificateIdentityWithTls() throws Exception {
         CountingStore store = new CountingStore();
         OrionKeyMaterial material = OrionKeyMaterial.open(
                 store,
@@ -169,35 +169,33 @@ class OrionKeyMaterialTest {
                 "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor identity = descriptor(
                 "https-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
-        AcmeMaterialConfiguration acme = new AcmeMaterialConfiguration(account, identity, Optional.empty());
         TlsMaterialConfiguration tls = new TlsMaterialConfiguration(
                 identity, Optional.empty(), List.of(), TlsClientAuthentication.DISABLED);
 
-        AcmeKeyMaterial keys = material.acquireAcmeKeys(acme, 2048, 2048);
+        generateKeys(material, account, identity);
         CertificateIdentity certificate = material.certificateIdentity(tls);
         assertThatThrownBy(certificate::createContext)
                 .hasMessageContaining("issued certificate chain");
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
         TestCertificateChain.Authority intermediate = TestCertificateChain.intermediate("Intermediate", root);
-        material.certificateIdentity(acme).installCertificateChain(
-                List.of(TestCertificateChain.leaf("orion.example", keys.domainKeyPair(), intermediate)),
+        material.certificateIdentity(tls).installCertificateChain(
+                List.of(TestCertificateChain.leaf("orion.example", material.keyPair(identity), intermediate)),
                 Optional.empty());
 
         assertThat(material.signingIdentity().activeKeyId()).isEqualTo("server-signing-v1");
-        assertThat(material.certificateIdentity(acme).issuedCertificateChain().orElseThrow()).hasSize(1);
+        assertThat(material.certificateIdentity(tls).issuedCertificateChain().orElseThrow()).hasSize(1);
         assertThat(certificate.createContext().getProtocol()).isEqualTo("TLS");
         assertThat(store.readCalls).isEqualTo(1);
         KeyMaterialDescriptor staleAccount = new KeyMaterialDescriptor(account.alias(), account.purposes(),
                 account.algorithm(), 2);
-        AcmeMaterialConfiguration stale = new AcmeMaterialConfiguration(staleAccount, identity, Optional.empty());
-        assertThatThrownBy(() -> material.certificateIdentity(stale))
+        assertThatThrownBy(() -> material.keyPair(staleAccount))
                 .isInstanceOf(GeneralSecurityException.class).hasMessageContaining("version");
 
         material.close();
         material.close();
         assertThatThrownBy(certificate::createContext)
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
-        assertThatThrownBy(() -> material.acquireAcmeKeys(acme, 2048, 2048))
+        assertThatThrownBy(() -> generateKeys(material, account, identity))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("closed");
     }
@@ -321,49 +319,53 @@ class OrionKeyMaterialTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void closesAcmeKeysAfterFailedSaveAndReopensOnlyDurableMaterial(boolean committed) throws Exception {
-        AcmeFailingStore store = new AcmeFailingStore(committed);
+    void closesGeneratedKeysAfterFailedSaveAndReopensOnlyDurableMaterial(boolean committed) throws Exception {
+        FailingStore store = new FailingStore(committed);
         SigningMaterialSet signing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());
-        AcmeMaterialConfiguration configuration = acmeConfiguration();
+        TlsMaterialConfiguration configuration = tlsConfiguration();
+        KeyMaterialDescriptor account = descriptor(
+                "account-v1", KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, 1);
         String afterFailure;
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
                 new KeyMaterialCreation(true))) {
             String before = store.read().orElseThrow().version();
             store.fail = true;
-            assertThatThrownBy(() -> material.acquireAcmeKeys(configuration, 2048, 2048))
-                    .isInstanceOf(IOException.class).hasMessage("ACME save failed");
+            assertThatThrownBy(() -> generateKeys(material, account, configuration.identity()))
+                    .isInstanceOf(IOException.class).hasMessage("Material save failed");
             afterFailure = store.read().orElseThrow().version();
             assertThat(afterFailure.equals(before)).isEqualTo(!committed);
             store.fail = false;
-            assertThatThrownBy(() -> material.acquireAcmeKeys(configuration, 2048, 2048))
+            assertThatThrownBy(() -> generateKeys(material, account, configuration.identity()))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
             assertThatThrownBy(() -> material.certificateIdentity(configuration).issuedCertificateChain())
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
         }
         try (OrionKeyMaterial reopened = OrionKeyMaterial.open(store, options(), signing, 2048)) {
-            AcmeKeyMaterial keys = reopened.acquireAcmeKeys(configuration, 2048, 2048);
-            assertThat(keys.accountKeyPair().getPrivate()).isNotNull();
-            assertThat(keys.domainKeyPair().getPrivate()).isNotNull();
+            generateKeys(reopened, account, configuration.identity());
+            assertThat(reopened.keyPair(account).getPrivate()).isNotNull();
+            assertThat(reopened.keyPair(configuration.identity()).getPrivate()).isNotNull();
             assertThat(store.read().orElseThrow().version().equals(afterFailure)).isEqualTo(committed);
         }
     }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void failedAcmeCertificateSaveClosesTheOwnerWithoutExposingAnUnsavedChain(boolean committed)
+    void failedCertificateSaveClosesTheOwnerWithoutExposingAnUnsavedChain(boolean committed)
             throws Exception {
-        AcmeFailingStore store = new AcmeFailingStore(committed);
+        FailingStore store = new FailingStore(committed);
         SigningMaterialSet signing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());
-        AcmeMaterialConfiguration configuration = acmeConfiguration();
+        TlsMaterialConfiguration configuration = tlsConfiguration();
+        KeyMaterialDescriptor account = descriptor(
+                "account-v1", KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, 1);
         X509Certificate expected;
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
                 new KeyMaterialCreation(true))) {
-            AcmeKeyMaterial keys = material.acquireAcmeKeys(configuration, 2048, 2048);
-            TestCertificateChain.Authority issuer = TestCertificateChain.root("ACME issuer");
+            generateKeys(material, account, configuration.identity());
+            TestCertificateChain.Authority issuer = TestCertificateChain.root("Certificate issuer");
             X509Certificate original = TestCertificateChain.leaf(
-                    "original.example", keys.domainKeyPair(), issuer);
+                    "original.example", material.keyPair(configuration.identity()), issuer);
             X509Certificate replacement = TestCertificateChain.leaf(
-                    "replacement.example", keys.domainKeyPair(), issuer);
+                    "replacement.example", material.keyPair(configuration.identity()), issuer);
             material.certificateIdentity(configuration).installCertificateChain(
                     List.of(original), Optional.empty());
             assertThatThrownBy(() -> material.certificateIdentity(configuration)
@@ -374,7 +376,7 @@ class OrionKeyMaterialTest {
             store.fail = true;
             assertThatThrownBy(() -> material.certificateIdentity(configuration)
                     .installCertificateChain(List.of(replacement), Optional.empty()))
-                    .isInstanceOf(IOException.class).hasMessage("ACME save failed");
+                    .isInstanceOf(IOException.class).hasMessage("Material save failed");
             store.fail = false;
             assertThatThrownBy(() -> material.certificateIdentity(configuration).issuedCertificateChain())
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
@@ -391,18 +393,26 @@ class OrionKeyMaterialTest {
         }
     }
 
-    private static AcmeMaterialConfiguration acmeConfiguration() {
-        return new AcmeMaterialConfiguration(
-                descriptor("acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1),
+    private static TlsMaterialConfiguration tlsConfiguration() {
+        return new TlsMaterialConfiguration(
                 descriptor("https-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1),
-                Optional.empty());
+                Optional.empty(), List.of(), TlsClientAuthentication.DISABLED);
     }
 
-    private static final class AcmeFailingStore extends InMemoryKeyMaterialContentStore {
+    private static void generateKeys(OrionKeyMaterial material, KeyMaterialDescriptor first,
+            KeyMaterialDescriptor second) throws IOException, GeneralSecurityException {
+        material.withModification(modification -> {
+            modification.generateKey(first, 2048);
+            modification.generateKey(second, 2048);
+            modification.apply();
+        });
+    }
+
+    private static final class FailingStore extends InMemoryKeyMaterialContentStore {
         private final boolean committed;
         private boolean fail;
 
-        private AcmeFailingStore(boolean committed) {
+        private FailingStore(boolean committed) {
             this.committed = committed;
         }
 
@@ -414,7 +424,7 @@ class OrionKeyMaterialTest {
             if (committed) {
                 super.write(bytes, expectedVersion);
             }
-            throw new IOException("ACME save failed");
+            throw new IOException("Material save failed");
         }
     }
 

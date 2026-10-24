@@ -58,14 +58,14 @@ import pro.deta.orion.agentd.session.SessionDiscovery;
 import pro.deta.orion.agentd.session.SessionManifest;
 import pro.deta.orion.agentd.session.SessionRegistry;
 import pro.deta.orion.agentd.transport.JettyHttp2Transport;
-import pro.deta.orion.keymaterial.AcmeKeyMaterial;
-import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
+import pro.deta.orion.keymaterial.TlsMaterialConfiguration;
+import pro.deta.orion.keymaterial.TlsClientAuthentication;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -145,8 +145,6 @@ class JettyHTTPServerIT {
     private static final int HTTPS_START_ATTEMPTS = 3;
     private static final KeyMaterialDescriptor SIGNING = descriptor(
             "server-signing-v1", KeyMaterialPurpose.SERVER_SIGNING);
-    private static final KeyMaterialDescriptor ACCOUNT = descriptor(
-            "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT);
     private static final KeyMaterialDescriptor IDENTITY = descriptor(
             "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY);
     private static final TrustedCertificateDescriptor SERVER_ROOT = trusted("server-root-v1");
@@ -370,9 +368,10 @@ class JettyHTTPServerIT {
     @Test
     void failsHttpsStartupForStorageOnlyIdentity() throws Exception {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
-            AcmeMaterialConfiguration acme = new AcmeMaterialConfiguration(
-                    ACCOUNT, IDENTITY, Optional.empty());
-            owner.acquireAcmeKeys(acme, 2048, 2048);
+            owner.withModification(modification -> {
+                modification.generateKey(IDENTITY, 2048);
+                modification.apply();
+            });
             JettyHTTPServer server = server(
                     httpConfiguration(false),
                     desiredState(OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of()),
@@ -1060,16 +1059,20 @@ class JettyHTTPServerIT {
             try (OrionKeyMaterial owner = owner(store)) {
                 TestCertificateChain.Authority serverRoot = TestCertificateChain.root("Server Root");
                 TestCertificateChain.Authority clientRoot = TestCertificateChain.root("Client Root");
-                AcmeMaterialConfiguration clientProvisioning = new AcmeMaterialConfiguration(
-                        ACCOUNT, IDENTITY, Optional.of(CLIENT_ROOT));
-                AcmeKeyMaterial keys = owner.acquireAcmeKeys(clientProvisioning, 2048, 2048);
+                owner.withModification(modification -> {
+                    modification.generateKey(IDENTITY, 2048);
+                    modification.apply();
+                });
+                KeyPair identityKey = owner.keyPair(IDENTITY);
+                TlsMaterialConfiguration clientProvisioning = new TlsMaterialConfiguration(
+                        IDENTITY, Optional.of(CLIENT_ROOT), List.of(), TlsClientAuthentication.DISABLED);
                 owner.certificateIdentity(clientProvisioning).installCertificateChain(
-                        List.of(TestCertificateChain.leaf("localhost", keys.domainKeyPair(), clientRoot)),
+                        List.of(TestCertificateChain.leaf("localhost", identityKey, clientRoot)),
                         Optional.of(clientRoot.certificate()));
-                AcmeMaterialConfiguration serverProvisioning = new AcmeMaterialConfiguration(
-                        ACCOUNT, IDENTITY, Optional.of(SERVER_ROOT));
+                TlsMaterialConfiguration serverProvisioning = new TlsMaterialConfiguration(
+                        IDENTITY, Optional.of(SERVER_ROOT), List.of(), TlsClientAuthentication.DISABLED);
                 X509Certificate serverCertificate = TestCertificateChain.leaf(
-                        "localhost", keys.domainKeyPair(), serverRoot);
+                        "localhost", identityKey, serverRoot);
                 owner.certificateIdentity(serverProvisioning).installCertificateChain(
                         List.of(serverCertificate),
                         Optional.of(serverRoot.certificate()));
@@ -1137,7 +1140,7 @@ class JettyHTTPServerIT {
         TestConfiguration desiredState = new TestConfiguration(EVENTS);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(), https, List.of(), List.of(), List.of(),
-                List.of()),
+                List.of(), List.of()),
                 List.of()), Optional.of("test-revision"));
         return desiredState;
     }
@@ -1157,7 +1160,7 @@ class JettyHTTPServerIT {
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
                 new OrionHttpRouteRegistry(Set.of(routes)),
                 new OrionHttpResponseWriter(new ObjectMapper()));
-        return new JettyHTTPServer(bootstrap, desiredState.acl(), tls, servlet, null, null);
+        return new JettyHTTPServer(bootstrap, desiredState.editor(), tls, servlet, null, null);
     }
 
     private static KeyMaterialDescriptor descriptor(String alias, KeyMaterialPurpose purpose) {

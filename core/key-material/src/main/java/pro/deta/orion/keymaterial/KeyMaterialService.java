@@ -480,23 +480,7 @@ public class KeyMaterialService implements AutoCloseable {
         validatePrepared(addition.entry(), descriptor);
     }
 
-    synchronized AcmeKeyMaterial acquireAcmeKeys(
-            KeyMaterialDescriptor account,
-            int accountKeySize,
-            KeyMaterialDescriptor identity,
-            int domainKeySize) throws IOException, GeneralSecurityException {
-        requireOpen();
-        boolean saveRequired = !containsAlias(account.alias(), Set.of())
-                || !containsAlias(identity.alias(), Set.of());
-        KeyPair accountKeyPair = generateKeyIfMissing(account, accountKeySize);
-        KeyPair domainKeyPair = generateKeyIfMissing(identity, domainKeySize);
-        if (saveRequired) {
-            saveAcmeMaterial();
-        }
-        return new AcmeKeyMaterial(accountKeyPair, domainKeyPair);
-    }
-
-    synchronized void installAcmeCertificateChain(
+    synchronized void installCertificateChain(
             KeyMaterialDescriptor identity,
             List<X509Certificate> certificateChain,
             Optional<TrustedCertificateDescriptor> issuerDescriptor,
@@ -507,10 +491,6 @@ public class KeyMaterialService implements AutoCloseable {
         if (issuerDescriptor.isPresent()) {
             setTrustedCertificate(issuerDescriptor.orElseThrow(), issuerCertificate.orElseThrow());
         }
-        saveAcmeMaterial();
-    }
-
-    private void saveAcmeMaterial() throws IOException, GeneralSecurityException {
         try {
             save();
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {

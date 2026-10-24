@@ -520,24 +520,6 @@ public class OrionKeyMaterial implements AutoCloseable {
         if (owner != null) owner.close();
     }
 
-    public AcmeKeyMaterial acquireAcmeKeys(AcmeMaterialConfiguration configuration,
-            int accountKeySize, int domainKeySize) throws IOException, GeneralSecurityException {
-        requireAcmeConfiguration(configuration);
-        return KeyMaterialCapabilities.open(owner, List.of(configuration.account(), configuration.identity()),
-                configuration.issuerTrustAnchor().map(List::of).orElseGet(List::of))
-                .acquireAcmeKeys(configuration.account(), configuration.identity(),
-                        configuration.issuerTrustAnchor(), accountKeySize, domainKeySize);
-    }
-
-    public CertificateIdentity certificateIdentity(AcmeMaterialConfiguration configuration)
-            throws GeneralSecurityException {
-        requireAcmeConfiguration(configuration);
-        return KeyMaterialCapabilities.open(owner, List.of(configuration.account(), configuration.identity()),
-                configuration.issuerTrustAnchor().map(List::of).orElseGet(List::of))
-                .certificateIdentity(configuration.identity(), configuration.issuerTrustAnchor(),
-                        List.of(), TlsClientAuthentication.DISABLED);
-    }
-
     public CertificateIdentity certificateIdentity(TlsMaterialConfiguration configuration)
             throws GeneralSecurityException {
         if (configuration == null) {
@@ -552,13 +534,6 @@ public class OrionKeyMaterial implements AutoCloseable {
         return KeyMaterialCapabilities.open(owner, List.of(configuration.identity()), trusted)
                 .certificateIdentity(configuration.identity(), configuration.serverIssuerTrustAnchor(),
                         configuration.clientTrustAnchors(), configuration.clientAuthentication());
-    }
-
-    private void requireAcmeConfiguration(AcmeMaterialConfiguration configuration) {
-        if (configuration == null) {
-            throw new IllegalArgumentException("ACME material configuration must not be null");
-        }
-        requireAvailable();
     }
 
     private void requireAvailable() {
