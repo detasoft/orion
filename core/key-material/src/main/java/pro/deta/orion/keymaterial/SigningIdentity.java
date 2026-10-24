@@ -27,7 +27,7 @@ public class SigningIdentity {
         this.material = material;
         Map<String, KeyMaterialDescriptor> keys = new LinkedHashMap<>();
         for (KeyMaterialDescriptor descriptor : material.verificationIncludingActive()) {
-            keys.put(descriptor.alias().value(), descriptor);
+            keys.put(descriptor.alias(), descriptor);
         }
         verification = Map.copyOf(keys);
     }
@@ -38,7 +38,7 @@ public class SigningIdentity {
 
     public String activeKeyId() {
         if (material == null) throw new IllegalStateException("Server identity is not available");
-        return material.active().alias().value();
+        return material.active().alias();
     }
 
     public byte[] sign(byte[] payload) throws GeneralSecurityException {
@@ -57,14 +57,14 @@ public class SigningIdentity {
 
     public List<PublicKey> publicKeys() throws GeneralSecurityException {
         if (owner == null) return List.of();
-        return List.of(owner.getKeyPair(material.active().alias().value()).getPublic());
+        return List.of(owner.getKeyPair(material.active().alias()).getPublic());
     }
 
     public List<PublicKey> retainedPublicKeys() throws GeneralSecurityException {
         if (owner == null) return List.of();
         List<PublicKey> keys = new ArrayList<>();
         for (KeyMaterialDescriptor descriptor : material.verification()) {
-            keys.add(owner.getKeyPair(descriptor.alias().value()).getPublic());
+            keys.add(owner.getKeyPair(descriptor.alias()).getPublic());
         }
         return List.copyOf(keys);
     }

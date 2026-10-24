@@ -34,21 +34,21 @@ public final class KeyMaterialModification implements Modification {
             throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(descriptor);
-        Addition existing = find(descriptor.alias().value());
+        Addition existing = find(descriptor.alias());
         if (existing != null) {
             requireAvailable(existing);
             owner.validatePrepared(existing.entry(), descriptor);
             return;
         }
-        add(descriptor.alias().value(), owner.prepareKey(descriptor, keySize), false);
+        add(descriptor.alias(), owner.prepareKey(descriptor, keySize), false);
     }
 
     public synchronized void importKey(KeyMaterialDescriptor descriptor, KeyPair keyPair)
             throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(descriptor);
-        requireAbsent(descriptor.alias().value());
-        add(descriptor.alias().value(), owner.preparePrivateKey(descriptor, keyPair), false);
+        requireAbsent(descriptor.alias());
+        add(descriptor.alias(), owner.preparePrivateKey(descriptor, keyPair), false);
     }
 
     public synchronized void importKey(KeyMaterialDescriptor descriptor, char[] privateKeyPem)
@@ -72,20 +72,20 @@ public final class KeyMaterialModification implements Modification {
             throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(descriptor);
-        requireAbsent(descriptor.alias().value());
-        add(descriptor.alias().value(), owner.prepareSecretKey(descriptor, key), false);
+        requireAbsent(descriptor.alias());
+        add(descriptor.alias(), owner.prepareSecretKey(descriptor, key), false);
     }
 
     public synchronized void setTrustedCertificate(TrustedCertificateDescriptor descriptor,
             X509Certificate certificate) throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(descriptor);
-        Addition existing = find(descriptor.alias().value());
+        Addition existing = find(descriptor.alias());
         if (existing != null) {
             requireAvailable(existing);
             owner.validatePrepared(existing.entry(), descriptor);
         }
-        add(descriptor.alias().value(), owner.prepareTrustedCertificate(descriptor, certificate), false);
+        add(descriptor.alias(), owner.prepareTrustedCertificate(descriptor, certificate), false);
     }
 
     public synchronized void installCertificateChain(KeyMaterialDescriptor identity,
@@ -98,14 +98,14 @@ public final class KeyMaterialModification implements Modification {
             throw new IllegalArgumentException("Certificate chains require TLS identity or CA material");
         }
         if (issuer == null) throw new IllegalArgumentException("Issuer optional must not be null");
-        Addition existing = requireEntry(identity.alias().value());
+        Addition existing = requireEntry(identity.alias());
         owner.validatePrepared(existing.entry(), identity);
         KeyStore.PrivateKeyEntry entry = (KeyStore.PrivateKeyEntry) existing.entry();
         Optional<X509Certificate> root = Optional.empty();
         if (issuer.isPresent()) {
             TrustedCertificateDescriptor descriptor = issuer.orElseThrow();
             requireDescriptor(descriptor);
-            Addition trusted = requireEntry(descriptor.alias().value());
+            Addition trusted = requireEntry(descriptor.alias());
             owner.validatePrepared(trusted.entry(), descriptor);
             root = Optional.of((X509Certificate) ((KeyStore.TrustedCertificateEntry) trusted.entry())
                     .getTrustedCertificate());
@@ -113,13 +113,13 @@ public final class KeyMaterialModification implements Modification {
         List<X509Certificate> certificates = KeyMaterialCapabilities.requireX509Chain(chain);
         KeyPair keyPair = new KeyPair(entry.getCertificate().getPublicKey(), entry.getPrivateKey());
         KeyMaterialCapabilities.validateCertificateChain(certificates, keyPair.getPublic(), root);
-        add(identity.alias().value(), owner.prepareCertificateChain(identity, keyPair, certificates), false);
+        add(identity.alias(), owner.prepareCertificateChain(identity, keyPair, certificates), false);
     }
 
     public synchronized void delete(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(descriptor);
-        Addition existing = requireEntry(descriptor.alias().value());
+        Addition existing = requireEntry(descriptor.alias());
         owner.validatePrepared(existing.entry(), descriptor);
         add(existing.alias(), existing.entry(), true);
     }
@@ -127,7 +127,7 @@ public final class KeyMaterialModification implements Modification {
     public synchronized void delete(TrustedCertificateDescriptor descriptor) throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(descriptor);
-        Addition existing = requireEntry(descriptor.alias().value());
+        Addition existing = requireEntry(descriptor.alias());
         owner.validatePrepared(existing.entry(), descriptor);
         add(existing.alias(), existing.entry(), true);
     }

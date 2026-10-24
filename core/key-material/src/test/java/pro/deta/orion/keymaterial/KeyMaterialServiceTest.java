@@ -104,10 +104,10 @@ class KeyMaterialServiceTest {
         TrustedCertificateDescriptor original = trustedCertificate(
                 "public-root-v1", 1);
         KeyMaterialDescriptor privateEntry = new KeyMaterialDescriptor(
-                new KeyMaterialAlias("private-entry-v1"),
+                "private-entry-v1",
                 KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(1));
+                1);
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
             service.setTrustedCertificate(original, root.certificate());
@@ -117,13 +117,13 @@ class KeyMaterialServiceTest {
 
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
             TrustedCertificateDescriptor wrongVersion = trustedCertificate(
-                    original.alias().value(), 2);
+                    original.alias(), 2);
             TrustedCertificateDescriptor wrongAlgorithm = new TrustedCertificateDescriptor(
                     original.alias(),
                     KeyMaterialAlgorithm.EC,
                     original.version());
             TrustedCertificateDescriptor wrongEntryType = trustedCertificate(
-                    privateEntry.alias().value(), 1);
+                    privateEntry.alias(), 1);
 
             assertThatThrownBy(() -> service.validateExisting(wrongVersion))
                     .hasMessageContaining("version");
@@ -207,10 +207,10 @@ class KeyMaterialServiceTest {
         Certificate[] mismatchedChain = service.getCertificateChain(
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_06_ALIAS);
         KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(
-                new KeyMaterialAlias(KeyMaterialTestConstants.BAD_SERVER_SIGNING_ALIAS),
+                KeyMaterialTestConstants.BAD_SERVER_SIGNING_ALIAS,
                 KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(1));
+                1);
 
         assertThatThrownBy(() -> service.setPrivateKey(
                 descriptor,
@@ -316,9 +316,9 @@ class KeyMaterialServiceTest {
             String alias,
             long version) {
         return new TrustedCertificateDescriptor(
-                new KeyMaterialAlias(alias),
+                alias,
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(version));
+                version);
     }
 
     private static KeyMaterialDescriptor descriptor(
@@ -326,9 +326,9 @@ class KeyMaterialServiceTest {
             KeyMaterialPurpose purpose,
             KeyMaterialAlgorithm algorithm) {
         return new KeyMaterialDescriptor(
-                new KeyMaterialAlias(alias),
+                alias,
                 purpose,
                 algorithm,
-                new KeyMaterialVersion(1));
+                1);
     }
 }

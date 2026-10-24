@@ -39,8 +39,6 @@ import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
-import pro.deta.orion.keymaterial.KeyMaterialAlias;
-import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.auth.DefaultAccessControl;
@@ -85,8 +83,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionAccessControlServiceImplTest {
     private static final SigningMaterialSet SIGNING = new SigningMaterialSet(
-            new KeyMaterialDescriptor(new KeyMaterialAlias("test-signing-key"), KeyMaterialPurpose.SERVER_SIGNING,
-                    KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1)), List.of());
+            new KeyMaterialDescriptor("test-signing-key", KeyMaterialPurpose.SERVER_SIGNING,
+                    KeyMaterialAlgorithm.RSA, 1), List.of());
     private static final KeyPair KEY_ONE = keyPair("RSA", 2048);
     private static final KeyPair KEY_TWO = keyPair("EC", 256);
     private static final KeyPair KEY_THREE = keyPair("RSA", 2048);
@@ -1704,8 +1702,8 @@ class OrionAccessControlServiceImplTest {
                     .serialize(
                             new ConfigurationSecretEnvelope(
                                     1,
-                                    new KeyMaterialAlias("configuration-v1"),
-                                    new KeyMaterialVersion(1),
+                                    "configuration-v1",
+                                    1,
                                     ConfigurationSecretEnvelopeCodec.AES_WRAP,
                                     ConfigurationSecretEnvelopeCodec.AES_GCM,
                                     ConfigurationSecretEnvelopeCodec.BASE64_URL,

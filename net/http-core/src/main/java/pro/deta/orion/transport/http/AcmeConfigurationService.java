@@ -13,11 +13,9 @@ import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
@@ -126,9 +124,9 @@ public final class AcmeConfigurationService {
         OrionMaterialReference requestedAccount = input.accountMaterial();
         if (requestedAccount != null) {
             try {
-                material.require(new KeyMaterialDescriptor(new KeyMaterialAlias(requestedAccount.alias()),
+                material.require(new KeyMaterialDescriptor(requestedAccount.alias(),
                         KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA,
-                        new KeyMaterialVersion(requestedAccount.version())));
+                        requestedAccount.version()));
             } catch (GeneralSecurityException invalid) {
                 throw new IllegalArgumentException("Select an existing RSA ACME account key");
             }

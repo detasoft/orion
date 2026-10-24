@@ -2,14 +2,12 @@ package pro.deta.orion;
 
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
 import pro.deta.orion.keymaterial.KeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialResourceResolver;
-import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.bootstrap.config.KeyMaterialConfig;
@@ -139,10 +137,10 @@ public final class OrionKeyMaterialFactory {
             throw new IllegalArgumentException("Server signing " + role + " reference must not be null");
         }
         return new KeyMaterialDescriptor(
-                new KeyMaterialAlias(required(reference.getAlias(), role + " alias")),
+                required(reference.getAlias(), role + " alias"),
                 KeyMaterialPurpose.SERVER_SIGNING,
                 algorithm,
-                new KeyMaterialVersion(reference.getVersion()));
+                reference.getVersion());
     }
 
     private static String resolveAgainstBaseDirectory(

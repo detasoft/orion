@@ -92,30 +92,30 @@ class OrionKeyMaterialTest {
             service.save();
         }
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), initial, 2048)) {
-            assertThat(material.signingIdentity().activeKeyId()).isEqualTo(old.alias().value());
-            assertThat(material.signingIdentity().hasVerificationKey(next.alias().value())).isFalse();
+            assertThat(material.signingIdentity().activeKeyId()).isEqualTo(old.alias());
+            assertThat(material.signingIdentity().hasVerificationKey(next.alias())).isFalse();
         }
 
         SigningMaterialSet retained = new SigningMaterialSet(next, List.of(old));
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), retained, 2048)) {
             SigningIdentity identity = material.signingIdentity();
             nextSignature = identity.sign(payload);
-            assertThat(identity.activeKeyId()).isEqualTo(next.alias().value());
-            assertThat(identity.verify(old.alias().value(), payload, oldSignature)).isTrue();
-            assertThat(identity.verify(next.alias().value(), payload, nextSignature)).isTrue();
+            assertThat(identity.activeKeyId()).isEqualTo(next.alias());
+            assertThat(identity.verify(old.alias(), payload, oldSignature)).isTrue();
+            assertThat(identity.verify(next.alias(), payload, nextSignature)).isTrue();
         }
 
         SigningMaterialSet retired = new SigningMaterialSet(next, List.of());
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), retired, 2048)) {
             SigningIdentity identity = material.signingIdentity();
-            assertThat(identity.verify(old.alias().value(), payload, oldSignature)).isFalse();
-            assertThat(identity.verify(next.alias().value(), payload, nextSignature)).isTrue();
+            assertThat(identity.verify(old.alias(), payload, oldSignature)).isFalse();
+            assertThat(identity.verify(next.alias(), payload, nextSignature)).isTrue();
             assertThat(identity.retainedPublicKeys()).isEmpty();
         }
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            assertThat(service.containsAlias(old.alias().value())).isTrue();
-            assertThat(service.getKeyPair(old.alias().value()).getPublic().getEncoded()).isNotEmpty();
-            assertThat(service.containsAlias(next.alias().value())).isTrue();
+            assertThat(service.containsAlias(old.alias())).isTrue();
+            assertThat(service.getKeyPair(old.alias()).getPublic().getEncoded()).isNotEmpty();
+            assertThat(service.containsAlias(next.alias())).isTrue();
         }
     }
 
@@ -185,7 +185,7 @@ class OrionKeyMaterialTest {
         assertThat(material.certificateIdentity(acme).issuedCertificateChain().orElseThrow()).hasSize(1);
         assertThat(certificate.createContext().getProtocol()).isEqualTo("TLS");
         assertThat(store.readCalls).isEqualTo(1);
-        KeyMaterialDescriptor staleAccount = descriptor(account.alias().value(), account.purpose(),
+        KeyMaterialDescriptor staleAccount = descriptor(account.alias(), account.purpose(),
                 account.algorithm(), 2);
         AcmeMaterialConfiguration stale = new AcmeMaterialConfiguration(staleAccount, identity, Optional.empty());
         assertThatThrownBy(() -> material.certificateIdentity(stale))
@@ -388,10 +388,10 @@ class OrionKeyMaterialTest {
             KeyMaterialAlgorithm algorithm,
             long version) {
         return new KeyMaterialDescriptor(
-                new KeyMaterialAlias(alias),
+                alias,
                 purpose,
                 algorithm,
-                new KeyMaterialVersion(version));
+                version);
     }
 
     @Test

@@ -33,7 +33,7 @@ public final class CertificateIdentity {
     }
 
     public Optional<List<X509Certificate>> issuedCertificateChain() throws GeneralSecurityException {
-        if (!owner.containsAlias(identity.alias().value())) return Optional.empty();
+        if (!owner.containsAlias(identity.alias())) return Optional.empty();
         List<X509Certificate> chain = certificateChain();
         if (chain.size() == 1 && isStorageCertificate(chain.getFirst())) return Optional.empty();
         return Optional.of(chain);
@@ -52,7 +52,7 @@ public final class CertificateIdentity {
         List<X509Certificate> validated = KeyMaterialCapabilities.requireX509Chain(certificateChain);
         Optional<X509Certificate> root = KeyMaterialCapabilities.requireIssuerCertificate(issuer, issuerTrustAnchor);
         KeyMaterialCapabilities.validateCertificateChain(validated,
-                owner.getKeyPair(identity.alias().value()).getPublic(), root);
+                owner.getKeyPair(identity.alias()).getPublic(), root);
         owner.installAcmeCertificateChain(identity, validated, issuer, root);
     }
 
@@ -62,7 +62,7 @@ public final class CertificateIdentity {
             throw new GeneralSecurityException("TLS identity must contain an issued certificate chain");
         }
         KeyMaterialCapabilities.validateCertificateChain(chain,
-                owner.getKeyPair(identity.alias().value()).getPublic(), issuerTrustAnchor());
+                owner.getKeyPair(identity.alias()).getPublic(), issuerTrustAnchor());
         return selected.createTlsContext(identity, chain, clientTrust);
     }
 

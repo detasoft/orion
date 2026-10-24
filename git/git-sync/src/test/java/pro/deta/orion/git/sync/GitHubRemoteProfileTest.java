@@ -12,13 +12,11 @@ import pro.deta.orion.git.client.GitClientTransportSession;
 import pro.deta.orion.git.client.GitCredentials;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialCapabilities;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialService;
-import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecretReference;
@@ -56,9 +54,9 @@ class GitHubRemoteProfileTest {
     void configureStoredCredential() throws Exception {
         material = KeyMaterialService.open(new InMemoryKeyMaterialContentStore(),
                 KeyMaterialOptions.pkcs12("test-password".toCharArray()));
-        KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(new KeyMaterialAlias("configuration-v1"),
+        KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor("configuration-v1",
                 KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES,
-                new KeyMaterialVersion(1));
+                1);
         material.generateSecretKeyIfMissing(descriptor, 256);
         secrets = new ConfigurationSecrets(() -> {
             resolutions.incrementAndGet();

@@ -18,7 +18,7 @@ class OrionSshHostKeysTest {
             SshHostKeyCapability keys = material.sshHostKeys(List.of());
 
             assertThat(keys.descriptors())
-                    .extracting(descriptor -> descriptor.alias().value())
+                    .extracting(descriptor -> descriptor.alias())
                     .containsExactly("ssh-host-ec-v1", "ssh-host-rsa-v1");
             publicKeys = keys.keyPairs().stream()
                     .map(key -> key.getPublic().getEncoded())
@@ -95,10 +95,10 @@ class OrionSshHostKeysTest {
 
     private static KeyMaterialDescriptor serverSigning() {
         return new KeyMaterialDescriptor(
-                new KeyMaterialAlias("server-signing-v1"),
+                "server-signing-v1",
                 KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(1));
+                1);
     }
 
     private static KeyMaterialDescriptor sshHostKey(
@@ -106,9 +106,9 @@ class OrionSshHostKeysTest {
             KeyMaterialAlgorithm algorithm,
             long version) {
         return new KeyMaterialDescriptor(
-                new KeyMaterialAlias(alias),
+                alias,
                 KeyMaterialPurpose.SSH_HOST,
                 algorithm,
-                new KeyMaterialVersion(version));
+                version);
     }
 }

@@ -11,11 +11,9 @@ import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
@@ -327,9 +325,9 @@ public class AcmeCertificateService {
         keyMaterial.withModification(modification -> {
             if (configuration.issuerTrustAnchor().isPresent()) {
                 TrustedCertificateDescriptor issuer = configuration.issuerTrustAnchor().orElseThrow();
-                String alias = issuer.alias().value();
-                if (alias.equalsIgnoreCase(configuration.account().alias().value())
-                        || alias.equalsIgnoreCase(configuration.identity().alias().value())) {
+                String alias = issuer.alias();
+                if (alias.equalsIgnoreCase(configuration.account().alias())
+                        || alias.equalsIgnoreCase(configuration.identity().alias())) {
                     throw new IllegalArgumentException("ACME key and issuer must use different aliases");
                 }
                 if (keyMaterial.contains(issuer.alias())) keyMaterial.require(issuer);
@@ -359,18 +357,18 @@ public class AcmeCertificateService {
             OrionMaterialReference reference,
             KeyMaterialPurpose purpose) {
         return new KeyMaterialDescriptor(
-                new KeyMaterialAlias(reference.alias()),
+                reference.alias(),
                 purpose,
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(reference.version()));
+                reference.version());
     }
 
     private static TrustedCertificateDescriptor trustedCertificate(
             OrionMaterialReference reference) {
         return new TrustedCertificateDescriptor(
-                new KeyMaterialAlias(reference.alias()),
+                reference.alias(),
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(reference.version()));
+                reference.version());
     }
 
     private static List<String> domainsFrom(IssueRequest request, OrionAcmeConfiguration configuration) {

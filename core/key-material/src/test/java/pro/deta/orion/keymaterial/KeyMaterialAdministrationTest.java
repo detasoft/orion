@@ -195,7 +195,7 @@ class KeyMaterialAdministrationTest {
     }
 
     private static KeyMaterialDescriptor descriptor(String alias, KeyMaterialPurpose purpose) {
-        return new KeyMaterialDescriptor(new KeyMaterialAlias(alias), purpose, KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(1));
+        return new KeyMaterialDescriptor(alias, purpose, KeyMaterialAlgorithm.RSA,
+                1);
     }
 }

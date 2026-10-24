@@ -17,7 +17,7 @@ public record SigningMaterialSet(KeyMaterialDescriptor active, List<KeyMaterialD
             verification = List.of();
         }
         LinkedHashSet<KeyMaterialDescriptor> validated = new LinkedHashSet<>();
-        Map<KeyMaterialAlias, KeyMaterialDescriptor> descriptorsByAlias = new LinkedHashMap<>();
+        Map<String, KeyMaterialDescriptor> descriptorsByAlias = new LinkedHashMap<>();
         descriptorsByAlias.put(active.alias(), active);
         for (KeyMaterialDescriptor candidate : verification) {
             requireCompatible(active, candidate);
@@ -28,7 +28,7 @@ public record SigningMaterialSet(KeyMaterialDescriptor active, List<KeyMaterialD
                 }
                 continue;
             }
-            if (candidate.version().compareTo(active.version()) >= 0) {
+            if (candidate.version() >= active.version()) {
                 throw new IllegalArgumentException(
                         "Verification material must be older than active material");
             }
@@ -59,6 +59,6 @@ public record SigningMaterialSet(KeyMaterialDescriptor active, List<KeyMaterialD
 
     private static IllegalArgumentException conflictingAlias(KeyMaterialDescriptor descriptor) {
         return new IllegalArgumentException(
-                "Signing material alias has conflicting descriptors: " + descriptor.alias().value());
+                "Signing material alias has conflicting descriptors: " + descriptor.alias());
     }
 }

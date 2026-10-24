@@ -174,7 +174,7 @@ public class KeyMaterialService implements AutoCloseable {
         requireOpen();
         requireDescriptor(descriptor);
         validateExisting(descriptor);
-        String alias = descriptor.alias().value();
+        String alias = descriptor.alias();
         return trustedCertificate(alias);
     }
 
@@ -202,7 +202,7 @@ public class KeyMaterialService implements AutoCloseable {
             throw new IllegalArgumentException("Private key descriptor must have a private key purpose");
         }
         Certificate[] certificates = requireCertificateChain(certificateChain);
-        requireMatchingLeaf(descriptor.alias().value(), keyPair, certificates);
+        requireMatchingLeaf(descriptor.alias(), keyPair, certificates);
         setTypedPrivateKey(descriptor, keyPair, certificates);
     }
 
@@ -245,7 +245,7 @@ public class KeyMaterialService implements AutoCloseable {
             X509Certificate certificate) throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(descriptor);
-        appendLegacy(descriptor.alias().value(), prepareTrustedCertificate(descriptor, certificate));
+        appendLegacy(descriptor.alias(), prepareTrustedCertificate(descriptor, certificate));
     }
 
     public synchronized KeyPair generateKeyIfMissing(
@@ -280,13 +280,13 @@ public class KeyMaterialService implements AutoCloseable {
         if (keySize < 0) {
             throw new IllegalArgumentException("Key size must not be negative");
         }
-        if (containsAlias(descriptor.alias().value())) {
+        if (containsAlias(descriptor.alias())) {
             validateExisting(descriptor);
-            return getKeyPair(descriptor.alias().value());
+            return getKeyPair(descriptor.alias());
         }
 
         KeyStore.PrivateKeyEntry entry = (KeyStore.PrivateKeyEntry) prepareKey(descriptor, keySize);
-        appendLegacy(descriptor.alias().value(), entry);
+        appendLegacy(descriptor.alias(), entry);
         return new KeyPair(entry.getCertificate().getPublicKey(), entry.getPrivateKey());
     }
 
@@ -302,20 +302,20 @@ public class KeyMaterialService implements AutoCloseable {
         if (keySize < 1) {
             throw new IllegalArgumentException("Secret key size must be positive");
         }
-        if (containsAlias(descriptor.alias().value())) {
+        if (containsAlias(descriptor.alias())) {
             validateExisting(descriptor);
             return;
         }
-        appendLegacy(descriptor.alias().value(), prepareKey(descriptor, keySize));
+        appendLegacy(descriptor.alias(), prepareKey(descriptor, keySize));
     }
 
     public synchronized void validateExisting(KeyMaterialDescriptor descriptor)
             throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(descriptor);
-        Addition addition = readAddition(descriptor.alias().value());
+        Addition addition = readAddition(descriptor.alias());
         if (addition == null || addition.deleted()) {
-            throw new GeneralSecurityException("Key material alias not found: " + descriptor.alias().value());
+            throw new GeneralSecurityException("Key material alias not found: " + descriptor.alias());
         }
         validatePrepared(addition.entry(), descriptor);
     }
@@ -346,10 +346,10 @@ public class KeyMaterialService implements AutoCloseable {
             KeyMaterialDescriptor descriptor;
             try {
                 descriptor = new KeyMaterialDescriptor(
-                        new KeyMaterialAlias(alias),
+                        alias,
                         purpose,
                         KeyMaterialAlgorithm.valueOf(fields[1]),
-                        new KeyMaterialVersion(Long.parseLong(fields[2])));
+                        Long.parseLong(fields[2]));
             } catch (IllegalArgumentException failure) {
                 throw new GeneralSecurityException(
                         "Typed key material metadata has invalid format: " + alias,
@@ -456,9 +456,9 @@ public class KeyMaterialService implements AutoCloseable {
             throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(descriptor);
-        Addition addition = readAddition(descriptor.alias().value());
+        Addition addition = readAddition(descriptor.alias());
         if (addition == null || addition.deleted()) {
-            throw new GeneralSecurityException("Key material alias not found: " + descriptor.alias().value());
+            throw new GeneralSecurityException("Key material alias not found: " + descriptor.alias());
         }
         validatePrepared(addition.entry(), descriptor);
     }
@@ -469,8 +469,8 @@ public class KeyMaterialService implements AutoCloseable {
             KeyMaterialDescriptor identity,
             int domainKeySize) throws IOException, GeneralSecurityException {
         requireOpen();
-        boolean saveRequired = !containsAlias(account.alias().value())
-                || !containsAlias(identity.alias().value());
+        boolean saveRequired = !containsAlias(account.alias())
+                || !containsAlias(identity.alias());
         KeyPair accountKeyPair = generateKeyIfMissing(account, accountKeySize);
         KeyPair domainKeyPair = generateKeyIfMissing(identity, domainKeySize);
         if (saveRequired) {
@@ -485,7 +485,7 @@ public class KeyMaterialService implements AutoCloseable {
             Optional<TrustedCertificateDescriptor> issuerDescriptor,
             Optional<X509Certificate> issuerCertificate) throws IOException, GeneralSecurityException {
         requireOpen();
-        KeyPair domainKeyPair = getKeyPair(identity.alias().value());
+        KeyPair domainKeyPair = getKeyPair(identity.alias());
         setPrivateKey(identity, domainKeyPair, certificateChain);
         if (issuerDescriptor.isPresent()) {
             setTrustedCertificate(issuerDescriptor.orElseThrow(), issuerCertificate.orElseThrow());
@@ -542,7 +542,7 @@ public class KeyMaterialService implements AutoCloseable {
         requireAlgorithm(descriptor, pair.getPrivate().getAlgorithm());
         requireAlgorithm(descriptor, pair.getPublic().getAlgorithm());
         X509Certificate certificate = storageCertificateFactory.create(
-                descriptor.alias().value(), descriptor.purpose().storageName(), pair);
+                descriptor.alias(), descriptor.purpose().storageName(), pair);
         return prepareCertificateChain(descriptor, pair, List.of(certificate));
     }
 
@@ -551,7 +551,7 @@ public class KeyMaterialService implements AutoCloseable {
         requireOpen();
         requireDescriptor(descriptor);
         Certificate[] certificates = requireCertificateChain(chain);
-        requireMatchingLeaf(descriptor.alias().value(), pair, certificates);
+        requireMatchingLeaf(descriptor.alias(), pair, certificates);
         return new KeyStore.PrivateKeyEntry(pair.getPrivate(), certificates, descriptorAttributes(descriptor));
     }
 
@@ -597,7 +597,7 @@ public class KeyMaterialService implements AutoCloseable {
             }
             requireAlgorithm(descriptor, key.getPrivateKey().getAlgorithm());
         }
-        validateMetadata(descriptor.alias().value(), attribute(entry.getAttributes(), DESCRIPTOR_ATTRIBUTE_OID),
+        validateMetadata(descriptor.alias(), attribute(entry.getAttributes(), DESCRIPTOR_ATTRIBUTE_OID),
                 descriptor.purpose(), descriptor.algorithm(), descriptor.version());
     }
 
@@ -609,7 +609,7 @@ public class KeyMaterialService implements AutoCloseable {
             throw new GeneralSecurityException("Key material entry type does not match purpose");
         }
         requireAlgorithm(descriptor, trusted.getTrustedCertificate().getPublicKey().getAlgorithm());
-        validateMetadata(descriptor.alias().value(), attribute(entry.getAttributes(), DESCRIPTOR_ATTRIBUTE_OID),
+        validateMetadata(descriptor.alias(), attribute(entry.getAttributes(), DESCRIPTOR_ATTRIBUTE_OID),
                 descriptor.purpose(), descriptor.algorithm(), descriptor.version());
     }
 
@@ -737,14 +737,14 @@ public class KeyMaterialService implements AutoCloseable {
     }
 
     private static void validateMetadata(String alias, String metadata, KeyMaterialPurpose purpose,
-            KeyMaterialAlgorithm algorithm, KeyMaterialVersion version)
+            KeyMaterialAlgorithm algorithm, long version)
             throws GeneralSecurityException {
         if (metadata == null) throw new GeneralSecurityException("Typed key material metadata is missing: " + alias);
         String[] fields = metadata.split(";", -1);
         if (fields.length != 3) throw metadataFailure(alias, "format");
         requireMetadataField(alias, "purpose", purpose.name(), fields[0]);
         requireMetadataField(alias, "algorithm", algorithm.name(), fields[1]);
-        requireMetadataField(alias, "version", Long.toString(version.value()), fields[2]);
+        requireMetadataField(alias, "version", Long.toString(version), fields[2]);
     }
 
     private record EntryVersion(String physicalAlias, String alias, long version, long kmsVersion, boolean deleted) {}
@@ -841,7 +841,7 @@ public class KeyMaterialService implements AutoCloseable {
             KeyMaterialDescriptor descriptor,
             KeyPair keyPair,
             Certificate[] certificateChain) throws GeneralSecurityException {
-        appendLegacy(descriptor.alias().value(),
+        appendLegacy(descriptor.alias(),
                 new KeyStore.PrivateKeyEntry(keyPair.getPrivate(), certificateChain, descriptorAttributes(descriptor)));
     }
 
@@ -871,10 +871,10 @@ public class KeyMaterialService implements AutoCloseable {
     private static Set<KeyStore.Entry.Attribute> descriptorAttributes(
             KeyMaterialPurpose purpose,
             KeyMaterialAlgorithm algorithm,
-            KeyMaterialVersion version) {
+            long version) {
         String value = purpose.name()
                 + ";" + algorithm.name()
-                + ";" + version.value();
+                + ";" + version;
         return Set.of(new PKCS12Attribute(DESCRIPTOR_ATTRIBUTE_OID, value));
     }
 
@@ -896,7 +896,7 @@ public class KeyMaterialService implements AutoCloseable {
             throws GeneralSecurityException {
         if (!descriptor.algorithm().acceptsKeyAlgorithm(actual)) {
             throw new GeneralSecurityException(
-                    "Key material algorithm does not match alias " + descriptor.alias().value()
+                    "Key material algorithm does not match alias " + descriptor.alias()
                             + ": expected " + descriptor.algorithm().keyAlgorithm() + ", found " + actual);
         }
     }
@@ -905,7 +905,7 @@ public class KeyMaterialService implements AutoCloseable {
             throws GeneralSecurityException {
         if (!descriptor.algorithm().acceptsKeyAlgorithm(actual)) {
             throw new GeneralSecurityException(
-                    "Key material algorithm does not match alias " + descriptor.alias().value()
+                    "Key material algorithm does not match alias " + descriptor.alias()
                             + ": expected " + descriptor.algorithm().keyAlgorithm() + ", found " + actual);
         }
     }

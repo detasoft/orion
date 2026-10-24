@@ -34,7 +34,7 @@ class OrionKeyMaterialApiTest {
     private static final KeyMaterialDescriptor OTHER = descriptor("other", KeyMaterialPurpose.SERVER_SIGNING);
     private static final KeyMaterialDescriptor IDENTITY = descriptor("https", KeyMaterialPurpose.TLS_IDENTITY);
     private static final TrustedCertificateDescriptor ROOT = new TrustedCertificateDescriptor(
-            new KeyMaterialAlias("root"), KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1));
+            "root", KeyMaterialAlgorithm.RSA, 1);
 
     @Test
     void publishesGeneratedKeysTogetherAndSignsAfterReload() throws Exception {
@@ -416,8 +416,8 @@ class OrionKeyMaterialApiTest {
     }
 
     private static KeyMaterialDescriptor descriptor(String alias, KeyMaterialPurpose purpose) {
-        return new KeyMaterialDescriptor(new KeyMaterialAlias(alias), purpose,
-                KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1));
+        return new KeyMaterialDescriptor(alias, purpose,
+                KeyMaterialAlgorithm.RSA, 1);
     }
 
     private static OrionKeyMaterial open(KeyMaterialContentStore store) throws Exception {

@@ -9,10 +9,8 @@ import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -88,12 +86,12 @@ class PlaywrightExternalServicesIT {
 
     private static AcmeMaterialConfiguration acmeMaterial() {
         return new AcmeMaterialConfiguration(
-                new KeyMaterialDescriptor(new KeyMaterialAlias("acme-account"),
+                new KeyMaterialDescriptor("acme-account",
                         KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA,
-                        new KeyMaterialVersion(1)),
-                new KeyMaterialDescriptor(new KeyMaterialAlias("acme-identity"),
+                        1),
+                new KeyMaterialDescriptor("acme-identity",
                         KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA,
-                        new KeyMaterialVersion(1)),
+                        1),
                 Optional.empty());
     }
 

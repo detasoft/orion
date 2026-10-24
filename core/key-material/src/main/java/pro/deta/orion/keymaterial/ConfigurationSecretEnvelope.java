@@ -4,8 +4,8 @@ import java.util.Arrays;
 
 public record ConfigurationSecretEnvelope(
         int version,
-        KeyMaterialAlias keyAlias,
-        KeyMaterialVersion keyVersion,
+        String keyAlias,
+        long keyVersion,
         String wrappingAlgorithm,
         String encryptionAlgorithm,
         String encoding,
@@ -16,11 +16,9 @@ public record ConfigurationSecretEnvelope(
         if (version < 1) {
             throw new IllegalArgumentException("Envelope version must be positive");
         }
-        if (keyAlias == null) {
-            throw new IllegalArgumentException("Envelope key alias must not be null");
-        }
-        if (keyVersion == null) {
-            throw new IllegalArgumentException("Envelope key version must not be null");
+        requireText(keyAlias, "Envelope key alias");
+        if (keyVersion < 1) {
+            throw new IllegalArgumentException("Envelope key version must be positive");
         }
         requireText(wrappingAlgorithm, "Envelope wrapping algorithm");
         requireText(encryptionAlgorithm, "Envelope encryption algorithm");

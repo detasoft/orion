@@ -82,7 +82,7 @@ class S3BootstrapRestartIT {
                     configuration, environment, materialStore, new KeyMaterialCreation(false))) {
                 KeyMaterialDescriptor active = OrionKeyMaterialFactory.signingMaterial(
                         configuration.getBootstrap().getKeyMaterial()).active();
-                signingKeyId = active.alias().value();
+                signingKeyId = active.alias();
                 signature = material.sign(active, payload);
                 OrionDocument document = OrionDocument.withAccessControl(
                         DefaultAccessControl.create("cold-start-test-password-hash"));
@@ -127,7 +127,7 @@ class S3BootstrapRestartIT {
             try (BootstrapContext bootstrap = BootstrapContext.open(configuration, environment,
                     new KeyMaterialCreation(false), bootstrapEvents1)) {
 
-                assertThat(bootstrap.signingMaterial().active().alias().value()).isEqualTo(signingKeyId);
+                assertThat(bootstrap.signingMaterial().active().alias()).isEqualTo(signingKeyId);
                 assertThat(bootstrap.keyMaterial().verify(bootstrap.signingMaterial().active(),
                         payload, signature)).isTrue();
                 OrionComponent component = runtimeComponent(configuration, bootstrap, bootstrapEvents1);
@@ -202,7 +202,7 @@ class S3BootstrapRestartIT {
                     savedMaterial = repository.files().readBytes(MATERIAL_REF, MATERIAL_PATH);
                     savedRefs = Map.copyOf(repository.refs());
                     assertThat(savedRefs).containsKeys(CONFIGURATION_REF, MATERIAL_REF);
-                    signingKeyId = bootstrap.signingMaterial().active().alias().value();
+                    signingKeyId = bootstrap.signingMaterial().active().alias();
                     signature = bootstrap.keyMaterial().sign(bootstrap.signingMaterial().active(), payload);
                     for (KeyPair pair : bootstrap.sshHostKeys(List.of()).keyPairs()) {
                         hostKeys.add(PublicKeyEntry.toString(pair.getPublic()));
@@ -229,7 +229,7 @@ class S3BootstrapRestartIT {
             try (BootstrapContext bootstrap = BootstrapContext.open(restarted, environment,
                     new KeyMaterialCreation(false), bootstrapEvents3)) {
 
-                assertThat(bootstrap.signingMaterial().active().alias().value()).isEqualTo(signingKeyId);
+                assertThat(bootstrap.signingMaterial().active().alias()).isEqualTo(signingKeyId);
                 assertThat(bootstrap.keyMaterial().verify(bootstrap.signingMaterial().active(),
                         payload, signature)).isTrue();
                 assertThat(bootstrap.sshHostKeys(List.of()).keyPairs())

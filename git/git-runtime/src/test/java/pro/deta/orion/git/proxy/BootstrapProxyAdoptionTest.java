@@ -7,11 +7,9 @@ import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -164,8 +162,8 @@ class BootstrapProxyAdoptionTest {
     }
 
     private static OrionKeyMaterial material() throws Exception {
-        var signing = new KeyMaterialDescriptor(new KeyMaterialAlias("signing"), KeyMaterialPurpose.SERVER_SIGNING,
-                KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1));
+        var signing = new KeyMaterialDescriptor("signing", KeyMaterialPurpose.SERVER_SIGNING,
+                KeyMaterialAlgorithm.RSA, 1);
         try (var options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
             return OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
                     new SigningMaterialSet(signing, List.of()), 2048, new KeyMaterialCreation(true));

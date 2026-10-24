@@ -17,10 +17,8 @@ import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.TlsClientAuthentication;
 import pro.deta.orion.keymaterial.TlsMaterialConfiguration;
@@ -328,16 +326,16 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
             OrionMaterialReference reference,
             KeyMaterialPurpose purpose) {
         return new KeyMaterialDescriptor(
-                new KeyMaterialAlias(reference.alias()),
+                reference.alias(),
                 purpose,
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(reference.version()));
+                reference.version());
     }
 
     private TrustedCertificateDescriptor trustedCertificate(OrionMaterialReference reference) {
         return new TrustedCertificateDescriptor(
-                new KeyMaterialAlias(reference.alias()),
+                reference.alias(),
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(reference.version()));
+                reference.version());
     }
 }

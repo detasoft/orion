@@ -21,11 +21,9 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -71,7 +69,7 @@ class AcmeCertificateServiceTest {
     private static final KeyMaterialDescriptor IDENTITY = descriptor(
             "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY);
     private static final TrustedCertificateDescriptor ROOT = new TrustedCertificateDescriptor(
-            new KeyMaterialAlias("issuer-root-v1"), KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1));
+            "issuer-root-v1", KeyMaterialAlgorithm.RSA, 1);
 
     @TempDir
     private Path tempDir;
@@ -248,7 +246,7 @@ class AcmeCertificateServiceTest {
         try (OrionKeyMaterial material = owner(store)) {
             material.withModification(modification -> {
                 TrustedCertificateDescriptor mismatched = new TrustedCertificateDescriptor(
-                        ROOT.alias(), ROOT.algorithm(), new KeyMaterialVersion(2));
+                        ROOT.alias(), ROOT.algorithm(), 2);
                 modification.setTrustedCertificate(mismatched, issuer.root.certificate());
                 modification.apply();
             });
@@ -750,10 +748,10 @@ class AcmeCertificateServiceTest {
 
     private static KeyMaterialDescriptor descriptor(String alias, KeyMaterialPurpose purpose) {
         return new KeyMaterialDescriptor(
-                new KeyMaterialAlias(alias),
+                alias,
                 purpose,
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(1));
+                1);
     }
 
     private static final class RecordingIssuer extends AcmeCertificateIssuer {

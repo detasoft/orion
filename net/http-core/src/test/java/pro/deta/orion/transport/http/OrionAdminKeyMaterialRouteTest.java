@@ -6,13 +6,11 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialInventoryEntry;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
-import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 
 import java.io.IOException;
@@ -29,8 +27,8 @@ import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Authorizati
 
 class OrionAdminKeyMaterialRouteTest {
     private static final KeyMaterialDescriptor ACCOUNT = new KeyMaterialDescriptor(
-            new KeyMaterialAlias("account"), KeyMaterialPurpose.ACME_ACCOUNT,
-            KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1));
+            "account", KeyMaterialPurpose.ACME_ACCOUNT,
+            KeyMaterialAlgorithm.RSA, 1);
 
     @Test
     void exposesOnlyPublicInventoryToApplicationAdmins() throws Exception {

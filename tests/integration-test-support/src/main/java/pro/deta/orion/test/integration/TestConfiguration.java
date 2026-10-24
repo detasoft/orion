@@ -18,13 +18,11 @@ import pro.deta.orion.keymaterial.ConfigurationSecretCipher;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialCapabilities;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialService;
-import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -57,8 +55,8 @@ public final class TestConfiguration implements AutoCloseable {
         this.cipher = cipher;
         editor = new OrionConfigurationEditor(storage, cipher, material, events.manager());
         SigningMaterialSet signing = new SigningMaterialSet(
-                new KeyMaterialDescriptor(new KeyMaterialAlias("signing"), KeyMaterialPurpose.SERVER_SIGNING,
-                        KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1)), List.of());
+                new KeyMaterialDescriptor("signing", KeyMaterialPurpose.SERVER_SIGNING,
+                        KeyMaterialAlgorithm.RSA, 1), List.of());
         acl = new OrionAccessControlServiceImpl(new OrionPasswordHashingService(), new RootPasswordReset(false),
                 material, signing, bootstrap, editor);
         events.own(this);
@@ -89,10 +87,10 @@ public final class TestConfiguration implements AutoCloseable {
             events.own(material);
             KeyMaterialDescriptor descriptor =
                     new KeyMaterialDescriptor(
-                            new KeyMaterialAlias("configuration-v1"),
+                            "configuration-v1",
                             KeyMaterialPurpose.CONFIGURATION_CIPHER,
                             KeyMaterialAlgorithm.AES,
-                            new KeyMaterialVersion(1));
+                            1);
             material.generateSecretKeyIfMissing(descriptor, 256);
             return KeyMaterialCapabilities.open(material, java.util.List.of(descriptor))
                     .configurationCipher(descriptor);

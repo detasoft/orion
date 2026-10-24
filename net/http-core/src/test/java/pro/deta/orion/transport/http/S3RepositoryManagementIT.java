@@ -39,9 +39,9 @@ class S3RepositoryManagementIT {
                      KeyMaterialOptions.pkcs12("test-password".toCharArray()));
              S3Transport transport = new S3Transport();
              NativeGitRepositoryProvider local = NativeGitRepositoryProvider.inMemory(EVENTS.manager())) {
-            KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(new KeyMaterialAlias("configuration-v1"),
+            KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor("configuration-v1",
                     KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES,
-                    new KeyMaterialVersion(1));
+                    1);
             material.generateSecretKeyIfMissing(descriptor, 256);
             ConfigurationSecretCipher cipher = KeyMaterialCapabilities.open(material, List.of(descriptor))
                     .configurationCipher(descriptor);

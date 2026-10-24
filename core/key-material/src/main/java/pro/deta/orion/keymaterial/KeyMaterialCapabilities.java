@@ -32,14 +32,14 @@ public final class KeyMaterialCapabilities {
     private static final int GCM_NONCE_BYTES = 12;
 
     private final KeyMaterialService owner;
-    private final Map<KeyMaterialAlias, KeyMaterialDescriptor> descriptors;
-    private final Map<KeyMaterialAlias, TrustedCertificateDescriptor> trustedCertificates;
+    private final Map<String, KeyMaterialDescriptor> descriptors;
+    private final Map<String, TrustedCertificateDescriptor> trustedCertificates;
     private final SecureRandom secureRandom;
 
     private KeyMaterialCapabilities(
             KeyMaterialService owner,
-            Map<KeyMaterialAlias, KeyMaterialDescriptor> descriptors,
-            Map<KeyMaterialAlias, TrustedCertificateDescriptor> trustedCertificates) {
+            Map<String, KeyMaterialDescriptor> descriptors,
+            Map<String, TrustedCertificateDescriptor> trustedCertificates) {
         this.owner = owner;
         this.descriptors = descriptors;
         this.trustedCertificates = trustedCertificates;
@@ -56,21 +56,21 @@ public final class KeyMaterialCapabilities {
             KeyMaterialService owner,
             Collection<KeyMaterialDescriptor> descriptors,
             Collection<TrustedCertificateDescriptor> trustedCertificates) throws GeneralSecurityException {
-        Map<KeyMaterialAlias, KeyMaterialDescriptor> registered = register(descriptors);
-        Map<KeyMaterialAlias, TrustedCertificateDescriptor> registeredCertificates =
+        Map<String, KeyMaterialDescriptor> registered = register(descriptors);
+        Map<String, TrustedCertificateDescriptor> registeredCertificates =
                 registerTrustedCertificates(trustedCertificates, registered.keySet());
         if (owner == null) {
             throw new IllegalArgumentException("Key material service must not be null");
         }
         for (KeyMaterialDescriptor descriptor : registered.values()) {
-            if (owner.containsAlias(descriptor.alias().value())) {
+            if (owner.containsAlias(descriptor.alias())) {
                 owner.validateExisting(descriptor);
             } else if (!canBeCreatedLazily(descriptor)) {
                 owner.validateExisting(descriptor);
             }
         }
         for (TrustedCertificateDescriptor descriptor : registeredCertificates.values()) {
-            if (owner.containsAlias(descriptor.alias().value())) {
+            if (owner.containsAlias(descriptor.alias())) {
                 owner.validateExisting(descriptor);
             }
         }
@@ -179,7 +179,7 @@ public final class KeyMaterialCapabilities {
             public List<KeyPair> keyPairs() throws GeneralSecurityException {
                 List<KeyPair> keys = new ArrayList<>();
                 for (KeyMaterialDescriptor descriptor : registered) {
-                    keys.add(owner.getKeyPair(descriptor.alias().value()));
+                    keys.add(owner.getKeyPair(descriptor.alias()));
                 }
                 return List.copyOf(keys);
             }
@@ -196,7 +196,7 @@ public final class KeyMaterialCapabilities {
 
             @Override
             public KeyPair keyPair() throws GeneralSecurityException {
-                KeyPair selected = owner.getKeyPair(registered.alias().value());
+                KeyPair selected = owner.getKeyPair(registered.alias());
                 return new KeyPair(selected.getPublic(), selected.getPrivate());
             }
         };
@@ -218,7 +218,7 @@ public final class KeyMaterialCapabilities {
 
             @Override
             public X509Certificate[] certificateChain() throws GeneralSecurityException {
-                Certificate[] certificates = owner.getCertificateChain(registered.alias().value());
+                Certificate[] certificates = owner.getCertificateChain(registered.alias());
                 X509Certificate[] chain = new X509Certificate[certificates.length];
                 for (int index = 0; index < certificates.length; index++) {
                     if (!(certificates[index] instanceof X509Certificate certificate)) {
@@ -250,7 +250,7 @@ public final class KeyMaterialCapabilities {
         secureRandom.nextBytes(nonce);
 
         Cipher wrappingCipher = Cipher.getInstance(ConfigurationSecretEnvelopeCodec.AES_WRAP);
-        wrappingCipher.init(Cipher.WRAP_MODE, owner.secretKey(descriptor.alias().value()));
+        wrappingCipher.init(Cipher.WRAP_MODE, owner.secretKey(descriptor.alias()));
         byte[] wrappedDataKey = wrappingCipher.wrap(dataKey);
 
         Cipher encryptionCipher = Cipher.getInstance(ConfigurationSecretEnvelopeCodec.AES_GCM);
@@ -279,7 +279,7 @@ public final class KeyMaterialCapabilities {
         requireContext(context);
         requireEnvelopeMatches(descriptor, envelope);
         Cipher wrappingCipher = Cipher.getInstance(ConfigurationSecretEnvelopeCodec.AES_WRAP);
-        wrappingCipher.init(Cipher.UNWRAP_MODE, owner.secretKey(descriptor.alias().value()));
+        wrappingCipher.init(Cipher.UNWRAP_MODE, owner.secretKey(descriptor.alias()));
         SecretKey dataKey;
         try {
             dataKey = (SecretKey) wrappingCipher.unwrap(
@@ -310,7 +310,7 @@ public final class KeyMaterialCapabilities {
             throw new IllegalArgumentException("Configuration secret envelope must not be null");
         }
         if (!descriptor.alias().equals(envelope.keyAlias())
-                || !descriptor.version().equals(envelope.keyVersion())) {
+                || descriptor.version() != envelope.keyVersion()) {
             throw new ConfigurationSecretException(
                     ConfigurationSecretException.Reason.MATERIAL_MISMATCH,
                     "Configuration secret wrapping material does not match the capability");
@@ -342,7 +342,7 @@ public final class KeyMaterialCapabilities {
             throws GeneralSecurityException {
         requireBytes(payload, "Payload");
         Signature signer = Signature.getInstance(descriptor.algorithm().requireSignatureAlgorithm());
-        signer.initSign(owner.getKeyPair(descriptor.alias().value()).getPrivate());
+        signer.initSign(owner.getKeyPair(descriptor.alias()).getPrivate());
         signer.update(payload);
         return signer.sign();
     }
@@ -352,7 +352,7 @@ public final class KeyMaterialCapabilities {
         requireBytes(payload, "Payload");
         requireBytes(signature, "Signature");
         Signature verifier = Signature.getInstance(descriptor.algorithm().requireSignatureAlgorithm());
-        verifier.initVerify(owner.getKeyPair(descriptor.alias().value()).getPublic());
+        verifier.initVerify(owner.getKeyPair(descriptor.alias()).getPublic());
         verifier.update(payload);
         return verifier.verify(signature);
     }
@@ -365,9 +365,9 @@ public final class KeyMaterialCapabilities {
         try {
             KeyStore keyStore = KeyStore.getInstance(KeyMaterialConstants.DEFAULT_KEY_STORE_TYPE);
             keyStore.load(null, password);
-            KeyPair keyPair = owner.getKeyPair(descriptor.alias().value());
+            KeyPair keyPair = owner.getKeyPair(descriptor.alias());
             keyStore.setKeyEntry(
-                    descriptor.alias().value(),
+                    descriptor.alias(),
                     keyPair.getPrivate(),
                     password,
                     identityChain.toArray(Certificate[]::new));
@@ -377,7 +377,7 @@ public final class KeyMaterialCapabilities {
             trustStore.load(null, password);
             for (TrustedCertificateDescriptor trustedCertificate : clientTrust) {
                 trustStore.setCertificateEntry(
-                        trustedCertificate.alias().value(),
+                        trustedCertificate.alias(),
                         owner.getTrustedCertificate(trustedCertificate));
             }
             TrustManagerFactory trustFactory = TrustManagerFactory.getInstance(
@@ -410,7 +410,7 @@ public final class KeyMaterialCapabilities {
         KeyMaterialDescriptor registered = descriptors.get(descriptor.alias());
         if (!descriptor.equals(registered)) {
             throw new IllegalArgumentException(
-                    "Key material descriptor is not registered: " + descriptor.alias().value());
+                    "Key material descriptor is not registered: " + descriptor.alias());
         }
         return registered;
     }
@@ -430,7 +430,7 @@ public final class KeyMaterialCapabilities {
         TrustedCertificateDescriptor registered = trustedCertificates.get(descriptor.alias());
         if (!descriptor.equals(registered)) {
             throw new IllegalArgumentException(
-                    "Trusted certificate descriptor is not registered: " + descriptor.alias().value());
+                    "Trusted certificate descriptor is not registered: " + descriptor.alias());
         }
         return registered;
     }
@@ -445,7 +445,7 @@ public final class KeyMaterialCapabilities {
             TrustedCertificateDescriptor value = requireRegistered(descriptor);
             if (registered.contains(value)) {
                 throw new IllegalArgumentException(
-                        "Duplicate client trust descriptor: " + value.alias().value());
+                        "Duplicate client trust descriptor: " + value.alias());
             }
             registered.add(value);
         }
@@ -465,12 +465,12 @@ public final class KeyMaterialCapabilities {
         return List.copyOf(registered);
     }
 
-    private static Map<KeyMaterialAlias, KeyMaterialDescriptor> register(
+    private static Map<String, KeyMaterialDescriptor> register(
             Collection<KeyMaterialDescriptor> descriptors) {
         if (descriptors == null || descriptors.isEmpty()) {
             throw new IllegalArgumentException("Key material descriptors must not be empty");
         }
-        Map<KeyMaterialAlias, KeyMaterialDescriptor> registered = new LinkedHashMap<>();
+        Map<String, KeyMaterialDescriptor> registered = new LinkedHashMap<>();
         for (KeyMaterialDescriptor descriptor : descriptors) {
             if (descriptor == null) {
                 throw new IllegalArgumentException("Key material descriptor must not be null");
@@ -479,11 +479,11 @@ public final class KeyMaterialCapabilities {
             if (previous != null && !previous.equals(descriptor)) {
                 if (previous.purpose() != descriptor.purpose()) {
                     throw new IllegalArgumentException(
-                            "Key material alias " + descriptor.alias().value()
+                            "Key material alias " + descriptor.alias()
                                     + " is configured for multiple purposes");
                 }
                 throw new IllegalArgumentException(
-                        "Key material alias has conflicting descriptors: " + descriptor.alias().value());
+                        "Key material alias has conflicting descriptors: " + descriptor.alias());
             }
         }
         return registered;
@@ -494,13 +494,13 @@ public final class KeyMaterialCapabilities {
                 || descriptor.purpose() == KeyMaterialPurpose.TLS_IDENTITY;
     }
 
-    private static Map<KeyMaterialAlias, TrustedCertificateDescriptor> registerTrustedCertificates(
+    private static Map<String, TrustedCertificateDescriptor> registerTrustedCertificates(
             Collection<TrustedCertificateDescriptor> descriptors,
-            Set<KeyMaterialAlias> privateKeyAliases) {
+            Set<String> privateKeyAliases) {
         if (descriptors == null) {
             throw new IllegalArgumentException("Trusted certificate descriptors must not be null");
         }
-        Map<KeyMaterialAlias, TrustedCertificateDescriptor> registered = new LinkedHashMap<>();
+        Map<String, TrustedCertificateDescriptor> registered = new LinkedHashMap<>();
         for (TrustedCertificateDescriptor descriptor : descriptors) {
             if (descriptor == null) {
                 throw new IllegalArgumentException("Trusted certificate descriptor must not be null");
@@ -508,12 +508,12 @@ public final class KeyMaterialCapabilities {
             if (privateKeyAliases.contains(descriptor.alias())) {
                 throw new IllegalArgumentException(
                         "Key material alias is configured for private key and trust-anchor purposes: "
-                                + descriptor.alias().value());
+                                + descriptor.alias());
             }
             TrustedCertificateDescriptor previous = registered.putIfAbsent(descriptor.alias(), descriptor);
             if (previous != null && !previous.equals(descriptor)) {
                 throw new IllegalArgumentException(
-                        "Trusted certificate alias has conflicting descriptors: " + descriptor.alias().value());
+                        "Trusted certificate alias has conflicting descriptors: " + descriptor.alias());
             }
         }
         return registered;
@@ -522,7 +522,7 @@ public final class KeyMaterialCapabilities {
     List<X509Certificate> x509CertificateChain(KeyMaterialDescriptor descriptor)
             throws GeneralSecurityException {
         List<X509Certificate> chain = requireX509Chain(
-                Arrays.asList(owner.getCertificateChain(descriptor.alias().value())));
+                Arrays.asList(owner.getCertificateChain(descriptor.alias())));
         if (chain.size() > 1 && isSelfSigned(chain.getLast())) {
             return List.copyOf(chain.subList(0, chain.size() - 1));
         }

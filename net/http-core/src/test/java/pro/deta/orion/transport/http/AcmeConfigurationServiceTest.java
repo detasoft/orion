@@ -23,11 +23,9 @@ import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -52,8 +50,8 @@ class AcmeConfigurationServiceTest {
     void selectsStoredAccountKeyPersistsItsReferenceAndReusesItForIssuance() throws Exception {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             owner.withModification(modification -> {
-                modification.generateKey(new KeyMaterialDescriptor(new KeyMaterialAlias("existing-account"),
-                        KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1)), 3072);
+                modification.generateKey(new KeyMaterialDescriptor("existing-account",
+                        KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1), 3072);
                 modification.apply();
             });
             OrionMaterialReference reference = new OrionMaterialReference("existing-account", 1);
@@ -140,8 +138,8 @@ class AcmeConfigurationServiceTest {
         OrionDocument initial = OrionDocument.withAccessControl(new AccessControl());
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             owner.withModification(modification -> {
-                modification.generateKey(new KeyMaterialDescriptor(new KeyMaterialAlias("other-account"),
-                        KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1)), 3072);
+                modification.generateKey(new KeyMaterialDescriptor("other-account",
+                        KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1), 3072);
                 modification.apply();
             });
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
@@ -384,10 +382,10 @@ class AcmeConfigurationServiceTest {
         return OrionKeyMaterial.open(store, KeyMaterialOptions.pkcs12("password".toCharArray()),
                 new SigningMaterialSet(
                         new KeyMaterialDescriptor(
-                                new KeyMaterialAlias("signing"),
+                                "signing",
                                 KeyMaterialPurpose.SERVER_SIGNING,
                                 KeyMaterialAlgorithm.RSA,
-                                new KeyMaterialVersion(1)), List.of()), 2048,
+                                1), List.of()), 2048,
                                         new KeyMaterialCreation(true));
     }
 

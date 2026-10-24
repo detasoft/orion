@@ -107,13 +107,13 @@ public final class OrionConfigurationEditor {
     private void requireKey(OrionMaterialReference reference, KeyMaterialPurpose purpose)
             throws GeneralSecurityException {
         configurationMaterial.require(new KeyMaterialDescriptor(
-                new KeyMaterialAlias(reference.alias()), purpose, KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(reference.version())));
+                reference.alias(), purpose, KeyMaterialAlgorithm.RSA,
+                reference.version()));
     }
 
     private void requireTrust(OrionMaterialReference reference) throws GeneralSecurityException {
-        configurationMaterial.require(new TrustedCertificateDescriptor(new KeyMaterialAlias(reference.alias()),
-                KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(reference.version())));
+        configurationMaterial.require(new TrustedCertificateDescriptor(reference.alias(),
+                KeyMaterialAlgorithm.RSA, reference.version()));
     }
 
     public void withAccess(ChangeMetadata metadata, OrionRevision expectedRevision,

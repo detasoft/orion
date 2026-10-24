@@ -51,9 +51,9 @@ class ConfiguredStorageManagementTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(new KeyMaterialAlias("configuration-v1"),
+        KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor("configuration-v1",
                 KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES,
-                new KeyMaterialVersion(1));
+                1);
         material = KeyMaterialService.open(new InMemoryKeyMaterialContentStore(),
                 KeyMaterialOptions.pkcs12("test-password".toCharArray()));
         material.generateSecretKeyIfMissing(descriptor, 256);
@@ -76,9 +76,9 @@ class ConfiguredStorageManagementTest {
                         new OrionPasswordHashingService(),
                         new RootPasswordReset(false),
                         OrionKeyMaterial.unavailable(),
-                        new SigningMaterialSet(new KeyMaterialDescriptor(new KeyMaterialAlias("signing"),
+                        new SigningMaterialSet(new KeyMaterialDescriptor("signing",
                                 KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA,
-                                new KeyMaterialVersion(1)), List.of()),
+                                1), List.of()),
                         new BootstrapConfiguration(),
                         editor);
         acl.onStart();

@@ -1,6 +1,9 @@
 package pro.deta.orion.keymaterial;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
 
@@ -12,20 +15,20 @@ class KeyMaterialDescriptorTest {
     void modelsPurposeAlgorithmAndVersion() {
         KeyMaterialDescriptor descriptor = signing("server-signing-v2", 2);
 
-        assertThat(descriptor.alias().value()).isEqualTo("server-signing-v2");
+        assertThat(descriptor.alias()).isEqualTo("server-signing-v2");
         assertThat(descriptor.purpose()).isEqualTo(KeyMaterialPurpose.SERVER_SIGNING);
         assertThat(descriptor.algorithm()).isEqualTo(KeyMaterialAlgorithm.RSA);
-        assertThat(descriptor.version().value()).isEqualTo(2);
+        assertThat(descriptor.version()).isEqualTo(2);
     }
 
     @Test
     void rejectsCrossPurposeAliasReuse() {
         KeyMaterialDescriptor signing = signing("shared-alias", 1);
         KeyMaterialDescriptor ssh = new KeyMaterialDescriptor(
-                new KeyMaterialAlias("shared-alias"),
+                "shared-alias",
                 KeyMaterialPurpose.SSH_HOST,
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(1));
+                1);
 
         assertThatThrownBy(() -> KeyMaterialCapabilities.open(null, List.of(signing, ssh)))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -62,11 +65,32 @@ class KeyMaterialDescriptorTest {
                 .hasMessageContaining("older");
     }
 
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" ", "\t"})
+    void rejectsBlankAliasesAtTheDescriptorBoundary(String alias) {
+        assertThatThrownBy(() -> new KeyMaterialDescriptor(alias,
+                KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, 1))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new TrustedCertificateDescriptor(alias, KeyMaterialAlgorithm.RSA, 1))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {0, -1})
+    void rejectsNonPositiveVersionsAtTheDescriptorBoundary(long version) {
+        assertThatThrownBy(() -> new KeyMaterialDescriptor("signing",
+                KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, version))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new TrustedCertificateDescriptor("root", KeyMaterialAlgorithm.RSA, version))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     private static KeyMaterialDescriptor signing(String alias, long version) {
         return new KeyMaterialDescriptor(
-                new KeyMaterialAlias(alias),
+                alias,
                 KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(version));
+                version);
     }
 }

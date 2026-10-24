@@ -23,8 +23,8 @@ public final class ConfigurationSecretEnvelopeCodec {
                 ".",
                 PREFIX,
                 field("version", Integer.toString(envelope.version())),
-                field("alias", encodeText(envelope.keyAlias().value())),
-                field("key-version", Long.toString(envelope.keyVersion().value())),
+                field("alias", encodeText(envelope.keyAlias())),
+                field("key-version", Long.toString(envelope.keyVersion())),
                 field("wrap", encodeText(envelope.wrappingAlgorithm())),
                 field("cipher", encodeText(envelope.encryptionAlgorithm())),
                 field("encoding", encodeText(envelope.encoding())),
@@ -46,9 +46,8 @@ public final class ConfigurationSecretEnvelopeCodec {
         try {
             envelope = new ConfigurationSecretEnvelope(
                     parseInt(value(fields[1], "version"), "version"),
-                    new KeyMaterialAlias(decodeText(value(fields[2], "alias"), "key alias")),
-                    new KeyMaterialVersion(parseLong(
-                            value(fields[3], "key-version"), "key version")),
+                    decodeText(value(fields[2], "alias"), "key alias"),
+                    parseLong(value(fields[3], "key-version"), "key version"),
                     decodeText(value(fields[4], "wrap"), "wrapping algorithm"),
                     decodeText(value(fields[5], "cipher"), "encryption algorithm"),
                     decodeText(value(fields[6], "encoding"), "encoding"),

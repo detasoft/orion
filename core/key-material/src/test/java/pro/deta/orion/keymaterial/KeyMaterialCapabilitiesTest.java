@@ -112,15 +112,15 @@ class KeyMaterialCapabilitiesTest {
                     .isEqualTo(generatedEd25519.getPrivate().getEncoded());
 
             KeyMaterialDescriptor wrongPurpose = descriptor(
-                    rsaClient.alias().value(),
+                    rsaClient.alias(),
                     KeyMaterialPurpose.SSH_HOST,
                     rsaClient.algorithm(),
-                    rsaClient.version().value());
+                    rsaClient.version());
             KeyMaterialDescriptor wrongAlgorithm = descriptor(
-                    rsaClient.alias().value(),
+                    rsaClient.alias(),
                     rsaClient.purpose(),
                     KeyMaterialAlgorithm.EC,
-                    rsaClient.version().value());
+                    rsaClient.version());
 
             assertThatThrownBy(() -> capabilities.sshClientKey(wrongPurpose))
                     .isInstanceOf(IllegalArgumentException.class)
@@ -207,7 +207,7 @@ class KeyMaterialCapabilitiesTest {
 
             TestCertificateChain.Authority authority = TestCertificateChain.root("tls-root");
             X509Certificate leaf = TestCertificateChain.leaf(
-                    "localhost", service.getKeyPair(tls.alias().value()), authority);
+                    "localhost", service.getKeyPair(tls.alias()), authority);
             service.installAcmeCertificateChain(tls, List.of(leaf), Optional.empty(), Optional.empty());
             SSLContext context = capabilities.certificateIdentity(
                     tls,
@@ -572,11 +572,11 @@ class KeyMaterialCapabilitiesTest {
                     ConfigurationSecretException.Reason.AUTHENTICATION_FAILED);
             assertSecretFailure(
                     () -> capability.open(
-                            withAlias(envelope, new KeyMaterialAlias("configuration-v2")),
+                            withAlias(envelope, "configuration-v2"),
                             context()),
                     ConfigurationSecretException.Reason.MATERIAL_MISMATCH);
             assertSecretFailure(
-                    () -> capability.open(withVersion(envelope, new KeyMaterialVersion(2)), context()),
+                    () -> capability.open(withVersion(envelope, 2), context()),
                     ConfigurationSecretException.Reason.MATERIAL_MISMATCH);
         }
     }
@@ -660,22 +660,22 @@ class KeyMaterialCapabilitiesTest {
 
     private static ConfigurationSecretEnvelope withAlias(
             ConfigurationSecretEnvelope envelope,
-            KeyMaterialAlias alias) {
+            String alias) {
         return copy(envelope, alias, envelope.keyVersion(), envelope.wrappedDataKey(),
                 envelope.nonce(), envelope.ciphertext());
     }
 
     private static ConfigurationSecretEnvelope withVersion(
             ConfigurationSecretEnvelope envelope,
-            KeyMaterialVersion version) {
+            long version) {
         return copy(envelope, envelope.keyAlias(), version, envelope.wrappedDataKey(),
                 envelope.nonce(), envelope.ciphertext());
     }
 
     private static ConfigurationSecretEnvelope copy(
             ConfigurationSecretEnvelope envelope,
-            KeyMaterialAlias alias,
-            KeyMaterialVersion version,
+            String alias,
+            long version,
             byte[] wrappedDataKey,
             byte[] nonce,
             byte[] ciphertext) {
@@ -707,12 +707,12 @@ class KeyMaterialCapabilitiesTest {
             KeyMaterialAlgorithm algorithm,
             long version) {
         return new KeyMaterialDescriptor(
-                new KeyMaterialAlias(alias), purpose, algorithm, new KeyMaterialVersion(version));
+                alias, purpose, algorithm, version);
     }
 
     private static TrustedCertificateDescriptor trustedCertificate(String alias) {
         return new TrustedCertificateDescriptor(
-                new KeyMaterialAlias(alias), KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1));
+                alias, KeyMaterialAlgorithm.RSA, 1);
     }
 
     private static Certificate nonX509Certificate() {

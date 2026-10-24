@@ -4,10 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
-import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
@@ -261,8 +259,8 @@ public class ACMECertificateChallengeTest {
     }
 
     private static OrionKeyMaterial keyMaterial() throws Exception {
-        KeyMaterialDescriptor signing = new KeyMaterialDescriptor(new KeyMaterialAlias("server-signing-v1"),
-                KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1));
+        KeyMaterialDescriptor signing = new KeyMaterialDescriptor("server-signing-v1",
+                KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, 1);
         return OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
                 KeyMaterialOptions.pkcs12("test-password".toCharArray()),
                 new SigningMaterialSet(signing, List.of()), 2048, new KeyMaterialCreation(true));

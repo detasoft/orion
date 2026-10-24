@@ -36,13 +36,11 @@ import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialService;
 import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
-import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.User;
@@ -208,10 +206,10 @@ class BootstrapContextTest {
             assertThat(context.repositoryProvider().find(configurationRepository)
                     .valueOrFailure("configuration repository").refs().get("refs/heads/main"))
                     .isEqualTo(initialRevision);
-            assertThat(context.signingMaterial().active().alias().value()).isNotBlank();
+            assertThat(context.signingMaterial().active().alias()).isNotBlank();
             assertThat(context.keyMaterial().contains(context.signingMaterial().active())).isTrue();
             assertThat(context.sshHostKeys(List.of()).descriptors())
-                    .extracting(descriptor -> descriptor.alias().value())
+                    .extracting(descriptor -> descriptor.alias())
                     .containsExactly("ssh-host-ec-v1", "ssh-host-rsa-v1");
         }
         assertThatThrownBy(() -> backend.find("orion")).hasMessageContaining("closed");
@@ -311,10 +309,10 @@ class BootstrapContextTest {
                         payload, oldSignature)).isTrue();
 
                 KeyMaterialDescriptor staged = new KeyMaterialDescriptor(
-                        new KeyMaterialAlias("server-signing-v2"),
+                        "server-signing-v2",
                         KeyMaterialPurpose.SERVER_SIGNING,
                         KeyMaterialAlgorithm.RSA,
-                        new KeyMaterialVersion(2));
+                        2);
                 try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("correct-password".toCharArray());
                      KeyMaterialService material = KeyMaterialService.open(
                              new NativeGitKeyMaterialContentStore(
@@ -324,7 +322,7 @@ class BootstrapContextTest {
                 }
 
                 try (BootstrapContext activated = openContext(next, ENVIRONMENT, borrow(backend))) {
-                    assertThat(activated.signingMaterial().active().alias().value())
+                    assertThat(activated.signingMaterial().active().alias())
                             .isEqualTo("server-signing-v2");
                     assertThat(activated.keyMaterial().verify(activated.signingMaterial().verification().getFirst(),
                             payload, oldSignature)).isTrue();
@@ -332,7 +330,7 @@ class BootstrapContextTest {
             }
 
             try (BootstrapContext restored = openContext(initial, ENVIRONMENT, borrow(backend))) {
-                assertThat(restored.signingMaterial().active().alias().value()).isEqualTo("server-signing-v1");
+                assertThat(restored.signingMaterial().active().alias()).isEqualTo("server-signing-v1");
                 assertThat(restored.keyMaterial().verify(restored.signingMaterial().active(),
                         payload, oldSignature)).isTrue();
             }
@@ -387,7 +385,7 @@ class BootstrapContextTest {
 
                 try (NativeGitRepositoryProvider restored = repositoryWith(configuration, backup)) {
                     try (BootstrapContext runtime = openContext(configuration, ENVIRONMENT, borrow(restored))) {
-                        assertThat(runtime.signingMaterial().active().alias().value())
+                        assertThat(runtime.signingMaterial().active().alias())
                                 .isEqualTo("server-signing-v1");
                         assertThat(runtime.keyMaterial().verify(runtime.signingMaterial().active(),
                                 payload, signature)).isTrue();
@@ -617,7 +615,7 @@ class BootstrapContextTest {
                 .hasMessage("Bootstrap source ref is unavailable: material");
 
         try (BootstrapContext initialized = openContext(configuration, ENVIRONMENT, true)) {
-            keyId = initialized.signingMaterial().active().alias().value();
+            keyId = initialized.signingMaterial().active().alias();
             signature = initialized.keyMaterial().sign(initialized.signingMaterial().active(), payload);
             OrionComponent component = runtimeComponent(configuration, initialized);
             try {
@@ -629,7 +627,7 @@ class BootstrapContextTest {
         }
 
         try (BootstrapContext restarted = openContext(configuration, ENVIRONMENT)) {
-            assertThat(restarted.signingMaterial().active().alias().value()).isEqualTo(keyId);
+            assertThat(restarted.signingMaterial().active().alias()).isEqualTo(keyId);
             assertThat(restarted.keyMaterial().verify(restarted.signingMaterial().active(),
                     payload, signature)).isTrue();
             OrionComponent component = runtimeComponent(configuration, restarted);
@@ -654,7 +652,7 @@ class BootstrapContextTest {
                     .valueOrFailure("open repository")
                     .files().readBytes("refs/heads/main", "material.p12");
 
-            assertThat(context.signingMaterial().active().alias().value()).isNotBlank();
+            assertThat(context.signingMaterial().active().alias()).isNotBlank();
             assertThat(material).isNotEmpty();
         }
     }
@@ -882,10 +880,10 @@ class BootstrapContextTest {
 
             String activeKeyId;
             try (BootstrapContext context = openContext(configuration, environment, borrow(backend))) {
-                activeKeyId = context.signingMaterial().active().alias().value();
+                activeKeyId = context.signingMaterial().active().alias();
             }
             try (BootstrapContext context = openContext(configuration, environment, borrow(backend))) {
-                assertThat(context.signingMaterial().active().alias().value()).isEqualTo(activeKeyId);
+                assertThat(context.signingMaterial().active().alias()).isEqualTo(activeKeyId);
             }
         }
     }

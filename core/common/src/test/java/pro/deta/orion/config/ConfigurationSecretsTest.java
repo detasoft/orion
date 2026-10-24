@@ -9,13 +9,11 @@ import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialCapabilities;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialService;
-import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
@@ -50,8 +48,8 @@ class ConfigurationSecretsTest {
     private static final ConfigurationSecretReference REFERENCE = new ConfigurationSecretReference(
             ConfigurationSecretReference.Scope.REPOSITORY, "github-token");
     private static final KeyMaterialDescriptor CIPHER = new KeyMaterialDescriptor(
-            new KeyMaterialAlias("configuration-v1"), KeyMaterialPurpose.CONFIGURATION_CIPHER,
-            KeyMaterialAlgorithm.AES, new KeyMaterialVersion(1));
+            "configuration-v1", KeyMaterialPurpose.CONFIGURATION_CIPHER,
+            KeyMaterialAlgorithm.AES, 1);
     private final InMemoryKeyMaterialContentStore material = new InMemoryKeyMaterialContentStore();
     private final AtomicReference<OrionDocument> current = new AtomicReference<>(document());
     private final AtomicReference<byte[]> cipherInput = new AtomicReference<>();

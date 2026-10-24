@@ -5,10 +5,8 @@ import org.junit.jupiter.api.AfterEach;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
-import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 
@@ -413,7 +411,7 @@ class JwtAccessTokenServiceTest {
         }
 
         private String activeKeyId() {
-            return signing.active().alias().value();
+            return signing.active().alias();
         }
 
         private byte[] sign(byte[] payload) throws GeneralSecurityException {
@@ -422,7 +420,7 @@ class JwtAccessTokenServiceTest {
     }
 
     private static KeyMaterialDescriptor descriptor(String alias, int version) {
-        return new KeyMaterialDescriptor(new KeyMaterialAlias(alias), KeyMaterialPurpose.SERVER_SIGNING,
-                KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(version));
+        return new KeyMaterialDescriptor(alias, KeyMaterialPurpose.SERVER_SIGNING,
+                KeyMaterialAlgorithm.RSA, version);
     }
 }

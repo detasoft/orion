@@ -1,13 +1,13 @@
 package pro.deta.orion.keymaterial;
 
 public record KeyMaterialDescriptor(
-        KeyMaterialAlias alias,
+        String alias,
         KeyMaterialPurpose purpose,
         KeyMaterialAlgorithm algorithm,
-        KeyMaterialVersion version) {
+        long version) {
     public KeyMaterialDescriptor {
-        if (alias == null) {
-            throw new IllegalArgumentException("Key material alias must not be null");
+        if (alias == null || alias.isBlank()) {
+            throw new IllegalArgumentException("Key material alias must not be empty");
         }
         if (purpose == null) {
             throw new IllegalArgumentException("Key material purpose must not be null");
@@ -15,8 +15,8 @@ public record KeyMaterialDescriptor(
         if (algorithm == null) {
             throw new IllegalArgumentException("Key material algorithm must not be null");
         }
-        if (version == null) {
-            throw new IllegalArgumentException("Key material version must not be null");
+        if (version < 1) {
+            throw new IllegalArgumentException("Key material version must be positive");
         }
         if (purpose == KeyMaterialPurpose.TRUST_ANCHOR) {
             throw new IllegalArgumentException("Trust anchors require a trusted certificate descriptor");

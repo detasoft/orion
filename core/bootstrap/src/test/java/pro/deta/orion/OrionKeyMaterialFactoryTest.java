@@ -37,7 +37,7 @@ class OrionKeyMaterialFactoryTest {
                 configuration, Map.of(PASSWORD_ENV, "test-password"), new KeyMaterialCreation(true))) {
             KeyMaterialDescriptor active = signing(configuration).active();
             signature = material.sign(active, payload);
-            assertThat(active.alias().value()).isEqualTo("cluster-signing-v2");
+            assertThat(active.alias()).isEqualTo("cluster-signing-v2");
             assertThat(material.version()).isEqualTo(1);
         }
 

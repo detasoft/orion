@@ -62,11 +62,9 @@ import pro.deta.orion.keymaterial.AcmeKeyMaterial;
 import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
@@ -1111,7 +1109,7 @@ class JettyHTTPServerIT {
             int port) {
         List<OrionMaterialReference> references = new java.util.ArrayList<>();
         for (TrustedCertificateDescriptor root : clientRoots) {
-            references.add(new OrionMaterialReference(root.alias().value(), root.version().value()));
+            references.add(new OrionMaterialReference(root.alias(), root.version()));
         }
         OrionHttpsConfiguration https = new OrionHttpsConfiguration(
                 true,
@@ -1164,25 +1162,25 @@ class JettyHTTPServerIT {
 
     private static KeyMaterialDescriptor descriptor(String alias, KeyMaterialPurpose purpose) {
         return new KeyMaterialDescriptor(
-                new KeyMaterialAlias(alias),
+                alias,
                 purpose,
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(1));
+                1);
     }
 
     private static TrustedCertificateDescriptor trusted(String alias) {
         return new TrustedCertificateDescriptor(
-                new KeyMaterialAlias(alias),
+                alias,
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(1));
+                1);
     }
 
     private static OrionMaterialReference reference(KeyMaterialDescriptor descriptor) {
-        return new OrionMaterialReference(descriptor.alias().value(), descriptor.version().value());
+        return new OrionMaterialReference(descriptor.alias(), descriptor.version());
     }
 
     private static OrionMaterialReference reference(TrustedCertificateDescriptor descriptor) {
-        return new OrionMaterialReference(descriptor.alias().value(), descriptor.version().value());
+        return new OrionMaterialReference(descriptor.alias(), descriptor.version());
     }
 
     private static void request(URL url) {

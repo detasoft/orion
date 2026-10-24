@@ -21,8 +21,8 @@ class ConfigurationSecretEnvelopeCodecTest {
         assertThat(serialized).contains(".alias=").contains(".ciphertext=");
         assertThat(codec.serialize(parsed)).isEqualTo(serialized);
         assertThat(parsed.version()).isEqualTo(1);
-        assertThat(parsed.keyAlias()).isEqualTo(new KeyMaterialAlias("configuration-v1"));
-        assertThat(parsed.keyVersion()).isEqualTo(new KeyMaterialVersion(1));
+        assertThat(parsed.keyAlias()).isEqualTo("configuration-v1");
+        assertThat(parsed.keyVersion()).isEqualTo(1);
         assertThat(parsed.wrappingAlgorithm()).isEqualTo("AESWrap");
         assertThat(parsed.encryptionAlgorithm()).isEqualTo("AES/GCM/NoPadding");
         assertThat(parsed.encoding()).isEqualTo("base64url");
@@ -38,8 +38,8 @@ class ConfigurationSecretEnvelopeCodecTest {
         byte[] ciphertext = bytes(4, 5, 6);
         ConfigurationSecretEnvelope envelope = new ConfigurationSecretEnvelope(
                 1,
-                new KeyMaterialAlias("configuration-v1"),
-                new KeyMaterialVersion(1),
+                "configuration-v1",
+                1,
                 "AESWrap",
                 "AES/GCM/NoPadding",
                 "base64url",
@@ -68,6 +68,9 @@ class ConfigurationSecretEnvelopeCodecTest {
 
         assertFailure("database-password", ConfigurationSecretException.Reason.MALFORMED);
         assertFailure("orion-secret.1", ConfigurationSecretException.Reason.MALFORMED);
+        assertFailure(replace(valid, 3, "key-version=0"), ConfigurationSecretException.Reason.MALFORMED);
+        assertFailure(replace(valid, 3, "key-version=-1"), ConfigurationSecretException.Reason.MALFORMED);
+        assertFailure(replace(valid, 2, "alias=" + field(" ")), ConfigurationSecretException.Reason.MALFORMED);
         assertFailure(replace(valid, 3, "key-version=not-a-number"),
                 ConfigurationSecretException.Reason.MALFORMED);
         assertFailure(replace(valid, 7, "wrapped-key="),
@@ -106,8 +109,8 @@ class ConfigurationSecretEnvelopeCodecTest {
 
         assertThatThrownBy(() -> new ConfigurationSecretEnvelope(
                 1,
-                new KeyMaterialAlias("configuration-v1"),
-                new KeyMaterialVersion(1),
+                "configuration-v1",
+                1,
                 "AESWrap",
                 "AES/GCM/NoPadding",
                 "base64url",
@@ -130,8 +133,8 @@ class ConfigurationSecretEnvelopeCodecTest {
     private static ConfigurationSecretEnvelope envelope() {
         return new ConfigurationSecretEnvelope(
                 1,
-                new KeyMaterialAlias("configuration-v1"),
-                new KeyMaterialVersion(1),
+                "configuration-v1",
+                1,
                 "AESWrap",
                 "AES/GCM/NoPadding",
                 "base64url",

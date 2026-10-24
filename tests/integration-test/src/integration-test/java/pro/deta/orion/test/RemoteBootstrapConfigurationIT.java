@@ -177,7 +177,7 @@ class RemoteBootstrapConfigurationIT {
             pro.deta.orion.event.OrionEventManager bootstrapEvents2 =
                     new pro.deta.orion.event.OrionEventManager();
             try (var recovered = BootstrapContext.open(configuration, environment, bootstrapEvents2)) {
-                assertThat(recovered.signingMaterial().active().alias().value()).isNotBlank();
+                assertThat(recovered.signingMaterial().active().alias()).isNotBlank();
             }
         }
     }
