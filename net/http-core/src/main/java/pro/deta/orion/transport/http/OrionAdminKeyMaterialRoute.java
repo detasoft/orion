@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import java.util.Set;
+
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
@@ -29,7 +31,7 @@ public final class OrionAdminKeyMaterialRoute extends BaseAdminRoute {
     @Override
     protected OrionHttpResponse doGet(HttpServletRequest request) throws IOException {
         try {
-            return OrionHttpResponse.ok(Map.of("entries", material.inventory()))
+            return OrionHttpResponse.ok(Map.of("entries", material.inventory(Set.of())))
                     .withHeader("Cache-Control", "no-store");
         } catch (GeneralSecurityException failure) {
             throw new IOException("Cannot read key material inventory", failure);
@@ -58,10 +60,10 @@ public final class OrionAdminKeyMaterialRoute extends BaseAdminRoute {
             }
             String alias = input.alias();
             KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(alias,
-                    input.purpose(), KeyMaterialAlgorithm.RSA, 1);
+                    Set.of(input.purpose()), KeyMaterialAlgorithm.RSA, 1);
             char[] privateKeyPem = input.privateKeyPem();
             material.withModification(modification -> {
-                if (material.contains(alias)) {
+                if (material.contains(alias, Set.of())) {
                     throw new IllegalArgumentException("Key material name already exists");
                 }
                 if (privateKeyPem == null || privateKeyPem.length == 0) {

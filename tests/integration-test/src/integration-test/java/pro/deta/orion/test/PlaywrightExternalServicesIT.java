@@ -1,5 +1,7 @@
 package pro.deta.orion.test;
 
+import java.util.Set;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -87,10 +89,10 @@ class PlaywrightExternalServicesIT {
     private static AcmeMaterialConfiguration acmeMaterial() {
         return new AcmeMaterialConfiguration(
                 new KeyMaterialDescriptor("acme-account",
-                        KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA,
+                        Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA,
                         1),
                 new KeyMaterialDescriptor("acme-identity",
-                        KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA,
+                        Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA,
                         1),
                 Optional.empty());
     }

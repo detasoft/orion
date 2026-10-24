@@ -1,5 +1,7 @@
 package pro.deta.orion.acl;
 
+import java.util.Set;
+
 import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.internal.UserEmail;
@@ -83,7 +85,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionAccessControlServiceImplTest {
     private static final SigningMaterialSet SIGNING = new SigningMaterialSet(
-            new KeyMaterialDescriptor("test-signing-key", KeyMaterialPurpose.SERVER_SIGNING,
+            new KeyMaterialDescriptor("test-signing-key", Set.of(KeyMaterialPurpose.SERVER_SIGNING),
                     KeyMaterialAlgorithm.RSA, 1), List.of());
     private static final KeyPair KEY_ONE = keyPair("RSA", 2048);
     private static final KeyPair KEY_TWO = keyPair("EC", 256);

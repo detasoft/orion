@@ -20,6 +20,7 @@ import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -63,14 +64,14 @@ public final class KeyMaterialCapabilities {
             throw new IllegalArgumentException("Key material service must not be null");
         }
         for (KeyMaterialDescriptor descriptor : registered.values()) {
-            if (owner.containsAlias(descriptor.alias())) {
+            if (owner.containsAlias(descriptor.alias(), Set.of())) {
                 owner.validateExisting(descriptor);
             } else if (!canBeCreatedLazily(descriptor)) {
                 owner.validateExisting(descriptor);
             }
         }
         for (TrustedCertificateDescriptor descriptor : registeredCertificates.values()) {
-            if (owner.containsAlias(descriptor.alias())) {
+            if (owner.containsAlias(descriptor.alias(), Set.of())) {
                 owner.validateExisting(descriptor);
             }
         }
@@ -109,17 +110,17 @@ public final class KeyMaterialCapabilities {
             throw new IllegalArgumentException("Verification material must not be empty");
         }
         List<KeyMaterialDescriptor> registered = new ArrayList<>();
-        KeyMaterialPurpose purpose = null;
+        EnumSet<KeyMaterialPurpose> sharedPurposes = EnumSet.of(
+                KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialPurpose.CERTIFICATE_AUTHORITY);
         for (KeyMaterialDescriptor descriptor : requested) {
             KeyMaterialDescriptor value = requireRegistered(descriptor);
-            if (value.purpose() != KeyMaterialPurpose.SERVER_SIGNING
-                    && value.purpose() != KeyMaterialPurpose.CERTIFICATE_AUTHORITY) {
+            if (!value.purposes().contains(KeyMaterialPurpose.SERVER_SIGNING)
+                    && !value.purposes().contains(KeyMaterialPurpose.CERTIFICATE_AUTHORITY)) {
                 throw new IllegalArgumentException("Verification requires signing-capable material");
             }
-            if (purpose == null) {
-                purpose = value.purpose();
-            } else if (value.purpose() != purpose) {
-                throw new IllegalArgumentException("Verification material must have one purpose");
+            sharedPurposes.retainAll(value.purposes());
+            if (sharedPurposes.isEmpty()) {
+                throw new IllegalArgumentException("Verification material must share a signing purpose");
             }
             registered.add(value);
         }
@@ -397,7 +398,7 @@ public final class KeyMaterialCapabilities {
             KeyMaterialDescriptor descriptor,
             KeyMaterialPurpose expectedPurpose) {
         KeyMaterialDescriptor registered = requireRegistered(descriptor);
-        if (registered.purpose() != expectedPurpose) {
+        if (!registered.purposes().contains(expectedPurpose)) {
             throw new IllegalArgumentException("Capability requires " + expectedPurpose + " purpose");
         }
         return registered;
@@ -408,7 +409,9 @@ public final class KeyMaterialCapabilities {
             throw new IllegalArgumentException("Key material descriptor must not be null");
         }
         KeyMaterialDescriptor registered = descriptors.get(descriptor.alias());
-        if (!descriptor.equals(registered)) {
+        if (registered == null || registered.algorithm() != descriptor.algorithm()
+                || registered.version() != descriptor.version()
+                || !registered.purposes().containsAll(descriptor.purposes())) {
             throw new IllegalArgumentException(
                     "Key material descriptor is not registered: " + descriptor.alias());
         }
@@ -428,7 +431,9 @@ public final class KeyMaterialCapabilities {
             throw new IllegalArgumentException("Trusted certificate descriptor must not be null");
         }
         TrustedCertificateDescriptor registered = trustedCertificates.get(descriptor.alias());
-        if (!descriptor.equals(registered)) {
+        if (registered == null || registered.algorithm() != descriptor.algorithm()
+                || registered.version() != descriptor.version()
+                || !registered.purposes().containsAll(descriptor.purposes())) {
             throw new IllegalArgumentException(
                     "Trusted certificate descriptor is not registered: " + descriptor.alias());
         }
@@ -477,21 +482,22 @@ public final class KeyMaterialCapabilities {
             }
             KeyMaterialDescriptor previous = registered.putIfAbsent(descriptor.alias(), descriptor);
             if (previous != null && !previous.equals(descriptor)) {
-                if (previous.purpose() != descriptor.purpose()) {
+                if (previous.algorithm() != descriptor.algorithm() || previous.version() != descriptor.version()) {
                     throw new IllegalArgumentException(
-                            "Key material alias " + descriptor.alias()
-                                    + " is configured for multiple purposes");
+                            "Key material alias has conflicting descriptors: " + descriptor.alias());
                 }
-                throw new IllegalArgumentException(
-                        "Key material alias has conflicting descriptors: " + descriptor.alias());
+                EnumSet<KeyMaterialPurpose> purposes = EnumSet.copyOf(previous.purposes());
+                purposes.addAll(descriptor.purposes());
+                registered.put(descriptor.alias(), new KeyMaterialDescriptor(descriptor.alias(), purposes,
+                        descriptor.algorithm(), descriptor.version()));
             }
         }
         return registered;
     }
 
     private static boolean canBeCreatedLazily(KeyMaterialDescriptor descriptor) {
-        return descriptor.purpose() == KeyMaterialPurpose.ACME_ACCOUNT
-                || descriptor.purpose() == KeyMaterialPurpose.TLS_IDENTITY;
+        return Set.of(KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialPurpose.TLS_IDENTITY)
+                .containsAll(descriptor.purposes());
     }
 
     private static Map<String, TrustedCertificateDescriptor> registerTrustedCertificates(
@@ -512,8 +518,14 @@ public final class KeyMaterialCapabilities {
             }
             TrustedCertificateDescriptor previous = registered.putIfAbsent(descriptor.alias(), descriptor);
             if (previous != null && !previous.equals(descriptor)) {
-                throw new IllegalArgumentException(
-                        "Trusted certificate alias has conflicting descriptors: " + descriptor.alias());
+                if (previous.algorithm() != descriptor.algorithm() || previous.version() != descriptor.version()) {
+                    throw new IllegalArgumentException(
+                            "Trusted certificate alias has conflicting descriptors: " + descriptor.alias());
+                }
+                EnumSet<KeyMaterialPurpose> purposes = EnumSet.copyOf(previous.purposes());
+                purposes.addAll(descriptor.purposes());
+                registered.put(descriptor.alias(), new TrustedCertificateDescriptor(descriptor.alias(), purposes,
+                        descriptor.algorithm(), descriptor.version()));
             }
         }
         return registered;

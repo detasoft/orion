@@ -69,7 +69,7 @@ class AcmeCertificateServiceTest {
     private static final KeyMaterialDescriptor IDENTITY = descriptor(
             "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY);
     private static final TrustedCertificateDescriptor ROOT = new TrustedCertificateDescriptor(
-            "issuer-root-v1", KeyMaterialAlgorithm.RSA, 1);
+            "issuer-root-v1", Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, 1);
 
     @TempDir
     private Path tempDir;
@@ -246,7 +246,7 @@ class AcmeCertificateServiceTest {
         try (OrionKeyMaterial material = owner(store)) {
             material.withModification(modification -> {
                 TrustedCertificateDescriptor mismatched = new TrustedCertificateDescriptor(
-                        ROOT.alias(), ROOT.algorithm(), 2);
+                        ROOT.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR), ROOT.algorithm(), 2);
                 modification.setTrustedCertificate(mismatched, issuer.root.certificate());
                 modification.apply();
             });
@@ -272,7 +272,7 @@ class AcmeCertificateServiceTest {
                     material, issuer, null);
             assertThatThrownBy(() -> service.issue(AcmeCertificateService.IssueRequest.EMPTY))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThat(material.inventory()).isEmpty();
+            assertThat(material.inventory(Set.of())).isEmpty();
             assertThat(material.version()).isZero();
             assertThat(issuer.calls).isZero();
         }
@@ -749,7 +749,7 @@ class AcmeCertificateServiceTest {
     private static KeyMaterialDescriptor descriptor(String alias, KeyMaterialPurpose purpose) {
         return new KeyMaterialDescriptor(
                 alias,
-                purpose,
+                Set.of(purpose),
                 KeyMaterialAlgorithm.RSA,
                 1);
     }

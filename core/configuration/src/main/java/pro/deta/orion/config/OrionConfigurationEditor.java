@@ -1,5 +1,7 @@
 package pro.deta.orion.config;
 
+import java.util.Set;
+
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import pro.deta.orion.event.OrionEventManager;
@@ -107,12 +109,12 @@ public final class OrionConfigurationEditor {
     private void requireKey(OrionMaterialReference reference, KeyMaterialPurpose purpose)
             throws GeneralSecurityException {
         configurationMaterial.require(new KeyMaterialDescriptor(
-                reference.alias(), purpose, KeyMaterialAlgorithm.RSA,
+                reference.alias(), Set.of(purpose), KeyMaterialAlgorithm.RSA,
                 reference.version()));
     }
 
     private void requireTrust(OrionMaterialReference reference) throws GeneralSecurityException {
-        configurationMaterial.require(new TrustedCertificateDescriptor(reference.alias(),
+        configurationMaterial.require(new TrustedCertificateDescriptor(reference.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
                 KeyMaterialAlgorithm.RSA, reference.version()));
     }
 

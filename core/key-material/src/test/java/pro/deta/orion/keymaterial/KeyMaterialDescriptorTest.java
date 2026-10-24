@@ -1,5 +1,7 @@
 package pro.deta.orion.keymaterial;
 
+import java.util.Set;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
@@ -16,24 +18,24 @@ class KeyMaterialDescriptorTest {
         KeyMaterialDescriptor descriptor = signing("server-signing-v2", 2);
 
         assertThat(descriptor.alias()).isEqualTo("server-signing-v2");
-        assertThat(descriptor.purpose()).isEqualTo(KeyMaterialPurpose.SERVER_SIGNING);
+        assertThat(descriptor.purposes()).containsExactly(KeyMaterialPurpose.SERVER_SIGNING);
         assertThat(descriptor.algorithm()).isEqualTo(KeyMaterialAlgorithm.RSA);
         assertThat(descriptor.version()).isEqualTo(2);
     }
 
     @Test
-    void rejectsCrossPurposeAliasReuse() {
+    void rejectsConflictingAlgorithmsForOneAlias() {
         KeyMaterialDescriptor signing = signing("shared-alias", 1);
         KeyMaterialDescriptor ssh = new KeyMaterialDescriptor(
                 "shared-alias",
-                KeyMaterialPurpose.SSH_HOST,
-                KeyMaterialAlgorithm.RSA,
+                Set.of(KeyMaterialPurpose.SSH_HOST),
+                KeyMaterialAlgorithm.EC,
                 1);
 
         assertThatThrownBy(() -> KeyMaterialCapabilities.open(null, List.of(signing, ssh)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("shared-alias")
-                .hasMessageContaining("purposes");
+                .hasMessageContaining("conflicting");
     }
 
     @Test
@@ -70,9 +72,10 @@ class KeyMaterialDescriptorTest {
     @ValueSource(strings = {" ", "\t"})
     void rejectsBlankAliasesAtTheDescriptorBoundary(String alias) {
         assertThatThrownBy(() -> new KeyMaterialDescriptor(alias,
-                KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, 1))
+                Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new TrustedCertificateDescriptor(alias, KeyMaterialAlgorithm.RSA, 1))
+        assertThatThrownBy(() -> new TrustedCertificateDescriptor(alias,
+                Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, 1))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -80,16 +83,25 @@ class KeyMaterialDescriptorTest {
     @ValueSource(longs = {0, -1})
     void rejectsNonPositiveVersionsAtTheDescriptorBoundary(long version) {
         assertThatThrownBy(() -> new KeyMaterialDescriptor("signing",
-                KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, version))
+                Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, version))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new TrustedCertificateDescriptor("root", KeyMaterialAlgorithm.RSA, version))
+        assertThatThrownBy(() -> new TrustedCertificateDescriptor("root",
+                Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, version))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rejectsAccountKeysCombinedWithOtherWorkflowRoles() {
+        assertThatThrownBy(() -> new KeyMaterialDescriptor("account",
+                Set.of(KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialPurpose.TLS_IDENTITY),
+                KeyMaterialAlgorithm.RSA, 1)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ACME_ACCOUNT");
     }
 
     private static KeyMaterialDescriptor signing(String alias, long version) {
         return new KeyMaterialDescriptor(
                 alias,
-                KeyMaterialPurpose.SERVER_SIGNING,
+                Set.of(KeyMaterialPurpose.SERVER_SIGNING),
                 KeyMaterialAlgorithm.RSA,
                 version);
     }

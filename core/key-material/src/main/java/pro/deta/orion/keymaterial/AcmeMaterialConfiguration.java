@@ -18,7 +18,7 @@ public record AcmeMaterialConfiguration(
             KeyMaterialDescriptor descriptor,
             KeyMaterialPurpose purpose,
             String label) {
-        if (descriptor == null || descriptor.purpose() != purpose) {
+        if (descriptor == null || !descriptor.purposes().contains(purpose)) {
             throw new IllegalArgumentException(label + " must use " + purpose + " purpose");
         }
     }

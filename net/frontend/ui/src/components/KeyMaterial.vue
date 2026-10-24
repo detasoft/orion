@@ -18,7 +18,7 @@ const form = reactive({ revision: '', enabled: false, provider: 'letsencrypt', d
   accountEmail: '', domains: '', accountMaterial: null, eabKeyId: '', eabHmacKey: '', eabConfigured: false })
 const presets = ref([])
 const accountKeys = computed(() => entries.value.filter(entry =>
-  entry.purpose === 'ACME_ACCOUNT' && entry.algorithm === 'RSA'))
+  entry.purposes.includes('ACME_ACCOUNT') && entry.algorithm === 'RSA'))
 const accountAlias = computed({
   get: () => form.accountMaterial?.alias ?? '',
   set: alias => {
@@ -293,7 +293,7 @@ onBeforeUnmount(() => { attempt += 1 })
       <article v-for="entry in entries" :key="entry.alias" class="material-entry">
         <div class="material-entry-heading">
           <h3>{{ entry.alias }}</h3>
-          <span>{{ entry.purpose.replaceAll('_', ' ') }}</span>
+          <span>{{ entry.purposes.map(purpose => purpose.replaceAll('_', ' ')).sort().join(', ') }}</span>
         </div>
         <p>{{ entry.algorithm }} · version {{ entry.version }}</p>
         <p v-if="entry.publicKeySha256Fingerprint">Public key SHA-256:

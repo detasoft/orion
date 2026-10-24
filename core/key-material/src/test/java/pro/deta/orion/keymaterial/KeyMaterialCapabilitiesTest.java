@@ -1,5 +1,7 @@
 package pro.deta.orion.keymaterial;
 
+import java.util.Set;
+
 import org.junit.jupiter.api.Test;
 
 import javax.net.ssl.SSLContext;
@@ -9,6 +11,7 @@ import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.TrustManagerFactory;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
+import java.security.GeneralSecurityException;
 import java.security.KeyPairGenerator;
 import java.security.KeyStore;
 import java.security.SecureRandom;
@@ -27,6 +30,33 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class KeyMaterialCapabilitiesTest {
+    @Test
+    void combinesRoleRequestsForOneStoredKeyWithoutGrantingMissingPurposes() throws Exception {
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        KeyMaterialDescriptor stored = new KeyMaterialDescriptor("shared",
+                Set.of(KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialPurpose.SSH_HOST),
+                KeyMaterialAlgorithm.RSA, 1);
+        KeyMaterialDescriptor signing = new KeyMaterialDescriptor("shared",
+                Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
+        KeyMaterialDescriptor host = new KeyMaterialDescriptor("shared",
+                Set.of(KeyMaterialPurpose.SSH_HOST), KeyMaterialAlgorithm.RSA, 1);
+        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
+            KeyMaterialModification modification = service.modify();
+            modification.generateKey(stored, 2048);
+            modification.apply();
+            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, List.of(signing, host));
+            byte[] payload = new byte[]{1, 2, 3};
+            byte[] signature = capabilities.signing(signing).sign(payload);
+            assertThat(capabilities.verification(List.of(signing)).verify(payload, signature)).isTrue();
+            assertThat(capabilities.sshHostKeys(List.of(host)).keyPairs().getFirst().getPublic())
+                    .isEqualTo(service.getKeyPair("shared").getPublic());
+            KeyMaterialDescriptor missingRole = new KeyMaterialDescriptor("shared",
+                    Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 1);
+            assertThatThrownBy(() -> KeyMaterialCapabilities.open(service, List.of(missingRole)))
+                    .isInstanceOf(GeneralSecurityException.class).hasMessageContaining("purpose");
+        }
+    }
+
     @Test
     void signsAndVerifiesWithoutExposingPrivateKey() throws Exception {
         try (KeyMaterialService service = service()) {
@@ -116,9 +146,9 @@ class KeyMaterialCapabilitiesTest {
                     KeyMaterialPurpose.SSH_HOST,
                     rsaClient.algorithm(),
                     rsaClient.version());
-            KeyMaterialDescriptor wrongAlgorithm = descriptor(
+            KeyMaterialDescriptor wrongAlgorithm = new KeyMaterialDescriptor(
                     rsaClient.alias(),
-                    rsaClient.purpose(),
+                    rsaClient.purposes(),
                     KeyMaterialAlgorithm.EC,
                     rsaClient.version());
 
@@ -707,12 +737,12 @@ class KeyMaterialCapabilitiesTest {
             KeyMaterialAlgorithm algorithm,
             long version) {
         return new KeyMaterialDescriptor(
-                alias, purpose, algorithm, version);
+                alias, Set.of(purpose), algorithm, version);
     }
 
     private static TrustedCertificateDescriptor trustedCertificate(String alias) {
         return new TrustedCertificateDescriptor(
-                alias, KeyMaterialAlgorithm.RSA, 1);
+                alias, Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, 1);
     }
 
     private static Certificate nonX509Certificate() {

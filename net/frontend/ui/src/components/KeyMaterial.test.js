@@ -10,7 +10,7 @@ import KeyMaterial from './KeyMaterial.vue'
 beforeEach(() => {
   vi.clearAllMocks()
   client.keyMaterial.mockResolvedValue({ entries: [{
-    alias: 'acme-identity', purpose: 'TLS_IDENTITY', algorithm: 'RSA',
+    alias: 'acme-identity', purposes: ['TLS_IDENTITY'], algorithm: 'RSA',
     version: 1,
     publicKeyPem: '-----BEGIN PUBLIC KEY-----\npublic\n-----END PUBLIC KEY-----',
     certificates: [],
@@ -49,7 +49,7 @@ it('imports Certbot JSON through the existing form and makes the key available f
   await wrapper.get('[aria-label="Private key PEM or Certbot JSON"]').setValue(jwk)
   expect(wrapper.text()).toContain('private_key.json')
   client.keyMaterial.mockResolvedValueOnce({ entries: [
-    { alias: 'certbot', version: 1, purpose: 'ACME_ACCOUNT', algorithm: 'RSA', certificates: [] },
+    { alias: 'certbot', version: 1, purposes: ['ACME_ACCOUNT'], algorithm: 'RSA', certificates: [] },
   ] })
   await wrapper.get('[aria-label="Create key material"]').trigger('submit')
   await flushPromises()
@@ -79,8 +79,8 @@ it('imports a key and clears the private input even when the request fails', asy
 
 it('selects only compatible account keys and saves the reference before issuance', async () => {
   client.keyMaterial.mockResolvedValue({ entries: [
-    { alias: 'account', version: 3, purpose: 'ACME_ACCOUNT', algorithm: 'RSA', certificates: [] },
-    { alias: 'tls-only', version: 1, purpose: 'TLS_IDENTITY', algorithm: 'RSA', certificates: [] },
+    { alias: 'account', version: 3, purposes: ['ACME_ACCOUNT'], algorithm: 'RSA', certificates: [] },
+    { alias: 'tls-only', version: 1, purposes: ['TLS_IDENTITY'], algorithm: 'RSA', certificates: [] },
   ] })
   const wrapper = mount(KeyMaterial, { props: { token: 'admin-token' } })
   await flushPromises()
@@ -101,7 +101,7 @@ it('keeps the configured key selected and does not save unchanged settings befor
   const settings = await client.acmeConfiguration()
   client.acmeConfiguration.mockResolvedValue({ ...settings, accountMaterial: { alias: 'saved', version: 2 } })
   client.keyMaterial.mockResolvedValue({ entries: [
-    { alias: 'saved', version: 2, purpose: 'ACME_ACCOUNT', algorithm: 'RSA', certificates: [] },
+    { alias: 'saved', version: 2, purposes: ['ACME_ACCOUNT'], algorithm: 'RSA', certificates: [] },
   ] })
   const wrapper = mount(KeyMaterial, { props: { token: 'admin-token' } })
   await flushPromises()
@@ -182,7 +182,7 @@ it('shows public material, issues a certificate, and refreshes the stored list',
   expect(wrapper.text()).toContain('No issued certificate')
   expect(wrapper.text()).not.toContain('PRIVATE KEY')
   client.keyMaterial.mockResolvedValueOnce({ entries: [{
-    alias: 'acme-identity', purpose: 'TLS_IDENTITY', algorithm: 'RSA',
+    alias: 'acme-identity', purposes: ['TLS_IDENTITY'], algorithm: 'RSA',
     version: 1, publicKeyPem: 'public',
     certificates: [{ subject: '', dnsNames: ['orion.test'], issuer: 'CN=Orion test CA',
       validFrom: '2026-09-25T00:00:00Z', validUntil: '2026-09-26T00:00:00Z',
@@ -245,5 +245,17 @@ it('preserves issuance success when the renewal status refresh fails', async () 
   expect(wrapper.text()).toContain('Certificate issued and saved.')
   expect(wrapper.text()).toContain('Could not refresh renewal status.')
   expect(wrapper.text()).not.toContain('Could not save settings or issue')
+  wrapper.unmount()
+})
+
+it('displays every purpose of a key without offering it as an ACME account key', async () => {
+  client.keyMaterial.mockResolvedValue({ entries: [{
+    alias: 'shared-key', purposes: ['SERVER_SIGNING', 'TLS_IDENTITY'], algorithm: 'RSA',
+    version: 1, certificates: [],
+  }] })
+  const wrapper = mount(KeyMaterial, { props: { token: 'admin-token' } })
+  await flushPromises()
+  expect(wrapper.get('.material-entry').text()).toContain('SERVER SIGNING, TLS IDENTITY')
+  expect(wrapper.get('[aria-label="ACME account key"]').text()).not.toContain('shared-key')
   wrapper.unmount()
 })

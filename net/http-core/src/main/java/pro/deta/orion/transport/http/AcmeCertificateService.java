@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import java.util.Set;
+
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import pro.deta.orion.util.LogScope;
@@ -330,7 +332,7 @@ public class AcmeCertificateService {
                         || alias.equalsIgnoreCase(configuration.identity().alias())) {
                     throw new IllegalArgumentException("ACME key and issuer must use different aliases");
                 }
-                if (keyMaterial.contains(issuer.alias())) keyMaterial.require(issuer);
+                if (keyMaterial.contains(issuer.alias(), Set.of())) keyMaterial.require(issuer);
             }
             modification.generateKey(configuration.account(), RSA_KEY_SIZE);
             modification.generateKey(configuration.identity(), RSA_KEY_SIZE);
@@ -358,7 +360,7 @@ public class AcmeCertificateService {
             KeyMaterialPurpose purpose) {
         return new KeyMaterialDescriptor(
                 reference.alias(),
-                purpose,
+                Set.of(purpose),
                 KeyMaterialAlgorithm.RSA,
                 reference.version());
     }
@@ -366,7 +368,7 @@ public class AcmeCertificateService {
     private static TrustedCertificateDescriptor trustedCertificate(
             OrionMaterialReference reference) {
         return new TrustedCertificateDescriptor(
-                reference.alias(),
+                reference.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
                 KeyMaterialAlgorithm.RSA,
                 reference.version());
     }

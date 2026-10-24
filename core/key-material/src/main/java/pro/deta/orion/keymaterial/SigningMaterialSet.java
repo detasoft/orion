@@ -1,5 +1,6 @@
 package pro.deta.orion.keymaterial;
 
+
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -10,7 +11,7 @@ public record SigningMaterialSet(KeyMaterialDescriptor active, List<KeyMaterialD
         if (active == null) {
             throw new IllegalArgumentException("Active signing material must not be null");
         }
-        if (active.purpose() != KeyMaterialPurpose.SERVER_SIGNING) {
+        if (!active.purposes().contains(KeyMaterialPurpose.SERVER_SIGNING)) {
             throw new IllegalArgumentException("Active material must have SERVER_SIGNING purpose");
         }
         if (verification == null) {
@@ -49,7 +50,7 @@ public record SigningMaterialSet(KeyMaterialDescriptor active, List<KeyMaterialD
         if (candidate == null) {
             throw new IllegalArgumentException("Signing material must not be null");
         }
-        if (candidate.purpose() != expected.purpose()) {
+        if (!candidate.purposes().contains(KeyMaterialPurpose.SERVER_SIGNING)) {
             throw new IllegalArgumentException("Signing material purpose does not match active material");
         }
         if (candidate.algorithm() != expected.algorithm()) {

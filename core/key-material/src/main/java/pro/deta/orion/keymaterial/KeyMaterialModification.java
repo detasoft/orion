@@ -85,7 +85,11 @@ public final class KeyMaterialModification implements Modification {
             requireAvailable(existing);
             owner.validatePrepared(existing.entry(), descriptor);
         }
-        add(descriptor.alias(), owner.prepareTrustedCertificate(descriptor, certificate), false);
+        KeyStore.TrustedCertificateEntry prepared = owner.prepareTrustedCertificate(descriptor, certificate);
+        if (existing != null) {
+            prepared = new KeyStore.TrustedCertificateEntry(certificate, existing.entry().getAttributes());
+        }
+        add(descriptor.alias(), prepared, false);
     }
 
     public synchronized void installCertificateChain(KeyMaterialDescriptor identity,
@@ -93,8 +97,8 @@ public final class KeyMaterialModification implements Modification {
             throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(identity);
-        if (identity.purpose() != KeyMaterialPurpose.TLS_IDENTITY
-                && identity.purpose() != KeyMaterialPurpose.CERTIFICATE_AUTHORITY) {
+        if (!identity.purposes().contains(KeyMaterialPurpose.TLS_IDENTITY)
+                && !identity.purposes().contains(KeyMaterialPurpose.CERTIFICATE_AUTHORITY)) {
             throw new IllegalArgumentException("Certificate chains require TLS identity or CA material");
         }
         if (issuer == null) throw new IllegalArgumentException("Issuer optional must not be null");
@@ -113,7 +117,9 @@ public final class KeyMaterialModification implements Modification {
         List<X509Certificate> certificates = KeyMaterialCapabilities.requireX509Chain(chain);
         KeyPair keyPair = new KeyPair(entry.getCertificate().getPublicKey(), entry.getPrivateKey());
         KeyMaterialCapabilities.validateCertificateChain(certificates, keyPair.getPublic(), root);
-        add(identity.alias(), owner.prepareCertificateChain(identity, keyPair, certificates), false);
+        KeyStore.PrivateKeyEntry prepared = owner.prepareCertificateChain(identity, keyPair, certificates);
+        add(identity.alias(), new KeyStore.PrivateKeyEntry(prepared.getPrivateKey(),
+                prepared.getCertificateChain(), entry.getAttributes()), false);
     }
 
     public synchronized void delete(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {

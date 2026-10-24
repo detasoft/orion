@@ -1,5 +1,7 @@
 package pro.deta.orion.keymaterial;
 
+import java.util.Set;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -113,9 +115,9 @@ class OrionKeyMaterialTest {
             assertThat(identity.retainedPublicKeys()).isEmpty();
         }
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            assertThat(service.containsAlias(old.alias())).isTrue();
+            assertThat(service.containsAlias(old.alias(), Set.of())).isTrue();
             assertThat(service.getKeyPair(old.alias()).getPublic().getEncoded()).isNotEmpty();
-            assertThat(service.containsAlias(next.alias())).isTrue();
+            assertThat(service.containsAlias(next.alias(), Set.of())).isTrue();
         }
     }
 
@@ -185,7 +187,7 @@ class OrionKeyMaterialTest {
         assertThat(material.certificateIdentity(acme).issuedCertificateChain().orElseThrow()).hasSize(1);
         assertThat(certificate.createContext().getProtocol()).isEqualTo("TLS");
         assertThat(store.readCalls).isEqualTo(1);
-        KeyMaterialDescriptor staleAccount = descriptor(account.alias(), account.purpose(),
+        KeyMaterialDescriptor staleAccount = new KeyMaterialDescriptor(account.alias(), account.purposes(),
                 account.algorithm(), 2);
         AcmeMaterialConfiguration stale = new AcmeMaterialConfiguration(staleAccount, identity, Optional.empty());
         assertThatThrownBy(() -> material.certificateIdentity(stale))
@@ -389,7 +391,7 @@ class OrionKeyMaterialTest {
             long version) {
         return new KeyMaterialDescriptor(
                 alias,
-                purpose,
+                Set.of(purpose),
                 algorithm,
                 version);
     }

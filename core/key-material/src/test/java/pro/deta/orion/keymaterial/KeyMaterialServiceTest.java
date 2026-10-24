@@ -1,5 +1,7 @@
 package pro.deta.orion.keymaterial;
 
+import java.util.Set;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -35,7 +37,7 @@ class KeyMaterialServiceTest {
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS);
 
         assertThat(savedVersion).isNotBlank();
-        assertThat(reloaded.containsAlias(KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS)).isTrue();
+        assertThat(reloaded.containsAlias(KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS, Set.of())).isTrue();
         assertThat(loaded.getPublic().getEncoded()).isEqualTo(generated.getPublic().getEncoded());
         assertThat(loaded.getPrivate().getAlgorithm()).isEqualTo(generated.getPrivate().getAlgorithm());
         assertThat(chain).hasSize(1);
@@ -105,7 +107,7 @@ class KeyMaterialServiceTest {
                 "public-root-v1", 1);
         KeyMaterialDescriptor privateEntry = new KeyMaterialDescriptor(
                 "private-entry-v1",
-                KeyMaterialPurpose.SERVER_SIGNING,
+                Set.of(KeyMaterialPurpose.SERVER_SIGNING),
                 KeyMaterialAlgorithm.RSA,
                 1);
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
@@ -119,7 +121,7 @@ class KeyMaterialServiceTest {
             TrustedCertificateDescriptor wrongVersion = trustedCertificate(
                     original.alias(), 2);
             TrustedCertificateDescriptor wrongAlgorithm = new TrustedCertificateDescriptor(
-                    original.alias(),
+                    original.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
                     KeyMaterialAlgorithm.EC,
                     original.version());
             TrustedCertificateDescriptor wrongEntryType = trustedCertificate(
@@ -154,7 +156,7 @@ class KeyMaterialServiceTest {
         }
 
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            assertThat(service.privateKeyDescriptors(KeyMaterialPurpose.SSH_HOST))
+            assertThat(service.privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST)))
                     .containsExactly(ec, rsa);
         }
     }
@@ -179,7 +181,7 @@ class KeyMaterialServiceTest {
         }
 
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            List<KeyMaterialInventoryEntry> entries = service.inventory();
+            List<KeyMaterialInventoryEntry> entries = service.inventory(Set.of());
             assertThat(entries).extracting(KeyMaterialInventoryEntry::alias)
                     .containsExactly("configuration-v1", "issuer-v1", "tls-identity-v1");
             assertThat(entries.get(0).publicKeyPem()).isNull();
@@ -208,7 +210,7 @@ class KeyMaterialServiceTest {
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_06_ALIAS);
         KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(
                 KeyMaterialTestConstants.BAD_SERVER_SIGNING_ALIAS,
-                KeyMaterialPurpose.SERVER_SIGNING,
+                Set.of(KeyMaterialPurpose.SERVER_SIGNING),
                 KeyMaterialAlgorithm.RSA,
                 1);
 
@@ -260,7 +262,7 @@ class KeyMaterialServiceTest {
         KeyMaterialContentStore readOnlyStore = KeyMaterialResourceResolver.standard().resolveStore(reference);
         KeyMaterialService readOnly = KeyMaterialService.open(readOnlyStore, options());
 
-        assertThat(readOnly.containsAlias(KeyMaterialTestConstants.HTTPS_2026_05_ALIAS)).isTrue();
+        assertThat(readOnly.containsAlias(KeyMaterialTestConstants.HTTPS_2026_05_ALIAS, Set.of())).isTrue();
         assertThat(readOnly.getCertificateChain(KeyMaterialTestConstants.HTTPS_2026_05_ALIAS)).hasSize(1);
     }
 
@@ -282,7 +284,7 @@ class KeyMaterialServiceTest {
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("closed");
             assertThatThrownBy(() -> service.containsAlias(
-                    KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS))
+                    KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS, Set.of()))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("closed");
         } finally {
@@ -316,7 +318,7 @@ class KeyMaterialServiceTest {
             String alias,
             long version) {
         return new TrustedCertificateDescriptor(
-                alias,
+                alias, Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
                 KeyMaterialAlgorithm.RSA,
                 version);
     }
@@ -327,7 +329,7 @@ class KeyMaterialServiceTest {
             KeyMaterialAlgorithm algorithm) {
         return new KeyMaterialDescriptor(
                 alias,
-                purpose,
+                Set.of(purpose),
                 algorithm,
                 1);
     }

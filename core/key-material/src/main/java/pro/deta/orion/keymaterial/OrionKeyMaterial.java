@@ -1,5 +1,7 @@
 package pro.deta.orion.keymaterial;
 
+import java.util.Set;
+
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
@@ -136,33 +138,32 @@ public class OrionKeyMaterial implements AutoCloseable {
         Objects.requireNonNull(descriptor, "descriptor");
         requireAvailable();
         synchronized (owner) {
-            if (!owner.containsAlias(descriptor.alias())) return false;
+            if (!owner.containsAlias(descriptor.alias(), Set.of())) return false;
             owner.validateExisting(descriptor);
             return true;
         }
     }
 
-    public boolean contains(String alias) throws GeneralSecurityException {
+    public boolean contains(String alias, Set<KeyMaterialPurpose> requiredPurposes) throws GeneralSecurityException {
         requireAvailable();
         Objects.requireNonNull(alias, "alias");
-        return owner.containsAlias(alias);
+        return owner.containsAlias(alias, requiredPurposes);
     }
 
     public boolean contains(TrustedCertificateDescriptor descriptor) throws GeneralSecurityException {
         Objects.requireNonNull(descriptor, "descriptor");
         requireAvailable();
         synchronized (owner) {
-            if (!owner.containsAlias(descriptor.alias())) return false;
+            if (!owner.containsAlias(descriptor.alias(), Set.of())) return false;
             owner.validateExisting(descriptor);
             return true;
         }
     }
 
-    public List<KeyMaterialDescriptor> privateKeyDescriptors(KeyMaterialPurpose purpose)
+    public List<KeyMaterialDescriptor> privateKeyDescriptors(Set<KeyMaterialPurpose> requiredPurposes)
             throws GeneralSecurityException {
         requireAvailable();
-        Objects.requireNonNull(purpose, "purpose");
-        return owner.privateKeyDescriptors(purpose);
+        return owner.privateKeyDescriptors(requiredPurposes);
     }
 
     public KeyPair keyPair(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
@@ -200,8 +201,8 @@ public class OrionKeyMaterial implements AutoCloseable {
     private KeyMaterialCapabilities signingOperations(KeyMaterialDescriptor descriptor)
             throws GeneralSecurityException {
         Objects.requireNonNull(descriptor, "descriptor");
-        if (descriptor.purpose() != KeyMaterialPurpose.SERVER_SIGNING
-                && descriptor.purpose() != KeyMaterialPurpose.CERTIFICATE_AUTHORITY) {
+        if (!descriptor.purposes().contains(KeyMaterialPurpose.SERVER_SIGNING)
+                && !descriptor.purposes().contains(KeyMaterialPurpose.CERTIFICATE_AUTHORITY)) {
             throw new IllegalArgumentException("Signatures require server signing or CA material");
         }
         return KeyMaterialCapabilities.open(owner, List.of(descriptor));
@@ -229,7 +230,7 @@ public class OrionKeyMaterial implements AutoCloseable {
 
     private void requireCipher(KeyMaterialDescriptor descriptor) {
         Objects.requireNonNull(descriptor, "descriptor");
-        if (descriptor.purpose() != KeyMaterialPurpose.CONFIGURATION_CIPHER) {
+        if (!descriptor.purposes().contains(KeyMaterialPurpose.CONFIGURATION_CIPHER)) {
             throw new IllegalArgumentException("Encryption requires configuration cipher material");
         }
     }
@@ -247,7 +248,7 @@ public class OrionKeyMaterial implements AutoCloseable {
         Objects.requireNonNull(descriptor, "descriptor");
         requireAvailable();
         synchronized (owner) {
-            if (!owner.containsAlias(descriptor.alias())) return Optional.empty();
+            if (!owner.containsAlias(descriptor.alias(), Set.of())) return Optional.empty();
             List<X509Certificate> chain = certificateChain(descriptor);
             if (chain.size() == 1 && CertificateIdentity.isStorageCertificate(chain.getFirst())) {
                 return Optional.empty();
@@ -274,7 +275,7 @@ public class OrionKeyMaterial implements AutoCloseable {
         requireAvailable();
         if (references == null) throw new IllegalArgumentException("SSH host key references must not be null");
         synchronized (owner) {
-            List<KeyMaterialDescriptor> available = privateKeyDescriptors(KeyMaterialPurpose.SSH_HOST);
+            List<KeyMaterialDescriptor> available = privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST));
             List<KeyMaterialDescriptor> selected = references.isEmpty()
                     ? available : selectSshHostKeys(available, references);
             List<KeyPair> keys = new ArrayList<>();
@@ -387,9 +388,10 @@ public class OrionKeyMaterial implements AutoCloseable {
         owner.validateExisting(descriptor);
     }
 
-    public List<KeyMaterialInventoryEntry> inventory() throws GeneralSecurityException {
+    public List<KeyMaterialInventoryEntry> inventory(Set<KeyMaterialPurpose> requiredPurposes)
+            throws GeneralSecurityException {
         if (owner == null) throw new GeneralSecurityException("Configuration material inventory is unavailable");
-        return owner.inventory();
+        return owner.inventory(requiredPurposes);
     }
 
     public ConfigurationSecretCipher configurationCipher() {
@@ -400,7 +402,7 @@ public class OrionKeyMaterial implements AutoCloseable {
     public KeyMaterialDescriptor configurationCipherKey() {
         requireAvailable();
         return new KeyMaterialDescriptor("configuration-v1",
-                KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES,
+                Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES,
                 1);
     }
 
@@ -410,7 +412,7 @@ public class OrionKeyMaterial implements AutoCloseable {
             throw new IllegalArgumentException("Configuration secret and context must not be empty");
         }
         synchronized (owner) {
-            if (!owner.containsAlias(descriptor.alias())) {
+            if (!owner.containsAlias(descriptor.alias(), Set.of())) {
                 try {
                     owner.generateSecretKeyIfMissing(descriptor, 256);
                     owner.save();
@@ -440,19 +442,19 @@ public class OrionKeyMaterial implements AutoCloseable {
         }
         synchronized (owner) {
             List<KeyMaterialDescriptor> available = owner.privateKeyDescriptors(
-                    KeyMaterialPurpose.SSH_HOST);
+                    Set.of(KeyMaterialPurpose.SSH_HOST));
             if (references.isEmpty() && available.isEmpty()) {
                 KeyMaterialDescriptor rsa = defaultSshHostKey("ssh-host-rsa", KeyMaterialAlgorithm.RSA);
                 KeyMaterialDescriptor ec = defaultSshHostKey("ssh-host-ec", KeyMaterialAlgorithm.EC);
                 for (KeyMaterialDescriptor descriptor : List.of(rsa, ec)) {
-                    if (owner.containsAlias(descriptor.alias())) {
+                    if (owner.containsAlias(descriptor.alias(), Set.of())) {
                         owner.validateExisting(descriptor);
                     }
                 }
                 owner.generateKeyIfMissing(rsa, KeyMaterialConstants.RSA_KEY_SIZE_BITS);
                 owner.generateKeyIfMissing(ec, KeyMaterialConstants.EC_KEY_SIZE_BITS);
                 owner.save();
-                available = owner.privateKeyDescriptors(KeyMaterialPurpose.SSH_HOST);
+                available = owner.privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST));
             }
             List<KeyMaterialDescriptor> selected = references.isEmpty()
                     ? available : selectSshHostKeys(available, references);
@@ -463,7 +465,7 @@ public class OrionKeyMaterial implements AutoCloseable {
     private KeyMaterialDescriptor defaultSshHostKey(String logicalAlias, KeyMaterialAlgorithm algorithm) {
         long version = 1;
         return new KeyMaterialDescriptor(logicalAlias + "-v" + version,
-                KeyMaterialPurpose.SSH_HOST, algorithm, version);
+                Set.of(KeyMaterialPurpose.SSH_HOST), algorithm, version);
     }
 
     private List<KeyMaterialDescriptor> selectSshHostKeys(List<KeyMaterialDescriptor> available,

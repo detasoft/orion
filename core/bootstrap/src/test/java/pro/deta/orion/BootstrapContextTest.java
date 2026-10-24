@@ -1,5 +1,7 @@
 package pro.deta.orion;
 
+import java.util.Set;
+
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
 
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
@@ -310,7 +312,7 @@ class BootstrapContextTest {
 
                 KeyMaterialDescriptor staged = new KeyMaterialDescriptor(
                         "server-signing-v2",
-                        KeyMaterialPurpose.SERVER_SIGNING,
+                        Set.of(KeyMaterialPurpose.SERVER_SIGNING),
                         KeyMaterialAlgorithm.RSA,
                         2);
                 try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("correct-password".toCharArray());

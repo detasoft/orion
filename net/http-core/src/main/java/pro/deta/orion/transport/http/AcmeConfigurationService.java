@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import java.util.Set;
+
 import pro.deta.orion.util.Result;
 import pro.deta.orion.internal.ChangeMetadata;
 import jakarta.inject.Inject;
@@ -125,7 +127,7 @@ public final class AcmeConfigurationService {
         if (requestedAccount != null) {
             try {
                 material.require(new KeyMaterialDescriptor(requestedAccount.alias(),
-                        KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA,
+                        Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA,
                         requestedAccount.version()));
             } catch (GeneralSecurityException invalid) {
                 throw new IllegalArgumentException("Select an existing RSA ACME account key");

@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import java.util.Set;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import pro.deta.orion.auth.*;
@@ -40,7 +42,7 @@ class S3RepositoryManagementIT {
              S3Transport transport = new S3Transport();
              NativeGitRepositoryProvider local = NativeGitRepositoryProvider.inMemory(EVENTS.manager())) {
             KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor("configuration-v1",
-                    KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES,
+                    Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES,
                     1);
             material.generateSecretKeyIfMissing(descriptor, 256);
             ConfigurationSecretCipher cipher = KeyMaterialCapabilities.open(material, List.of(descriptor))

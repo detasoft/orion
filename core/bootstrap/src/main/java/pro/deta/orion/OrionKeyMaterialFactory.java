@@ -1,5 +1,7 @@
 package pro.deta.orion;
 
+import java.util.Set;
+
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
@@ -138,7 +140,7 @@ public final class OrionKeyMaterialFactory {
         }
         return new KeyMaterialDescriptor(
                 required(reference.getAlias(), role + " alias"),
-                KeyMaterialPurpose.SERVER_SIGNING,
+                Set.of(KeyMaterialPurpose.SERVER_SIGNING),
                 algorithm,
                 reference.getVersion());
     }

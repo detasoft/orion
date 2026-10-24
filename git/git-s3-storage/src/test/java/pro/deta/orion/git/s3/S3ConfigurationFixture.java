@@ -1,5 +1,7 @@
 package pro.deta.orion.git.s3;
 
+import java.util.Set;
+
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
@@ -54,7 +56,7 @@ final class S3ConfigurationFixture implements AutoCloseable {
                         EVENTS.manager());
         provider = new NativeGitRepositoryProvider(factory);
         KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor("configuration-v1",
-                KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES, 1);
+                Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES, 1);
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-material".toCharArray())) {
             material = KeyMaterialService.open(new InMemoryKeyMaterialContentStore(), options);
         }

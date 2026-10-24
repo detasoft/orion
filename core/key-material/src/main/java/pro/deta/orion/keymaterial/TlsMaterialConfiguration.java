@@ -10,7 +10,7 @@ public record TlsMaterialConfiguration(
         List<TrustedCertificateDescriptor> clientTrustAnchors,
         TlsClientAuthentication clientAuthentication) {
     public TlsMaterialConfiguration {
-        if (identity == null || identity.purpose() != KeyMaterialPurpose.TLS_IDENTITY) {
+        if (identity == null || !identity.purposes().contains(KeyMaterialPurpose.TLS_IDENTITY)) {
             throw new IllegalArgumentException("TLS identity must use TLS_IDENTITY purpose");
         }
         if (serverIssuerTrustAnchor == null) {

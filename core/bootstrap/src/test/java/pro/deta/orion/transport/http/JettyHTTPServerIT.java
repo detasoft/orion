@@ -1163,14 +1163,14 @@ class JettyHTTPServerIT {
     private static KeyMaterialDescriptor descriptor(String alias, KeyMaterialPurpose purpose) {
         return new KeyMaterialDescriptor(
                 alias,
-                purpose,
+                Set.of(purpose),
                 KeyMaterialAlgorithm.RSA,
                 1);
     }
 
     private static TrustedCertificateDescriptor trusted(String alias) {
         return new TrustedCertificateDescriptor(
-                alias,
+                alias, Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
                 KeyMaterialAlgorithm.RSA,
                 1);
     }

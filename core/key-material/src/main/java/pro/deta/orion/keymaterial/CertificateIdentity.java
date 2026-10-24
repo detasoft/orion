@@ -1,5 +1,7 @@
 package pro.deta.orion.keymaterial;
 
+import java.util.Set;
+
 import javax.net.ssl.SSLContext;
 import java.io.IOException;
 import java.security.GeneralSecurityException;
@@ -33,7 +35,7 @@ public final class CertificateIdentity {
     }
 
     public Optional<List<X509Certificate>> issuedCertificateChain() throws GeneralSecurityException {
-        if (!owner.containsAlias(identity.alias())) return Optional.empty();
+        if (!owner.containsAlias(identity.alias(), Set.of())) return Optional.empty();
         List<X509Certificate> chain = certificateChain();
         if (chain.size() == 1 && isStorageCertificate(chain.getFirst())) return Optional.empty();
         return Optional.of(chain);

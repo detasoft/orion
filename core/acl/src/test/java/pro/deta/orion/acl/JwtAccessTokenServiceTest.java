@@ -1,5 +1,7 @@
 package pro.deta.orion.acl;
 
+import java.util.Set;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.AfterEach;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
@@ -420,7 +422,7 @@ class JwtAccessTokenServiceTest {
     }
 
     private static KeyMaterialDescriptor descriptor(String alias, int version) {
-        return new KeyMaterialDescriptor(alias, KeyMaterialPurpose.SERVER_SIGNING,
+        return new KeyMaterialDescriptor(alias, Set.of(KeyMaterialPurpose.SERVER_SIGNING),
                 KeyMaterialAlgorithm.RSA, version);
     }
 }

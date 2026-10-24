@@ -1,5 +1,7 @@
 package pro.deta.orion.config;
 
+import java.util.Set;
+
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
@@ -133,7 +135,7 @@ class NativeSshCredentialPersistenceTest {
                 new RootPasswordReset(false),
                 OrionKeyMaterial.unavailable(),
                 new SigningMaterialSet(new KeyMaterialDescriptor("signing",
-                        KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA,
+                        Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA,
                         1), List.of()),
                 new BootstrapConfiguration(),
                 editor);

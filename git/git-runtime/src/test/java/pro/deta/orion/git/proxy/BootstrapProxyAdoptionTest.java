@@ -1,5 +1,7 @@
 package pro.deta.orion.git.proxy;
 
+import java.util.Set;
+
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import org.junit.jupiter.api.Test;
@@ -162,7 +164,7 @@ class BootstrapProxyAdoptionTest {
     }
 
     private static OrionKeyMaterial material() throws Exception {
-        var signing = new KeyMaterialDescriptor("signing", KeyMaterialPurpose.SERVER_SIGNING,
+        var signing = new KeyMaterialDescriptor("signing", Set.of(KeyMaterialPurpose.SERVER_SIGNING),
                 KeyMaterialAlgorithm.RSA, 1);
         try (var options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
             return OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,

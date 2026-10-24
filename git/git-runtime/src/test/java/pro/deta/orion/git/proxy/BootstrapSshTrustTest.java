@@ -157,7 +157,7 @@ class BootstrapSshTrustTest {
 
     private static OrionKeyMaterial material() throws Exception {
         KeyMaterialDescriptor signing = new KeyMaterialDescriptor("signing",
-                KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, 1);
+                Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
             return OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
                     new SigningMaterialSet(signing, List.of()), 2048, new KeyMaterialCreation(true));

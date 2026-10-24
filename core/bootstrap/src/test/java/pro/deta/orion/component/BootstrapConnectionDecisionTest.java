@@ -1,5 +1,7 @@
 package pro.deta.orion.component;
 
+import java.util.Set;
+
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.config.OrionConfigurationEditor;
 import org.eclipse.jgit.api.Git;
@@ -219,7 +221,7 @@ class BootstrapConnectionDecisionTest {
             provider.resolveProvisional(NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration, false);
             storage = new NativeGitOrionConfigurationStorage(provider, configuration);
             KeyMaterialDescriptor signing = new KeyMaterialDescriptor("signing",
-                    KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, 1);
+                    Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
             try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
                 material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
                         new SigningMaterialSet(signing, List.of()), 2048, new KeyMaterialCreation(true));

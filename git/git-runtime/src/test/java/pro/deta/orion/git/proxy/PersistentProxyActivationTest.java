@@ -1,5 +1,7 @@
 package pro.deta.orion.git.proxy;
 
+import java.util.Set;
+
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
@@ -303,7 +305,7 @@ class PersistentProxyActivationTest {
 
         Fixture() throws Exception {
             var signing = new KeyMaterialDescriptor("signing",
-                    KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, 1);
+                    Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
             try (var options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
                 material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
                         new SigningMaterialSet(signing, List.of()), 2048, new KeyMaterialCreation(true));

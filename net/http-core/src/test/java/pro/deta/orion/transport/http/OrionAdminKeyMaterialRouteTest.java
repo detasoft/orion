@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import java.util.Set;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -27,17 +29,17 @@ import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Authorizati
 
 class OrionAdminKeyMaterialRouteTest {
     private static final KeyMaterialDescriptor ACCOUNT = new KeyMaterialDescriptor(
-            "account", KeyMaterialPurpose.ACME_ACCOUNT,
+            "account", Set.of(KeyMaterialPurpose.ACME_ACCOUNT),
             KeyMaterialAlgorithm.RSA, 1);
 
     @Test
     void exposesOnlyPublicInventoryToApplicationAdmins() throws Exception {
         KeyMaterialInventoryEntry entry = new KeyMaterialInventoryEntry(
-                "acme-identity", "TLS_IDENTITY", "RSA", 1,
+                "acme-identity", Set.of(KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialPurpose.SERVER_SIGNING), "RSA", 1,
                 "-----BEGIN PUBLIC KEY-----\npublic\n-----END PUBLIC KEY-----", "fingerprint", List.of());
         OrionKeyMaterial material = new OrionKeyMaterial() {
             @Override
-            public List<KeyMaterialInventoryEntry> inventory() {
+            public List<KeyMaterialInventoryEntry> inventory(Set<KeyMaterialPurpose> requiredPurposes) {
                 return List.of(entry);
             }
         };
@@ -45,6 +47,8 @@ class OrionAdminKeyMaterialRouteTest {
 
         assertThat(route.definition().authorization()).isEqualTo(APPLICATION_ADMIN);
         assertThat(route.doGet(null).body()).isEqualTo(Map.of("entries", List.of(entry)));
+        assertThat(new ObjectMapper().writeValueAsString(route.doGet(null).body()))
+                .contains("\"purposes\":", "TLS_IDENTITY", "SERVER_SIGNING");
     }
 
     @Test
@@ -137,7 +141,7 @@ class OrionAdminKeyMaterialRouteTest {
                 assertThat(post(material, body).status()).isEqualTo(400);
             }
             assertThat(post(material, "x".repeat(32769)).status()).isEqualTo(413);
-            assertThat(material.inventory()).isEmpty();
+            assertThat(material.inventory(Set.of())).isEmpty();
             assertThat(store.read()).isEmpty();
         }
     }
@@ -151,7 +155,7 @@ class OrionAdminKeyMaterialRouteTest {
                     """);
             assertThat(response.status()).isEqualTo(400);
             assertThat(response.body().toString()).doesNotContain("private-secret");
-            assertThat(material.inventory()).isEmpty();
+            assertThat(material.inventory(Set.of())).isEmpty();
             assertThat(store.read()).isEmpty();
         }
     }

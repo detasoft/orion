@@ -1,5 +1,7 @@
 package pro.deta.orion.keymaterial;
 
+import java.util.Set;
+
 import org.junit.jupiter.api.Test;
 
 import java.security.GeneralSecurityException;
@@ -96,7 +98,7 @@ class OrionSshHostKeysTest {
     private static KeyMaterialDescriptor serverSigning() {
         return new KeyMaterialDescriptor(
                 "server-signing-v1",
-                KeyMaterialPurpose.SERVER_SIGNING,
+                Set.of(KeyMaterialPurpose.SERVER_SIGNING),
                 KeyMaterialAlgorithm.RSA,
                 1);
     }
@@ -107,7 +109,7 @@ class OrionSshHostKeysTest {
             long version) {
         return new KeyMaterialDescriptor(
                 alias,
-                KeyMaterialPurpose.SSH_HOST,
+                Set.of(KeyMaterialPurpose.SSH_HOST),
                 algorithm,
                 version);
     }

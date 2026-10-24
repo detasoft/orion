@@ -1116,7 +1116,7 @@ class OrionOidcOnboardingTest {
             });
             provider.start();
             KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor("signing",
-                    KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, 1);
+                    Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
             try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
                 material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
                         new SigningMaterialSet(descriptor, List.of()), 2048, new KeyMaterialCreation(true));

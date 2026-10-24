@@ -1,5 +1,7 @@
 package pro.deta.orion.config;
 
+import java.util.Set;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,7 +50,7 @@ class ConfigurationSecretsTest {
     private static final ConfigurationSecretReference REFERENCE = new ConfigurationSecretReference(
             ConfigurationSecretReference.Scope.REPOSITORY, "github-token");
     private static final KeyMaterialDescriptor CIPHER = new KeyMaterialDescriptor(
-            "configuration-v1", KeyMaterialPurpose.CONFIGURATION_CIPHER,
+            "configuration-v1", Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER),
             KeyMaterialAlgorithm.AES, 1);
     private final InMemoryKeyMaterialContentStore material = new InMemoryKeyMaterialContentStore();
     private final AtomicReference<OrionDocument> current = new AtomicReference<>(document());

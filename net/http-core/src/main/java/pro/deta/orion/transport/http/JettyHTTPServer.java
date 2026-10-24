@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import java.util.Set;
+
 import jakarta.inject.Inject;
 import pro.deta.orion.agent.server.AgentSessionServer;
 import jakarta.inject.Singleton;
@@ -327,14 +329,14 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
             KeyMaterialPurpose purpose) {
         return new KeyMaterialDescriptor(
                 reference.alias(),
-                purpose,
+                Set.of(purpose),
                 KeyMaterialAlgorithm.RSA,
                 reference.version());
     }
 
     private TrustedCertificateDescriptor trustedCertificate(OrionMaterialReference reference) {
         return new TrustedCertificateDescriptor(
-                reference.alias(),
+                reference.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
                 KeyMaterialAlgorithm.RSA,
                 reference.version());
     }

@@ -260,7 +260,7 @@ public class ACMECertificateChallengeTest {
 
     private static OrionKeyMaterial keyMaterial() throws Exception {
         KeyMaterialDescriptor signing = new KeyMaterialDescriptor("server-signing-v1",
-                KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, 1);
+                Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
         return OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
                 KeyMaterialOptions.pkcs12("test-password".toCharArray()),
                 new SigningMaterialSet(signing, List.of()), 2048, new KeyMaterialCreation(true));

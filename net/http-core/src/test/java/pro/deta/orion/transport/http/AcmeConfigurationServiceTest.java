@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import java.util.Set;
+
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.config.OrionConfigurationEditor;
 
@@ -51,7 +53,7 @@ class AcmeConfigurationServiceTest {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             owner.withModification(modification -> {
                 modification.generateKey(new KeyMaterialDescriptor("existing-account",
-                        KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1), 3072);
+                        Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 1), 3072);
                 modification.apply();
             });
             OrionMaterialReference reference = new OrionMaterialReference("existing-account", 1);
@@ -108,7 +110,7 @@ class AcmeConfigurationServiceTest {
                     """, AcmeAdministrationTest.admin())).status()).isEqualTo(200);
             certificates.issue(new AcmeCertificateService.IssueRequest(null, null, null, null, null, null, true));
             assertThat(issuedKeys).hasSize(1);
-            String expected = owner.inventory().getFirst().publicKeyPem();
+            String expected = owner.inventory(Set.of()).getFirst().publicKeyPem();
             assertThat(expected.replaceAll("\\s", "")).contains(java.util.Base64.getEncoder()
                     .encodeToString(issuedKeys.getFirst().getPublic().getEncoded()));
             for (OrionMaterialReference invalid : List.of(new OrionMaterialReference("missing", 1),
@@ -128,7 +130,7 @@ class AcmeConfigurationServiceTest {
                                                 "root"))
                         .isInstanceOf(IllegalArgumentException.class);
             }
-            assertThat(owner.inventory()).noneMatch(entry -> entry.alias().equals("missing"));
+            assertThat(owner.inventory(Set.of())).noneMatch(entry -> entry.alias().equals("missing"));
             assertThat(service.view().accountMaterial()).isEqualTo(reference);
         }
     }
@@ -139,7 +141,7 @@ class AcmeConfigurationServiceTest {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             owner.withModification(modification -> {
                 modification.generateKey(new KeyMaterialDescriptor("other-account",
-                        KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1), 3072);
+                        Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 1), 3072);
                 modification.apply();
             });
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
@@ -383,7 +385,7 @@ class AcmeConfigurationServiceTest {
                 new SigningMaterialSet(
                         new KeyMaterialDescriptor(
                                 "signing",
-                                KeyMaterialPurpose.SERVER_SIGNING,
+                                Set.of(KeyMaterialPurpose.SERVER_SIGNING),
                                 KeyMaterialAlgorithm.RSA,
                                 1), List.of()), 2048,
                                         new KeyMaterialCreation(true));

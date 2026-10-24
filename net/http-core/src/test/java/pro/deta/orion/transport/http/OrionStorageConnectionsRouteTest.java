@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import java.util.Set;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.*;
@@ -30,7 +32,7 @@ class OrionStorageConnectionsRouteTest {
         try (KeyMaterialService material = KeyMaterialService.open(new InMemoryKeyMaterialContentStore(),
                 KeyMaterialOptions.pkcs12("test-password".toCharArray()))) {
             KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor("configuration-v1",
-                    KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES,
+                    Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES,
                     1);
             material.generateSecretKeyIfMissing(descriptor, 256);
             ConfigurationSecretCipher cipher = KeyMaterialCapabilities.open(material, List.of(descriptor))

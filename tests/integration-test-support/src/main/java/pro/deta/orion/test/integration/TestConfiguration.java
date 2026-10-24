@@ -1,5 +1,7 @@
 package pro.deta.orion.test.integration;
 
+import java.util.Set;
+
 import java.util.Optional;
 import java.util.List;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
@@ -55,7 +57,7 @@ public final class TestConfiguration implements AutoCloseable {
         this.cipher = cipher;
         editor = new OrionConfigurationEditor(storage, cipher, material, events.manager());
         SigningMaterialSet signing = new SigningMaterialSet(
-                new KeyMaterialDescriptor("signing", KeyMaterialPurpose.SERVER_SIGNING,
+                new KeyMaterialDescriptor("signing", Set.of(KeyMaterialPurpose.SERVER_SIGNING),
                         KeyMaterialAlgorithm.RSA, 1), List.of());
         acl = new OrionAccessControlServiceImpl(new OrionPasswordHashingService(), new RootPasswordReset(false),
                 material, signing, bootstrap, editor);
@@ -88,7 +90,7 @@ public final class TestConfiguration implements AutoCloseable {
             KeyMaterialDescriptor descriptor =
                     new KeyMaterialDescriptor(
                             "configuration-v1",
-                            KeyMaterialPurpose.CONFIGURATION_CIPHER,
+                            Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER),
                             KeyMaterialAlgorithm.AES,
                             1);
             material.generateSecretKeyIfMissing(descriptor, 256);
