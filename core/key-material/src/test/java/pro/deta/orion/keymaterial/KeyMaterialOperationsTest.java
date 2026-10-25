@@ -29,9 +29,9 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class KeyMaterialCapabilitiesTest {
+class KeyMaterialOperationsTest {
     @Test
-    void combinesRoleRequestsForOneStoredKeyWithoutGrantingMissingPurposes() throws Exception {
+    void reusesStoredKeyForItsRequestedPurposesWithoutGrantingMissingPurposes() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialDescriptor stored = new KeyMaterialDescriptor("shared",
                 Set.of(KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialPurpose.SSH_HOST),
@@ -40,38 +40,37 @@ class KeyMaterialCapabilitiesTest {
                 Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor host = new KeyMaterialDescriptor("shared",
                 Set.of(KeyMaterialPurpose.SSH_HOST), KeyMaterialAlgorithm.RSA, 1);
-        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options())) {
             KeyMaterialModification modification = service.modify();
             modification.generateKey(stored, 2048);
             modification.apply();
-            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, List.of(signing, host));
+
             byte[] payload = new byte[]{1, 2, 3};
-            byte[] signature = capabilities.signing(signing).sign(payload);
-            assertThat(capabilities.verification(List.of(signing)).verify(payload, signature)).isTrue();
-            service.validateExisting(host);
+            byte[] signature = service.sign(signing, payload);
+            assertThat(service.verify(signing, payload, signature)).isTrue();
+            service.require(host);
             KeyMaterialDescriptor missingRole = new KeyMaterialDescriptor("shared",
                     Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 1);
-            assertThatThrownBy(() -> KeyMaterialCapabilities.open(service, List.of(missingRole)))
+            assertThatThrownBy(() -> service.require(missingRole))
                     .isInstanceOf(GeneralSecurityException.class).hasMessageContaining("purpose");
         }
     }
 
     @Test
     void signsAndVerifiesWithoutExposingPrivateKey() throws Exception {
-        try (KeyMaterialService service = service()) {
+        try (OrionKeyMaterial service = service()) {
             KeyMaterialDescriptor signing = descriptor(
                     "server-signing-v1",
                     KeyMaterialPurpose.SERVER_SIGNING,
                     KeyMaterialAlgorithm.RSA,
                     1);
-            service.generateKeyIfMissing(signing, 2048);
-            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, List.of(signing));
+            generateKey(service, signing, 2048);
 
             byte[] payload = "short-lived-token".getBytes(StandardCharsets.UTF_8);
-            byte[] signature = capabilities.signing(signing).sign(payload);
+            byte[] signature = service.sign(signing, payload);
 
-            assertThat(capabilities.verification(List.of(signing)).verify(payload, signature)).isTrue();
-            assertThat(capabilities.verification(List.of(signing)).verify(
+            assertThat(service.verify(signing, payload, signature)).isTrue();
+            assertThat(service.verify(signing, 
                     "modified".getBytes(StandardCharsets.UTF_8), signature)).isFalse();
         }
     }
@@ -84,17 +83,16 @@ class KeyMaterialCapabilitiesTest {
                 KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.ED25519,
                 1);
-        try (KeyMaterialService initial = KeyMaterialService.open(store, options())) {
-            initial.generateKeyIfMissing(signing, 0);
-            initial.save();
+        try (OrionKeyMaterial initial = OrionKeyMaterial.open(store, options())) {
+            generateKey(initial, signing, 0);
         }
 
-        try (KeyMaterialService reloaded = KeyMaterialService.open(store, options())) {
-            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(reloaded, List.of(signing));
-            byte[] payload = "ed25519-payload".getBytes(StandardCharsets.UTF_8);
-            byte[] signature = capabilities.signing(signing).sign(payload);
+        try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(store, options())) {
 
-            assertThat(capabilities.verification(List.of(signing)).verify(payload, signature)).isTrue();
+            byte[] payload = "ed25519-payload".getBytes(StandardCharsets.UTF_8);
+            byte[] signature = reloaded.sign(signing, payload);
+
+            assertThat(reloaded.verify(signing, payload, signature)).isTrue();
         }
     }
 
@@ -118,18 +116,16 @@ class KeyMaterialCapabilitiesTest {
                 1);
         KeyPair generatedRsa;
         KeyPair generatedEd25519;
-        try (KeyMaterialService initial = KeyMaterialService.open(store, options())) {
-            generatedRsa = initial.generateKeyIfMissing(rsaClient, 2048);
-            generatedEd25519 = initial.generateKeyIfMissing(ed25519Client, 0);
-            initial.generateKeyIfMissing(host, 2048);
-            initial.save();
+        try (OrionKeyMaterial initial = OrionKeyMaterial.open(store, options())) {
+            generatedRsa = generateKey(initial, rsaClient, 2048);
+            generatedEd25519 = generateKey(initial, ed25519Client, 0);
+            generateKey(initial, host, 2048);
         }
 
-        try (KeyMaterialService reloaded = KeyMaterialService.open(store, options())) {
-            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(
-                    reloaded, List.of(rsaClient, ed25519Client, host));
-            KeyPair selectedRsa = capabilities.sshClientKey(rsaClient).keyPair();
-            KeyPair selectedEd25519 = capabilities.sshClientKey(ed25519Client).keyPair();
+        try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(store, options())) {
+
+            KeyPair selectedRsa = reloaded.keyPair(rsaClient);
+            KeyPair selectedEd25519 = reloaded.keyPair(ed25519Client);
 
             assertThat(selectedRsa.getPublic().getEncoded())
                     .isEqualTo(generatedRsa.getPublic().getEncoded());
@@ -151,15 +147,13 @@ class KeyMaterialCapabilitiesTest {
                     KeyMaterialAlgorithm.EC,
                     rsaClient.version());
 
-            assertThatThrownBy(() -> capabilities.sshClientKey(wrongPurpose))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("registered");
-            assertThatThrownBy(() -> capabilities.sshClientKey(wrongAlgorithm))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("registered");
-            assertThatThrownBy(() -> capabilities.sshClientKey(host))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("SSH_CLIENT");
+            assertThatThrownBy(() -> reloaded.keyPair(wrongPurpose))
+                    .isInstanceOf(GeneralSecurityException.class)
+                    .hasMessageContaining("purpose");
+            assertThatThrownBy(() -> reloaded.keyPair(wrongAlgorithm))
+                    .isInstanceOf(GeneralSecurityException.class)
+                    .hasMessageContaining("algorithm");
+            assertThat(reloaded.keyPair(host).getPublic().getAlgorithm()).isEqualTo("RSA");
             assertThatThrownBy(() -> descriptor(
                     "invalid-client-v1",
                     KeyMaterialPurpose.SSH_CLIENT,
@@ -173,18 +167,18 @@ class KeyMaterialCapabilitiesTest {
 
     @Test
     void validatesExistingEntriesBeforeReuseOrActivation() throws Exception {
-        try (KeyMaterialService service = service()) {
+        try (OrionKeyMaterial service = service()) {
             KeyMaterialDescriptor rsa = descriptor(
                     "host-key-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.RSA, 1);
-            service.generateKeyIfMissing(rsa, 2048);
+            generateKey(service, rsa, 2048);
             KeyMaterialDescriptor incompatible = descriptor(
                     "host-key-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.EC, 1);
 
-            assertThatThrownBy(() -> service.generateKeyIfMissing(incompatible, 256))
+            assertThatThrownBy(() -> generateKey(service, incompatible, 256))
                     .isInstanceOf(Exception.class)
                     .hasMessageContaining("algorithm")
                     .hasMessageContaining("host-key-v1");
-            assertThatThrownBy(() -> KeyMaterialCapabilities.open(service, List.of(incompatible)))
+            assertThatThrownBy(() -> service.require(incompatible))
                     .isInstanceOf(Exception.class)
                     .hasMessageContaining("algorithm")
                     .hasMessageContaining("host-key-v1");
@@ -199,27 +193,26 @@ class KeyMaterialCapabilitiesTest {
                 KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.RSA,
                 1);
-        try (KeyMaterialService initial = KeyMaterialService.open(store, options())) {
-            initial.generateKeyIfMissing(original, 2048);
-            initial.save();
+        try (OrionKeyMaterial initial = OrionKeyMaterial.open(store, options())) {
+            generateKey(initial, original, 2048);
         }
 
-        try (KeyMaterialService reloaded = KeyMaterialService.open(store, options())) {
+        try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(store, options())) {
             KeyMaterialDescriptor changedVersion = descriptor(
                     "server-signing-v1",
                     KeyMaterialPurpose.SERVER_SIGNING,
                     KeyMaterialAlgorithm.RSA,
                     2);
 
-            assertThatThrownBy(() -> reloaded.generateKeyIfMissing(changedVersion, 2048))
+            assertThatThrownBy(() -> generateKey(reloaded, changedVersion, 2048))
                     .isInstanceOf(Exception.class)
                     .hasMessageContaining("version");
         }
     }
 
     @Test
-    void exposesTlsSshAndCaThroughPurposeSpecificCapabilities() throws Exception {
-        try (KeyMaterialService service = service()) {
+    void exposesTlsSshAndCaThroughDirectMaterialOperations() throws Exception {
+        try (OrionKeyMaterial service = service()) {
             KeyMaterialDescriptor tls = descriptor(
                     "https-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
             KeyMaterialDescriptor ssh = descriptor(
@@ -229,28 +222,27 @@ class KeyMaterialCapabilitiesTest {
                     KeyMaterialPurpose.CERTIFICATE_AUTHORITY,
                     KeyMaterialAlgorithm.RSA,
                     1);
-            service.generateKeyIfMissing(tls, 2048);
-            service.generateKeyIfMissing(ssh, 2048);
-            service.generateKeyIfMissing(ca, 2048);
-            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, List.of(tls, ssh, ca));
+            generateKey(service, tls, 2048);
+            generateKey(service, ssh, 2048);
+            generateKey(service, ca, 2048);
 
             TestCertificateChain.Authority authority = TestCertificateChain.root("tls-root");
             X509Certificate leaf = TestCertificateChain.leaf(
-                    "localhost", service.getKeyPair(tls.alias()), authority);
-            service.installCertificateChain(tls, List.of(leaf), Optional.empty(), Optional.empty());
-            SSLContext context = capabilities.certificateIdentity(
+                    "localhost", service.keyPair(tls), authority);
+            installCertificateChain(service, tls, List.of(leaf), Optional.empty(), Optional.empty());
+            SSLContext context = service.certificateIdentity(new TlsMaterialConfiguration(
                     tls,
                     Optional.empty(),
                     List.of(),
-                    TlsClientAuthentication.DISABLED).createContext();
-            KeyPair sshHostKey = service.getKeyPair(ssh.alias());
+                    TlsClientAuthentication.DISABLED)).createContext();
+            KeyPair sshHostKey = service.keyPair(ssh);
             byte[] payload = "certificate-body".getBytes(StandardCharsets.UTF_8);
-            byte[] signature = capabilities.certificateAuthority(ca).sign(payload);
+            byte[] signature = service.sign(ca, payload);
 
             assertThat(context.getProtocol()).isEqualTo("TLS");
             assertThat(sshHostKey.getPrivate().getAlgorithm()).isEqualTo("RSA");
-            assertThat(capabilities.verification(List.of(ca)).verify(payload, signature)).isTrue();
-            assertThat(capabilities.certificateAuthority(ca).certificateChain()).hasSize(1);
+            assertThat(service.verify(ca, payload, signature)).isTrue();
+            assertThat(service.certificateChain(ca)).hasSize(1);
         }
     }
 
@@ -263,22 +255,22 @@ class KeyMaterialCapabilitiesTest {
                 "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
         byte[] accountPublic;
         byte[] identityPublic;
-        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options())) {
             generateKeys(service, account, identity);
-            accountPublic = service.getKeyPair(account.alias()).getPublic().getEncoded();
-            identityPublic = service.getKeyPair(identity.alias()).getPublic().getEncoded();
+            accountPublic = service.keyPair(account).getPublic().getEncoded();
+            identityPublic = service.keyPair(identity).getPublic().getEncoded();
 
             assertThat(store.read().orElseThrow().version()).isEqualTo("1");
             generateKeys(service, account, identity);
-            assertThat(service.getKeyPair(account.alias()).getPublic().getEncoded())
+            assertThat(service.keyPair(account).getPublic().getEncoded())
                     .isEqualTo(accountPublic);
             assertThat(store.read().orElseThrow().version()).isEqualTo("1");
         }
 
-        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options())) {
             generateKeys(service, account, identity);
-            assertThat(service.getKeyPair(account.alias()).getPublic().getEncoded()).isEqualTo(accountPublic);
-            assertThat(service.getKeyPair(identity.alias()).getPublic().getEncoded()).isEqualTo(identityPublic);
+            assertThat(service.keyPair(account).getPublic().getEncoded()).isEqualTo(accountPublic);
+            assertThat(service.keyPair(identity).getPublic().getEncoded()).isEqualTo(identityPublic);
             assertThat(store.read().orElseThrow().version()).isEqualTo("1");
         }
     }
@@ -290,7 +282,7 @@ class KeyMaterialCapabilitiesTest {
                 "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor identity = descriptor(
                 "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.EC, 1);
-        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options())) {
             assertThatThrownBy(() -> generateKeys(service, account, identity))
                     .isInstanceOf(Exception.class);
             assertThat(store.read()).isEmpty();
@@ -299,13 +291,13 @@ class KeyMaterialCapabilitiesTest {
 
     @Test
     void rejectsNonTlsDescriptorsForCertificateIdentity() throws Exception {
-        try (KeyMaterialService service = service()) {
+        try (OrionKeyMaterial service = service()) {
             KeyMaterialDescriptor signing = descriptor(
                     "signing-v1", KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, 1);
-            service.generateKeyIfMissing(signing, 2048);
-            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, List.of(signing));
-            assertThatThrownBy(() -> capabilities.certificateIdentity(signing, Optional.empty(),
-                    List.of(), TlsClientAuthentication.DISABLED))
+            generateKey(service, signing, 2048);
+
+            assertThatThrownBy(() -> service.certificateIdentity(new TlsMaterialConfiguration(signing, Optional.empty(),
+                    List.of(), TlsClientAuthentication.DISABLED)))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("TLS_IDENTITY");
         }
@@ -320,33 +312,29 @@ class KeyMaterialCapabilitiesTest {
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
         TestCertificateChain.Authority intermediate = TestCertificateChain.intermediate("Intermediate", root);
 
-        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(
-                    service, List.of(identity), List.of(rootDescriptor));
-            CertificateIdentity capability = capabilities.certificateIdentity(identity,
-                    Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED);
-            service.generateKeyIfMissing(identity, 2048);
-            service.save();
-            KeyPair domainKey = service.getKeyPair(identity.alias());
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options())) {
+
+            CertificateIdentity certificate = service.certificateIdentity(new TlsMaterialConfiguration(identity,
+                    Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED));
+            generateKey(service, identity, 2048);
+            KeyPair domainKey = service.keyPair(identity);
             X509Certificate leaf = TestCertificateChain.leaf("orion.example", domainKey, intermediate);
 
-            capability.installCertificateChain(
+            certificate.installCertificateChain(
                     List.of(leaf, intermediate.certificate()),
                     Optional.of(root.certificate()));
 
             assertThat(store.read().orElseThrow().version()).isEqualTo("2");
-            assertThat(capability.certificateChain()).containsExactly(leaf, intermediate.certificate());
-            assertThat(capability.issuerTrustAnchor()).contains(root.certificate());
+            assertThat(certificate.certificateChain()).containsExactly(leaf, intermediate.certificate());
+            assertThat(certificate.issuerTrustAnchor()).contains(root.certificate());
         }
 
-        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(
-                    service, List.of(identity), List.of(rootDescriptor));
-            CertificateIdentity capability = capabilities.certificateIdentity(identity,
-                    Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED);
-            assertThat(capability.certificateChain()).hasSize(2);
-            assertThat(capability.issuerTrustAnchor()).contains(root.certificate());
-            assertThat(capability.createContext().getProtocol()).isEqualTo("TLS");
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options())) {
+            CertificateIdentity certificate = service.certificateIdentity(new TlsMaterialConfiguration(identity,
+                    Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED));
+            assertThat(certificate.certificateChain()).hasSize(2);
+            assertThat(certificate.issuerTrustAnchor()).contains(root.certificate());
+            assertThat(certificate.createContext().getProtocol()).isEqualTo("TLS");
         }
     }
 
@@ -359,36 +347,34 @@ class KeyMaterialCapabilitiesTest {
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
         TestCertificateChain.Authority otherRoot = TestCertificateChain.root("Other Root");
         TestCertificateChain.Authority intermediate = TestCertificateChain.intermediate("Intermediate", root);
-        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(
-                    service, List.of(identity), List.of(rootDescriptor));
-            CertificateIdentity capability = capabilities.certificateIdentity(identity,
-                    Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED);
-            service.generateKeyIfMissing(identity, 2048);
-            service.save();
-            KeyPair domainKey = service.getKeyPair(identity.alias());
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options())) {
+
+            CertificateIdentity certificate = service.certificateIdentity(new TlsMaterialConfiguration(identity,
+                    Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED));
+            generateKey(service, identity, 2048);
+            KeyPair domainKey = service.keyPair(identity);
             KeyPair otherKey = KeyPairGenerator.getInstance("RSA").generateKeyPair();
             X509Certificate validLeaf = TestCertificateChain.leaf("orion.example", domainKey, intermediate);
             X509Certificate wrongLeaf = TestCertificateChain.leaf("other.example", otherKey, intermediate);
             TestCertificateChain.Authority unrelatedIntermediate =
                     TestCertificateChain.intermediate("Unrelated", otherRoot);
 
-            assertThatThrownBy(() -> capability.installCertificateChain(
+            assertThatThrownBy(() -> certificate.installCertificateChain(
                     List.of(wrongLeaf, intermediate.certificate()), Optional.of(root.certificate())))
                     .hasMessageContaining("public key");
-            assertThatThrownBy(() -> capability.installCertificateChain(
+            assertThatThrownBy(() -> certificate.installCertificateChain(
                     List.of(validLeaf, unrelatedIntermediate.certificate()),
                     Optional.of(otherRoot.certificate())))
                     .hasMessageContaining("signature");
-            assertThatThrownBy(() -> capability.installCertificateChain(
+            assertThatThrownBy(() -> certificate.installCertificateChain(
                     List.of(validLeaf, intermediate.certificate()), Optional.of(otherRoot.certificate())))
                     .hasMessageContaining("issuer root");
-            assertThatThrownBy(() -> capability.installCertificateChain(
+            assertThatThrownBy(() -> certificate.installCertificateChain(
                     List.of(validLeaf, intermediate.certificate(), root.certificate()),
                     Optional.of(root.certificate())))
                     .hasMessageContaining("must not include")
                     .hasMessageContaining("root");
-            assertThatThrownBy(() -> capability.installCertificateChain(
+            assertThatThrownBy(() -> certificate.installCertificateChain(
                     List.of(nonX509Certificate(), intermediate.certificate()),
                     Optional.of(root.certificate())))
                     .hasMessageContaining("X.509");
@@ -411,33 +397,29 @@ class KeyMaterialCapabilitiesTest {
         KeyPair issuerSignedClientKey = TestCertificateChain.keyPair();
         X509Certificate issuerSignedClientCertificate = TestCertificateChain.leaf(
                 "issuer-signed-client", issuerSignedClientKey, serverAuthority);
-        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            KeyPair domainKey = service.generateKeyIfMissing(identity, 2048);
-            service.setPrivateKey(
-                    identity,
-                    domainKey,
-                    List.of(TestCertificateChain.leaf("orion.example", domainKey, serverAuthority)));
-            service.setTrustedCertificate(serverRoot, serverAuthority.certificate());
-            service.setTrustedCertificate(clientRoot, clientAuthority.certificate());
-            service.save();
-            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(
-                    service, List.of(identity), List.of(serverRoot, clientRoot));
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options())) {
+            KeyPair domainKey = generateKey(service, identity, 2048);
+            installCertificateChain(service, identity,
+                    List.of(TestCertificateChain.leaf("orion.example", domainKey, serverAuthority)),
+                    Optional.empty(), Optional.empty());
+            setTrustedCertificate(service, serverRoot, serverAuthority.certificate());
+            setTrustedCertificate(service, clientRoot, clientAuthority.certificate());
 
-            CertificateIdentity disabled = capabilities.certificateIdentity(
+            CertificateIdentity disabled = service.certificateIdentity(new TlsMaterialConfiguration(
                     identity,
                     Optional.of(serverRoot),
                     List.of(),
-                    TlsClientAuthentication.DISABLED);
-            CertificateIdentity wanted = capabilities.certificateIdentity(
+                    TlsClientAuthentication.DISABLED));
+            CertificateIdentity wanted = service.certificateIdentity(new TlsMaterialConfiguration(
                     identity,
                     Optional.of(serverRoot),
                     List.of(clientRoot),
-                    TlsClientAuthentication.WANT);
-            CertificateIdentity required = capabilities.certificateIdentity(
+                    TlsClientAuthentication.WANT));
+            CertificateIdentity required = service.certificateIdentity(new TlsMaterialConfiguration(
                     identity,
                     Optional.of(serverRoot),
                     List.of(clientRoot),
-                    TlsClientAuthentication.REQUIRED);
+                    TlsClientAuthentication.REQUIRED));
             SSLContext trustedClient = clientContext(
                     serverAuthority.certificate(), trustedClientKey, trustedClientCertificate);
             SSLContext issuerSignedClient = clientContext(
@@ -450,18 +432,18 @@ class KeyMaterialCapabilitiesTest {
             assertThat(handshake(required, trustedClient)).isEqualTo(new HandshakeResult(true, true));
             assertThat(handshake(required, issuerSignedClient).successful()).isFalse();
 
-            CertificateIdentity sharedRootRoles = capabilities.certificateIdentity(
+            CertificateIdentity sharedRootRoles = service.certificateIdentity(new TlsMaterialConfiguration(
                     identity,
                     Optional.of(serverRoot),
                     List.of(clientRoot, serverRoot),
-                    TlsClientAuthentication.REQUIRED);
+                    TlsClientAuthentication.REQUIRED));
             assertThat(handshake(sharedRootRoles, issuerSignedClient))
                     .isEqualTo(new HandshakeResult(true, true));
-            assertThatThrownBy(() -> capabilities.certificateIdentity(
+            assertThatThrownBy(() -> service.certificateIdentity(new TlsMaterialConfiguration(
                     identity,
                     Optional.of(serverRoot),
                     List.of(),
-                    TlsClientAuthentication.REQUIRED))
+                    TlsClientAuthentication.REQUIRED)))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("client trust");
         }
@@ -575,22 +557,21 @@ class KeyMaterialCapabilitiesTest {
     }
 
     @Test
-    void rejectsPurposeSpecificCapabilityMismatch() throws Exception {
-        try (KeyMaterialService service = service()) {
+    void rejectsSigningWithSshOnlyMaterial() throws Exception {
+        try (OrionKeyMaterial service = service()) {
             KeyMaterialDescriptor ssh = descriptor(
                     "ssh-host-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.RSA, 1);
-            service.generateKeyIfMissing(ssh, 2048);
-            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, List.of(ssh));
+            generateKey(service, ssh, 2048);
 
-            assertThatThrownBy(() -> capabilities.signing(ssh))
+            assertThatThrownBy(() -> service.sign(ssh, new byte[]{1}))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("SERVER_SIGNING");
+                    .hasMessageContaining("signing");
         }
     }
 
     @Test
     void rejectsMixedPurposeVerificationMaterial() throws Exception {
-        try (KeyMaterialService service = service()) {
+        try (OrionKeyMaterial service = service()) {
             KeyMaterialDescriptor signing = descriptor(
                     "server-signing-v1",
                     KeyMaterialPurpose.SERVER_SIGNING,
@@ -601,17 +582,45 @@ class KeyMaterialCapabilitiesTest {
                     KeyMaterialPurpose.CERTIFICATE_AUTHORITY,
                     KeyMaterialAlgorithm.RSA,
                     1);
-            service.generateKeyIfMissing(signing, 2048);
-            service.generateKeyIfMissing(ca, 2048);
-            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, List.of(signing, ca));
+            generateKey(service, signing, 2048);
+            generateKey(service, ca, 2048);
 
-            assertThatThrownBy(() -> capabilities.verification(List.of(signing, ca)))
+            assertThatThrownBy(() -> service.verification(List.of(signing, ca)))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("purpose");
         }
     }
 
-    private static void generateKeys(KeyMaterialService service, KeyMaterialDescriptor first,
+    private static KeyPair generateKey(OrionKeyMaterial material, KeyMaterialDescriptor descriptor,
+            int keySize) throws Exception {
+        material.withModification(modification -> {
+            modification.generateKey(descriptor, keySize);
+            modification.apply();
+        });
+        return material.keyPair(descriptor);
+    }
+
+    private static void setTrustedCertificate(OrionKeyMaterial material, TrustedCertificateDescriptor descriptor,
+            X509Certificate certificate) throws Exception {
+        material.withModification(modification -> {
+            modification.setTrustedCertificate(descriptor, certificate);
+            modification.apply();
+        });
+    }
+
+    private static void installCertificateChain(OrionKeyMaterial material, KeyMaterialDescriptor identity,
+            List<X509Certificate> chain, Optional<TrustedCertificateDescriptor> issuer,
+            Optional<X509Certificate> root) throws Exception {
+        material.withModification(modification -> {
+            if (root.isPresent()) {
+                modification.setTrustedCertificate(issuer.orElseThrow(), root.orElseThrow());
+            }
+            modification.installCertificateChain(identity, chain, issuer);
+            modification.apply();
+        });
+    }
+
+    private static void generateKeys(OrionKeyMaterial service, KeyMaterialDescriptor first,
             KeyMaterialDescriptor second) throws Exception {
         KeyMaterialModification modification = service.modify();
         try {
@@ -623,8 +632,8 @@ class KeyMaterialCapabilitiesTest {
         }
     }
 
-    private static KeyMaterialService service() throws Exception {
-        return KeyMaterialService.open(new InMemoryKeyMaterialContentStore(), options());
+    private static OrionKeyMaterial service() throws Exception {
+        return OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options());
     }
 
     private static ConfigurationSecretContext context() {
@@ -779,14 +788,14 @@ class KeyMaterialCapabilitiesTest {
     }
 
     private static HandshakeResult handshake(
-            CertificateIdentity capability,
+            CertificateIdentity certificate,
             SSLContext clientContext) throws Exception {
-        try (SSLServerSocket serverSocket = (SSLServerSocket) capability
+        try (SSLServerSocket serverSocket = (SSLServerSocket) certificate
                 .createContext()
                 .getServerSocketFactory()
                 .createServerSocket(0);
                 var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            configureClientAuthentication(serverSocket, capability.clientAuthentication());
+            configureClientAuthentication(serverSocket, certificate.clientAuthentication());
             Future<ServerHandshakeResult> server = executor.submit(() -> acceptHandshake(serverSocket));
             boolean clientSucceeded = clientHandshake(clientContext, serverSocket.getLocalPort());
             ServerHandshakeResult serverResult;

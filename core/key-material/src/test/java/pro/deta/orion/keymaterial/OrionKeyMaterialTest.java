@@ -55,10 +55,10 @@ class OrionKeyMaterialTest {
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
             service.generateKeyIfMissing(old, 2048);
             service.generateKeyIfMissing(active, 2048);
-            oldSignature = KeyMaterialCapabilities.open(service, List.of(old, active))
-                    .signing(old)
-                    .sign(payload);
             service.save();
+        }
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options())) {
+            oldSignature = material.sign(old, payload);
         }
 
         SigningMaterialSet signing = new SigningMaterialSet(active, List.of(old));
