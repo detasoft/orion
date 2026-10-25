@@ -55,10 +55,10 @@ class S3RepositoryManagementIT {
                             EVENTS, configured, List.of(organization), material);
             ConfigurationSecrets secrets =
                     new ConfigurationSecrets(
-                            () -> fixture.desired().acl().configuration().result()
+                            () -> fixture.desired().editor().current().result()
                                     .valueOrFailure("Cannot read configuration document"), material);
             configuredFactory.activate(
-                    () -> fixture.desired().acl().configuration().result()
+                    () -> fixture.desired().editor().current().result()
                             .valueOrFailure("Cannot read configuration document"),
                     secrets,
                     name -> false);
@@ -79,8 +79,7 @@ class S3RepositoryManagementIT {
             assertThat(local.repositoryNames()).isEmpty();
             assertThat(
                             fixture.desired()
-                                    .acl()
-                                    .configuration()
+                                    .editor().current()
                                     .result().valueOrFailure("Cannot read configuration document")
                                     .organizations()
                                     .getFirst()
@@ -98,7 +97,7 @@ class S3RepositoryManagementIT {
                             EVENTS.manager());
             NativeGitRepositoryProvider reopened = new NativeGitRepositoryProvider(reopenedFactory);
             reopenedFactory.activate(
-                    () -> fixture.desired().acl().configuration().result()
+                    () -> fixture.desired().editor().current().result()
                             .valueOrFailure("Cannot read configuration document"),
                     secrets,
                     name -> false);

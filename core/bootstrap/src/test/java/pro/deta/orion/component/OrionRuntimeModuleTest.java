@@ -270,6 +270,7 @@ class OrionRuntimeModuleTest {
         assertThat(component.runtimeStateMachine().childStatuses().keySet()).containsExactly(
                 "executor",
                 "event-manager",
+                "configuration",
                 "access-control",
                 "agent-session-server",
                 "transports");

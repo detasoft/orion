@@ -74,15 +74,21 @@ class ConfiguredStorageManagementTest {
                                 1), List.of()),
                         new BootstrapConfiguration(),
                         editor);
+        editor.onStart();
         acl.onStart();
         management = new ConfiguredStorageManagement(acl, editor, material, repositories);
         actor = SecurityContext.createContext().withUserIdentity(
-                new InternalUserImpl("alice", organization, () -> acl.configuration().result()
+                new InternalUserImpl("alice", organization, () -> editor.current().result()
                         .valueOrFailure("Cannot read configuration document")));
     }
 
     @AfterEach
-    void close() { acl.onStop(); repositories.close(); material.close(); }
+    void close() {
+        acl.onStop();
+        editor.onStop();
+        repositories.close();
+        material.close();
+    }
 
     @Test
     void persistsEncryptedConnectionAndClearsInputWithoutExposingSecrets() {
@@ -96,7 +102,7 @@ class ConfiguredStorageManagementTest {
                 .doesNotContain("private-access-secret");
         Connection.S3 connection = (Connection.S3) activeDocument().organizations()
                 .getFirst().connections().getFirst();
-        char[] resolved = new ConfigurationSecrets(() -> acl.configuration().result()
+        char[] resolved = new ConfigurationSecrets(() -> editor.current().result()
                 .valueOrFailure("Cannot read configuration document"), material)
                 .resolveOrganization(activeDocument(), organization, connection.secretKey().orElseThrow());
         assertThat(resolved).isEqualTo("private-access-secret".toCharArray());
@@ -485,12 +491,12 @@ class ConfiguredStorageManagementTest {
 
     private String revision() {
         EVENTS.await();
-        return ((OrionRevision.Stored) acl.configuration().revision()).value();
+        return ((OrionRevision.Stored) editor.current().revision()).value();
     }
 
     private OrionDocument activeDocument() {
         EVENTS.await();
-        return acl.configuration().result().valueOrFailure("Cannot read configuration document");
+        return editor.current().result().valueOrFailure("Cannot read configuration document");
     }
 
     private StorageManagement.S3Input input(char[] secret) {

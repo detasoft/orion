@@ -380,8 +380,7 @@ class RuntimeHttpAdminApiIT {
             AccessControlUserUpdate update = new AccessControlUserUpdate(
                 "token-user", "token-user@example.test",
                 List.of(new AccessControlCredentialUpdate(CredentialType.SHA1, hash)), List.of());
-            TestRuntimeBootstrap.withAccess(
-                    orion.accessControlService(), orion.component().configurationEditor(),
+            TestRuntimeBootstrap.withAccess(orion.component().configurationEditor(),
                     new pro.deta.orion.internal.ChangeMetadata(
                             new UserEmail(update.id(), update.email()),
                             "createOrUpdateUser() " + update.id()),

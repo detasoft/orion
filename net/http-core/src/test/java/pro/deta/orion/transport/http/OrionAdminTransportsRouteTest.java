@@ -106,13 +106,13 @@ class OrionAdminTransportsRouteTest {
                 List.of(), List.of()),
                 List.of()), Optional.of("test-revision"));
         JettyHTTPServer server = new JettyHTTPServer(
-                configuration, desiredState.acl(), OrionKeyMaterial.unavailable(), servlet, null, null);
+                configuration, desiredState.editor(), OrionKeyMaterial.unavailable(), servlet, null, null);
         server.onStart();
 
         try {
             OrionAdminTransportsRoute route = new OrionAdminTransportsRoute(
                     configuration,
-                    desiredState.acl(),
+                    desiredState.editor(),
                     () -> server,
                     null,
                     null);
@@ -150,7 +150,7 @@ class OrionAdminTransportsRouteTest {
                         List.of(), List.of()),
                 List.of()), Optional.of("test-revision"));
         JettyHTTPServer server = new JettyHTTPServer(
-                configuration, desiredState.acl(), OrionKeyMaterial.unavailable(), null, null, null) {
+                configuration, desiredState.editor(), OrionKeyMaterial.unavailable(), null, null, null) {
             @Override
             public int boundHttpsPort() {
                 return 9443;
@@ -158,7 +158,7 @@ class OrionAdminTransportsRouteTest {
         };
         configuration.setTransport(null);
         OrionAdminTransportsRoute route = new OrionAdminTransportsRoute(
-                configuration, desiredState.acl(), () -> server, null, null);
+                configuration, desiredState.editor(), () -> server, null, null);
 
         OrionAdminTransportsRoute.AdminTransportsResponse response =
                 (OrionAdminTransportsRoute.AdminTransportsResponse) route.doGet(null).body();

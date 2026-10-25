@@ -93,7 +93,7 @@ class BootstrapProxyEndpointIT {
             var repository = upstream.repositoryProvider().create("bootstrap-inputs")
                     .valueOrFailure("bootstrap upstream");
             var document = OrionXml.read(new ByteArrayInputStream(
-                    TestRuntimeBootstrap.configurationXml(upstream.accessControlService())));
+                    TestRuntimeBootstrap.configurationXml(upstream.component().configurationEditor())));
             AccessControl currentAcl = document.system().accessControl();
             User currentRoot = currentAcl.users().getFirst();
             List<Grant> grants = new ArrayList<>(currentRoot.grants());
@@ -139,7 +139,7 @@ class BootstrapProxyEndpointIT {
                                 ? component.httpTransport().boundHttpPort() : component.sshTransport().boundPort();
                         if (launch == 0) {
                             var acl = component.orionAccessControlService();
-                            TestRuntimeBootstrap.withAccess(acl, component.configurationEditor(),
+                            TestRuntimeBootstrap.withAccess(component.configurationEditor(),
                     new pro.deta.orion.internal.ChangeMetadata(UserEmail.EMPTY, "add root test key"), edit -> {
                                 assertThat(edit.addSshCredentials("root",
                                         List.of(PublicKeyEntry.toString(rootKey.getPublic()))))
@@ -181,8 +181,7 @@ class BootstrapProxyEndpointIT {
                                     user("writer", writerKey, ENDPOINT, true),
                                     user("reader", readerKey, ENDPOINT, false),
                                     user("outsider", outsiderKey, "ordinary", true))) {
-                                TestRuntimeBootstrap.withAccess(
-                                        acl, component.configurationEditor(),
+                                TestRuntimeBootstrap.withAccess(component.configurationEditor(),
                                         new pro.deta.orion.internal.ChangeMetadata(
                                                 new UserEmail(user.id(), user.email()),
                                                 "createOrUpdateUser() " + user.id()),

@@ -7,7 +7,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.acl.OrganizationAccounts;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.auth.SecurityContext;
-import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
@@ -21,17 +21,17 @@ import java.util.Map;
 /** Creates email-bound invitations for system users and organization members. */
 public final class OrionAdminInvitationsRoute extends BaseAdminRoute {
     private final OrganizationAccounts accounts;
-    private final OrionAccessControlService configurationService;
+    private final OrionConfigurationEditor editor;
     private final OrionOidcRoute oidc;
     private final ObjectMapper mapper;
     private final NativeGitRepositoryFactory repositories;
 
     @Inject
-    public OrionAdminInvitationsRoute(OrganizationAccounts accounts, OrionAccessControlService configurationService,
+    public OrionAdminInvitationsRoute(OrganizationAccounts accounts, OrionConfigurationEditor editor,
             OrionOidcRoute oidc, ObjectMapper mapper, NativeGitRepositoryFactory repositories) {
         super("/api/admin/invitations", OrionHttpRouteDefinition.Method.GET, OrionHttpRouteDefinition.Method.POST);
         this.accounts = accounts;
-        this.configurationService = configurationService;
+        this.editor = editor;
         this.oidc = oidc;
         this.mapper = mapper;
         this.repositories = repositories;
@@ -40,7 +40,7 @@ public final class OrionAdminInvitationsRoute extends BaseAdminRoute {
     @Override
     protected OrionHttpResponse doGet(HttpServletRequest request) {
         List<Map<String, Object>> organizations = new ArrayList<>();
-        for (OrionDocument.Organization organization : configurationService.configuration().result()
+        for (OrionDocument.Organization organization : editor.current().result()
                 .valueOrFailure("Cannot read configuration document")
                 .organizations()) {
             organizations.add(Map.of("id", organization.id().value(), "name",

@@ -150,7 +150,7 @@ class OrionStartupIT {
         OrionDocument loadedDocument;
 
         try (StartedOrion orion = startServerWithConfig(configuration)) {
-            OrionDocumentRevision configurationFile = orion.accessControlService().configuration();
+            OrionDocumentRevision configurationFile = orion.component().configurationEditor().current();
             loadedDocument = configurationFile.result().valueOrFailure("Cannot read configuration document");
 
             assertThat(hasUser(loadedDocument.system().accessControl(), "remote-user")).isTrue();
@@ -175,7 +175,7 @@ class OrionStartupIT {
 
         try (StartedOrion orion = startServerWithConfig(configuration)) {
             OrionDocument restartedDocument = OrionXml.read(new ByteArrayInputStream(
-                    TestRuntimeBootstrap.configurationXml(orion.accessControlService())));
+                    TestRuntimeBootstrap.configurationXml(orion.component().configurationEditor())));
 
             assertThat(orion.accessControlService().userExists("remote-user")).isFalse();
             assertThat(orion.accessControlService().userExists("saved-remote-user")).isTrue();
@@ -200,8 +200,7 @@ class OrionStartupIT {
                     .doesNotContain("<AccessControl");
             AccessControlUserUpdate update = new AccessControlUserUpdate(
                     "new-user", "new@example.test", List.of(), List.of());
-            TestRuntimeBootstrap.withAccess(
-                    orion.accessControlService(), orion.component().configurationEditor(),
+            TestRuntimeBootstrap.withAccess(orion.component().configurationEditor(),
                     new pro.deta.orion.internal.ChangeMetadata(
                             new UserEmail(update.id(), update.email()),
                             "createOrUpdateUser() " + update.id()),

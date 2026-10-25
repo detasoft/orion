@@ -46,8 +46,8 @@ class OrionAdminProxiesRouteTest {
     private final NativeGitRepositoryFactory provider = new NativeGitRepositoryFactory(
             pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager()));
     private final NativeGitRepositoryProvider backend = provider.provider();
-    private final OrionAdminProxiesRoute route = new OrionAdminProxiesRoute(
-            desired.acl(), provider, null, null, null, mapper);
+    private final OrionAdminProxiesRoute route =
+            new OrionAdminProxiesRoute(provider, desired.editor(), null, null, mapper);
     private final OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
             new OrionHttpRouteRegistry(Set.of(route)), new OrionHttpResponseWriter(mapper));
 

@@ -53,6 +53,7 @@ public final class TestConfiguration implements AutoCloseable {
         acl = new OrionAccessControlServiceImpl(new OrionPasswordHashingService(), new RootPasswordReset(false),
                 material, signing, bootstrap, editor);
         events.own(this);
+        editor.onStart();
         acl.onStart();
     }
 
@@ -69,7 +70,7 @@ public final class TestConfiguration implements AutoCloseable {
     }
 
     public ConfigurationSecrets secrets() {
-        return new ConfigurationSecrets(() -> acl.configuration().result()
+        return new ConfigurationSecrets(() -> editor.current().result()
                 .valueOrFailure("Cannot read configuration document"), material);
     }
 
@@ -120,6 +121,7 @@ public final class TestConfiguration implements AutoCloseable {
     @Override
     public void close() {
         acl.onStop();
+        editor.onStop();
     }
 
     private final class MemoryStorage implements OrionVersionedConfigurationStorage {

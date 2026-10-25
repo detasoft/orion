@@ -63,7 +63,7 @@ class BootstrapProxyTransportIT {
             NativeGitRepository repository = upstream.repositoryProvider().create("bootstrap-inputs")
                     .valueOrFailure("upstream repository");
             byte[] originalConfiguration =
-                    TestRuntimeBootstrap.configurationXml(upstream.accessControlService());
+                    TestRuntimeBootstrap.configurationXml(upstream.component().configurationEditor());
             repository
                     .files()
                     .withAccess(

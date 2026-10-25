@@ -74,7 +74,7 @@ final class RemoteBootstrapTestSupport {
             if (((SshCredentialListResult.Success) listed).credentials().isEmpty()) {
                 TestBearerTokens.enrollRootKey(upstream.accessControlService(), upstream.component().configurationEditor(), key);
             } else {
-                TestRuntimeBootstrap.withAccess(upstream.accessControlService(), upstream.component().configurationEditor(),
+                TestRuntimeBootstrap.withAccess(upstream.component().configurationEditor(),
                     new pro.deta.orion.internal.ChangeMetadata(UserEmail.EMPTY, "add root test key"), edit -> {
                     assertThat(edit
                         .addSshCredentials("root", List.of(PublicKeyEntry.toString(key.getPublic()))))

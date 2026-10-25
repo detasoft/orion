@@ -60,24 +60,24 @@ class BootstrapConnectionDecisionTest {
         try (Fixture fixture = new Fixture(directory)) {
             fixture.start();
             DecisionRequest request = fixture.decisions.list(ACTOR).getFirst();
-            assertThat(request.description()).contains(fixture.previous.upstream(fixture.acl.configuration()
+            assertThat(request.description()).contains(fixture.previous.upstream(fixture.editor.current()
                     .result().valueOrFailure("Cannot read configuration document").system()).toString(),
                     fixture.upstream.toUri().toString());
-            assertThat(fixture.acl.configuration().result()
+            assertThat(fixture.editor.current().result()
                     .valueOrFailure("Cannot read configuration document")
                     .system().proxies())
                     .containsExactly(fixture.previous);
             fixture.decisions.decide(request.id(), new DecisionAnswer(0, ACTOR)).valueOrFailure("approve");
             EVENTS.await();
-            assertThat(fixture.acl.configuration().result()
+            assertThat(fixture.editor.current().result()
                     .valueOrFailure("Cannot read configuration document")
                     .system().proxies()).singleElement()
-                    .satisfies(binding -> assertThat(binding.upstream(fixture.acl.configuration().result()
+                    .satisfies(binding -> assertThat(binding.upstream(fixture.editor.current().result()
                             .valueOrFailure("Cannot read configuration document")
                             .system())).isEqualTo(fixture.upstream.toUri()));
             assertThat(fixture.decisions.list(ACTOR)).isEmpty();
             assertThat(fixture.storage.load().result().isFailure()).isFalse();
-            assertThat(fixture.provider.bootstrapChanges(fixture.acl.configuration().result()
+            assertThat(fixture.provider.bootstrapChanges(fixture.editor.current().result()
                     .valueOrFailure("Cannot read configuration document"))).isEmpty();
         }
     }
@@ -86,15 +86,15 @@ class BootstrapConnectionDecisionTest {
     void rejectionKeepsTheYamlConnectionAndDoesNotRewriteXml() throws Exception {
         try (Fixture fixture = new Fixture(directory)) {
             fixture.start();
-            String revision = ((OrionRevision.Stored) fixture.acl.configuration().revision()).value();
+            String revision = ((OrionRevision.Stored) fixture.editor.current().revision()).value();
             fixture.decisions.decide(fixture.decisions.list(ACTOR).getFirst().id(), new DecisionAnswer(1, ACTOR))
                     .valueOrFailure("reject");
-            assertThat(fixture.acl.configuration().revision()).isEqualTo(new OrionRevision.Stored(revision));
+            assertThat(fixture.editor.current().revision()).isEqualTo(new OrionRevision.Stored(revision));
             assertThat(fixture.storage.load().result().isFailure()).isFalse();
             assertThat(fixture.provider.retry(fixture.previous.alias(),
-                    () -> fixture.acl.configuration().result()
+                    () -> fixture.editor.current().result()
                             .valueOrFailure("Cannot read configuration document"), fixture.secrets).isFailure()).isFalse();
-            assertThat(fixture.acl.configuration().result()
+            assertThat(fixture.editor.current().result()
                     .valueOrFailure("Cannot read configuration document")
                     .system().proxies())
                     .containsExactly(fixture.previous);
@@ -111,7 +111,7 @@ class BootstrapConnectionDecisionTest {
                         Optional.empty(), Optional.empty()), "main");
             fixture.editor
                     .edit(
-                            fixture.acl.configuration().revision(),
+                            fixture.editor.current().revision(),
                             new ChangeMetadata(UserEmail.EMPTY, "unrelated edit"))
                     .update(
                             document ->
@@ -128,14 +128,14 @@ class BootstrapConnectionDecisionTest {
             EVENTS.await();
             fixture.decisions.decide(request.id(), new DecisionAnswer(0, ACTOR)).valueOrFailure("approve");
             EVENTS.await();
-            assertThat(fixture.acl.configuration().result()
+            assertThat(fixture.editor.current().result()
                     .valueOrFailure("Cannot read configuration document")
                     .system().proxies()).contains(unrelated);
-            assertThat(fixture.acl.configuration().result()
+            assertThat(fixture.editor.current().result()
                     .valueOrFailure("Cannot read configuration document")
                     .system().proxies()).filteredOn(
                     binding -> binding.alias().equals(fixture.previous.alias())).singleElement()
-                    .satisfies(binding -> assertThat(binding.upstream(fixture.acl.configuration().result()
+                    .satisfies(binding -> assertThat(binding.upstream(fixture.editor.current().result()
                             .valueOrFailure("Cannot read configuration document")
                             .system())).isEqualTo(fixture.upstream.toUri()));
         }
@@ -147,19 +147,19 @@ class BootstrapConnectionDecisionTest {
             fixture.start();
             DecisionRequest request = fixture.decisions.list(ACTOR).getFirst();
             GitProxyBinding concurrent = new GitProxyBinding(fixture.previous.alias(),
-                new GitProxyBinding.Direct(fixture.previous.upstream(fixture.acl.configuration().result()
+                new GitProxyBinding.Direct(fixture.previous.upstream(fixture.editor.current().result()
                         .valueOrFailure("Cannot read configuration document")
                         .system()), GitCredentialKind.NONE, Optional.empty(), Optional.empty()), "refs/heads/other");
             fixture.editor
                     .edit(
-                            fixture.acl.configuration().revision(),
+                            fixture.editor.current().revision(),
                             new ChangeMetadata(UserEmail.EMPTY, "concurrent edit"))
                     .update(document -> withBinding(concurrent))
                     .apply();
             EVENTS.await();
             fixture.decisions.decide(request.id(), new DecisionAnswer(0, ACTOR)).valueOrFailure("approve");
             EVENTS.await();
-            assertThat(fixture.acl.configuration().result()
+            assertThat(fixture.editor.current().result()
                     .valueOrFailure("Cannot read configuration document")
                     .system().proxies()).containsExactly(concurrent);
             assertThat(fixture.storage.load().result().isFailure()).isFalse();
@@ -236,10 +236,11 @@ class BootstrapConnectionDecisionTest {
                             material, new SigningMaterialSet(signing, List.of()),
                             new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
                             editor);
+            editor.onStart();
             acl.onStart();
             secrets =
                     new ConfigurationSecrets(
-                            () -> acl.configuration().result()
+                            () -> editor.current().result()
                                     .valueOrFailure("Cannot read configuration document"), material);
         }
 
@@ -248,15 +249,16 @@ class BootstrapConnectionDecisionTest {
                             configured,
                             provider,
                             material, secrets,
-                    acl, editor, decisions,
+                    editor, decisions,
                     OrionRuntimeModule.connectionFailures(decisions),
-                    OrionRuntimeModule.proxyHostKeyDecisions(acl, editor, record -> { })).run();
+                    OrionRuntimeModule.proxyHostKeyDecisions(editor, record -> { })).run();
             assertThat(decisions.list(ACTOR)).hasSize(1);
         }
 
         @Override
         public void close() {
             acl.onStop();
+            editor.onStop();
             decisions.close();
             transport.close();
             material.close();

@@ -8,6 +8,7 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.acl.OrganizationAccounts;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
+import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.util.OrionUtils;
 import pro.deta.orion.auth.SecurityContext;
@@ -62,19 +63,20 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     private final SecureRandom random = new SecureRandom();
     private final OrganizationAccounts accounts;
     private final OrionAccessControlServiceImpl acl;
+    private final OrionConfigurationEditor editor;
     private final ConfigurationSecrets secrets;
     private final ObjectMapper mapper;
     private final OidcClient client;
 
     @Inject
-    public OrionOidcRoute(OrganizationAccounts accounts, OrionAccessControlServiceImpl acl,
+    public OrionOidcRoute(OrganizationAccounts accounts, OrionAccessControlServiceImpl acl, OrionConfigurationEditor editor,
             ConfigurationSecrets secrets, ObjectMapper mapper,
             ConfigurationContext configuration, OrionKeyMaterial keyMaterial) {
-        this(accounts, acl, secrets, mapper, Clock.systemUTC(),
+        this(accounts, acl, editor, secrets, mapper, Clock.systemUTC(),
                 configuration.getBaseDir().resolve("oidc-sessions"), keyMaterial);
     }
 
-    OrionOidcRoute(OrganizationAccounts accounts, OrionAccessControlServiceImpl acl,
+    OrionOidcRoute(OrganizationAccounts accounts, OrionAccessControlServiceImpl acl, OrionConfigurationEditor editor,
             ConfigurationSecrets secrets, ObjectMapper mapper, Clock clock,
             Path sessionDirectory, OrionKeyMaterial keyMaterial) {
         super("/api/auth/**", OrionHttpRouteDefinition.Method.GET, OrionHttpRouteDefinition.Method.POST);
@@ -83,6 +85,7 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
         this.keyMaterial = keyMaterial;
         this.accounts = accounts;
         this.acl = acl;
+        this.editor = editor;
         this.secrets = secrets;
         this.mapper = mapper;
         this.client = new OidcClient(mapper);
@@ -208,9 +211,9 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
             throw new IllegalArgumentException("Authorization issuer mismatch");
         }
         char[] secret = attempt.organization() == null
-                ? secrets.resolveSystem(acl.configuration().result()
+                ? secrets.resolveSystem(editor.current().result()
                         .valueOrFailure("Cannot read configuration document"), attempt.provider().secret())
-                : secrets.resolveOrganization(acl.configuration().result()
+                : secrets.resolveOrganization(editor.current().result()
                         .valueOrFailure("Cannot read configuration document"), attempt.organization(),
                         attempt.provider().secret());
         OidcClient.Identity identity;
@@ -435,7 +438,7 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     }
 
     private List<OidcProvider> configuredProviders(OrganizationId organization) {
-        return organization == null ? acl.configuration().result()
+        return organization == null ? editor.current().result()
                 .valueOrFailure("Cannot read configuration document")
                 .system().oidcProviders()
                 : accounts.organization(organization).oidcProviders();
@@ -458,7 +461,7 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     }
 
     private String systemProviderVersion(OidcProvider provider) {
-        for (ConfigurationSecret secret : acl.configuration().result()
+        for (ConfigurationSecret secret : editor.current().result()
                 .valueOrFailure("Cannot read configuration document")
                 .system().secrets()) {
             if (secret.id().equals(provider.secret())) return sessionKey(secret.envelope());
@@ -475,7 +478,7 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     }
 
     URI publicOrigin() {
-        URI uri = acl.configuration().result()
+        URI uri = editor.current().result()
                 .valueOrFailure("Cannot read configuration document")
                 .system().https().orElseThrow().publicUrl();
         if (uri == null || !"https".equals(uri.getScheme()) || uri.getHost() == null

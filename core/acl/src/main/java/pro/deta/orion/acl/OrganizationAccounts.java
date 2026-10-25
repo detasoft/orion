@@ -6,7 +6,6 @@ import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.config.OrionConfigurationModification;
 import pro.deta.orion.util.OrionUtils;
 import jakarta.inject.Singleton;
-import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.acl.Credential;
@@ -38,14 +37,12 @@ import java.util.function.UnaryOperator;
 @Singleton
 public final class OrganizationAccounts {
     private final OrionConfigurationEditor editor;
-    private final OrionAccessControlService configurationService;
     private final Clock clock = Clock.systemUTC();
     private final SecureRandom random = new SecureRandom();
 
     @Inject
-    public OrganizationAccounts(OrionConfigurationEditor editor, OrionAccessControlService configurationService) {
+    public OrganizationAccounts(OrionConfigurationEditor editor) {
         this.editor = editor;
-        this.configurationService = configurationService;
     }
 
     public InvitationLink invite(OrganizationId organizationId, String email, UserEmail author) {
@@ -206,7 +203,7 @@ public final class OrganizationAccounts {
     }
 
     public OrionDocument.Organization organization(OrganizationId id) {
-        for (OrionDocument.Organization organization : configurationService.configuration().result()
+        for (OrionDocument.Organization organization : editor.current().result()
                 .valueOrFailure("Cannot read configuration document")
                 .organizations()) {
             if (organization.id().equals(id)) {
@@ -283,7 +280,7 @@ public final class OrganizationAccounts {
 
     private void update(OrganizationId id, UnaryOperator<OrionDocument.Organization> operation,
             String message, UserEmail author) {
-        OrionRevision revision = configurationService.configuration().revision();
+        OrionRevision revision = editor.current().revision();
         editor.edit(revision, new ChangeMetadata(author, message)).update(document -> {
             List<OrionDocument.Organization> organizations = new ArrayList<>();
             boolean found = false;

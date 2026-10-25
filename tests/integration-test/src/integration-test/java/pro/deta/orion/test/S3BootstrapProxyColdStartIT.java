@@ -101,8 +101,7 @@ class S3BootstrapProxyColdStartIT {
                     signature = seeded.sign(active, payload);
                     OrionDocument document = OrionDocument.withAccessControl(
                             DefaultAccessControl.create("proxy-cold-start-password-hash"));
-                    ConfigurationSecrets secrets = new ConfigurationSecrets(() -> document,
-                            seeded.keyMaterial());
+                    ConfigurationSecrets secrets = new ConfigurationSecrets(() -> document, seeded);
                     ByteArrayOutputStream output = new ByteArrayOutputStream();
                     OrionXml.write(secrets.createSystem(document, SECRET_ID, SECRET_VALUE.toCharArray()), output);
                     xml = output.toByteArray();
@@ -145,7 +144,7 @@ class S3BootstrapProxyColdStartIT {
                         lifecycle.waitForStarting();
                         loadedConfiguration =
                                 TestRuntimeBootstrap.configurationXml(
-                                        component.orionAccessControlService());
+                                        component.configurationEditor());
                         OrionDocument loaded = OrionXml.read(new ByteArrayInputStream(loadedConfiguration));
                         ConfigurationSecrets secrets = new ConfigurationSecrets(() -> loaded,
                                 bootstrap.keyMaterial());

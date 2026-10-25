@@ -82,12 +82,13 @@ class NativeSshCredentialPersistenceTest {
                 EVENTS.manager());
         OrionAccessControlServiceImpl service = service(editor);
         try {
+            editor.onStart();
             service.onStart();
             assertThat(service.authenticateSshUser("alice", key.getPublic().getEncoded()))
                     .isInstanceOf(AuthenticationResult.Failure.class);
             AccessControlAccess access =
                     service.createAccess(
-                            service.configuration().revision(),
+                            editor.current().revision(),
                             new ChangeMetadata(
                                     new UserEmail("alice", "alice@example.test"),
                                     "add SSH credentials for alice"));
@@ -104,17 +105,19 @@ class NativeSshCredentialPersistenceTest {
                     .isInstanceOf(AuthenticationResult.Success.class);
         } finally {
             service.onStop();
+            editor.onStop();
         }
-        OrionAccessControlServiceImpl reopened =
-                service(new OrionConfigurationEditor(
+        OrionConfigurationEditor reopenedEditor = new OrionConfigurationEditor(
                         new NativeGitOrionConfigurationStorage(
                                 NativeGitRepositoryProvider.file(root, EVENTS.manager()),
                                 "acl",
                                 "refs/heads/main",
                                 "users.xml"),
                         pro.deta.orion.keymaterial.OrionKeyMaterial.unavailable(),
-                        EVENTS.manager()));
+                        EVENTS.manager());
+        OrionAccessControlServiceImpl reopened = service(reopenedEditor);
         try {
+            reopenedEditor.onStart();
             reopened.onStart();
             assertThat(reopened.authenticateSshUser("alice", key.getPublic().getEncoded()))
                     .isInstanceOf(AuthenticationResult.Success.class);
@@ -122,6 +125,7 @@ class NativeSshCredentialPersistenceTest {
                     .containsExactly(unchanged);
         } finally {
             reopened.onStop();
+            reopenedEditor.onStop();
         }
     }
 

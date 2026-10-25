@@ -63,7 +63,7 @@ public class ACMECertificateChallengeTest {
         WaitingChallengeIssuer issuer = new WaitingChallengeIssuer(challengeService);
         try (OrionKeyMaterial material = keyMaterial()) {
             AcmeCertificateService service = new AcmeCertificateService(
-                    desiredStateWithAcme().acl(),
+                    desiredStateWithAcme().editor(),
                     material,
                     issuer, null);
             try (AcmeHttpTestServer server = startHttp(
@@ -112,7 +112,7 @@ public class ACMECertificateChallengeTest {
                 new OrionHttpResponseWriter(new ObjectMapper()));
         JettyHTTPServer server = new JettyHTTPServer(
                 orionConfiguration,
-                desiredStateWithoutHttps().acl(),
+                desiredStateWithoutHttps().editor(),
                 OrionKeyMaterial.unavailable(),
                 rootServlet,
                 null, null);
@@ -151,7 +151,7 @@ public class ACMECertificateChallengeTest {
                 new OrionHttpResponseWriter(new ObjectMapper()));
         JettyHTTPServer server = new JettyHTTPServer(
                 orionConfiguration,
-                desiredStateWithoutHttps().acl(),
+                desiredStateWithoutHttps().editor(),
                 OrionKeyMaterial.unavailable(),
                 rootServlet,
                 null, null);
@@ -169,7 +169,7 @@ public class ACMECertificateChallengeTest {
         TestConfiguration desiredState = new TestConfiguration(EVENTS);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of(), List.of(),
-                List.of()),
+                List.of(), List.of()),
                 List.of()), Optional.of("test-revision"));
         return desiredState;
     }
@@ -199,7 +199,7 @@ public class ACMECertificateChallengeTest {
         TestConfiguration desiredState = new TestConfiguration(EVENTS);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.of(https), List.of(), List.of(), List.of(),
-                List.of()),
+                List.of(), List.of()),
                 List.of()), Optional.of("test-revision"));
         return desiredState;
     }

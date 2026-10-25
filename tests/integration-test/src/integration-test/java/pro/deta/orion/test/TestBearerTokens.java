@@ -40,8 +40,7 @@ final class TestBearerTokens {
         char[] password = accessControlService.plainRootToken(PlainRootTokenAccessForTests.create());
         byte[] credential = new String(password).getBytes(StandardCharsets.UTF_8);
         try {
-            TestRuntimeBootstrap.withAccess(
-                    accessControlService, editor,
+            TestRuntimeBootstrap.withAccess(editor,
                     new pro.deta.orion.internal.ChangeMetadata(
                             new UserEmail("root", "root@orion.pro"),
                             "complete root SSH key enrollment"),

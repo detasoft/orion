@@ -49,7 +49,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
             OrionKeyMaterial keyMaterial, NativeGitRepositoryProvider repositories) {
         this.acl = acl;
         this.editor = editor;
-        this.secrets = new ConfigurationSecrets(() -> acl.configuration().result()
+        this.secrets = new ConfigurationSecrets(() -> editor.current().result()
                 .valueOrFailure("Cannot read configuration document"), keyMaterial);
         this.repositories = repositories;
     }
@@ -58,7 +58,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
     public Outcome<Created> createRepository(SecurityContext actor, String requested, Optional<S3StorageBinding> storage) {
         return safely(() -> {
             String name = RepositoryName.parse(requested).value();
-            OrionDocumentRevision snapshot = acl.configuration();
+            OrionDocumentRevision snapshot = editor.current();
             requireRepositoryCreate(actor, snapshot.result()
                     .valueOrFailure("Cannot read configuration document"), name);
             if (storage.isPresent()) {
@@ -106,7 +106,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
     @Override
     public Outcome<Connections> connections(SecurityContext actor, Optional<OrganizationId> owner) {
         return safely(() -> {
-            OrionDocumentRevision snapshot = acl.configuration();
+            OrionDocumentRevision snapshot = editor.current();
             return new Success<>(view(actor, owner, snapshot));
         });
     }
@@ -118,7 +118,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
             return safely(() -> {
                 if (input == null) throw new IllegalArgumentException();
                 // Check scope before revision validation to avoid exposing another organization's configuration.
-                requireOwner(actor, acl.configuration().result()
+                requireOwner(actor, editor.current().result()
                         .valueOrFailure("Cannot read configuration document"), owner);
                 OrionConfigurationModification edit = editor.edit(new OrionRevision.Stored(revision),
                     new ChangeMetadata(new UserEmail(actor.getUserIdentity().getUserId(),

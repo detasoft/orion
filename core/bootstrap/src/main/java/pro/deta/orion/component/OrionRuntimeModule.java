@@ -71,7 +71,7 @@ public class OrionRuntimeModule {
     static Runnable bootstrapProxies(
             ConfiguredNativeGitRepositoryFactory configured,
             NativeGitRepositoryFactory provider, OrionKeyMaterial keyMaterial,
-            ConfigurationSecrets secrets, OrionAccessControlService configurationService, OrionConfigurationEditor editor,
+            ConfigurationSecrets secrets, OrionConfigurationEditor editor,
             DecisionRegistry decisions,
             ConnectionFailureHandler connectionFailures,
             BiFunction<ProxySshConnection, HostKeyRejectedException, Decision> hostKeyDecisions) {
@@ -79,25 +79,25 @@ public class OrionRuntimeModule {
             provider.connectionFailures(connectionFailures, hostKeyDecisions);
             Optional<OrionDocumentRevision> adopted =
                     BootstrapContext.adoptProxies(
-                            editor, provider, keyMaterial, configurationService.configuration());
+                            editor, provider, keyMaterial, editor.current());
             if (adopted.isPresent() && !OrionUtils.waitForCondition(
                             () ->
-                                    configurationService
-                                            .configuration()
+                                    editor
+                                            .current()
                                             .revision()
                                             .equals(adopted.orElseThrow().revision()))) {
                 throw new IllegalStateException("Adopted bootstrap configuration was not activated");
             }
-            configured.activate(() -> configurationService.configuration().result()
+            configured.activate(() -> editor.current().result()
                     .valueOrFailure("Cannot read configuration document"), secrets,
                     provider::referencesBootstrapRepository);
-            provider.activate(() -> configurationService.configuration().result()
+            provider.activate(() -> editor.current().result()
                     .valueOrFailure("Cannot read configuration document"), secrets, adopted.isEmpty());
-            OrionDocumentRevision snapshot = configurationService.configuration();
+            OrionDocumentRevision snapshot = editor.current();
             for (BootstrapChange change : provider.bootstrapChanges(snapshot.result()
                     .valueOrFailure("Cannot read configuration document"))) {
                 Decision decision = bootstrapDecision(change,
-                        actor -> saveBootstrapConnection(editor, configurationService.configuration(), change, actor));
+                        actor -> saveBootstrapConnection(editor, editor.current(), change, actor));
                 decisions.register(decision).valueOrFailure("Cannot register bootstrap connection decision");
             }
         };
@@ -166,14 +166,14 @@ public class OrionRuntimeModule {
     @Provides
     @Singleton
     public static BiFunction<ProxySshConnection, HostKeyRejectedException, Decision> proxyHostKeyDecisions(
-            OrionAccessControlService configurationService, OrionConfigurationEditor editor, CommandAuditSink audit) {
+            OrionConfigurationEditor editor, CommandAuditSink audit) {
         return (selected, rejected) -> {
             Connection.Ssh connection = selected.connection();
             GitProxyBinding binding = selected.binding();
             if (!connection.host().equalsIgnoreCase(rejected.host()) || connection.port() != rejected.port()) {
                 throw new IllegalStateException("Rejected host key belongs to another server", rejected);
             }
-            OrionDocumentRevision snapshot = configurationService.configuration();
+            OrionDocumentRevision snapshot = editor.current();
             if (!snapshot.result()
                     .valueOrFailure("Cannot read configuration document")
                     .system().proxies().contains(binding)
@@ -238,9 +238,9 @@ public class OrionRuntimeModule {
 
     @Provides
     @Singleton
-    static ConfigurationSecrets configurationSecrets(OrionAccessControlService configurationService,
+    static ConfigurationSecrets configurationSecrets(OrionConfigurationEditor editor,
             OrionKeyMaterial keyMaterial) {
-        return new ConfigurationSecrets(() -> configurationService.configuration().result()
+        return new ConfigurationSecrets(() -> editor.current().result()
                 .valueOrFailure("Cannot read configuration document"), keyMaterial);
     }
 

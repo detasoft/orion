@@ -19,34 +19,33 @@ final class TestRuntimeBootstrap {
     private TestRuntimeBootstrap() {
     }
 
-    static byte[] configurationXml(pro.deta.orion.OrionAccessControlService acl) throws java.io.IOException {
+    static byte[] configurationXml(pro.deta.orion.config.OrionConfigurationEditor editor) throws java.io.IOException {
         java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
-        pro.deta.orion.schema.orion.OrionXml.write(acl.configuration().result()
+        pro.deta.orion.schema.orion.OrionXml.write(editor.current().result()
                 .valueOrFailure("Cannot read configuration document"), output);
         return output.toByteArray();
     }
 
-    static <T> T withAccess(pro.deta.orion.OrionAccessControlService acl,
-            pro.deta.orion.config.OrionConfigurationEditor editor,
+    static <T> T withAccess(pro.deta.orion.config.OrionConfigurationEditor editor,
             pro.deta.orion.internal.ChangeMetadata metadata,
             java.util.function.Function<pro.deta.orion.acl.AccessControlAccess, T> operation) {
         pro.deta.orion.config.OrionConfigurationModification modification =
-                editor.edit(acl.configuration().revision(), metadata);
+                editor.edit(editor.current().revision(), metadata);
         pro.deta.orion.acl.AccessControlAccess access = new pro.deta.orion.acl.AccessControlAccess(
                 modification, new pro.deta.orion.crypto.OrionPasswordHashingService());
         try {
             T result = operation.apply(access);
-            awaitConfiguration(acl, modification.revision());
+            awaitConfiguration(editor, modification.revision());
             return result;
         } finally {
             access.discard();
         }
     }
 
-    static void awaitConfiguration(pro.deta.orion.OrionAccessControlService acl,
+    static void awaitConfiguration(pro.deta.orion.config.OrionConfigurationEditor editor,
             pro.deta.orion.config.OrionRevision revision) {
         if (!pro.deta.orion.util.OrionUtils.waitForCondition(
-                () -> acl.configuration().revision().equals(revision))) {
+                () -> editor.current().revision().equals(revision))) {
             throw new IllegalStateException("Configuration revision was not activated");
         }
     }
@@ -58,7 +57,7 @@ final class TestRuntimeBootstrap {
                 component.configurationEditor().edit(revision, metadata);
         try {
             modification.update(update).apply();
-            awaitConfiguration(component.orionAccessControlService(), modification.revision());
+            awaitConfiguration(component.configurationEditor(), modification.revision());
         } finally {
             modification.discard();
         }

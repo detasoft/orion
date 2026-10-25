@@ -1508,7 +1508,7 @@ class BootstrapContextTest {
                 String invalidB = source.refs().get("refs/heads/main");
 
                 EVENTS.await();
-                assertThat(component.orionAccessControlService().configuration().result()
+                assertThat(component.configurationEditor().current().result()
                         .valueOrFailure("Cannot read configuration document")).isEqualTo(first);
                 assertThat(source.refs().get("refs/heads/main")).isEqualTo(invalidB);
                 assertThat(context.repositoryProvider().isPublicRepositoryName(cache)).isFalse();

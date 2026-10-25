@@ -139,7 +139,7 @@ class S3BootstrapRestartIT {
                             OrionXml.read(
                                     new ByteArrayInputStream(
                                             TestRuntimeBootstrap.configurationXml(
-                                                    component.orionAccessControlService())));
+                                                    component.configurationEditor())));
                     ConfigurationSecrets secrets = new ConfigurationSecrets(() -> loaded,
                             bootstrap.keyMaterial());
                     assertThat(secrets.resolveSystem(SECRET_ID)).isEqualTo(SECRET_VALUE.toCharArray());
@@ -180,7 +180,7 @@ class S3BootstrapRestartIT {
                 try {
                     assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
                     lifecycle.waitForStarting();
-                    OrionDocumentRevision current = component.orionAccessControlService().configuration();
+                    OrionDocumentRevision current = component.configurationEditor().current();
                     OrionDocument document = current.result()
                             .valueOrFailure("Cannot read configuration document");
                     ConfigurationSecrets secrets = new ConfigurationSecrets(() -> document,
@@ -194,7 +194,7 @@ class S3BootstrapRestartIT {
                             ignored -> updated);
                     savedConfiguration =
                             TestRuntimeBootstrap.configurationXml(
-                                    component.orionAccessControlService());
+                                    component.configurationEditor());
                     assertThat(new String(savedConfiguration, StandardCharsets.UTF_8))
                             .contains(SECRET_ID).doesNotContain(SECRET_VALUE);
                     NativeGitRepository repository = bootstrap.repositoryProvider().find("orion")
@@ -243,7 +243,7 @@ class S3BootstrapRestartIT {
                     lifecycle.waitForStarting();
                     byte[] loadedConfiguration =
                             TestRuntimeBootstrap.configurationXml(
-                                    component.orionAccessControlService());
+                                    component.configurationEditor());
                     assertThat(loadedConfiguration).isEqualTo(savedConfiguration);
                     OrionDocument loaded = OrionXml.read(new ByteArrayInputStream(loadedConfiguration));
                     ConfigurationSecrets secrets = new ConfigurationSecrets(() -> loaded,

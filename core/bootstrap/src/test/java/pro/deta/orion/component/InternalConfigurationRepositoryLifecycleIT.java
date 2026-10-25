@@ -151,7 +151,7 @@ class InternalConfigurationRepositoryLifecycleIT {
     private static <T> T withAccess(OrionComponent component, ChangeMetadata metadata,
             java.util.function.Function<AccessControlAccess, T> operation) {
         AccessControlAccess access = component.orionAccessControlService().createAccess(
-                component.orionAccessControlService().configuration().revision(), metadata);
+                component.configurationEditor().current().revision(), metadata);
         try {
             T result = operation.apply(access);
             awaitConfiguration(component);
@@ -165,7 +165,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         OrionRevision.Stored revision =
                 new OrionRevision.Stored(repository(component).refs().get(CONFIGURATION_REF));
         assertThat(pro.deta.orion.util.OrionUtils.waitForCondition(() ->
-                component.orionAccessControlService().configuration().revision().equals(revision))).isTrue();
+                component.configurationEditor().current().revision().equals(revision))).isTrue();
     }
 
     @Test
@@ -255,7 +255,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             char[] rootPassword = component.orionAccessControlService()
                     .plainRootToken(PlainRootTokenAccessForTests.create());
             assertRecoveryPasswordOnly(component, new String(rootPassword));
-            AccessControl acl = component.orionAccessControlService().configuration().result()
+            AccessControl acl = component.configurationEditor().current().result()
                     .valueOrFailure("Cannot read configuration document")
                             .system().accessControl();
             assertThat(acl.users().getFirst().credentials())
@@ -299,7 +299,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             addKey(first, "alice", PublicKeyEntry.toString(aliceKey.getPublic()));
             oldRootToken = issueTokenForSshKey(first, "root", rootKey);
             aliceToken = issueTokenForSshKey(first, "alice", aliceKey);
-            AccessControl acl = first.orionAccessControlService().configuration().result()
+            AccessControl acl = first.configurationEditor().current().result()
                     .valueOrFailure("Cannot read configuration document")
                             .system().accessControl();
             User root = acl.users().stream()
@@ -326,11 +326,11 @@ class InternalConfigurationRepositoryLifecycleIT {
             OrionDocument replacement = OrionXml.read(
                     new ByteArrayInputStream(accessControlBytes(
                             new AccessControl(users, acl.roles(), acl.grants()))));
-            first.configurationEditor().edit(first.orionAccessControlService().configuration().revision(),
+            first.configurationEditor().edit(first.configurationEditor().current().revision(),
                     new ChangeMetadata(UserEmail.EMPTY, "Prepare configuration"))
                 .update(ignored -> replacement).apply();
             awaitConfiguration(first);
-            beforeReset = first.orionAccessControlService().configuration().result()
+            beforeReset = first.configurationEditor().current().result()
                     .valueOrFailure("Cannot read configuration document")
                             .system().accessControl();
             versionBeforeReset = repository(first).refs().get(CONFIGURATION_REF);
@@ -469,7 +469,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         try {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
             OrionDocument replacement = OrionXml.read(new ByteArrayInputStream(missingRootAclBytes()));
-            first.configurationEditor().edit(first.orionAccessControlService().configuration().revision(),
+            first.configurationEditor().edit(first.configurationEditor().current().revision(),
                     new ChangeMetadata(UserEmail.EMPTY, "Prepare configuration"))
                 .update(ignored -> replacement).apply();
             awaitConfiguration(first);
@@ -492,7 +492,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             assertRecoveryPasswordOnly(reset, newPassword);
             assertAuthenticated(reset, "alice", "alice-password");
 
-            AccessControl recovered = reset.orionAccessControlService().configuration().result()
+            AccessControl recovered = reset.configurationEditor().current().result()
                     .valueOrFailure("Cannot read configuration document")
                             .system().accessControl();
             assertThat(recovered.users())
@@ -666,7 +666,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             System.setOut(new PrintStream(resetOutput, true, StandardCharsets.UTF_8));
             assertThat(resetLifecycle.runApplication()).isEqualTo(RUNNING);
             assertThat(repository(reset).refs().get(CONFIGURATION_REF)).isNotEqualTo(versionBeforeReset);
-            AccessControl recovered = reset.orionAccessControlService().configuration().result()
+            AccessControl recovered = reset.configurationEditor().current().result()
                     .valueOrFailure("Cannot read configuration document")
                             .system().accessControl();
             assertThat(recovered.users())
@@ -694,7 +694,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         try {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
             OrionDocument replacement = OrionXml.read(new ByteArrayInputStream(defaultAclBytes("legacy-password")));
-            first.configurationEditor().edit(first.orionAccessControlService().configuration().revision(),
+            first.configurationEditor().edit(first.configurationEditor().current().revision(),
                     new ChangeMetadata(UserEmail.EMPTY, "Prepare configuration"))
                 .update(ignored -> replacement).apply();
             awaitConfiguration(first);
@@ -1159,7 +1159,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             OrionComponent component,
             String userId,
             String... expectedKeys) throws Exception {
-        AccessControl accessControl = component.orionAccessControlService().configuration().result()
+        AccessControl accessControl = component.configurationEditor().current().result()
                 .valueOrFailure("Cannot read configuration document")
                         .system().accessControl();
         User user = accessControl.users().stream()

@@ -62,7 +62,7 @@ class RemoteBootstrapConfigurationIT {
 
         try (var upstream = RuntimeHttpTestSupport.start(upstreamConfiguration)) {
             var environment = configureSources(tempDir, target, upstream, transport);
-            byte[] xml = TestRuntimeBootstrap.configurationXml(upstream.accessControlService());
+            byte[] xml = TestRuntimeBootstrap.configurationXml(upstream.component().configurationEditor());
             byte[] material = materialBytes(target, environment);
             var repository = upstream.repositoryProvider().create("bootstrap-inputs")
                     .valueOrFailure("native bootstrap repository");
@@ -119,7 +119,7 @@ class RemoteBootstrapConfigurationIT {
                     assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
                     lifecycle.waitForStarting();
                     var loaded = OrionXml.read(new ByteArrayInputStream(
-                            TestRuntimeBootstrap.configurationXml(component.orionAccessControlService())));
+                            TestRuntimeBootstrap.configurationXml(component.configurationEditor())));
                     var seeded = OrionXml.read(new ByteArrayInputStream(xml));
                     var seededAcl = seeded.system().accessControl();
                     var loadedAcl = loaded.system().accessControl();
@@ -219,7 +219,7 @@ class RemoteBootstrapConfigurationIT {
                                 fileAccess.write(
                                         acl.getPath(),
                                         TestRuntimeBootstrap.configurationXml(
-                                                configurationServer.accessControlService()));
+                                                configurationServer.component().configurationEditor()));
                                 fileAccess.apply();
                                 return null;
                             });
@@ -257,7 +257,7 @@ class RemoteBootstrapConfigurationIT {
                         lifecycle.waitForStarting();
                         byte[] xml =
                                 TestRuntimeBootstrap.configurationXml(
-                                        component.orionAccessControlService());
+                                        component.configurationEditor());
                         var document = OrionXml.read(new ByteArrayInputStream(xml));
                         assertThat(document.system().proxies()).extracting(binding -> binding.alias().value())
                                 .containsExactly("material");
