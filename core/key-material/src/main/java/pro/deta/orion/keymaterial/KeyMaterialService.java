@@ -219,29 +219,6 @@ public class KeyMaterialService implements AutoCloseable {
         return x509Certificate;
     }
 
-    public synchronized void setPrivateKey(
-            KeyMaterialDescriptor descriptor,
-            KeyPair keyPair,
-            List<? extends Certificate> certificateChain)
-            throws GeneralSecurityException {
-        requireOpen();
-        requireDescriptor(descriptor);
-        if (descriptor.purposes().contains(KeyMaterialPurpose.CONFIGURATION_CIPHER)
-                || descriptor.purposes().contains(KeyMaterialPurpose.TRUST_ANCHOR)) {
-            throw new IllegalArgumentException("Private key descriptor must have a private key purpose");
-        }
-        Certificate[] certificates = requireCertificateChain(certificateChain);
-        requireMatchingLeaf(descriptor.alias(), keyPair, certificates);
-        setTypedPrivateKey(descriptor, keyPair, certificates);
-    }
-
-    private void setUntypedPrivateKey(String alias, KeyPair keyPair, Certificate[] certificateChain)
-            throws GeneralSecurityException {
-        requireAlias(alias);
-        requireMatchingLeaf(alias, keyPair, certificateChain);
-        appendLegacy(alias, new KeyStore.PrivateKeyEntry(keyPair.getPrivate(), certificateChain));
-    }
-
     private static void requireMatchingLeaf(
             String alias,
             KeyPair keyPair,
@@ -256,92 +233,6 @@ public class KeyMaterialService implements AutoCloseable {
             throw new GeneralSecurityException(
                     "Certificate public key does not match private key alias: " + alias);
         }
-    }
-
-    private X509Certificate setPrivateKeyWithStorageCertificate(
-            String alias,
-            String purpose,
-            KeyPair keyPair)
-            throws GeneralSecurityException {
-        requireOpen();
-        X509Certificate certificate = storageCertificateFactory.create(alias, purpose, keyPair);
-        setUntypedPrivateKey(alias, keyPair, new Certificate[]{certificate});
-        return certificate;
-    }
-
-    public synchronized void setTrustedCertificate(
-            TrustedCertificateDescriptor descriptor,
-            X509Certificate certificate) throws GeneralSecurityException {
-        requireOpen();
-        requireDescriptor(descriptor);
-        KeyStore.TrustedCertificateEntry prepared = prepareTrustedCertificate(descriptor, certificate);
-        Addition existing = readAddition(descriptor.alias());
-        if (existing != null) {
-            validateExisting(descriptor);
-            prepared = new KeyStore.TrustedCertificateEntry(certificate, existing.entry().getAttributes());
-        }
-        appendLegacy(descriptor.alias(), prepared);
-    }
-
-    public synchronized KeyPair generateKeyIfMissing(
-            String alias,
-            KeyMaterialKeySpec spec) throws GeneralSecurityException {
-        requireOpen();
-        requireAlias(alias);
-        if (spec == null) {
-            throw new IllegalArgumentException("Key spec must not be null");
-        }
-        if (containsAlias(alias, Set.of())) {
-            return getKeyPair(alias);
-        }
-
-        KeyPairGenerator generator = KeyPairGenerator.getInstance(spec.algorithm());
-        if (spec.keySize() > 0) {
-            generator.initialize(spec.keySize());
-        }
-        KeyPair keyPair = generator.generateKeyPair();
-        setPrivateKeyWithStorageCertificate(alias, spec.purpose(), keyPair);
-        return keyPair;
-    }
-
-    public synchronized KeyPair generateKeyIfMissing(
-            KeyMaterialDescriptor descriptor,
-            int keySize) throws GeneralSecurityException {
-        requireOpen();
-        requireDescriptor(descriptor);
-        if (descriptor.algorithm() == KeyMaterialAlgorithm.AES) {
-            throw new IllegalArgumentException("Private key material cannot use AES");
-        }
-        if (keySize < 0) {
-            throw new IllegalArgumentException("Key size must not be negative");
-        }
-        if (containsAlias(descriptor.alias(), Set.of())) {
-            validateExisting(descriptor);
-            return getKeyPair(descriptor.alias());
-        }
-
-        KeyStore.PrivateKeyEntry entry = (KeyStore.PrivateKeyEntry) prepareKey(descriptor, keySize);
-        appendLegacy(descriptor.alias(), entry);
-        return new KeyPair(entry.getCertificate().getPublicKey(), entry.getPrivateKey());
-    }
-
-    public synchronized void generateSecretKeyIfMissing(
-            KeyMaterialDescriptor descriptor,
-            int keySize) throws GeneralSecurityException {
-        requireOpen();
-        requireDescriptor(descriptor);
-        if (!descriptor.purposes().contains(KeyMaterialPurpose.CONFIGURATION_CIPHER)
-                || descriptor.algorithm() != KeyMaterialAlgorithm.AES) {
-            throw new IllegalArgumentException("Secret key material must be an AES configuration cipher");
-        }
-        if (keySize < 1) {
-            throw new IllegalArgumentException("Secret key size must be positive");
-        }
-        if (containsAlias(descriptor.alias(), Set.of())) {
-            validateExisting(descriptor);
-            return;
-        }
-        appendLegacy(descriptor.alias(), prepareKey(descriptor, keySize));
     }
 
     public synchronized void validateExisting(KeyMaterialDescriptor descriptor)
@@ -498,36 +389,6 @@ public class KeyMaterialService implements AutoCloseable {
         validatePrepared(addition.entry(), descriptor);
     }
 
-    synchronized void installCertificateChain(
-            KeyMaterialDescriptor identity,
-            List<X509Certificate> certificateChain,
-            Optional<TrustedCertificateDescriptor> issuerDescriptor,
-            Optional<X509Certificate> issuerCertificate) throws IOException, GeneralSecurityException {
-        requireOpen();
-        KeyPair domainKeyPair = getKeyPair(identity.alias());
-        setPrivateKey(identity, domainKeyPair, certificateChain);
-        if (issuerDescriptor.isPresent()) {
-            setTrustedCertificate(issuerDescriptor.orElseThrow(), issuerCertificate.orElseThrow());
-        }
-        try {
-            save();
-        } catch (IOException | GeneralSecurityException | RuntimeException failure) {
-            close();
-            throw failure;
-        }
-    }
-
-    public synchronized String save() throws IOException, GeneralSecurityException {
-        requireOpen();
-        byte[] serialized = serialize(keyStore);
-        try {
-            version = store.write(serialized, version);
-            return version;
-        } finally {
-            Arrays.fill(serialized, (byte) 0);
-        }
-    }
-
     synchronized KeyStore.Entry prepareKey(KeyMaterialDescriptor descriptor, int keySize)
             throws GeneralSecurityException {
         requireOpen();
@@ -643,18 +504,6 @@ public class KeyMaterialService implements AutoCloseable {
         } finally {
             clear(password);
         }
-    }
-
-    private void appendLegacy(String alias, KeyStore.Entry entry) throws GeneralSecurityException {
-        requireOpen();
-        EntryVersion previous = findVersion(alias);
-        if (previous != null && previous.deleted()) {
-            throw new GeneralSecurityException("Key material is deleted: " + alias);
-        }
-        long nextEntryVersion = previous == null ? 1 : Math.incrementExact(previous.version());
-        long nextRevision = Math.incrementExact(revision);
-        append(keyStore, new Addition(alias, entry, nextEntryVersion, false), nextRevision);
-        revision = nextRevision;
     }
 
     private void append(KeyStore target, Addition addition, long kmsVersion) throws GeneralSecurityException {
@@ -862,20 +711,6 @@ public class KeyMaterialService implements AutoCloseable {
         } finally {
             clear(password);
         }
-    }
-
-    private void setTypedPrivateKey(
-            KeyMaterialDescriptor descriptor,
-            KeyPair keyPair,
-            Certificate[] certificateChain) throws GeneralSecurityException {
-        Set<KeyStore.Entry.Attribute> attributes = descriptorAttributes(descriptor);
-        Addition existing = readAddition(descriptor.alias());
-        if (existing != null) {
-            validateExisting(descriptor);
-            attributes = existing.entry().getAttributes();
-        }
-        appendLegacy(descriptor.alias(), new KeyStore.PrivateKeyEntry(
-                keyPair.getPrivate(), certificateChain, attributes));
     }
 
     private String descriptorMetadata(String alias) throws GeneralSecurityException {

@@ -121,8 +121,13 @@ public class OrionKeyMaterial implements AutoCloseable {
                     throw new GeneralSecurityException(
                             "A new material store cannot contain retained server identities");
                 }
-                service.generateKeyIfMissing(signingMaterial.active(), activeKeySize);
-                service.save();
+                KeyMaterialModification modification = service.modify();
+                try {
+                    modification.generateKey(signingMaterial.active(), activeKeySize);
+                    modification.apply();
+                } finally {
+                    modification.discard();
+                }
             }
             for (KeyMaterialDescriptor descriptor : signingMaterial.verificationIncludingActive()) {
                 service.validateExisting(descriptor);
