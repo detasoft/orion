@@ -3,11 +3,11 @@ import { onMounted, ref, watch } from 'vue'
 import { createOrionClient } from '../lib/orion-api.js'
 
 const props = defineProps({ invitation: { type: String, default: '' }, ticket: { type: String, default: '' },
-  organization: { type: String, default: '' } })
+  organization: { type: String, default: '' }, scope: { type: String, default: '' } })
 const emit = defineEmits(['signed-in', 'close'])
 const api = createOrionClient()
 const organization = ref(props.organization)
-const scope = ref(props.invitation || props.organization ? 'organization' : 'system')
+const scope = ref(props.scope || (props.organization ? 'organization' : 'system'))
 const providers = ref([])
 const provider = ref('')
 const loadedOrganization = ref('')
@@ -31,7 +31,8 @@ function loadProviders() {
     const selectedOrganization = organization.value.trim()
     const selectedScope = scope.value
     const result = await api.providers(selectedScope === 'system'
-      ? { scope: 'system' } : { scope: 'organization', organization: selectedOrganization })
+      ? { scope: 'system', ...(props.invitation ? { invitation: props.invitation } : {}) }
+      : { scope: 'organization', organization: selectedOrganization })
     if (selectedScope !== scope.value || selectedOrganization !== organization.value.trim()) return
     loadedScope.value = selectedScope
     loadedOrganization.value = selectedOrganization

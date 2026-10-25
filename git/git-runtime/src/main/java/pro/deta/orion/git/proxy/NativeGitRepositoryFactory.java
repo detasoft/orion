@@ -531,7 +531,7 @@ public final class NativeGitRepositoryFactory implements NativeGitRepositoryBack
             OrionDocument.SystemConfiguration system = candidate.system();
             candidate = new OrionDocument(new OrionDocument.SystemConfiguration(
                     system.accessControl(), system.https(), system.secrets(), bindings, connections,
-                    system.oidcProviders()),
+                    system.oidcProviders(), system.invitations()),
                     candidate.organizations());
         }
         return candidate;

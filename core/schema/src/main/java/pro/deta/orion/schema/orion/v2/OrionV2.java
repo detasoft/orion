@@ -38,7 +38,8 @@ public class OrionV2 {
     @NoArgsConstructor
     @AllArgsConstructor
     @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"accessControl", "https", "secrets", "proxies", "connections", "oidcProviders"})
+    @XmlType(propOrder = {"accessControl", "https", "secrets", "proxies", "connections", "oidcProviders",
+            "invitations"})
     public static final class SystemConfiguration {
         @XmlElement(name = "accessControl", required = true)
         private AccessControl accessControl;
@@ -54,9 +55,39 @@ public class OrionV2 {
         @XmlElement(name = "provider")
         private List<OidcProvider> oidcProviders;
 
+        @XmlElementWrapper(name = "invitations")
+        @XmlElement(name = "invitation")
+        private List<SystemInvitation> invitations;
+
         public SystemConfiguration(AccessControl accessControl) {
-            this(accessControl, null, null, null, null, null);
+            this(accessControl, null, null, null, null, null, null);
         }
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"email", "expiresAt", "provider", "repositories"})
+    public static final class SystemInvitation {
+        @XmlAttribute(required = true)
+        private String tokenHash;
+        private String email;
+        private long expiresAt;
+        private String provider;
+        @XmlElementWrapper(name = "repositories")
+        @XmlElement(name = "repository")
+        private List<InvitationRepository> repositories;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"name", "readWrite"})
+    public static final class InvitationRepository {
+        private String name;
+        private boolean readWrite;
     }
 
     @Data

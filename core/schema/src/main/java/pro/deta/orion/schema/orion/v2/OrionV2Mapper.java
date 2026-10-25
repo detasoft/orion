@@ -41,7 +41,8 @@ public final class OrionV2Mapper {
                         Optional.ofNullable(system.getHttps()).map(OrionV2Mapper::toCurrent),
                         toCurrentSecrets(system.getSecrets()),
                         toCurrentProxies(system.getProxies()), toCurrentConnections(system.getConnections()),
-                        toCurrentOidcProviders(system.getOidcProviders())),
+                        toCurrentOidcProviders(system.getOidcProviders()),
+                        toCurrentSystemInvitations(system.getInvitations())),
                 toCurrentOrganizations(source.getOrganizations()));
     }
 
@@ -54,7 +55,8 @@ public final class OrionV2Mapper {
                         source.system().https().map(OrionV2Mapper::fromCurrent).orElse(null),
                         fromCurrentSecrets(source.system().secrets()),
                         fromCurrentProxies(source.system().proxies()), fromCurrentConnections(source.system().connections()),
-                        fromCurrentOidcProviders(source.system().oidcProviders())),
+                        fromCurrentOidcProviders(source.system().oidcProviders()),
+                        fromCurrentSystemInvitations(source.system().invitations())),
                 fromCurrentOrganizations(source.organizations()));
     }
 
@@ -207,6 +209,33 @@ public final class OrionV2Mapper {
                     Optional.ofNullable(repository.getStorage()).map(OrionV2Mapper::toCurrent)));
         }
         return repositories;
+    }
+
+    private static List<SystemInvitation> toCurrentSystemInvitations(List<OrionV2.SystemInvitation> source) {
+        List<SystemInvitation> result = new ArrayList<>();
+        for (OrionV2.SystemInvitation invitation : sorted(source,
+                Comparator.comparing(OrionV2.SystemInvitation::getTokenHash, NULL_SAFE_STRINGS))) {
+            List<SystemInvitation.RepositoryAccess> repositories = new ArrayList<>();
+            for (OrionV2.InvitationRepository repository : listOrEmpty(invitation.getRepositories())) {
+                repositories.add(new SystemInvitation.RepositoryAccess(repository.getName(), repository.isReadWrite()));
+            }
+            result.add(new SystemInvitation(invitation.getTokenHash(), invitation.getEmail(),
+                    invitation.getExpiresAt(), invitation.getProvider(), repositories));
+        }
+        return result;
+    }
+
+    private static List<OrionV2.SystemInvitation> fromCurrentSystemInvitations(List<SystemInvitation> source) {
+        List<OrionV2.SystemInvitation> result = new ArrayList<>();
+        for (SystemInvitation invitation : sorted(source, Comparator.comparing(SystemInvitation::tokenHash))) {
+            List<OrionV2.InvitationRepository> repositories = new ArrayList<>();
+            for (SystemInvitation.RepositoryAccess access : invitation.repositories()) {
+                repositories.add(new OrionV2.InvitationRepository(access.repository(), access.readWrite()));
+            }
+            result.add(new OrionV2.SystemInvitation(invitation.tokenHash(), invitation.email(),
+                    invitation.expiresAt(), invitation.provider(), repositories));
+        }
+        return result;
     }
 
     private static List<OrganizationInvitation> toCurrentInvitations(List<OrionV2.Invitation> source) {

@@ -145,9 +145,12 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
 
     private OrionHttpResponse providers(HttpServletRequest request) {
         OrganizationId organization = organization(request.getParameter("scope"), request.getParameter("organization"));
+        String invitation = request.getParameter("invitation");
+        String selectedProvider = organization == null && invitation != null && !invitation.isEmpty()
+                ? accounts.systemInvitation(invitation).provider() : null;
         List<String> providers = new ArrayList<>();
         for (OidcProvider provider : configuredProviders(organization)) {
-            providers.add(provider.id());
+            if (selectedProvider == null || selectedProvider.equals(provider.id())) providers.add(provider.id());
         }
         return OrionHttpResponse.ok(Map.of("providers", providers));
     }
@@ -157,11 +160,12 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
                 body.has("organization") ? body.path("organization").asText() : null);
         OidcProvider provider = provider(organization, body.path("provider").asText());
         String invitation = body.path("invitation").asText("");
-        if (organization == null && !invitation.isEmpty()) {
-            throw new IllegalArgumentException("System sign-in requires an existing account");
-        }
         if (!invitation.isEmpty()) {
-            accounts.invitation(organization, invitation);
+            if (organization == null) {
+                if (!accounts.systemInvitation(invitation).provider().equals(provider.id())) {
+                    throw new IllegalArgumentException("Invitation provider does not match");
+                }
+            } else accounts.invitation(organization, invitation);
         }
         OidcClient.Metadata metadata = client.discover(provider);
         String state = randomToken();
@@ -219,7 +223,11 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
         requireCurrent(attempt);
         User linked = linkedUser(attempt.organization(),
                 attempt.provider().issuer().toString(), identity.subject());
-        if (linked == null && (attempt.organization() == null || attempt.invitation().isEmpty()
+        if (attempt.organization() == null && !attempt.invitation().isEmpty()) {
+            if (linked != null || !accounts.systemInvitation(attempt.invitation()).email().equals(identity.email())) {
+                throw new IllegalArgumentException("Invitation does not match an unlinked account");
+            }
+        } else if (linked == null && (attempt.organization() == null || attempt.invitation().isEmpty()
                 || !accounts.invitation(attempt.organization(), attempt.invitation()).email().equals(identity.email()))) {
             throw new IllegalArgumentException(attempt.organization() == null
                     ? "System OIDC account is unavailable" : "An invitation for this email is required");
@@ -254,13 +262,23 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
         }
         String issuer = attempt.provider().issuer().toString();
         User linked = linkedUser(attempt.organization(), issuer, login.identity().subject());
-        if (attempt.organization() == null && linked == null) {
+        if (attempt.organization() == null && linked == null && attempt.invitation().isEmpty()) {
             throw new IllegalArgumentException("System account is unavailable");
         }
-        String userId = linked == null
-                ? accounts.accept(attempt.organization(), attempt.invitation(), login.identity().email(), attempt.provider(),
-                        login.identity().subject(), body.path("first").asText(), body.path("last").asText())
-                : linked.id();
+        if (attempt.organization() == null && linked != null && !attempt.invitation().isEmpty()) {
+            throw new IllegalArgumentException("Account is already linked");
+        }
+        String userId;
+        if (linked != null) {
+            userId = linked.id();
+        } else if (attempt.organization() == null) {
+            userId = accounts.acceptSystem(attempt.invitation(), login.identity().email(), attempt.provider(),
+                    login.identity().subject(), body.path("first").asText(), body.path("last").asText());
+        } else {
+            userId = accounts.accept(attempt.organization(), attempt.invitation(), login.identity().email(),
+                    attempt.provider(), login.identity().subject(),
+                    body.path("first").asText(), body.path("last").asText());
+        }
         if (linked == null && !OrionUtils.waitForCondition(() -> {
             User active = linkedUser(attempt.organization(), issuer, login.identity().subject());
             return active != null && active.id().equals(userId);

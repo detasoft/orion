@@ -139,7 +139,7 @@ class BootstrapSshTrustTest {
                     new GitProxyBinding.Ssh(((GitProxyBinding.Ssh) actual.source()).connection(), "/old.git"), actual.ref());
             current.set(new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(),
                     system.https(), system.secrets(), List.of(previous), List.of(previousConnection),
-                    system.oidcProviders()),
+                    system.oidcProviders(), system.invitations()),
                     current.get().organizations()));
             assertThat(fixture.provider.adoptProvisional(current.get(), secrets)).isSameAs(current.get());
             fixture.provider.activate(current::get, secrets);

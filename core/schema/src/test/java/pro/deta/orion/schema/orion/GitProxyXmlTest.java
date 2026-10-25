@@ -52,7 +52,7 @@ class GitProxyXmlTest {
         List<GitProxyBinding> bindings = new ArrayList<>(system.proxies());
         var copied = new OrionDocument.SystemConfiguration(system.accessControl(), system.https(),
                 system.secrets(), bindings, system.connections(),
-                system.oidcProviders());
+                system.oidcProviders(), system.invitations());
         bindings.clear();
         assertThat(copied.proxies()).hasSize(2);
         assertThatThrownBy(copied.proxies()::clear).isInstanceOf(UnsupportedOperationException.class);

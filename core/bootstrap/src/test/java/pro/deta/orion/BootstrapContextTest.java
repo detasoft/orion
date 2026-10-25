@@ -1181,7 +1181,7 @@ class BootstrapContextTest {
                                                                 "invalid", "not-an-envelope")),
                                                 List.of(),
                                                 List.of(),
-                                                List.of()),
+                                                List.of(), List.of()),
                                         List.of())
                                 : OrionXml.read(new ByteArrayInputStream(content));
             } catch (IOException failure) {
@@ -1383,7 +1383,7 @@ class BootstrapContextTest {
                         Optional.empty(), Optional.empty()), "main");
         OrionDocument first = new OrionDocument(new OrionDocument.SystemConfiguration(
                 new AccessControl(), Optional.empty(), List.of(), List.of(unrelated), List.of(),
-                List.of()), List.of());
+                List.of(), List.of()), List.of());
         ByteArrayOutputStream firstXml = new ByteArrayOutputStream();
         OrionXml.write(first, firstXml);
         Upstream upstream = upstream("deferred-bootstrap", Map.of(
@@ -1429,7 +1429,7 @@ class BootstrapContextTest {
                 ByteArrayOutputStream output = new ByteArrayOutputStream();
                 OrionDocument valid = new OrionDocument(new OrionDocument.SystemConfiguration(
                         acl, Optional.empty(), List.of(), List.of(unrelated), List.of(),
-                        List.of()), List.of());
+                        List.of(), List.of()), List.of());
                 OrionXml.write(valid, output);
                 source.files()
                         .withAccess(
@@ -1498,7 +1498,7 @@ class BootstrapContextTest {
         OrionDocument invalid = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
                 Optional.empty(), List.of(new ConfigurationSecret("bad", "invalid")),
                 List.of(), List.of(),
-                List.of()), List.of());
+                List.of(), List.of()), List.of());
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         OrionXml.write(invalid, output);
         seedExternalConfiguration(directory, output.toByteArray());

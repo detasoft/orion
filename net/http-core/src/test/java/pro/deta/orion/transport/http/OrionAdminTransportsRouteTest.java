@@ -103,7 +103,7 @@ class OrionAdminTransportsRouteTest {
         TestConfiguration desiredState = new TestConfiguration(EVENTS);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of(), List.of(),
-                List.of()),
+                List.of(), List.of()),
                 List.of()), Optional.of("test-revision"));
         JettyHTTPServer server = new JettyHTTPServer(
                 configuration, desiredState.acl(), OrionKeyMaterial.unavailable(), servlet, null, null);
@@ -147,7 +147,7 @@ class OrionAdminTransportsRouteTest {
                                 List.of(),
                                 Optional.empty())),
                         List.of(), List.of(), List.of(),
-                        List.of()),
+                        List.of(), List.of()),
                 List.of()), Optional.of("test-revision"));
         JettyHTTPServer server = new JettyHTTPServer(
                 configuration, desiredState.acl(), OrionKeyMaterial.unavailable(), null, null, null) {

@@ -61,7 +61,7 @@ class OrionAdminProxiesRouteTest {
         OrionDocument base = document(List.of());
         desired.publish(new OrionDocument(new OrionDocument.SystemConfiguration(base.system().accessControl(),
                 base.system().https(), base.system().secrets(), List.of(binding), List.of(connection),
-                base.system().oidcProviders()), List.of()),
+                base.system().oidcProviders(), base.system().invitations()), List.of()),
                 Optional.of("configuration-revision"));
 
         var response = get(context(grant(GrantKey.ADMIN)));
@@ -110,7 +110,7 @@ class OrionAdminProxiesRouteTest {
 
     private OrionDocument document(List<GitProxyBinding> bindings) {
         OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
-                Optional.empty(), List.of(), bindings, List.of(), List.of()), List.of());
+                Optional.empty(), List.of(), bindings, List.of(), List.of(), List.of()), List.of());
         return desired.secrets().createSystem(document, "private-key-id", "private-ciphertext".toCharArray());
     }
 

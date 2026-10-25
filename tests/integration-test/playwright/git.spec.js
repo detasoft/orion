@@ -313,6 +313,113 @@ test('administrator connects an HTTPS Git proxy to private Gitea', async ({ requ
   }
 })
 
+test('administrator invites a system user who creates a profile and signs in through Gitea',
+  async ({ request, page, browser, adminToken }) => {
+    const credentials = await readFile(
+      new URL('../../external-services/.state/credentials.env', import.meta.url), 'utf8')
+    const fixturePassword = credentials.match(/^GITEA_PASSWORD=(.+)$/m)?.[1]
+    expect(fixturePassword, 'The fixture supplies GITEA_PASSWORD').toBeTruthy()
+    const secureUrl = new URL(browserUrl)
+    if (secureUrl.protocol === 'http:') {
+      secureUrl.protocol = 'https:'
+      secureUrl.port = '9443'
+    }
+    const origin = secureUrl.origin
+    const id = `invite-${randomUUID().slice(0, 8)}`
+    const email = `${id}@example.test`
+    const password = `Orion-${randomUUID()}`
+    const readOnly = `${id}-read`
+    const writable = `${id}-write`
+    const hidden = `${id}-hidden`
+    let accountCreated = false
+    let application
+    let userContext
+    let userPage
+    try {
+      const account = await giteaRequest('POST', '/api/v1/admin/users', fixturePassword,
+        { username: id, email, password, must_change_password: false, send_notify: false })
+      expect(account.status).toBe(201)
+      accountCreated = true
+      const registered = await giteaRequest('POST', '/api/v1/user/applications/oauth2', fixturePassword,
+        { name: id, confidential_client: true,
+          redirect_uris: [`${origin}/api/auth/oidc/callback`], skip_secondary_authorization: false })
+      expect(registered.status).toBe(201)
+      application = JSON.parse(registered.body)
+      for (const name of [readOnly, writable, hidden]) {
+        const created = await request.post(`${orionUrl}/api/admin/repositories`, {
+          headers: { Authorization: `Bearer ${adminToken}` }, data: { name },
+        })
+        expect(created.status()).toBe(201)
+      }
+      await page.addInitScript(({ origin, token }) => {
+        if (location.origin === origin) sessionStorage.setItem('orion.ui.token', token)
+      }, { origin, token: adminToken })
+      await page.goto(origin)
+      await page.getByRole('link', { name: 'People', exact: true }).click()
+      const provider = page.locator('.oidc-settings')
+      await provider.getByLabel('Provider scope').selectOption('system')
+      await provider.getByLabel('Provider ID', { exact: true }).fill(id)
+      await provider.getByLabel('Issuer URL', { exact: true }).fill(`${giteaUrl}/`)
+      await provider.getByLabel('Client ID', { exact: true }).fill(application.client_id)
+      await provider.getByLabel('Client secret', { exact: true }).fill(application.client_secret)
+      await provider.getByRole('button', { name: 'Save provider', exact: true }).click()
+      await expect(provider.getByRole('status')).toHaveText('Provider saved in the selected scope.')
+      const invitation = page.locator('.invitations')
+      await invitation.getByLabel('Invitation scope').selectOption('system')
+      await invitation.getByLabel('Invitation provider').selectOption(id)
+      await invitation.getByLabel('Email', { exact: true }).fill(email)
+      await invitation.getByRole('combobox', { name: readOnly, exact: true }).selectOption('read')
+      await invitation.getByRole('combobox', { name: writable, exact: true }).selectOption('readWrite')
+      const createdInvitation = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/api/admin/invitations' && response.request().method() === 'POST')
+      await invitation.getByRole('button', { name: 'Create invitation', exact: true }).click()
+      expect((await createdInvitation).status()).toBe(201)
+      const link = await invitation.getByLabel('Invitation link').inputValue()
+      expect(link).toContain('scope=system')
+
+      userContext = await browser.newContext()
+      userPage = await userContext.newPage()
+      await userPage.goto(link)
+      await expect(userPage.getByLabel('Sign-in scope')).toHaveCount(0)
+      await expect(userPage.getByLabel('Sign-in provider').locator('option')).toHaveText([id])
+      await userPage.getByRole('button', { name: 'Sign in', exact: true }).click()
+      await userPage.locator('#user_name').fill(id)
+      await userPage.locator('#password').fill(password)
+      await userPage.getByRole('button', { name: 'Sign In', exact: true }).click()
+      await userPage.getByRole('button', { name: 'Authorize Application', exact: true }).click()
+      await expect(userPage.getByRole('heading', { name: 'Set up your profile', exact: true })).toBeVisible()
+      await userPage.getByLabel('First name', { exact: true }).fill('Invited')
+      await userPage.getByLabel('Last name', { exact: true }).fill('System User')
+      await userPage.getByRole('button', { name: 'Continue', exact: true }).click()
+      await expect(userPage.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible()
+      await userPage.getByRole('link', { name: 'Repositories', exact: true }).click()
+      await expect(userPage.getByText(readOnly, { exact: true })).toBeVisible()
+      await expect(userPage.getByText(writable, { exact: true })).toBeVisible()
+      await expect(userPage.getByText(hidden, { exact: true })).toHaveCount(0)
+      await userPage.reload()
+      await expect(userPage.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible()
+      await userPage.getByRole('button', { name: 'Sign out', exact: true }).click()
+      await userPage.goto(link)
+      await expect(userPage.getByRole('alert')).toBeVisible()
+      await expect(userPage.getByRole('button', { name: 'Sign in', exact: true })).toHaveCount(0)
+    } catch (failure) {
+      if (userPage) await test.info().attach('System invitation page', {
+        body: await userPage.screenshot(), contentType: 'image/png',
+      })
+      throw failure
+    } finally {
+      await userContext?.close()
+      if (application) {
+        const deleted = await giteaRequest('DELETE', `/api/v1/user/applications/oauth2/${application.id}`, fixturePassword)
+        expect(deleted.status).toBe(204)
+      }
+      if (accountCreated) {
+        const deleted = await giteaRequest('DELETE', `/api/v1/admin/users/${id}`, fixturePassword)
+        expect(deleted.status).toBe(204)
+      }
+    }
+  })
+
 test('existing system user signs in through Gitea OIDC and keeps restricted permissions',
   async ({ request, page, browser, adminToken }) => {
     const credentialsPath = new URL('../../external-services/.state/credentials.env', import.meta.url)

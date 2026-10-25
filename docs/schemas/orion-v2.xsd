@@ -43,6 +43,13 @@
           </xs:sequence>
         </xs:complexType>
       </xs:element>
+      <xs:element name="invitations" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="invitation" type="systemInvitation" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
     </xs:sequence>
   </xs:complexType>
 
@@ -517,6 +524,29 @@
     <xs:sequence>
       <xs:element name="email" type="xs:string"/>
       <xs:element name="expiresAt" type="xs:long"/>
+    </xs:sequence>
+    <xs:attribute name="tokenHash" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="systemInvitation" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="email" type="xs:string"/>
+      <xs:element name="expiresAt" type="xs:long"/>
+      <xs:element name="provider" type="xs:string"/>
+      <xs:element name="repositories" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="repository" minOccurs="0" maxOccurs="100">
+              <xs:complexType>
+                <xs:sequence>
+                  <xs:element name="name" type="xs:string"/>
+                  <xs:element name="readWrite" type="xs:boolean"/>
+                </xs:sequence>
+              </xs:complexType>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
     </xs:sequence>
     <xs:attribute name="tokenHash" type="xs:string" use="required"/>
   </xs:complexType>

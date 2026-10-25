@@ -741,6 +741,29 @@ If setup fails, check:
 
 ### Invitations and account lifecycle
 
+For a new system user, a system administrator opens **People → Invite a user**,
+selects **System user**, chooses a configured system OIDC provider, and enters
+the invitee's email. Each available repository can receive **READ** or
+**READ+WRITE** access; the default is no access. Bootstrap configuration and key
+material repositories are excluded. Invitations cannot grant administration,
+repository creation, or force-push permissions.
+
+Orion returns a one-time link to copy and send; it does not send email. The
+invitee authenticates with the selected provider, whose verified email must
+match the invitation, and completes their profile. Creating the system account,
+assigning the stored initial permissions, binding the issuer/subject, and
+consuming the invitation are saved in one configuration revision. Permissions
+submitted by the invitee are not used. Later sign-ins use the exact binding.
+Invitations do not link existing accounts by email; use the existing system
+user binding form for those accounts.
+
+System invitations expire after seven days. Reissuing one for the same email
+replaces its permissions and invalidates the previous link, including an
+unfinished acceptance. Pending invitations and their permission selections are
+persisted under `system/invitations`; only the random token's SHA-256 digest is
+stored. An empty permission selection creates an account without repository
+access. System and organization providers remain independent.
+
 In the UI, a system administrator opens **People**, selects any organization
 with OIDC configured, and enters the invitee's email. Orion returns a link to
 copy and send; it does not send email. Invitations last seven days. Creating

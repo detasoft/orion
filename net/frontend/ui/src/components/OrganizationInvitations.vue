@@ -1,11 +1,16 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { createOrionClient } from '../lib/orion-api.js'
 
 const props = defineProps({ token: { type: String, required: true } })
 const emit = defineEmits(['authorization-error'])
 const organizations = ref([])
 const organization = ref('')
+const scope = ref('organization')
+const providers = ref([])
+const provider = ref('')
+const repositories = ref([])
+const access = ref(Object.create(null))
 const email = ref('')
 const invitation = ref(null)
 const busy = ref(false)
@@ -23,8 +28,23 @@ onMounted(async () => {
     const response = await api.invitations()
     organizations.value = response.organizations
     organization.value = response.organizations.find((item) => item.oidcConfigured)?.id ?? ''
+    providers.value = response.systemProviders ?? []
+    provider.value = providers.value[0] ?? ''
+    repositories.value = (response.repositories ?? []).map(name => ({ name }))
   } catch (failure) { failed(failure) }
 })
+
+watch(scope, () => {
+  invitation.value = null
+  copied.value = false
+  error.value = ''
+  access.value = Object.create(null)
+})
+
+watch([email, provider, access], () => {
+  invitation.value = null
+  copied.value = false
+}, { deep: true })
 
 async function invite() {
   busy.value = true
@@ -32,7 +52,12 @@ async function invite() {
   invitation.value = null
   copied.value = false
   try {
-    invitation.value = await api.invite({ organization: organization.value, email: email.value.trim() })
+    const input = scope.value === 'system'
+      ? { scope: 'system', email: email.value.trim(), provider: provider.value,
+        repositories: repositories.value.filter(item => access.value[item.name])
+          .map(item => ({ repository: item.name, readWrite: access.value[item.name] === 'readWrite' })) }
+      : { organization: organization.value, email: email.value.trim() }
+    invitation.value = await api.invite(input)
   } catch (failure) { failed(failure) }
   finally { busy.value = false }
 }
@@ -48,17 +73,42 @@ async function copy() {
 <template>
   <section class="panel content-panel invitations">
     <h3>Invite a user</h3>
-    <p>Select an organization and send the generated link to the invited email address.</p>
+    <p>Choose the account scope and send the generated link to the invited email address.</p>
     <form @submit.prevent="invite">
-      <label>Organization
-        <select v-model="organization" required :disabled="busy">
+      <label>Invitation scope
+        <select v-model="scope" name="scope" :disabled="busy">
+          <option value="organization">Organization member</option>
+          <option value="system">System user</option>
+        </select>
+      </label>
+      <label v-if="scope === 'organization'">Organization
+        <select v-model="organization" name="organization" required :disabled="busy">
           <option v-for="item in organizations" :key="item.id" :value="item.id" :disabled="!item.oidcConfigured">
             {{ item.name }} ({{ item.id }}){{ item.oidcConfigured ? '' : ' — configure OIDC first' }}
           </option>
         </select>
       </label>
+      <template v-else>
+        <label>Invitation provider
+          <select v-model="provider" name="provider" required :disabled="busy">
+            <option v-for="item in providers" :key="item" :value="item">{{ item }}</option>
+          </select>
+        </label>
+        <p v-if="!providers.length">Configure a system OIDC provider first.</p>
+        <fieldset :disabled="busy">
+          <legend>Initial repository access</legend>
+          <p>No access is granted unless selected. Administrative permissions are not available here.</p>
+          <label v-for="item in repositories" :key="item.name">{{ item.name }}
+            <select v-model="access[item.name]" :name="`access-${item.name}`">
+              <option :value="undefined">No access</option>
+              <option value="read">READ</option>
+              <option value="readWrite">READ+WRITE</option>
+            </select>
+          </label>
+        </fieldset>
+      </template>
       <label>Email <input v-model="email" type="email" required maxlength="254" :disabled="busy" /></label>
-      <button class="primary-button" :disabled="busy || !organization">
+      <button class="primary-button" :disabled="busy || (scope === 'system' ? !provider : !organization)">
         {{ busy ? 'Creating…' : 'Create invitation' }}
       </button>
     </form>

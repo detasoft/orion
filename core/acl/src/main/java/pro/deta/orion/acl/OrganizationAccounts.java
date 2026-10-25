@@ -3,6 +3,8 @@ package pro.deta.orion.acl;
 import pro.deta.orion.internal.ChangeMetadata;
 import jakarta.inject.Inject;
 import pro.deta.orion.config.OrionConfigurationEditor;
+import pro.deta.orion.config.OrionConfigurationModification;
+import pro.deta.orion.util.OrionUtils;
 import jakarta.inject.Singleton;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.config.OrionRevision;
@@ -16,6 +18,8 @@ import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OidcProvider;
 import pro.deta.orion.schema.orion.v2.OrganizationInvitation;
+import pro.deta.orion.schema.orion.v2.SystemInvitation;
+import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -73,6 +77,115 @@ public final class OrganizationAccounts {
             return replaceAccounts(organization, organization.users(), invitations);
         }, "invite organization user", author);
         return new InvitationLink(token, expires);
+    }
+
+    public InvitationLink inviteSystem(String email, String provider,
+            List<SystemInvitation.RepositoryAccess> repositories, UserEmail author) {
+        byte[] bytes = new byte[32];
+        random.nextBytes(bytes);
+        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        long expires = clock.instant().plusSeconds(7 * 86400).getEpochSecond();
+        SystemInvitation invitation = new SystemInvitation(digest(token), email, expires, provider, repositories);
+        updateSystem(system -> {
+            boolean configured = false;
+            for (OidcProvider configuredProvider : system.oidcProviders()) {
+                if (configuredProvider.id().equals(provider)) configured = true;
+            }
+            if (!configured) throw new IllegalArgumentException("System OIDC provider is unavailable");
+            for (User user : system.accessControl().users()) {
+                if (user.email() != null && user.email().equalsIgnoreCase(invitation.email())) {
+                    throw new IllegalArgumentException("A user with this email already exists");
+                }
+            }
+            List<SystemInvitation> invitations = new ArrayList<>();
+            for (SystemInvitation previous : system.invitations()) {
+                if (previous.expiresAt() > clock.instant().getEpochSecond()
+                        && !previous.email().equals(invitation.email())) invitations.add(previous);
+            }
+            if (invitations.size() >= 1000) throw new IllegalArgumentException("Too many pending invitations");
+            invitations.add(invitation);
+            return replaceSystemAccounts(system, system.accessControl().users(), invitations);
+        }, "invite system user", author);
+        return new InvitationLink(token, expires);
+    }
+
+    public SystemInvitation systemInvitation(String token) {
+        return systemInvitation(editor.current().result()
+                .valueOrFailure("Cannot read configuration document").system(), token);
+    }
+
+    private SystemInvitation systemInvitation(OrionDocument.SystemConfiguration system, String token) {
+        if (token == null || !token.matches("[A-Za-z0-9_-]{43}")) {
+            throw new IllegalArgumentException("Invitation is unavailable");
+        }
+        String hash = digest(token);
+        for (SystemInvitation invitation : system.invitations()) {
+            if (invitation.tokenHash().equals(hash) && invitation.expiresAt() > clock.instant().getEpochSecond()) {
+                return invitation;
+            }
+        }
+        throw new IllegalArgumentException("Invitation is unavailable");
+    }
+
+    public String acceptSystem(String token, String email, OidcProvider provider, String subject,
+            String first, String last) {
+        String normalized = OrganizationInvitation.normalizeEmail(email);
+        String givenName = profileName(first, true);
+        String familyName = profileName(last, false);
+        String userId = "u-" + UUID.randomUUID();
+        String issuer = provider.issuer().toString();
+        updateSystem(system -> {
+            SystemInvitation invitation = systemInvitation(system, token);
+            if (!system.oidcProviders().contains(provider) || !invitation.provider().equals(provider.id())
+                    || !invitation.email().equals(normalized)) {
+                throw new IllegalArgumentException("Invitation identity or provider does not match");
+            }
+            for (User existing : system.accessControl().users()) {
+                if (existing.email() != null && existing.email().equalsIgnoreCase(normalized)) {
+                    throw new IllegalArgumentException("A user with this email already exists");
+                }
+                for (Credential credential : existing.credentials()) {
+                    if (credential.type() == CredentialType.OIDC_SUBJECT
+                            && issuer.equals(credential.keyId()) && subject.equals(credential.value())) {
+                        throw new IllegalArgumentException("Account is already linked");
+                    }
+                }
+            }
+            List<Grant> grants = new ArrayList<>();
+            for (SystemInvitation.RepositoryAccess access : invitation.repositories()) {
+                List<GrantExpression> expressions = new ArrayList<>();
+                expressions.add(new GrantExpression(GrantKey.REPOSITORY, access.repository()));
+                expressions.add(new GrantExpression(GrantKey.READ, "true"));
+                if (access.readWrite()) expressions.add(new GrantExpression(GrantKey.READ_WRITE, "true"));
+                grants.add(new Grant("invitation-" + grants.size(), expressions));
+            }
+            List<User> users = new ArrayList<>(system.accessControl().users());
+            users.add(new User(userId, givenName, familyName, normalized,
+                    List.of(new Credential(CredentialType.OIDC_SUBJECT, issuer, subject)), List.of(), grants));
+            List<SystemInvitation> invitations = new ArrayList<>(system.invitations());
+            invitations.remove(invitation);
+            return replaceSystemAccounts(system, users, invitations);
+        }, "accept system invitation", new UserEmail(userId, normalized));
+        return userId;
+    }
+
+    private void updateSystem(UnaryOperator<OrionDocument.SystemConfiguration> operation,
+            String message, UserEmail author) {
+        OrionConfigurationModification edit = editor.edit(editor.current().revision(),
+                new ChangeMetadata(author, message))
+                .update(document -> new OrionDocument(operation.apply(document.system()), document.organizations()));
+        edit.apply();
+        if (!OrionUtils.waitForCondition(() -> editor.current().revision().equals(edit.revision()))) {
+            throw new IllegalStateException("Saved system account configuration was not activated");
+        }
+    }
+
+    private static OrionDocument.SystemConfiguration replaceSystemAccounts(
+            OrionDocument.SystemConfiguration system, List<User> users, List<SystemInvitation> invitations) {
+        AccessControl acl = system.accessControl();
+        return new OrionDocument.SystemConfiguration(new AccessControl(users, acl.roles(), acl.grants()),
+                system.https(), system.secrets(), system.proxies(), system.connections(), system.oidcProviders(),
+                invitations);
     }
 
     public OrganizationInvitation invitation(OrganizationId organization, String token) {

@@ -503,7 +503,7 @@ class OrionAdminProxyMutationTest {
                                                 document.system().secrets(),
                                                 List.of(first, second),
                                                 document.system().connections(),
-                                                document.system().oidcProviders()),
+                                                document.system().oidcProviders(), document.system().invitations()),
                                         document.organizations());
                             })
                     .apply();
@@ -669,7 +669,7 @@ class OrionAdminProxyMutationTest {
                                                 system.secrets(),
                                                 List.of(first, second),
                                                 system.connections(),
-                                                system.oidcProviders()),
+                                                system.oidcProviders(), system.invitations()),
                                         document.organizations());
                             })
                     .apply();

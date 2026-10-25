@@ -57,6 +57,12 @@ import java.time.Clock;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import static org.assertj.core.api.Assertions.*;
 
 class OrionOidcOnboardingTest {
@@ -66,6 +72,268 @@ class OrionOidcOnboardingTest {
     @org.junit.jupiter.api.AfterEach
     void stopTestEvents() {
         EVENTS.close();
+    }
+
+    @Test
+    void providerSaveAcknowledgesOnlyAfterTheProviderIsAvailableToInvitations() throws Exception {
+        try (Fixture f = new Fixture();
+                ExecutorService requests = Executors.newSingleThreadExecutor()) {
+            f.storage.deferPublication = true;
+            Future<Reply> saving = requests.submit(() -> f.request("POST", "/api/admin/oidc",
+                    Map.of("scope", "system", "id", "corporate", "issuer", f.issuer.toString(),
+                            "clientId", "client", "clientSecret", "secret", "revision", f.revision()),
+                    Map.of(), null, f.admin));
+            try {
+                assertThat(f.storage.savedWithoutPublication.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThatThrownBy(() -> saving.get(200, TimeUnit.MILLISECONDS))
+                        .isInstanceOf(TimeoutException.class);
+            } finally {
+                EVENTS.manager().publish(new ConfigurationChanged(f.storage, f.storage.snapshot));
+            }
+            assertThat(saving.get(5, TimeUnit.SECONDS).status).isEqualTo(200);
+            Reply invitations = f.request("GET", "/api/admin/invitations", Map.of(), Map.of(), null, f.admin);
+            assertThat(invitations.json.path("systemProviders").get(0).asText()).isEqualTo("corporate");
+        }
+    }
+
+    @Test
+    void systemInvitationCreationAcknowledgesOnlyAfterItsLinkIsAvailable() throws Exception {
+        try (Fixture f = new Fixture();
+                ExecutorService requests = Executors.newSingleThreadExecutor()) {
+            f.configureSystem(List.of());
+            f.storage.deferPublication = true;
+            Future<Reply> saving = requests.submit(() -> f.request("POST", "/api/admin/invitations",
+                    Map.of("scope", "system", "email", "alice@example.test", "provider", "corporate"),
+                    Map.of(), null, f.admin));
+            try {
+                assertThat(f.storage.savedWithoutPublication.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThatThrownBy(() -> saving.get(200, TimeUnit.MILLISECONDS))
+                        .isInstanceOf(TimeoutException.class);
+            } finally {
+                EVENTS.manager().publish(new ConfigurationChanged(f.storage, f.storage.snapshot));
+            }
+            Reply response = saving.get(5, TimeUnit.SECONDS);
+            assertThat(response.status).isEqualTo(201);
+            String token = query(URI.create(response.json.path("url").asText()).getRawFragment()).get("invite");
+            assertThat(f.accounts.systemInvitation(token).provider()).isEqualTo("corporate");
+        }
+    }
+
+    @Test
+    void administratorInvitesASystemUserWithInitialRepositoryAccess() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.configureSystem(List.of());
+            Reply response = f.request("POST", "/api/admin/invitations",
+                    Map.of("scope", "system", "email", "alice@example.test", "provider", "corporate",
+                            "repositories", List.of(Map.of("repository", "project", "readWrite", true))),
+                    Map.of(), null, f.admin);
+            assertThat(response.status).isEqualTo(201);
+            assertThat(response.json.path("url").asText()).contains("#invite=", "scope=system");
+            assertThat(f.document().system().accessControl().users()).isEmpty();
+            assertThat(f.document().system().invitations()).singleElement().satisfies(invitation -> {
+                assertThat(invitation.provider()).isEqualTo("corporate");
+                assertThat(invitation.repositories())
+                        .containsExactly(new SystemInvitation.RepositoryAccess("project", true));
+                assertThat(response.json.path("url").asText()).doesNotContain(invitation.tokenHash());
+            });
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void acceptingSystemInvitationAssignsOnlyItsPromisedRepositoryAccess(boolean readWrite) throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.configureSystem(List.of());
+            String invitation = f.inviteSystem(List.of(Map.of("repository", "project", "readWrite", readWrite)));
+            Login login = f.startSystem(invitation);
+            String ticket = f.callback(login);
+            assertThat(f.post("profile", Map.of("ticket", ticket), login.cookie).json.path("setup").asBoolean())
+                    .isTrue();
+            Reply completed = f.post("complete", Map.of("ticket", ticket, "first", "Alice", "last", "Smith",
+                            "admin", true, "repositories", List.of(Map.of("repository", "other", "readWrite", true))),
+                    login.cookie);
+            assertThat(completed.status).isEqualTo(200);
+            TokenAuthenticationResult.Success authenticated = (TokenAuthenticationResult.Success)
+                    f.acl.verifyToken(completed.json.path("token").asText().getBytes(StandardCharsets.UTF_8));
+            assertThat(authenticated.userIdentity().getOrganizationId()).isEmpty();
+            SecurityContext context = SecurityContext.createContext().withUserIdentity(authenticated.userIdentity());
+            assertThat(RepositoryAccessRules.read().evaluate(context, RepositoryResource.of("project")).allowed())
+                    .isTrue();
+            assertThat(RepositoryAccessRules.write().evaluate(context, RepositoryResource.of("project")).allowed())
+                    .isEqualTo(readWrite);
+            assertThat(RepositoryAccessRules.read().evaluate(context, RepositoryResource.of("other")).allowed())
+                    .isFalse();
+            assertThat(RepositoryAccessRules.create().evaluate(context, RepositoryResource.of("project")).allowed())
+                    .isFalse();
+            assertThat(RepositoryAccessRules.force().evaluate(context, RepositoryResource.of("project")).allowed())
+                    .isFalse();
+            assertThat(ApplicationAccessRules.admin().evaluate(context,
+                    ApplicationAdminResource.applicationAdmin()).allowed()).isFalse();
+            assertThat(f.document().system().invitations()).isEmpty();
+            assertThat(f.document().system().accessControl().users()).singleElement().satisfies(user -> {
+                assertThat(user.first()).isEqualTo("Alice");
+                assertThat(user.credentials()).containsExactly(
+                        new Credential(CredentialType.OIDC_SUBJECT, f.issuer.toString(), "external-alice"));
+            });
+            assertThat(f.post("complete", Map.of("ticket", ticket, "first", "Replay"), login.cookie).status)
+                    .isEqualTo(400);
+            assertThat(f.post("start", Map.of("scope", "system", "provider", "corporate",
+                    "invitation", invitation), null).status).isEqualTo(400);
+            Login returning = f.startSystem();
+            String returningTicket = f.callback(returning);
+            assertThat(f.post("profile", Map.of("ticket", returningTicket), returning.cookie)
+                    .json.path("setup").asBoolean()).isFalse();
+            assertThat(f.post("complete", Map.of("ticket", returningTicket), returning.cookie).status).isEqualTo(200);
+            assertThat(f.document().system().accessControl().users()).hasSize(1);
+        }
+    }
+
+    @Test
+    void systemInvitationWithoutRepositoryAccessCreatesAnUnprivilegedAccount() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.configureSystem(List.of());
+            Login login = f.startSystem(f.inviteSystem(List.of()));
+            Reply completed = f.post("complete", Map.of("ticket", f.callback(login), "first", "Alice"), login.cookie);
+            assertThat(completed.status).isEqualTo(200);
+            assertThat(f.document().system().accessControl().users()).singleElement()
+                    .satisfies(user -> assertThat(user.grants()).isEmpty());
+        }
+    }
+
+    @Test
+    void systemInvitationRejectsWrongEmailUnverifiedIdentityAndOrganizationScope() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.configureSystem(List.of());
+            String invitation = f.inviteSystem(List.of());
+            assertThat(f.post("start", Map.of("organization", "acme", "provider", "corporate",
+                    "invitation", invitation), null).status).isEqualTo(400);
+            f.email = "other@example.test";
+            Login wrongEmail = f.startSystem(invitation);
+            assertThat(f.callbackReply(wrongEmail).status).isEqualTo(400);
+            f.email = "alice@example.test";
+            f.emailVerified = false;
+            Login unverified = f.startSystem(invitation);
+            assertThat(f.callbackReply(unverified).status).isEqualTo(400);
+            assertThat(f.document().system().accessControl().users()).isEmpty();
+            assertThat(f.accounts.systemInvitation(invitation)).isNotNull();
+        }
+    }
+
+    @Test
+    void systemInvitationReplacementInvalidatesEvenAnAlreadyVerifiedLogin() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.configureSystem(List.of());
+            String old = f.inviteSystem(List.of(Map.of("repository", "project", "readWrite", true)));
+            Login login = f.startSystem(old);
+            String ticket = f.callback(login);
+            String replacement = f.inviteSystem(List.of());
+            assertThat(f.post("complete", Map.of("ticket", ticket, "first", "Alice"), login.cookie).status)
+                    .isEqualTo(400);
+            assertThat(f.document().system().accessControl().users()).isEmpty();
+            assertThat(f.document().system().invitations()).hasSize(1);
+            Login current = f.startSystem(replacement);
+            assertThat(f.post("complete", Map.of("ticket", f.callback(current), "first", "Alice"), current.cookie)
+                    .status).isEqualTo(200);
+            assertThat(f.document().system().accessControl().users().getFirst().grants()).isEmpty();
+        }
+    }
+
+    @Test
+    void systemInvitationIsNotConsumedOnStorageConflictAndCannotBeAcceptedAfterExpiry() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.configureSystem(List.of());
+            String token = f.inviteSystem(List.of());
+            OidcProvider provider = f.document().system().oidcProviders().getFirst();
+            f.storage.conflict = true;
+            assertThatThrownBy(() -> f.accounts.acceptSystem(token, "alice@example.test", provider,
+                    "external-alice", "Alice", ""))
+                    .isInstanceOf(OrionConfigurationConcurrentUpdateException.class);
+            assertThat(f.document().system().accessControl().users()).isEmpty();
+            assertThat(f.accounts.systemInvitation(token)).isNotNull();
+            f.storage.conflict = false;
+            f.editor.edit(f.editor.current().revision(), new ChangeMetadata(UserEmail.EMPTY, "expire system invite"))
+                    .update(document -> {
+                        OrionDocument.SystemConfiguration system = document.system();
+                        SystemInvitation invitation = system.invitations().getFirst();
+                        return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(),
+                                system.https(), system.secrets(), system.proxies(), system.connections(),
+                                system.oidcProviders(), List.of(new SystemInvitation(invitation.tokenHash(),
+                                        invitation.email(), 1, invitation.provider(), invitation.repositories()))),
+                                document.organizations());
+                    }).apply();
+            EVENTS.await();
+            assertThatThrownBy(() -> f.accounts.acceptSystem(token, "alice@example.test", provider,
+                    "external-alice", "Alice", "")).isInstanceOf(IllegalArgumentException.class);
+            assertThat(f.document().system().accessControl().users()).isEmpty();
+        }
+    }
+
+    @Test
+    void systemInvitationsRejectExistingAccountsAndUnsupportedRepositoryGrants() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.configureSystem(List.of(f.systemUser("operator", "external-alice", false)));
+            assertThat(f.request("POST", "/api/admin/invitations", Map.of("scope", "system",
+                    "email", "alice@example.test", "provider", "corporate"), Map.of(), null, f.admin).status)
+                    .isEqualTo(400);
+            f.configureSystem(List.of());
+            for (String repository : List.of("**", "project/*", "../project", "orion", "missing")) {
+                assertThat(f.request("POST", "/api/admin/invitations", Map.of("scope", "system",
+                        "email", "alice@example.test", "provider", "corporate", "repositories",
+                        List.of(Map.of("repository", repository, "readWrite", true))), Map.of(), null, f.admin).status)
+                        .as(repository).isEqualTo(400);
+            }
+            assertThat(f.document().system().invitations()).isEmpty();
+        }
+    }
+
+    @Test
+    void systemInvitationPinsItsProviderAndOnlyAdministratorsCanCreateOrInspectInvitations() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.configureSystem(List.of());
+            f.editor.edit(f.editor.current().revision(), new ChangeMetadata(UserEmail.EMPTY, "add second provider"))
+                    .update(document -> {
+                        OrionDocument.SystemConfiguration system = document.system();
+                        OidcProvider provider = system.oidcProviders().getFirst();
+                        return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(),
+                                system.https(), system.secrets(), system.proxies(), system.connections(),
+                                List.of(provider, new OidcProvider("other", provider.issuer(), provider.clientId(),
+                                        provider.secret(), provider.idleTimeoutSeconds(), 0)), system.invitations()),
+                                document.organizations());
+                    }).apply();
+            EVENTS.await();
+            String invitation = f.inviteSystem(List.of());
+            Reply providers = f.request("GET", "/api/auth/providers", Map.of(),
+                    Map.of("scope", "system", "invitation", invitation), null, null);
+            assertThat(providers.json.path("providers")).hasSize(1);
+            assertThat(providers.json.path("providers").get(0).asText()).isEqualTo("corporate");
+            assertThat(f.post("start", Map.of("scope", "system", "provider", "other",
+                    "invitation", invitation), null).status).isEqualTo(400);
+            SecurityContext user = SecurityContext.createContext().withUserIdentity(new InternalUserImpl("reader",
+                    List.of(new Grant("read", List.of(new GrantExpression(GrantKey.REPOSITORY, "project"))))));
+            assertThat(f.request("GET", "/api/admin/invitations", Map.of(), Map.of(), null, user).status)
+                    .isEqualTo(403);
+            assertThat(f.request("POST", "/api/admin/invitations", Map.of("scope", "system",
+                    "email", "outsider@example.test", "provider", "corporate"), Map.of(), null, user).status)
+                    .isEqualTo(403);
+            assertThat(f.document().system().invitations()).hasSize(1);
+        }
+    }
+
+    @Test
+    void acceptingASystemInvitationNeverLinksAnExistingSubjectToANewEmail() throws Exception {
+        try (Fixture f = new Fixture()) {
+            User existing = f.systemUser("operator", "external-alice", false);
+            f.configureSystem(List.of(existing));
+            Reply invitation = f.request("POST", "/api/admin/invitations", Map.of("scope", "system",
+                    "email", "different@example.test", "provider", "corporate"), Map.of(), null, f.admin);
+            assertThat(invitation.status).isEqualTo(201);
+            String token = query(URI.create(invitation.json.path("url").asText()).getRawFragment()).get("invite");
+            f.email = "different@example.test";
+            Login login = f.startSystem(token);
+            assertThat(f.callbackReply(login).status).isEqualTo(400);
+            assertThat(f.document().system().accessControl().users()).containsExactly(existing);
+            assertThat(f.accounts.systemInvitation(token)).isNotNull();
+        }
     }
 
     @Test
@@ -335,7 +603,7 @@ class OrionOidcOnboardingTest {
                                                 system.secrets(),
                                                 system.proxies(),
                                                 system.connections(),
-                                                List.of()),
+                                                List.of(), system.invitations()),
                                         document.organizations());
                             })
                     .apply();
@@ -1029,6 +1297,9 @@ class OrionOidcOnboardingTest {
     }
 
     private static final class Fixture implements AutoCloseable {
+        final pro.deta.orion.git.proxy.NativeGitRepositoryFactory repositories =
+                new pro.deta.orion.git.proxy.NativeGitRepositoryFactory(
+                        pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager()));
         final ObjectMapper mapper = new ObjectMapper();
         final MemoryStorage storage = new MemoryStorage();
         final OrionKeyMaterial material;
@@ -1061,6 +1332,9 @@ class OrionOidcOnboardingTest {
         final URI issuer;
 
         Fixture() throws Exception {
+            repositories.provider().create("project").valueOrFailure("create invitation test repository");
+            repositories.resolveProvisional(pro.deta.orion.git.proxy.NativeGitRepositoryFactory.CONFIGURATION_SOURCE,
+                    new pro.deta.orion.bootstrap.config.BootstrapConfigurationSourceConfig(), true);
             KeyPair tlsKey = TestCertificateChain.keyPair();
             KeyStore keyStore = KeyStore.getInstance("PKCS12");
             keyStore.load(null, null);
@@ -1144,7 +1418,7 @@ class OrionOidcOnboardingTest {
             }
             OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
                     Optional.of(https), List.of(), List.of(), List.of(),
-                    List.of()), organizations);
+                    List.of(), List.of()), organizations);
             for (String id : List.of("default", "acme")) {
                 document = secrets.replace(document, ConfigurationScope.organization(new OrganizationId(id)),
                         "oidc", "secret".toCharArray());
@@ -1177,7 +1451,7 @@ class OrionOidcOnboardingTest {
                                     Set.of(
                                             oidc,
                                             new OrionAdminInvitationsRoute(
-                                                    accounts, acl, oidc, mapper),
+                                                    accounts, acl, oidc, mapper, repositories),
                                             new OrionAdminOidcRoute(acl, editor, secrets, mapper),
                                             new OrionAdminCreateOrUpdateUserRoute(
                                                     acl, editor, mapper))),
@@ -1202,6 +1476,18 @@ class OrionOidcOnboardingTest {
 
         Login startSystem() throws Exception {
             return startLogin(Map.of("scope", "system", "provider", "corporate"));
+        }
+
+        String inviteSystem(List<Map<String, Object>> repositories) throws Exception {
+            Reply reply = request("POST", "/api/admin/invitations", Map.of("scope", "system",
+                    "email", "alice@example.test", "provider", "corporate", "repositories", repositories),
+                    Map.of(), null, admin);
+            assertThat(reply.status).isEqualTo(201);
+            return query(URI.create(reply.json.path("url").asText()).getRawFragment()).get("invite");
+        }
+
+        Login startSystem(String invitation) throws Exception {
+            return startLogin(Map.of("scope", "system", "provider", "corporate", "invitation", invitation));
         }
 
         private Login startLogin(Map<String, Object> input) throws Exception {
@@ -1252,7 +1538,7 @@ class OrionOidcOnboardingTest {
                                                                         "oidc",
                                                                         OidcProvider
                                                                                 .DEFAULT_IDLE_TIMEOUT_SECONDS,
-                                                                        0))),
+                                                                        0)), system.invitations()),
                                                 document.organizations());
                                 return secrets.replaceSystem(
                                         changed, "oidc", "secret".toCharArray());
@@ -1374,6 +1660,7 @@ class OrionOidcOnboardingTest {
         }
 
         @Override public void close() {
+            repositories.close();
             acl.onStop();
             provider.stop(0);
             HttpsURLConnection.setDefaultSSLSocketFactory(originalTls);
@@ -1401,6 +1688,8 @@ class OrionOidcOnboardingTest {
         OrionDocumentRevision snapshot;
         int saves;
         boolean conflict;
+        boolean deferPublication;
+        final CountDownLatch savedWithoutPublication = new CountDownLatch(1);
 
         @Override
         public OrionDocumentRevision load() {
@@ -1427,7 +1716,8 @@ class OrionOidcOnboardingTest {
                     .equals(document)) return stored;
             OrionRevision.Stored saved = new OrionRevision.Stored(Integer.toString(++saves));
             snapshot = new OrionDocumentRevision(Result.of(document), saved);
-            EVENTS.manager().publish(new ConfigurationChanged(this, snapshot));
+            if (deferPublication) savedWithoutPublication.countDown();
+            else EVENTS.manager().publish(new ConfigurationChanged(this, snapshot));
             return saved;
         }
     }

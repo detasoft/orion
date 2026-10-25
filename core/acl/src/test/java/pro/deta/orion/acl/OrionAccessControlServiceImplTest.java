@@ -115,7 +115,7 @@ class OrionAccessControlServiceImplTest {
                                         List.of(new ConfigurationSecret("secret", testEnvelope())),
                                         List.of(),
                                         List.of(),
-                                        List.of(provider)),
+                                        List.of(provider), List.of()),
                                 List.of());
         try (ServiceFixture fixture = fixture(document.apply(List.of(binding,
                 new Credential(CredentialType.OPENSSH_PUBLIC_KEY,
@@ -156,7 +156,7 @@ class OrionAccessControlServiceImplTest {
         java.util.function.BiFunction<AccessControl, String, OrionDocument> document = (acl, envelope) ->
                 new OrionDocument(new OrionDocument.SystemConfiguration(acl, Optional.empty(),
                         List.of(new ConfigurationSecret("secret", envelope)), List.of(), List.of(),
-                        List.of(provider)), List.of());
+                        List.of(provider), List.of()), List.of());
         AccessControl original = new AccessControl(List.of(alice),
                 List.of(new Role("reader", List.of(read), List.of())), List.of());
         try (ServiceFixture fixture = fixture(document.apply(original, testEnvelope()))) {
@@ -231,7 +231,7 @@ class OrionAccessControlServiceImplTest {
                                                                         testEnvelope())),
                                                         document.system().proxies(),
                                                         document.system().connections(),
-                                                        document.system().oidcProviders()),
+                                                        document.system().oidcProviders(), document.system().invitations()),
                                                 document.organizations()));
                         assertThat(fixture.storage.saveCount).isZero();
                         fixture.storage.awaitEvents();
@@ -276,7 +276,7 @@ class OrionAccessControlServiceImplTest {
                         document.system().accessControl(), document.system().https(),
                         List.of(new ConfigurationSecret("abandoned", testEnvelope())),
                         document.system().proxies(), document.system().connections(),
-                        document.system().oidcProviders()), document.organizations()));
+                        document.system().oidcProviders(), document.system().invitations()), document.organizations()));
                 throw failure;
             })).isSameAs(failure);
             assertThat(fixture.storage.saveCount).isZero();
@@ -338,7 +338,7 @@ class OrionAccessControlServiceImplTest {
                         document.system().accessControl(), document.system().https(),
                         List.of(new ConfigurationSecret("credential", testEnvelope())),
                         document.system().proxies(), document.system().connections(),
-                        document.system().oidcProviders()), document.organizations()));
+                        document.system().oidcProviders(), document.system().invitations()), document.organizations()));
                 modification.apply();
                 storage.awaitEvents();
                 assertThat(published).containsExactly(storage.snapshot);
@@ -720,7 +720,7 @@ class OrionAccessControlServiceImplTest {
                                                                             testEnvelope())),
                                                             document.system().proxies(),
                                                             document.system().connections(),
-                                                            document.system().oidcProviders()),
+                                                            document.system().oidcProviders(), document.system().invitations()),
                                                     document.organizations()));
             appliedEdit.apply();
             OrionDocumentRevision result = fixture.storage.snapshot;
@@ -790,7 +790,7 @@ class OrionAccessControlServiceImplTest {
                         List.of(),
                         Optional.empty());
         OrionDocument initial = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
-                Optional.of(https), List.of(), List.of(), List.of(), List.of()), List.of());
+                Optional.of(https), List.of(), List.of(), List.of(), List.of(), List.of()), List.of());
         try (ServiceFixture fixture = fixture(initial)) {
             assertThat(fixture.service.configuration().result()
                     .valueOrFailure("Cannot read configuration document")
@@ -830,7 +830,7 @@ class OrionAccessControlServiceImplTest {
                                     List.of(),
                                     List.of(),
                                     List.of(),
-                                    List.of()),
+                                    List.of(), initial.system().invitations()),
                             List.of());
             fixture.storage.snapshot =
                     new OrionDocumentRevision(
@@ -856,7 +856,7 @@ class OrionAccessControlServiceImplTest {
                     URI.create("https://localhost:8443"), Optional.empty(), Optional.empty(),
                     OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), Optional.empty());
             OrionDocument changed = new OrionDocument(new OrionDocument.SystemConfiguration(
-                    acl, Optional.of(https), List.of(), List.of(), List.of(), List.of()), List.of());
+                    acl, Optional.of(https), List.of(), List.of(), List.of(), List.of(), List.of()), List.of());
             fixture.storage.snapshot =
                     new OrionDocumentRevision(Result.of(changed), new OrionRevision.Stored("second-commit"));
             fixture.storage.publish("configuration changed");
@@ -1506,7 +1506,7 @@ class OrionAccessControlServiceImplTest {
                         List.of(new ConfigurationSecret("invalid", "not-an-envelope")),
                         List.of(),
                         List.of(),
-                        List.of()),
+                        List.of(), List.of()),
                 List.of());
     }
 

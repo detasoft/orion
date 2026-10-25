@@ -14,6 +14,17 @@ it('loads system providers without requiring an organization', async () => {
   wrapper.unmount()
 })
 
+it('loads only the provider bound to a system invitation and locks its scope', async () => {
+  api.providers.mockResolvedValue({ providers: ['corporate'] })
+  const wrapper = mount(OrganizationSignIn, { props: { invitation: 'secret', scope: 'system' } })
+  await flushPromises()
+  expect(api.providers).toHaveBeenCalledWith({ scope: 'system', invitation: 'secret' })
+  expect(wrapper.find('[name=scope]').exists()).toBe(false)
+  expect(wrapper.find('input').exists()).toBe(false)
+  expect(wrapper.findAll('option').map(item => item.text())).toEqual(['corporate'])
+  wrapper.unmount()
+})
+
 it('loads providers for the invitation organization and prevents switching its scope', async () => {
   api.providers.mockResolvedValue({ providers: ['corporate', 'google'] })
   const wrapper = mount(OrganizationSignIn, { props: { organization: 'acme', invitation: 'secret' } })

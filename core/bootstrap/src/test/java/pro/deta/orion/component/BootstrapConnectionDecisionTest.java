@@ -122,7 +122,7 @@ class BootstrapConnectionDecisionTest {
                                                     document.system().secrets(),
                                                     List.of(fixture.previous, unrelated),
                                                     document.system().connections(),
-                                                    document.system().oidcProviders()),
+                                                    document.system().oidcProviders(), document.system().invitations()),
                                             document.organizations()))
                     .apply();
             EVENTS.await();
@@ -169,7 +169,7 @@ class BootstrapConnectionDecisionTest {
     private static OrionDocument withBinding(GitProxyBinding binding) {
         return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(),
                 List.of(), List.of(binding), List.of(),
-                List.of()), List.of());
+                List.of(), List.of()), List.of());
     }
 
     private static final class Fixture implements AutoCloseable {

@@ -148,7 +148,7 @@ public class OrionRuntimeModule {
                 OrionDocument.SystemConfiguration system = document.system();
                 return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(),
                         system.https(), system.secrets(), bindings, connections,
-                        system.oidcProviders()), document.organizations());
+                        system.oidcProviders(), system.invitations()), document.organizations());
             }).apply();
             return Result.of(null);
         } catch (RuntimeException failure) {
@@ -212,7 +212,7 @@ public class OrionRuntimeModule {
                 OrionDocument.SystemConfiguration system = document.system();
                 return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(),
                         system.https(), system.secrets(), system.proxies(), connections,
-                        system.oidcProviders()), document.organizations());
+                        system.oidcProviders(), system.invitations()), document.organizations());
             }).apply();
             recordTrustAudit(audit, binding, actor, "saved");
             return Result.of(null);

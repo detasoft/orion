@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.config.OrionConfigurationEditor;
+import pro.deta.orion.config.OrionConfigurationModification;
+import pro.deta.orion.util.OrionUtils;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.config.ConfigurationSecrets;
@@ -102,10 +104,13 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
             char[] suppliedSecret = secret;
             SecurityContext context = (SecurityContext) request.getAttribute(
                     OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
-            editor.edit(new OrionRevision.Stored(revision),
+            OrionConfigurationModification edit = editor.edit(new OrionRevision.Stored(revision),
                     new ChangeMetadata(new UserEmail(context.getUserIdentity().getUserId(), ""), "Configure " + scope + " OIDC provider"))
-                    .update(document -> save(document, id, provider, suppliedSecret))
-                    .apply();
+                    .update(document -> save(document, id, provider, suppliedSecret));
+            edit.apply();
+            if (!OrionUtils.waitForCondition(() -> editor.current().revision().equals(edit.revision()))) {
+                throw new IllegalStateException("Saved OIDC provider configuration was not activated");
+            }
             return OrionHttpResponse.ok(Map.of("saved", true)).withHeader("Cache-Control", "no-store");
         } catch (OrionConfigurationConcurrentUpdateException conflict) {
             return OrionHttpResponse.text(409, "Configuration changed. Reload providers and try again.");
@@ -164,7 +169,8 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
             if (replacing) providers.remove(previous);
             providers.add(updated);
             return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(), system.https(),
-                    system.secrets(), system.proxies(), system.connections(), providers), document.organizations());
+                    system.secrets(), system.proxies(), system.connections(), providers, system.invitations()),
+                    document.organizations());
         }
         List<OrionDocument.Organization> organizations = new ArrayList<>();
         for (OrionDocument.Organization candidate : document.organizations()) {

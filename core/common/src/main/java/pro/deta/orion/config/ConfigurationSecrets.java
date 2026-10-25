@@ -223,7 +223,7 @@ public final class ConfigurationSecrets {
             return new OrionDocument(new OrionDocument.SystemConfiguration(
                     document.system().accessControl(), document.system().https(),
                     secrets, document.system().proxies(), document.system().connections(),
-                    document.system().oidcProviders()),
+                    document.system().oidcProviders(), document.system().invitations()),
                     document.organizations());
         }
         ConfigurationScope scope = owner.orElseThrow();

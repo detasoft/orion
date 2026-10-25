@@ -43,7 +43,7 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
     public OrionDocument replaceAccessControl(AccessControl accessControl) {
         return new OrionDocument(
                 new SystemConfiguration(accessControl, system.https(), system.secrets(), system.proxies(),
-                        system.connections(), system.oidcProviders()),
+                        system.connections(), system.oidcProviders(), system.invitations()),
                 organizations);
     }
 
@@ -65,9 +65,10 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
             List<ConfigurationSecret> secrets,
             List<GitProxyBinding> proxies,
             List<Connection> connections,
-            List<OidcProvider> oidcProviders) {
+            List<OidcProvider> oidcProviders,
+            List<SystemInvitation> invitations) {
         public SystemConfiguration(AccessControl accessControl) {
-            this(accessControl, Optional.empty(), List.of(), List.of(), List.of(), List.of());
+            this(accessControl, Optional.empty(), List.of(), List.of(), List.of(), List.of(), List.of());
         }
 
         public SystemConfiguration {
@@ -75,6 +76,7 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
             https = Objects.requireNonNullElseGet(https, Optional::empty);
             secrets = copyUnique(secrets, ConfigurationSecret::id, "secret");
             oidcProviders = copyUnique(oidcProviders, OidcProvider::id, "OIDC provider");
+            invitations = copyUnique(invitations, SystemInvitation::tokenHash, "system invitation");
             connections = copyConnections(connections, secrets);
             proxies = new ArrayList<>(copyUnique(proxies, GitProxyBinding::alias, "proxy"));
             proxies.sort(Comparator.comparing(proxy -> proxy.alias().value()));

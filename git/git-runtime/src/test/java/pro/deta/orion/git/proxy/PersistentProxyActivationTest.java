@@ -220,7 +220,7 @@ class PersistentProxyActivationTest {
             fixture.current.set(new OrionDocument(new OrionDocument.SystemConfiguration(
                     valid.system().accessControl(), valid.system().https(), List.of(invalid),
                     valid.system().proxies(), valid.system().connections(),
-                    valid.system().oidcProviders()), valid.organizations()));
+                    valid.system().oidcProviders(), valid.system().invitations()), valid.organizations()));
 
             assertThatThrownBy(() -> provider.activate(fixture.current::get, fixture.secrets))
                     .isInstanceOf(IllegalStateException.class).hasMessageNotContaining("invalid-envelope");
@@ -247,7 +247,7 @@ class PersistentProxyActivationTest {
             provider.activate(fixture.current::get, fixture.secrets);
             OrionDocument invalid = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
                     Optional.empty(), List.of(new ConfigurationSecret("broken", "invalid-envelope")), List.of(), List.of(),
-                    List.of()),
+                    List.of(), List.of()),
                     List.of());
 
             assertThatThrownBy(() -> provider.activate(() -> invalid, fixture.secrets))
@@ -291,7 +291,7 @@ class PersistentProxyActivationTest {
         return new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
                 document.system().https(), document.system().secrets(), bindings,
                         document.system().connections(),
-                document.system().oidcProviders()), document.organizations());
+                document.system().oidcProviders(), document.system().invitations()), document.organizations());
     }
 
     private static final class Fixture implements AutoCloseable {

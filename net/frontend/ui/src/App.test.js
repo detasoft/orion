@@ -312,6 +312,37 @@ describe('Orion navigation', () => {
     expect(signIn.props('organization')).toBe('acme')
     expect(window.location.hash).toBe('#/overview')
   })
+
+  it.each(['invite', 'onboarding'])('handles %s links in an already open tab', async (parameter) => {
+    const wrapper = mount(App, { global: { stubs: { OrganizationSignIn: {
+      props: ['invitation', 'ticket', 'organization', 'scope'], template: '<div class="sign-in" />',
+    } } } })
+    await flushPromises()
+    window.history.pushState(null, '', `/ui#${parameter}=secret&scope=system`)
+    window.dispatchEvent(new Event('hashchange'))
+    await flushPromises()
+    expect(wrapper.findComponent('.sign-in').exists()).toBe(true)
+    const signIn = wrapper.getComponent('.sign-in')
+    expect(signIn.props(parameter === 'invite' ? 'invitation' : 'ticket')).toBe('secret')
+    expect(signIn.props('scope')).toBe('system')
+    expect(signIn.props('organization')).toBe('')
+    expect(window.location.hash).toBe('#/overview')
+    wrapper.unmount()
+  })
+
+  it('opens system invitations without selecting an organization and removes the invitation from the URL', async () => {
+    window.history.replaceState(null, '', '/ui#invite=secret&scope=system')
+    const wrapper = mount(App, { global: { stubs: { OrganizationSignIn: {
+      props: ['invitation', 'ticket', 'organization', 'scope'], template: '<div class="sign-in" />',
+    } } } })
+    await flushPromises()
+    const signIn = wrapper.getComponent('.sign-in')
+    expect(signIn.props('invitation')).toBe('secret')
+    expect(signIn.props('scope')).toBe('system')
+    expect(signIn.props('organization')).toBe('')
+    expect(window.location.hash).toBe('#/overview')
+    wrapper.unmount()
+  })
 })
 
 describe('Orion connection', () => {

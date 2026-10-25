@@ -226,7 +226,7 @@ class RuntimeHttpAdminAclUpdateIT {
                     system.accessControl(), system.https(),
                     List.of(new ConfigurationSecret("plain", "open-xml-secret")),
                     system.proxies(), system.connections(),
-                    system.oidcProviders()), stored.organizations());
+                    system.oidcProviders(), system.invitations()), stored.organizations());
             assertThatThrownBy(() -> RuntimeHttpTestSupport.updateConfiguration(
                     orion, serializeDocument(plaintext), current.etag()))
                     .isInstanceOf(IllegalStateException.class);

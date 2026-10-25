@@ -302,7 +302,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
             OrionDocument.SystemConfiguration system = document.system();
             return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(), system.https(),
                     system.secrets(), system.proxies(), connections,
-                    system.oidcProviders()), document.organizations());
+                    system.oidcProviders(), system.invitations()), document.organizations());
         }
         OrionDocument.Organization organization = organization(document, owner.orElseThrow());
         return replaceOrganization(document, new OrionDocument.Organization(organization.id(),

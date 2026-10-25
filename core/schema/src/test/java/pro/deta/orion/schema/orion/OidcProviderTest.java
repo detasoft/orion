@@ -28,7 +28,7 @@ class OidcProviderTest {
                 "organization-client", "client-secret", OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0);
         OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
                 Optional.empty(), List.of(new ConfigurationSecret("client-secret", "system-envelope")),
-                List.of(), List.of(), List.of(systemProvider)),
+                List.of(), List.of(), List.of(systemProvider), List.of()),
                 List.of(organization("acme", List.of(organizationProvider))));
         ByteArrayOutputStream xml = new ByteArrayOutputStream();
         OrionXml.write(document, xml);
@@ -47,10 +47,10 @@ class OidcProviderTest {
                 "system-client", "client-secret", OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0);
         assertThatThrownBy(() -> new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(),
                 List.of(new ConfigurationSecret("client-secret", "encrypted")), List.of(), List.of(),
-                List.of(provider, provider)))
+                List.of(provider, provider), List.of()))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("duplicate OIDC provider");
         assertThatThrownBy(() -> new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(),
-                List.of(), List.of(), List.of(), List.of(provider)))
+                List.of(), List.of(), List.of(), List.of(provider), List.of()))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("system scope");
     }
 

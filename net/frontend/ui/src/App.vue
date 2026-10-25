@@ -127,6 +127,13 @@ function selectView(view, event) {
 }
 
 function readRoute() {
+  const fragment = new URLSearchParams(window.location.hash.slice(1))
+  if (fragment.has('invite') || fragment.has('onboarding')) {
+    signIn.value = { invitation: fragment.get('invite') ?? '', ticket: fragment.get('onboarding') ?? '',
+      scope: fragment.get('scope') === 'system' ? 'system' : 'organization',
+      organization: fragment.get('scope') === 'system' ? '' : fragment.get('organization') ?? 'default' }
+    window.history.replaceState(null, '', window.location.pathname + window.location.search)
+  }
   const [requested, query = ''] = window.location.hash.slice(2).split('?')
   const available = identity.value ? navItems.value : allNavItems
   const view = window.location.hash.startsWith('#/') && available.some((item) => item.id === requested)
@@ -483,12 +490,6 @@ onMounted(() => {
   renewalTimer = setInterval(renewSession, 30000)
   window.addEventListener('focus', renewSession)
   document.addEventListener('visibilitychange', renewSession)
-  const fragment = new URLSearchParams(window.location.hash.slice(1))
-  if (fragment.has('invite') || fragment.has('onboarding')) {
-    signIn.value = { invitation: fragment.get('invite') ?? '', ticket: fragment.get('onboarding') ?? '',
-      organization: fragment.get('organization') ?? 'default' }
-    window.history.replaceState(null, '', window.location.pathname + window.location.search)
-  }
   readRoute()
   window.addEventListener('hashchange', readRoute)
   darkMode.value = localStorage.getItem('orion.ui.theme') === 'dark'
@@ -511,7 +512,8 @@ onUnmounted(() => {
 
 <template>
   <div class="app-shell" :class="{ 'dark-mode': darkMode }">
-    <OrganizationSignIn v-if="signIn" v-bind="signIn" @signed-in="signedIn" @close="signIn = null" />
+    <OrganizationSignIn v-if="signIn" :key="signIn.ticket || signIn.invitation || ''" v-bind="signIn"
+      @signed-in="signedIn" @close="signIn = null" />
     <div v-if="sidebarOpen" class="scrim" @click="sidebarOpen = false" />
 
     <aside class="sidebar" :class="{ open: sidebarOpen }">
