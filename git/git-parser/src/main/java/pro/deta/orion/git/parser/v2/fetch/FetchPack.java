@@ -83,7 +83,7 @@ public final class FetchPack {
             }
         }
         if (plan.capabilities().has(GitCapability.INCLUDE_TAG)) {
-            pack.includeTags();
+            pack.includeTags(repository);
         }
         pack.packUris = Collections.unmodifiableMap(pack.selectPackUris(repository, plan.packfileUriProtocols()));
         List<IndexedObject> entries = new ArrayList<>();
@@ -329,10 +329,12 @@ public final class FetchPack {
         }
     }
 
-    private void includeTags() throws IOException {
+    private void includeTags(GitRepositoryContext repository) throws IOException {
+        RefsSnapshot snapshot = index.snapshotRefs(new RefSelection.All());
+        Set<RefId> visible = repository.visibleRefs(snapshot);
         Map<ObjectId, GitObjectLinks> tags = new LinkedHashMap<>();
-        for (Map.Entry<RefId, ObjectId> ref : index.snapshotRefs(
-                new RefSelection.Pattern("refs/tags/*")).refs().entrySet()) {
+        for (Map.Entry<RefId, ObjectId> ref : snapshot.refs().entrySet()) {
+            if (!ref.getKey().value().startsWith("refs/tags/") || !visible.contains(ref.getKey())) continue;
             ObjectId id = ref.getValue();
             Set<ObjectId> visited = new HashSet<>();
             while (!objects.contains(id) && !common.contains(id) && visited.add(id)) {

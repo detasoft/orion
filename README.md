@@ -1029,6 +1029,8 @@ Non-fast-forward tag updates additionally require `FORCE` access to all branches
 branch-scoped force grants cannot use a broader write grant to authorize those updates.
 For organization grants, a matching branch `DENY` prevents unrestricted access for
 that operation even when an `ALLOW` grant contains `BRANCH=*`.
+Branch-restricted readers hide all tags both in ref discovery and in automatic `include-tag`
+pack selection. Unrestricted readers retain automatic delivery of annotated tags, including nested tags.
 
 ## Development
 

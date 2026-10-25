@@ -3,6 +3,8 @@ package pro.deta.orion.transport.git;
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
@@ -17,6 +19,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
@@ -40,11 +43,13 @@ import pro.deta.orion.schema.orion.v2.ScopedRole;
 import pro.deta.orion.schema.orion.v2.TeamId;
 import pro.deta.orion.transport.git.auth.AuthenticatedRepositoryAccessHook;
 import java.io.ByteArrayOutputStream;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -69,6 +74,52 @@ class GitBlockingWireSessionTest {
     private static final String MAIN_ID = "88d050b1908057b53d38b42702ebc659e3d7f696";
     private static final String WANT = "2".repeat(40);
     private static final String NULL_ID = "0".repeat(40);
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void includeTagUsesVisibleRefsForLegacyAndV2Fetches(boolean version2, boolean unrestricted) throws Exception {
+        try (NativeGitRepositoryProvider provider = providerWithVisibilityRefs()) {
+            NativeGitRepository source = provider.find("project").valueOrFailure("repository");
+            String annotated = source.refs().get("refs/tags/annotated");
+            ObjectId nested = source.writeObject(GitObjectType.TAG,
+                    ("object " + annotated + "\ntype tag\ntag nested\n\nprivate annotation\n")
+                            .getBytes(StandardCharsets.UTF_8));
+            source.updateRef("refs/tags/nested", NULL_ID, nested.toHex());
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            try (QueueByteSource input = new QueueByteSource(Duration.ofSeconds(1))) {
+                input.feed(version2 ? fetchRequest("want " + MAIN_ID + "\n", "include-tag\n", "done\n")
+                        : legacyUploadRequest("want " + MAIN_ID + " include-tag\n", "done\n"));
+                input.end();
+                session(input, output, provider, visibilityHook(unrestricted ? null : "main"))
+                        .serveSmartHttpPost(version2 ? uploadV2Request() : uploadV1Request());
+            }
+            byte[] response = output.bytes();
+            byte[] pack;
+            if (version2) {
+                ByteArrayOutputStream received = new ByteArrayOutputStream();
+                try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(response))) {
+                    Optional<GitPktLine> packet;
+                    while ((packet = GitPktLine.readNextFrom(input)).isPresent()) {
+                        if (packet.orElseThrow() instanceof GitPktLine.Data data
+                                && data.content().length > 0 && data.content()[0] == 1) {
+                            received.write(data.content(), 1, data.content().length - 1);
+                        }
+                    }
+                }
+                pack = received.toByteArray();
+            } else {
+                int offset = output.ascii().indexOf("PACK");
+                assertThat(offset).isNotNegative();
+                pack = Arrays.copyOfRange(response, offset, response.length);
+            }
+            NativeGitRepository downloaded = provider.create("downloaded").valueOrFailure("download repository");
+            downloaded.publishPack(pack, List.of(), false, GitNativeRepositoryAccessHook.ALLOW_ALL);
+            assertThat(downloaded.readObject(new ObjectId(MAIN_ID))).isPresent();
+            assertThat(downloaded.readObject(new ObjectId(annotated)).isPresent()).isEqualTo(unrestricted);
+            assertThat(downloaded.readObject(nested).isPresent()).isEqualTo(unrestricted);
+            assertThat(downloaded.readObject(new ObjectId(source.refs().get("refs/tags/secret")))).isEmpty();
+        }
+    }
 
     @Test
     void advertisementsHideDeniedBranchNamesAndAllTagsForRestrictedReaders() throws Exception {
