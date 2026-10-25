@@ -58,21 +58,15 @@ public class OrionKeyMaterial implements AutoCloseable {
 
     private final SecureRandom secureRandom = new SecureRandom();
     private final KeyMaterialService owner;
-    private final SigningIdentity signingIdentity;
     private boolean closed;
 
-    private OrionKeyMaterial(
-            KeyMaterialService owner,
-            SigningMaterialSet signingMaterial) {
+    private OrionKeyMaterial(KeyMaterialService owner) {
         this.owner = owner;
-        this.signingIdentity = signingMaterial == null
-                ? SigningIdentity.unavailable() : new SigningIdentity(this, signingMaterial);
     }
 
     public static OrionKeyMaterial open(KeyMaterialContentStore store, KeyMaterialOptions options)
             throws IOException, GeneralSecurityException {
-        return new OrionKeyMaterial(
-                KeyMaterialService.open(store, options), null);
+        return new OrionKeyMaterial(KeyMaterialService.open(store, options));
     }
 
     public static OrionKeyMaterial open(
@@ -80,8 +74,7 @@ public class OrionKeyMaterial implements AutoCloseable {
             KeyMaterialOptions options,
             OrionEventPublisher eventPublisher) throws IOException, GeneralSecurityException {
         return new OrionKeyMaterial(
-                KeyMaterialService.open(store, options, new KeyMaterialStorageCertificateFactory(), eventPublisher),
-                null);
+                KeyMaterialService.open(store, options, new KeyMaterialStorageCertificateFactory(), eventPublisher));
     }
 
     public static OrionKeyMaterial open(
@@ -132,7 +125,7 @@ public class OrionKeyMaterial implements AutoCloseable {
             for (KeyMaterialDescriptor descriptor : signingMaterial.verificationIncludingActive()) {
                 service.validateExisting(descriptor);
             }
-            return new OrionKeyMaterial(service, signingMaterial);
+            return new OrionKeyMaterial(service);
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {
             service.close();
             throw failure;
@@ -141,15 +134,10 @@ public class OrionKeyMaterial implements AutoCloseable {
 
     protected OrionKeyMaterial() {
         owner = null;
-        signingIdentity = SigningIdentity.unavailable();
     }
 
     public static OrionKeyMaterial unavailable() {
         return new OrionKeyMaterial();
-    }
-
-    public SigningIdentity signingIdentity() {
-        return signingIdentity;
     }
 
     public boolean hasDurableSnapshot() {

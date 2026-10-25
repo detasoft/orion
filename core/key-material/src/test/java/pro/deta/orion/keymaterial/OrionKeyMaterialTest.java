@@ -31,22 +31,17 @@ class OrionKeyMaterialTest {
 
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
                 new KeyMaterialCreation(true))) {
-            SigningIdentity identity = material.signingIdentity();
-            signature = identity.sign(payload);
-            assertThat(identity.activeKeyId()).isEqualTo("server-signing-v1");
-            assertThat(identity.verify("server-signing-v1", payload, signature)).isTrue();
-            assertThat(identity.publicKeys()).hasSize(1);
+            signature = material.sign(signing.active(), payload);
+            assertThat(material.verify(signing.active(), payload, signature)).isTrue();
         }
 
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048)) {
-            SigningIdentity identity = material.signingIdentity();
-            assertThat(identity.verify("server-signing-v1", payload, signature)).isTrue();
-            assertThat(identity.verify("unknown", payload, signature)).isFalse();
+            assertThat(material.verify(signing.active(), payload, signature)).isTrue();
         }
     }
 
     @Test
-    void retainsExactOlderAliasForVerificationAcrossReload() throws Exception {
+    void retainsOlderSigningMaterialAcrossReloadAndRetirement() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialDescriptor old = rsa("server-signing-v1", 1);
         KeyMaterialDescriptor active = rsa("server-signing-v2", 2);
@@ -68,66 +63,15 @@ class OrionKeyMaterialTest {
 
         SigningMaterialSet signing = new SigningMaterialSet(active, List.of(old));
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048)) {
-            SigningIdentity identity = material.signingIdentity();
-            byte[] activeSignature = identity.sign(payload);
+            byte[] activeSignature = material.sign(active, payload);
 
-            assertThat(identity.activeKeyId()).isEqualTo("server-signing-v2");
-            assertThat(identity.verify("server-signing-v1", payload, oldSignature)).isTrue();
-            assertThat(identity.verify("server-signing-v2", payload, activeSignature)).isTrue();
-            assertThat(identity.verify("server-signing-v1", payload, activeSignature)).isFalse();
-            assertThat(identity.publicKeys()).hasSize(1);
-            assertThat(identity.retainedPublicKeys()).hasSize(1);
+            assertThat(material.verify(old, payload, oldSignature)).isTrue();
+            assertThat(material.verify(active, payload, activeSignature)).isTrue();
+            assertThat(material.verify(old, payload, activeSignature)).isFalse();
         }
-    }
-
-    @Test
-    void stagesActivatesAndRetiresSigningAliasWithoutDeletingStoredKey() throws Exception {
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        KeyMaterialDescriptor old = rsa("server-signing-v1", 1);
-        KeyMaterialDescriptor next = rsa("server-signing-v2", 2);
-        byte[] payload = "rotation-payload".getBytes(StandardCharsets.UTF_8);
-        byte[] oldSignature;
-        byte[] nextSignature;
-        SigningMaterialSet initial = new SigningMaterialSet(old, List.of());
-
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), initial, 2048,
-                new KeyMaterialCreation(true))) {
-            oldSignature = material.signingIdentity().sign(payload);
-        }
-        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            KeyMaterialModification modification = service.modify();
-            try {
-                modification.generateKey(next, 2048);
-                modification.apply();
-            } finally {
-                modification.discard();
-            }
-        }
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), initial, 2048)) {
-            assertThat(material.signingIdentity().activeKeyId()).isEqualTo(old.alias());
-            assertThat(material.signingIdentity().hasVerificationKey(next.alias())).isFalse();
-        }
-
-        SigningMaterialSet retained = new SigningMaterialSet(next, List.of(old));
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), retained, 2048)) {
-            SigningIdentity identity = material.signingIdentity();
-            nextSignature = identity.sign(payload);
-            assertThat(identity.activeKeyId()).isEqualTo(next.alias());
-            assertThat(identity.verify(old.alias(), payload, oldSignature)).isTrue();
-            assertThat(identity.verify(next.alias(), payload, nextSignature)).isTrue();
-        }
-
-        SigningMaterialSet retired = new SigningMaterialSet(next, List.of());
+        SigningMaterialSet retired = new SigningMaterialSet(active, List.of());
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), retired, 2048)) {
-            SigningIdentity identity = material.signingIdentity();
-            assertThat(identity.verify(old.alias(), payload, oldSignature)).isFalse();
-            assertThat(identity.verify(next.alias(), payload, nextSignature)).isTrue();
-            assertThat(identity.retainedPublicKeys()).isEmpty();
-        }
-        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            assertThat(service.containsAlias(old.alias(), Set.of())).isTrue();
-            assertThat(service.getKeyPair(old.alias()).getPublic().getEncoded()).isNotEmpty();
-            assertThat(service.containsAlias(next.alias(), Set.of())).isTrue();
+            assertThat(material.verify(old, payload, oldSignature)).isTrue();
         }
     }
 
@@ -174,10 +118,11 @@ class OrionKeyMaterialTest {
     @Test
     void sharesInstalledCertificateIdentityWithTls() throws Exception {
         CountingStore store = new CountingStore();
+        KeyMaterialDescriptor signing = rsa("server-signing-v1", 1);
         OrionKeyMaterial material = OrionKeyMaterial.open(
                 store,
                 options(),
-                new SigningMaterialSet(rsa("server-signing-v1", 1), List.of()),
+                new SigningMaterialSet(signing, List.of()),
                 2048,
                 new KeyMaterialCreation(true));
         KeyMaterialDescriptor account = descriptor(
@@ -187,6 +132,8 @@ class OrionKeyMaterialTest {
         TlsMaterialConfiguration tls = new TlsMaterialConfiguration(
                 identity, Optional.empty(), List.of(), TlsClientAuthentication.DISABLED);
 
+        byte[] payload = new byte[]{1};
+        byte[] signature = material.sign(signing, payload);
         generateKeys(material, account, identity);
         CertificateIdentity certificate = material.certificateIdentity(tls);
         assertThatThrownBy(certificate::createContext)
@@ -197,7 +144,7 @@ class OrionKeyMaterialTest {
                 List.of(TestCertificateChain.leaf("orion.example", material.keyPair(identity), intermediate)),
                 Optional.empty());
 
-        assertThat(material.signingIdentity().activeKeyId()).isEqualTo("server-signing-v1");
+        assertThat(material.verify(signing, payload, signature)).isTrue();
         assertThat(material.certificateIdentity(tls).issuedCertificateChain().orElseThrow()).hasSize(1);
         assertThat(certificate.createContext().getProtocol()).isEqualTo("TLS");
         assertThat(store.readCalls).isEqualTo(1);
@@ -466,7 +413,7 @@ class OrionKeyMaterialTest {
                     new ConfigurationSecretContext("system/token", "credential")))
                     .isInstanceOf(GeneralSecurityException.class);
             assertThat(store.read().orElseThrow().version()).isEqualTo(before);
-            assertThat(material.signingIdentity().sign(new byte[]{1})).isNotEmpty();
+            assertThat(material.sign(signing.active(), new byte[]{1})).isNotEmpty();
         }
     }
 

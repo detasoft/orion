@@ -236,29 +236,37 @@ class JwtAccessTokenServiceTest {
     }
 
     @Test
-    void rotatedIdentityVerifiesRetainedAliasAndIssuesWithNewAlias() throws Exception {
+    void stagesActivatesAndRetiresSigningKeysWithoutDeletingStoredMaterial() throws Exception {
         KeyPair oldKey = rsaKeyPair();
         KeyPair newKey = rsaKeyPair();
-        JwtAccessTokenService oldService = service(
-                new TestIdentity("server-signing-v1", Map.of("server-signing-v1", oldKey)),
-                CLOCK);
+        TestIdentity identity = new TestIdentity("server-signing-v1", Map.of("server-signing-v1", oldKey));
+        JwtAccessTokenService oldService = service(identity, CLOCK);
         String oldToken = oldService.issue("alice", 600, null).value();
-        TestIdentity rotated = new TestIdentity(
-                "server-signing-v2",
-                orderedKeys("server-signing-v2", newKey, "server-signing-v1", oldKey));
-        JwtAccessTokenService rotatedService = service(rotated, CLOCK);
+        KeyMaterialDescriptor next = descriptor("server-signing-v2", 2);
+        identity.material.withModification(modification -> {
+            modification.importKey(next, newKey);
+            modification.apply();
+        });
 
+        String stagedToken = oldService.issue("alice", 600, null).value();
+        assertThat(header(stagedToken)).contains("\"kid\":\"server-signing-v1\"");
+        assertVerified(oldService, stagedToken, "alice", null);
+        JwtAccessTokenService rotatedService = new JwtAccessTokenService(identity.material,
+                new SigningMaterialSet(next, List.of(identity.signing.active())), CLOCK);
         String newToken = rotatedService.issue("alice", 600, null).value();
 
         assertVerified(rotatedService, oldToken, "alice", null);
         assertThat(header(newToken)).contains("\"kid\":\"server-signing-v2\"");
+        assertVerified(rotatedService, newToken, "alice", null);
+        assertThat(oldService.verify(newToken)).isEqualTo(
+                JwtAccessTokenService.VerificationResult.failure("JWT signing key is unknown"));
 
-        JwtAccessTokenService retired = new JwtAccessTokenService(rotated.material,
-                new SigningMaterialSet(rotated.signing.active(), List.of()), CLOCK);
+        JwtAccessTokenService retired = new JwtAccessTokenService(identity.material,
+                new SigningMaterialSet(next, List.of()), CLOCK);
         assertThat(retired.verify(oldToken)).isEqualTo(
                 JwtAccessTokenService.VerificationResult.failure("JWT signing key is unknown"));
         assertVerified(retired, newToken, "alice", null);
-        assertThat(rotated.material.contains(rotated.signing.verification().getFirst())).isTrue();
+        assertThat(identity.material.contains(identity.signing.active())).isTrue();
     }
 
     @Test

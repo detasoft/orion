@@ -37,7 +37,7 @@ import java.util.StringJoiner;
 /**
  * @AiRule All public methods in this class must be synchronized.
  */
-public class KeyMaterialService implements AutoCloseable {
+final class KeyMaterialService implements AutoCloseable {
     private static final String DESCRIPTOR_ATTRIBUTE_OID =
             "2.25.260349814076539099691640886169327825428";
     private static final String ADDITION_ATTRIBUTE_OID =
