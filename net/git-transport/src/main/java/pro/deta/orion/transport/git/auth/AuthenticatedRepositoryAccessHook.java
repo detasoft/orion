@@ -17,7 +17,6 @@ import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 public final class AuthenticatedRepositoryAccessHook
         implements GitNativeRepositoryAccessHook {
     private static final String BRANCH_REF_PREFIX = "refs/heads/";
-    private static final String TAG_REF_PREFIX = "refs/tags/";
 
     private final SecurityContext securityContext;
 
@@ -118,18 +117,15 @@ public final class AuthenticatedRepositoryAccessHook
                         BranchAccessRules.force()));
             }
         } else {
-            boolean tag = refName.startsWith(TAG_REF_PREFIX);
-            if (tag) {
-                require(() -> accessEnforcer().require(
-                        securityContext,
-                        repositoryResource,
-                        RepositoryAccessRules.writeUnrestricted()));
-            }
+            require(() -> accessEnforcer().require(
+                    securityContext,
+                    repositoryResource,
+                    RepositoryAccessRules.writeUnrestricted()));
             if (force) {
                 require(() -> accessEnforcer().require(
                         securityContext,
                         repositoryResource,
-                        tag ? RepositoryAccessRules.forceUnrestricted() : RepositoryAccessRules.force()));
+                        RepositoryAccessRules.forceUnrestricted()));
             }
         }
     }

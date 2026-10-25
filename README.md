@@ -1024,8 +1024,9 @@ For push, branch restrictions are taken only from matching `READ_WRITE` grants; 
 grants cannot expand or restrict writable branches. Among matching `READ_WRITE` grants,
 the existing combination policy remains: if any specify branches, those branches form
 the allowed set, and a `BRANCH=*` grant permits all branches.
-Creating, changing, or deleting a tag requires `READ_WRITE` access to all branches.
-Non-fast-forward tag updates additionally require `FORCE` access to all branches;
+Creating, changing, or deleting refs outside `refs/heads/*`, including tags and notes,
+requires `READ_WRITE` access to all branches.
+Non-fast-forward updates to these refs additionally require `FORCE` access to all branches;
 branch-scoped force grants cannot use a broader write grant to authorize those updates.
 For organization grants, a matching branch `DENY` prevents unrestricted access for
 that operation even when an `ALLOW` grant contains `BRANCH=*`.

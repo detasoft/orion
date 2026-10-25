@@ -1,6 +1,8 @@
 package pro.deta.orion.transport.git.auth;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.GrantKey;
@@ -82,20 +84,22 @@ class AuthenticatedRepositoryAccessHookTest {
                 .isInstanceOf(GitNativeRepositoryAccessHook.AccessDeniedException.class);
     }
 
-    @Test
-    void tagRewritesKeepTheirRepositoryForceCheck() {
+    @ParameterizedTest
+    @ValueSource(strings = {"refs/tags/v1", "refs/notes/commits", "refs/custom/review"})
+    void nonBranchRewritesKeepTheirRepositoryForceCheck(String refName) {
         AuthenticatedRepositoryAccessHook allowed = new AuthenticatedRepositoryAccessHook(
                 branchSecurityContext("project", "*", true));
         AuthenticatedRepositoryAccessHook denied = new AuthenticatedRepositoryAccessHook(
                 branchSecurityContext("project", "*", false));
 
-        assertThatCode(() -> allowed.beforeUpdate("project", "refs/tags/v1", true)).doesNotThrowAnyException();
-        assertThatThrownBy(() -> denied.beforeUpdate("project", "refs/tags/v1", true))
+        assertThatCode(() -> allowed.beforeUpdate("project", refName, true)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> denied.beforeUpdate("project", refName, true))
                 .isInstanceOf(GitNativeRepositoryAccessHook.AccessDeniedException.class);
     }
 
-    @Test
-    void branchScopedWritersCannotMutateTags() {
+    @ParameterizedTest
+    @ValueSource(strings = {"refs/tags/v1", "refs/notes/commits", "refs/custom/review"})
+    void branchScopedWritersCannotMutateOtherRefs(String refName) {
         for (boolean additionalUnqualifiedGrant : List.of(false, true)) {
             List<Grant> grants = new ArrayList<>(branchSecurityContext("project", "dev", true)
                     .getUserIdentity().getGrants());
@@ -107,14 +111,15 @@ class AuthenticatedRepositoryAccessHookTest {
             assertThatCode(() -> hook.beforeUpdate("project", "refs/heads/dev", false))
                     .doesNotThrowAnyException();
             for (boolean force : List.of(false, true)) {
-                assertThatThrownBy(() -> hook.beforeUpdate("project", "refs/tags/v1", force))
+                assertThatThrownBy(() -> hook.beforeUpdate("project", refName, force))
                         .isInstanceOf(GitNativeRepositoryAccessHook.AccessDeniedException.class);
             }
         }
     }
 
-    @Test
-    void tagWritersIgnoreReadOnlyBranchRestrictions() {
+    @ParameterizedTest
+    @ValueSource(strings = {"refs/tags/v1", "refs/notes/commits", "refs/custom/review"})
+    void unrestrictedRefWritesIgnoreReadOnlyBranchRestrictions(String refName) {
         Grant read = new Grant("read-dev", List.of(
                 new GrantExpression(GrantKey.REPOSITORY, "project"),
                 new GrantExpression(GrantKey.BRANCH, "dev")));
@@ -125,12 +130,13 @@ class AuthenticatedRepositoryAccessHookTest {
                 SecurityContext.createContext().withUserIdentity(new InternalUserImpl("writer", grants)));
 
         for (boolean force : List.of(false, true)) {
-            assertThatCode(() -> hook.beforeUpdate("project", "refs/tags/v1", force)).doesNotThrowAnyException();
+            assertThatCode(() -> hook.beforeUpdate("project", refName, force)).doesNotThrowAnyException();
         }
     }
 
-    @Test
-    void tagForceCannotBorrowAnUnrestrictedWriteGrant() {
+    @ParameterizedTest
+    @ValueSource(strings = {"refs/tags/v1", "refs/notes/commits", "refs/custom/review"})
+    void nonBranchForceCannotBorrowAnUnrestrictedWriteGrant(String refName) {
         Grant force = new Grant("force-dev", List.of(
                 new GrantExpression(GrantKey.REPOSITORY, "project"),
                 new GrantExpression(GrantKey.FORCE, "true"),
@@ -141,14 +147,15 @@ class AuthenticatedRepositoryAccessHookTest {
         AuthenticatedRepositoryAccessHook hook = new AuthenticatedRepositoryAccessHook(
                 SecurityContext.createContext().withUserIdentity(new InternalUserImpl("writer", grants)));
 
-        assertThatCode(() -> hook.beforeUpdate("project", "refs/tags/v1", false)).doesNotThrowAnyException();
+        assertThatCode(() -> hook.beforeUpdate("project", refName, false)).doesNotThrowAnyException();
         assertThatCode(() -> hook.beforeUpdate("project", "refs/heads/dev", true)).doesNotThrowAnyException();
-        assertThatThrownBy(() -> hook.beforeUpdate("project", "refs/tags/v1", true))
+        assertThatThrownBy(() -> hook.beforeUpdate("project", refName, true))
                 .isInstanceOf(GitNativeRepositoryAccessHook.AccessDeniedException.class);
     }
 
-    @Test
-    void organizationTagWritesRespectBranchAllowsAndDenies() {
+    @ParameterizedTest
+    @ValueSource(strings = {"refs/tags/v1", "refs/notes/commits", "refs/custom/review"})
+    void organizationNonBranchWritesRespectBranchAllowsAndDenies(String refName) {
         ScopedGrant limited = new ScopedGrant(new GrantId("limited"), ScopedGrant.Effect.ALLOW,
                 List.of(new GrantExpression(GrantKey.READ_WRITE, "true"),
                         new GrantExpression(GrantKey.FORCE, "true"),
@@ -158,7 +165,7 @@ class AuthenticatedRepositoryAccessHookTest {
         assertThatCode(() -> restricted.beforeUpdate("acme/team/project", "refs/heads/dev", false))
                 .doesNotThrowAnyException();
         for (boolean force : List.of(false, true)) {
-            assertThatThrownBy(() -> restricted.beforeUpdate("acme/team/project", "refs/tags/v1", force))
+            assertThatThrownBy(() -> restricted.beforeUpdate("acme/team/project", refName, force))
                     .isInstanceOf(GitNativeRepositoryAccessHook.AccessDeniedException.class);
         }
 
@@ -169,7 +176,7 @@ class AuthenticatedRepositoryAccessHookTest {
         AuthenticatedRepositoryAccessHook full = new AuthenticatedRepositoryAccessHook(
                 organizationContext(List.of(allow)));
         for (boolean force : List.of(false, true)) {
-            assertThatCode(() -> full.beforeUpdate("acme/team/project", "refs/tags/v1", force))
+            assertThatCode(() -> full.beforeUpdate("acme/team/project", refName, force))
                     .doesNotThrowAnyException();
         }
         for (GrantKey action : List.of(GrantKey.READ_WRITE, GrantKey.FORCE)) {
@@ -181,13 +188,13 @@ class AuthenticatedRepositoryAccessHookTest {
             assertThatCode(() -> hook.beforeUpdate("acme/team/project", "refs/heads/dev", true))
                     .doesNotThrowAnyException();
             if (action == GrantKey.FORCE) {
-                assertThatCode(() -> hook.beforeUpdate("acme/team/project", "refs/tags/v1", false))
+                assertThatCode(() -> hook.beforeUpdate("acme/team/project", refName, false))
                         .doesNotThrowAnyException();
             } else {
-                assertThatThrownBy(() -> hook.beforeUpdate("acme/team/project", "refs/tags/v1", false))
+                assertThatThrownBy(() -> hook.beforeUpdate("acme/team/project", refName, false))
                         .isInstanceOf(GitNativeRepositoryAccessHook.AccessDeniedException.class);
             }
-            assertThatThrownBy(() -> hook.beforeUpdate("acme/team/project", "refs/tags/v1", true))
+            assertThatThrownBy(() -> hook.beforeUpdate("acme/team/project", refName, true))
                     .isInstanceOf(GitNativeRepositoryAccessHook.AccessDeniedException.class);
         }
     }

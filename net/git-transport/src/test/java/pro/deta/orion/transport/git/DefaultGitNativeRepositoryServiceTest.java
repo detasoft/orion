@@ -150,10 +150,18 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
     }
 
     @ParameterizedTest
-    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
-    void branchWriterCannotCreateOrDeleteTagsDuringPublication(boolean delete, boolean atomic) throws Exception {
+    @CsvSource({
+            "refs/tags/v1,false,false", "refs/tags/v1,false,true",
+            "refs/tags/v1,true,false", "refs/tags/v1,true,true",
+            "refs/notes/commits,false,false", "refs/notes/commits,false,true",
+            "refs/notes/commits,true,false", "refs/notes/commits,true,true",
+            "refs/custom/review,false,false", "refs/custom/review,false,true",
+            "refs/custom/review,true,false", "refs/custom/review,true,true"
+    })
+    void branchWriterCannotMutateOtherRefsDuringPublication(String refName, boolean delete, boolean atomic)
+            throws Exception {
         NativeGitRepository repository = createRepository(backend, "demo");
-        if (delete) repository.updateRef("refs/tags/v1", NULL_ID, MAIN_ID);
+        if (delete) repository.updateRef(refName, NULL_ID, MAIN_ID);
         Grant grant = new Grant("dev-writer", List.of(
                 new GrantExpression(GrantKey.REPOSITORY, "demo"),
                 new GrantExpression(GrantKey.READ_WRITE, "true"),
@@ -161,17 +169,17 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
         AuthenticatedRepositoryAccessHook hook = new AuthenticatedRepositoryAccessHook(
                 SecurityContext.createContext().withUserIdentity(new InternalUserImpl("writer", List.of(grant))));
         RefUpdate branch = RefUpdate.fromWire("refs/heads/dev", NULL_ID, MAIN_ID);
-        RefUpdate tag = RefUpdate.fromWire("refs/tags/v1", delete ? MAIN_ID : NULL_ID,
+        RefUpdate other = RefUpdate.fromWire(refName, delete ? MAIN_ID : NULL_ID,
                 delete ? NULL_ID : TAG_ID);
 
         try (GitRepositoryContext context = service.open(receiveRequest("demo"), hook)) {
-            List<RefUpdateResult> results = context.publish(Optional.empty(), List.of(branch, tag), atomic);
+            List<RefUpdateResult> results = context.publish(Optional.empty(), List.of(branch, other), atomic);
 
             assertThat(results).extracting(RefUpdateResult::status)
                     .containsExactly(atomic ? ATOMIC_ABORTED : APPLIED, REJECTED);
             assertThat(repository.refs().containsKey("refs/heads/dev")).isEqualTo(!atomic);
-            if (delete) assertThat(repository.refs()).containsEntry("refs/tags/v1", MAIN_ID);
-            else assertThat(repository.refs()).doesNotContainKey("refs/tags/v1");
+            if (delete) assertThat(repository.refs()).containsEntry(refName, MAIN_ID);
+            else assertThat(repository.refs()).doesNotContainKey(refName);
         }
     }
 
