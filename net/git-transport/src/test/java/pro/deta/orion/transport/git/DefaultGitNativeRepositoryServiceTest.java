@@ -1,6 +1,12 @@
 package pro.deta.orion.transport.git;
 
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.auth.InternalUserImpl;
+import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
+import pro.deta.orion.transport.git.auth.AuthenticatedRepositoryAccessHook;
 
 import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import org.junit.jupiter.api.Test;
@@ -141,6 +147,32 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
         }
         assertThat(repository.readObject(object).orElseThrow().data()).containsExactly((byte) 2);
         assertThat(calls).containsExactly("receive demo", "write demo");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void branchWriterCannotCreateOrDeleteTagsDuringPublication(boolean delete, boolean atomic) throws Exception {
+        NativeGitRepository repository = createRepository(backend, "demo");
+        if (delete) repository.updateRef("refs/tags/v1", NULL_ID, MAIN_ID);
+        Grant grant = new Grant("dev-writer", List.of(
+                new GrantExpression(GrantKey.REPOSITORY, "demo"),
+                new GrantExpression(GrantKey.READ_WRITE, "true"),
+                new GrantExpression(GrantKey.BRANCH, "dev")));
+        AuthenticatedRepositoryAccessHook hook = new AuthenticatedRepositoryAccessHook(
+                SecurityContext.createContext().withUserIdentity(new InternalUserImpl("writer", List.of(grant))));
+        RefUpdate branch = RefUpdate.fromWire("refs/heads/dev", NULL_ID, MAIN_ID);
+        RefUpdate tag = RefUpdate.fromWire("refs/tags/v1", delete ? MAIN_ID : NULL_ID,
+                delete ? NULL_ID : TAG_ID);
+
+        try (GitRepositoryContext context = service.open(receiveRequest("demo"), hook)) {
+            List<RefUpdateResult> results = context.publish(Optional.empty(), List.of(branch, tag), atomic);
+
+            assertThat(results).extracting(RefUpdateResult::status)
+                    .containsExactly(atomic ? ATOMIC_ABORTED : APPLIED, REJECTED);
+            assertThat(repository.refs().containsKey("refs/heads/dev")).isEqualTo(!atomic);
+            if (delete) assertThat(repository.refs()).containsEntry("refs/tags/v1", MAIN_ID);
+            else assertThat(repository.refs()).doesNotContainKey("refs/tags/v1");
+        }
     }
 
     @Test

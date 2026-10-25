@@ -1,47 +1,5 @@
 # Module Review: `core/authorization`
 
-## 7. Branch-scoped writers can mutate tags outside their branch grants
-
-**Problem.** A writer with `REPOSITORY=project`, `READ_WRITE=true`, and `BRANCH=dev` passes the repository
-write check. Creating or deleting `refs/tags/v1` then bypasses branch authorization because the per-update
-hook only applies branch grants to `refs/heads/`. The same grant cannot update `refs/heads/main`, so its
-branch restriction has different effects across ref namespaces.
-
-**Sources.** [RepositoryAccessRules.evaluateWrite()](src/main/java/pro/deta/orion/auth/check/rule/RepositoryAccessRules.java)
-checks repository and operation expressions before the
-[access hook](../../net/git-transport/src/main/java/pro/deta/orion/transport/git/auth/AuthenticatedRepositoryAccessHook.java)
-checks each update. `beforeUpdate()` checks branch push grants only for `refs/heads/`; for other refs it
-checks only the repository force grant when `force` is true.
-[NativeGitReceivePack.complete()](../../git/git-native-storage/src/main/java/pro/deta/orion/git/nativestorage/receive/NativeGitReceivePack.java)
-classifies updates as force only when both old and new IDs exist, leaving tag creation and deletion outside
-that check. [Hook tests](../../net/git-transport/src/test/java/pro/deta/orion/transport/git/auth/AuthenticatedRepositoryAccessHookTest.java)
-cover branch and force checks but do not establish tag creation/deletion permissions for scoped writers.
-
-**Documented behavior.** Branch read and write grants exist, and branch-limited readers hide all tags.
-No user-facing contract was found defining whether branch-scoped write grants authorize tag mutations or
-which grant must authorize branch deletion and tag rewrites.
-
-**Contract.** Define ref mutation permissions through grants, including the meaning of branch qualifiers for
-tag operations. Preserve repository ownership, scoped DENY precedence, old-ID conflict detection, and atomic
-publication. Existing grants should not silently authorize a different ref namespace through a preliminary
-repository-wide check.
-
-**Minimal repair.** Define the grant requirements for tag creation, update, and deletion, then enforce them
-at the existing per-update hook. Classify destructive changes explicitly if they require additional grants.
-Test ordinary allowed branch updates, rejected unrelated branches, and tag mutations with branch-limited
-and repository-wide writers.
-
-**Alternatives and consequences.** Excluding branch-qualified grants from tag authorization reuses current
-repository grants. Separate tag or deletion action keys allow finer privileges but expand the grant contract
-and require an explicit decision about existing writers. A separate repository safety-switch model would
-duplicate the selected grant authority.
-
-**Confidence.** High for the tag bypass in the current execution path; intended tag and deletion grant
-semantics remain undecided. No destructive push reproduction was run.
-
-**Priority signals.** Importance: high for writers expected to be confined to selected branches. Repair ease:
-medium after the grant semantics are settled; the existing update hook provides the enforcement boundary.
-
 ## 8. System and organization identities interpret the same read grant differently
 
 **Problem.** `{REPOSITORY=acme/team/repo, CREATE=true}` grants a system identity read access to an existing
