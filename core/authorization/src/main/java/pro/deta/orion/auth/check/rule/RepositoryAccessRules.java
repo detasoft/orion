@@ -11,8 +11,6 @@ import pro.deta.orion.auth.check.resource.RepositoryResource;
 
 import java.util.List;
 
-import static pro.deta.orion.auth.check.MatcherUtils.filterGrants;
-
 /**
  * Rules for repository-wide grants. These rules know how ACL repository expressions map to repository names,
  * but they do not know anything about git protocol transport details.
@@ -85,7 +83,7 @@ public final class RepositoryAccessRules {
         if (userIdentity.getOrganizationId().isPresent()) {
             return GrantAccess.scopedRepositoryAccess(userIdentity, resource, GrantKey.READ, null, false);
         }
-        boolean allowed = GrantAccess.hasGrant(userIdentity, GrantAccess.repositoryGrant(resource.repositoryName()));
+        boolean allowed = !GrantAccess.repositoryReadGrants(userIdentity, resource.repositoryName()).isEmpty();
         if (allowed) {
             return AccessDecision.allow("repository grant matched");
         }
@@ -101,10 +99,7 @@ public final class RepositoryAccessRules {
         AccessDecision parent = parentRule.evaluate(securityContext, resource);
         if (!parent.allowed()) return parent;
         List<Grant> restricted = GrantAccess.branchRestrictedRepositoryGrants(
-                identity, resource.repositoryName());
-        if (action != GrantKey.READ) {
-            restricted = filterGrants(restricted, GrantMatcher.enabled(action));
-        }
+                identity, resource.repositoryName(), action);
         if (restricted.isEmpty()) return parent;
         for (Grant grant : restricted) {
             if (GrantMatcher.of(GrantKey.BRANCH, "*"::equals).matchesAny(grant.info())) return parent;

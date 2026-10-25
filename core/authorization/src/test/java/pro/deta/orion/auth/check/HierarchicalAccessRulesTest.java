@@ -1,6 +1,8 @@
 package pro.deta.orion.auth.check;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.resource.BranchResource;
@@ -33,6 +35,62 @@ import static pro.deta.orion.schema.acl.GrantKey.*;
 
 class HierarchicalAccessRulesTest {
     private static final RepositoryResource REPOSITORY = RepositoryResource.of("acme/team/repo");
+
+    @ParameterizedTest
+    @CsvSource({
+            "NONE,NONE,true", "READ,NONE,true", "READ_WRITE,NONE,true",
+            "CREATE,NONE,false", "FORCE,NONE,false", "ADMIN,NONE,false", "SHUTDOWN,NONE,false",
+            "CREATE,READ,true", "FORCE,READ,true", "ADMIN,READ,true", "SHUTDOWN,READ,true",
+            "CREATE,READ_WRITE,true", "FORCE,READ_WRITE,true", "ADMIN,READ_WRITE,true",
+            "SHUTDOWN,READ_WRITE,true"
+    })
+    void repositoryReadActionsAgreeAcrossIdentityKinds(String action, String read, boolean allowed) {
+        List<GrantExpression> expressions = new ArrayList<>();
+        expressions.add(expression(GrantKey.REPOSITORY, "acme/**"));
+        if (!action.equals("NONE")) expressions.add(expression(GrantKey.valueOf(action), "true"));
+        if (!read.equals("NONE")) expressions.add(expression(GrantKey.valueOf(read), "true"));
+        for (SecurityContext context : repositoryContexts(List.of(new Grant("access", expressions)))) {
+            assertThat(RepositoryAccessRules.read().evaluate(context, REPOSITORY).allowed()).isEqualTo(allowed);
+            assertThat(fetch(context, "main")).isEqualTo(allowed);
+            assertThat(RepositoryAccessRules.readUnrestricted().evaluate(context, REPOSITORY).allowed())
+                    .isEqualTo(allowed);
+            assertThat(RepositoryAccessRules.read().evaluate(context,
+                    RepositoryResource.of("other/team/repo")).allowed()).isFalse();
+        }
+    }
+
+    @Test
+    void unrelatedBranchActionsCannotRestrictOrExpandRead() {
+        for (GrantKey action : List.of(CREATE, FORCE, ADMIN, SHUTDOWN)) {
+            for (String branch : List.of("dev", "*")) {
+                Grant other = new Grant("other", List.of(expression(GrantKey.REPOSITORY, "acme/**"),
+                        expression(action, "true"), expression(BRANCH, branch)));
+                for (boolean limited : List.of(false, true)) {
+                    List<GrantExpression> expressions = new ArrayList<>();
+                    expressions.add(expression(GrantKey.REPOSITORY, "acme/**"));
+                    if (limited) expressions.add(expression(BRANCH, "main"));
+                    Grant read = new Grant("read", expressions);
+                    for (SecurityContext context : repositoryContexts(List.of(read, other))) {
+                        assertThat(fetch(context, "main")).isTrue();
+                        assertThat(fetch(context, "dev")).isEqualTo(!limited);
+                        assertThat(RepositoryAccessRules.readUnrestricted().evaluate(context, REPOSITORY)
+                                .allowed()).isEqualTo(!limited);
+                    }
+                }
+            }
+        }
+    }
+
+    private static List<SecurityContext> repositoryContexts(List<Grant> grants) {
+        List<ScopedGrant> scoped = new ArrayList<>();
+        for (Grant grant : grants) {
+            scoped.add(new ScopedGrant(new GrantId(grant.id()), ScopedGrant.Effect.ALLOW, grant.info()));
+        }
+        return List.of(
+                SecurityContext.createContext().withUserIdentity(new InternalUserImpl("alice", grants)),
+                context(document(List.of(), grants, List.of())),
+                context(document(List.of("acme/developer"), List.of(), scoped)));
+    }
 
     @Test
     void forceGrantIsConfinedToItsBranchIndependentlyOfWriteAccess() {

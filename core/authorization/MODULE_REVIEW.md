@@ -1,41 +1,5 @@
 # Module Review: `core/authorization`
 
-## 8. System and organization identities interpret the same read grant differently
-
-**Problem.** `{REPOSITORY=acme/team/repo, CREATE=true}` grants a system identity read access to an existing
-repository. The same expressions do not grant an organization identity read access. The discrepancy also
-applies to `FORCE`, `ADMIN`, and `SHUTDOWN` qualified by `REPOSITORY`: system read checks only the repository
-expression, while scoped read excludes grants dedicated to those actions.
-
-**Sources.** `RepositoryAccessRules.evaluateRead()` in the
-[repository rules](src/main/java/pro/deta/orion/auth/check/rule/RepositoryAccessRules.java) and
-`GrantAccess.matchesRepositoryAction()` in the
-[scoped matcher](src/main/java/pro/deta/orion/auth/check/rule/GrantAccess.java) own separate interpretations.
-[Hierarchical tests](src/test/java/pro/deta/orion/auth/check/HierarchicalAccessRulesTest.java), especially
-`repositoryQualifierDoesNotTurnOtherActionsIntoReadPermission`, establish the scoped behavior.
-[System tests](src/test/java/pro/deta/orion/auth/check/AccessRulesTest.java) preserve implicit read from a bare
-repository expression, but do not compare identical operation-qualified grants across identity kinds.
-
-**Documented behavior.** [README](../../README.md) documents identity boundaries and combined `READ_WRITE`
-access. No user-facing explanation of this action-to-read discrepancy was found. Bare repository grants are
-intentional: invitation onboarding gives organization users such a read grant, as README explicitly states.
-
-**Contract.** Preserve the system/organization identity boundary, organization DENY precedence, and documented
-onboarding behavior. Decide whether action-specific grants should imply read before unifying matching.
-
-**Minimal repair.** Define one action-to-read truth table and reuse its expression semantics in the existing
-helper, retaining separate scope/deny handling. Test identical grants with both identity kinds and retain
-coverage for bare repository grants and `READ_WRITE`.
-
-**Alternatives and consequences.** Documenting an intentional difference preserves permissions but retains
-two policy interpretations. Harmonizing toward scoped behavior can revoke implicit system read; harmonizing
-toward system behavior broadens organization read. Neither change should happen as incidental refactoring.
-
-**Confidence.** High for the difference; intended compatibility semantics require a product decision.
-
-**Priority signals.** Importance: medium to high for grant review and least-privilege administration. Repair
-ease: medium after the contract choice; no new role or policy abstraction is needed.
-
 ## 9. System SSH sessions retain revoked privileges while organization checks read current grants
 
 **Problem.** Authenticate a system SSH user, revoke their repository/ADMIN grant or remove the user, and keep

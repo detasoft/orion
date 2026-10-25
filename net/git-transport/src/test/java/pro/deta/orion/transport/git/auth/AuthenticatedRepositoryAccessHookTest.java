@@ -360,12 +360,14 @@ class AuthenticatedRepositoryAccessHookTest {
 
     @Test
     void wireCanonicalNameUsesTheExactRepositoryGrant() {
+        Grant readerCreator = new Grant("repository", List.of(
+                new GrantExpression(GrantKey.REPOSITORY, "team/repo"),
+                new GrantExpression(GrantKey.READ, "true"),
+                new GrantExpression(GrantKey.CREATE, "true")));
         AuthenticatedRepositoryAccessHook hook =
                 new AuthenticatedRepositoryAccessHook(
-                        repositorySecurityContext(
-                                "team/repo",
-                                false,
-                                true));
+                        SecurityContext.createContext().withUserIdentity(
+                                new InternalUserImpl("git-user", List.of(readerCreator))));
         String repositoryName = GitWireBootstrap.sshCommandData(
                         "git-upload-pack '/team%2Frepo.git'",
                         null)

@@ -17,7 +17,7 @@ import static pro.deta.orion.auth.check.MatcherUtils.filterGrants;
 /**
  * Rules for branch-level access. A branch is evaluated through its parent repository first, so a matching
  * branch expression cannot bypass the repository expression in the same ACL grant.
- * Push and force restrictions come only from grants for that operation; read grants cannot expand either.
+ * Branch restrictions come only from grants authorizing that operation.
  */
 public final class BranchAccessRules {
     private static final AccessRule<BranchResource> FETCH =
@@ -87,10 +87,7 @@ public final class BranchAccessRules {
 
         List<Grant> branchGrants = GrantAccess.branchRestrictedRepositoryGrants(
                 securityContext.getUserIdentity(),
-                repository.repositoryName());
-        if (action != GrantKey.READ) {
-            branchGrants = filterGrants(branchGrants, GrantMatcher.enabled(action));
-        }
+                repository.repositoryName(), action);
         if (branchGrants.isEmpty()) {
             return AccessDecision.allow("parent repository grant has no branch restriction");
         }

@@ -24,6 +24,7 @@ import static pro.deta.orion.auth.check.MatcherUtils.matchExpressionValue;
  * Shared grant matching for system ACLs and organization snapshots. Organization scopes supply resource
  * ownership, while grant expressions select operations and narrow repository or branch access. A branch
  * decision resolves the current organization once and applies parent and branch constraints together.
+ * Both identity kinds use the same read expressions, including implicit read from a bare repository grant.
  */
 final class GrantAccess {
     private GrantAccess() {
@@ -120,10 +121,17 @@ final class GrantAccess {
         return GrantMatcher.of(key).matchesAny(expressions);
     }
 
-    static List<Grant> branchRestrictedRepositoryGrants(UserIdentity userIdentity, String repositoryName) {
-        return matchingGrants(
-                userIdentity,
-                repositoryGrant(repositoryName),
-                GrantMatcher.of(GrantKey.BRANCH));
+    static List<Grant> repositoryReadGrants(UserIdentity identity, String repositoryName) {
+        List<Grant> grants = matchingGrants(identity, repositoryGrant(repositoryName));
+        grants.removeIf(grant -> !matchesRepositoryAction(grant.info(), repositoryName, GrantKey.READ));
+        return grants;
+    }
+
+    static List<Grant> branchRestrictedRepositoryGrants(UserIdentity identity, String repositoryName,
+            GrantKey action) {
+        List<Grant> grants = action == GrantKey.READ
+                ? repositoryReadGrants(identity, repositoryName)
+                : matchingGrants(identity, repositoryGrant(repositoryName), GrantMatcher.enabled(action));
+        return filterGrants(grants, GrantMatcher.of(GrantKey.BRANCH));
     }
 }
