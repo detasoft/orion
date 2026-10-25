@@ -1,5 +1,7 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.KeyMaterialBootstrap;
+
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
@@ -7,7 +9,6 @@ import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.BootstrapContext;
 import org.apache.sshd.common.keyprovider.KeyPairProvider;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.acl.RootPasswordReset;
@@ -90,7 +91,7 @@ final class TestRuntimeBootstrap {
         return DaggerOrionComponent.builder()
                 .bootstrapConfiguration(configuration)
                 .rootPasswordReset(rootPasswordReset)
-                .signingMaterial(BootstrapContext.signingMaterial(
+                .signingMaterial(KeyMaterialBootstrap.signingMaterial(
                         configuration.getBootstrap().getKeyMaterial()))
                 .keyMaterial(material)
                 .eventManager(events)

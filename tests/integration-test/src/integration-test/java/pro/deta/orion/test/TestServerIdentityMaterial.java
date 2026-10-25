@@ -1,5 +1,7 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.KeyMaterialBootstrap;
+
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
@@ -8,7 +10,6 @@ import pro.deta.orion.keymaterial.KeyMaterialConstants;
 import pro.deta.orion.keymaterial.KeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialResourceResolver;
-import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import org.apache.sshd.common.keyprovider.KeyPairProvider;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -48,7 +49,7 @@ final class TestServerIdentityMaterial implements AutoCloseable {
         try {
             if (!material.hasDurableSnapshot()) {
                 material.withModification(modification -> {
-                    modification.generateKey(BootstrapContext.signingMaterial(
+                    modification.generateKey(KeyMaterialBootstrap.signingMaterial(
                             configuration.getBootstrap().getKeyMaterial()).active(),
                             KeyMaterialConstants.RSA_KEY_SIZE_BITS);
                     modification.apply();
@@ -56,7 +57,7 @@ final class TestServerIdentityMaterial implements AutoCloseable {
             }
             return new TestServerIdentityMaterial(
                     material,
-                    material.keyPair(BootstrapContext.signingMaterial(
+                    material.keyPair(KeyMaterialBootstrap.signingMaterial(
                             configuration.getBootstrap().getKeyMaterial()).active()),
                     hostKeys(material));
         } catch (Exception failure) {

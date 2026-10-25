@@ -27,7 +27,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class BootstrapKeyMaterialTest {
+class KeyMaterialBootstrapTest {
     private static final String PASSWORD_ENV = "ORION_TEST_KEY_MATERIAL_PASSWORD";
 
     @TempDir
@@ -38,22 +38,18 @@ class BootstrapKeyMaterialTest {
         BootstrapConfiguration configuration = configuration();
         byte[] payload = "jwt-input".getBytes(StandardCharsets.UTF_8);
         byte[] signature;
-        try (OrionKeyMaterial material = BootstrapContext.openKeyMaterial(
-                configuration,
+        try (OrionKeyMaterial material = openLocal(configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
-                new KeyMaterialCreation(true),
-                event -> {})) {
+                new KeyMaterialCreation(true))) {
             KeyMaterialDescriptor active = signing(configuration).active();
             signature = material.sign(active, payload);
             assertThat(active.alias()).isEqualTo("cluster-signing-v2");
             assertThat(material.version()).isEqualTo(1);
         }
 
-        try (OrionKeyMaterial material = BootstrapContext.openKeyMaterial(
-                configuration,
+        try (OrionKeyMaterial material = openLocal(configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
-                new KeyMaterialCreation(false),
-                event -> {})) {
+                new KeyMaterialCreation(false))) {
             assertThat(material.verify(signing(configuration).active(), payload, signature)).isTrue();
         }
 
@@ -65,13 +61,11 @@ class BootstrapKeyMaterialTest {
         BootstrapConfiguration configuration = configuration();
         configuration.getBootstrap().setBaseDir("env:ORION_TEST_ROOT/material-home");
 
-        try (OrionKeyMaterial ignored = BootstrapContext.openKeyMaterial(
-                configuration,
+        try (OrionKeyMaterial ignored = openLocal(configuration,
                 Map.of(
                         "ORION_TEST_ROOT", tempDir.toString(),
                         PASSWORD_ENV, "test-password"),
-                new KeyMaterialCreation(true),
-                event -> {})) {
+                new KeyMaterialCreation(true))) {
             // Opening the identity initializes the configured store.
         }
 
@@ -81,11 +75,9 @@ class BootstrapKeyMaterialTest {
     @Test
     void resolvesConfiguredRetainedAliases() throws Exception {
         BootstrapConfiguration configuration = configuration();
-        try (OrionKeyMaterial ignored = BootstrapContext.openKeyMaterial(
-                configuration,
+        try (OrionKeyMaterial ignored = openLocal(configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
-                new KeyMaterialCreation(true),
-                event -> {})) {
+                new KeyMaterialCreation(true))) {
             // Initialize the active alias in a new store.
         }
         configuration.getBootstrap()
@@ -93,11 +85,9 @@ class BootstrapKeyMaterialTest {
                 .getServerSigning()
                 .setVerification(List.of(new SigningKeyReferenceConfig("missing-retained", 1)));
 
-        assertThatThrownBy(() -> BootstrapContext.openKeyMaterial(
-                configuration,
+        assertThatThrownBy(() -> openLocal(configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
-                new KeyMaterialCreation(false),
-                event -> {}))
+                new KeyMaterialCreation(false)))
                 .isInstanceOf(Exception.class)
                 .hasMessageContaining("missing-retained");
     }
@@ -106,11 +96,9 @@ class BootstrapKeyMaterialTest {
     void missingProtectedPasswordFailsWithoutCreatingStore() {
         BootstrapConfiguration configuration = configuration();
 
-        assertThatThrownBy(() -> BootstrapContext.openKeyMaterial(
-                configuration,
+        assertThatThrownBy(() -> openLocal(configuration,
                 Map.of(),
-                new KeyMaterialCreation(false),
-                event -> {}))
+                new KeyMaterialCreation(false)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(PASSWORD_ENV);
         assertThat(Files.exists(tempDir.resolve("security/orion.p12"))).isFalse();
@@ -122,7 +110,7 @@ class BootstrapKeyMaterialTest {
         configuration.getBootstrap().getKeyMaterial().setLocation("git+https://example.test/private.git");
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
 
-        try (OrionKeyMaterial material = BootstrapContext.openKeyMaterial(
+        try (OrionKeyMaterial material = KeyMaterialBootstrap.open(
                 configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
                 store,
@@ -138,7 +126,7 @@ class BootstrapKeyMaterialTest {
     void requiresExplicitCreationAndDoesNotPopulateAnExistingEmptyStore() throws Exception {
         BootstrapConfiguration configuration = configuration();
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        assertThatThrownBy(() -> BootstrapContext.openKeyMaterial(
+        assertThatThrownBy(() -> KeyMaterialBootstrap.open(
                 configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
                 store,
@@ -156,7 +144,7 @@ class BootstrapKeyMaterialTest {
             store.write(output.toByteArray(), null);
         }
         byte[] before = store.read().orElseThrow().bytes();
-        assertThatThrownBy(() -> BootstrapContext.openKeyMaterial(
+        assertThatThrownBy(() -> KeyMaterialBootstrap.open(
                 configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
                 store,
@@ -180,7 +168,7 @@ class BootstrapKeyMaterialTest {
             });
         }
         byte[] before = store.read().orElseThrow().bytes();
-        assertThatThrownBy(() -> BootstrapContext.openKeyMaterial(
+        assertThatThrownBy(() -> KeyMaterialBootstrap.open(
                 configuration, Map.of(PASSWORD_ENV, "test-password"), store,
                 new KeyMaterialCreation(true), event -> {}))
                 .isInstanceOf(GeneralSecurityException.class)
@@ -194,7 +182,7 @@ class BootstrapKeyMaterialTest {
         configuration.getBootstrap().getKeyMaterial().getServerSigning()
                 .setVerification(List.of(new SigningKeyReferenceConfig("previous-signing", 1)));
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        assertThatThrownBy(() -> BootstrapContext.openKeyMaterial(
+        assertThatThrownBy(() -> KeyMaterialBootstrap.open(
                 configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
                 store,
@@ -210,7 +198,7 @@ class BootstrapKeyMaterialTest {
         BootstrapConfiguration configuration = configuration();
         configuration.getBootstrap().getKeyMaterial().getServerSigning().setAlgorithm("ED25519");
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        assertThatThrownBy(() -> BootstrapContext.openKeyMaterial(
+        assertThatThrownBy(() -> KeyMaterialBootstrap.open(
                 configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
                 store,
@@ -221,8 +209,16 @@ class BootstrapKeyMaterialTest {
         assertThat(store.read()).isEmpty();
     }
 
+    private static OrionKeyMaterial openLocal(
+            BootstrapConfiguration configuration,
+            Map<String, String> environment,
+            KeyMaterialCreation creation) throws Exception {
+        return KeyMaterialBootstrap.open(configuration, environment,
+                KeyMaterialBootstrap.localStore(configuration, environment), creation, event -> {});
+    }
+
     private static SigningMaterialSet signing(BootstrapConfiguration configuration) {
-        return BootstrapContext.signingMaterial(configuration.getBootstrap().getKeyMaterial());
+        return KeyMaterialBootstrap.signingMaterial(configuration.getBootstrap().getKeyMaterial());
     }
 
     private BootstrapConfiguration configuration() {

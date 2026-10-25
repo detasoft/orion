@@ -1,5 +1,7 @@
 package pro.deta.orion.component;
 
+import pro.deta.orion.KeyMaterialBootstrap;
+
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
 
 
@@ -26,7 +28,6 @@ import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -981,7 +982,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         return DaggerOrionComponent.builder()
                 .bootstrapConfiguration(configuration)
                 .rootPasswordReset(rootPasswordReset)
-                .signingMaterial(BootstrapContext.signingMaterial(
+                .signingMaterial(KeyMaterialBootstrap.signingMaterial(
                         configuration.getBootstrap().getKeyMaterial()))
                 .keyMaterial(serverIdentity)
                 .eventManager(events)

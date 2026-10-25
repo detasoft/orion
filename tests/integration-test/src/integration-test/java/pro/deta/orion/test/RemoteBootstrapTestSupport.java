@@ -1,5 +1,7 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.KeyMaterialBootstrap;
+
 import java.security.KeyPair;
 import pro.deta.orion.internal.UserEmail;
 
@@ -113,7 +115,7 @@ final class RemoteBootstrapTestSupport {
         try (OrionKeyMaterial material = TestServerIdentityMaterial.openMaterial(
                 configuration, environment, store)) {
             material.withModification(modification -> {
-                modification.generateKey(BootstrapContext.signingMaterial(
+                modification.generateKey(KeyMaterialBootstrap.signingMaterial(
                         configuration.getBootstrap().getKeyMaterial()).active(),
                         KeyMaterialConstants.RSA_KEY_SIZE_BITS);
                 modification.apply();

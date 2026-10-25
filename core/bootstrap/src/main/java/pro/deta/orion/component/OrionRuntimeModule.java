@@ -14,6 +14,7 @@ import pro.deta.orion.git.client.GitSshClientTransport.HostKeyRejectedException;
 import pro.deta.orion.ssh.SshHostKeyDecision;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.BootstrapContext;
+import pro.deta.orion.ConfigurationBootstrap;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.decision.DecisionRegistry;
@@ -38,7 +39,6 @@ import pro.deta.orion.decision.ConnectionFailureHandler;
 import java.util.function.BiFunction;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.config.OrionVersionedConfigurationStorage;
-import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
 import pro.deta.orion.agent.server.AgentSessionServer;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
@@ -278,7 +278,6 @@ public class OrionRuntimeModule {
     @Singleton
     static OrionVersionedConfigurationStorage configurationStorage(NativeGitRepositoryFactory repositoryFactory,
             BootstrapConfiguration configuration) {
-        return new NativeGitOrionConfigurationStorage(repositoryFactory,
-                configuration.getBootstrap().getAccessControl());
+        return ConfigurationBootstrap.open(configuration, repositoryFactory);
     }
 }

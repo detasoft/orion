@@ -1,5 +1,7 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.KeyMaterialBootstrap;
+
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
@@ -79,7 +81,7 @@ class S3BootstrapRestartIT {
             byte[] xml;
             try (OrionKeyMaterial material = TestServerIdentityMaterial.openMaterial(
                     configuration, environment, materialStore)) {
-                KeyMaterialDescriptor active = BootstrapContext.signingMaterial(
+                KeyMaterialDescriptor active = KeyMaterialBootstrap.signingMaterial(
                         configuration.getBootstrap().getKeyMaterial()).active();
                 signingKeyId = active.alias();
                 signature = material.sign(active, payload);
