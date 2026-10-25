@@ -111,14 +111,12 @@ class AcmeCertificateServiceTest {
             store.material = material;
             AcmeCertificateService service = new AcmeCertificateService(
                     desired.editor(), material, null, null, EVENTS.executor());
-            OrionHttpsConfiguration https = desired.editor().current().result()
-                    .valueOrFailure("configuration").system().https().orElseThrow();
-            service.prepareMaterial(https);
+            saveSettings(service);
             assertThat(material.contains(ACCOUNT)).isTrue();
             assertThat(material.contains(IDENTITY)).isTrue();
             assertThat(material.version()).isEqualTo(1);
             byte[] before = store.read().orElseThrow().bytes();
-            service.prepareMaterial(https);
+            saveSettings(service);
             assertThat(store.read().orElseThrow().bytes()).isEqualTo(before);
         }
     }
@@ -151,8 +149,7 @@ class AcmeCertificateServiceTest {
         try (OrionKeyMaterial material = owner(store)) {
             AcmeCertificateService service = new AcmeCertificateService(
                     desired.editor(), material, issuer, null, EVENTS.executor());
-            service.prepareMaterial(desired.editor().current().result()
-                    .valueOrFailure("configuration").system().https().orElseThrow());
+            saveSettings(service);
             store.material = material;
             IssuedAcmeCertificate issued = service.issue(AcmeCertificateService.IssueRequest.EMPTY);
 
@@ -804,6 +801,13 @@ class AcmeCertificateServiceTest {
         BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getBootstrap().setBaseDir(tempDir.toString());
         return configuration;
+    }
+
+    private static void saveSettings(AcmeCertificateService service) {
+        AcmeCertificateService.View settings = service.view();
+        service.save(new AcmeCertificateService.Settings(settings.revision(), settings.provider(),
+                settings.directoryUrl(), settings.accountEmail(), settings.domains(), "", null, null), "root");
+        EVENTS.await();
     }
 
     private static TestConfiguration desiredState(boolean allowRequestedDomains) {

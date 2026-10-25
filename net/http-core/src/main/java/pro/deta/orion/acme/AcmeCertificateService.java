@@ -134,7 +134,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
         }
     }
 
-    OrionDocument updated(OrionDocument document, Settings input) {
+    private OrionDocument updated(OrionDocument document, Settings input) {
         Preset selected = null;
         for (Preset preset : PRESETS) {
             if (preset.id().equals(input.provider())) selected = preset;
@@ -498,7 +498,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
                 acme.eabKeyId().orElse(null), acme.eabSecret().orElse(null));
     }
 
-    void prepareMaterial(OrionHttpsConfiguration https) {
+    private void prepareMaterial(OrionHttpsConfiguration https) {
         try {
             prepareMaterial(materialFrom(https));
         } catch (IOException | GeneralSecurityException failure) {
