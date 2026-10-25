@@ -20,6 +20,7 @@ const client = {
   issueAcmeCertificate: vi.fn(),
   acmeConfiguration: vi.fn(),
   saveAcmeConfiguration: vi.fn(),
+  recurringTasks: vi.fn(),
   repositories: vi.fn(),
   remoteAliases: vi.fn(),
   routes: vi.fn(),
@@ -91,6 +92,8 @@ beforeEach(() => {
   client.keyMaterial.mockResolvedValue({ entries: [] })
   client.issueAcmeCertificate.mockResolvedValue('-----BEGIN CERTIFICATE-----')
   client.acmeConfiguration.mockResolvedValue({ revision: '1', provider: 'letsencrypt', domains: [], presets: [] })
+  client.recurringTasks.mockResolvedValue({ gitPackCleanup: { state: 'disabled', lastAttempt: '',
+    nextAttempt: '', deleted: 0, observed: 0, skipped: 0, message: '' } })
   client.repositories.mockResolvedValue({ repositories: [] })
   client.remoteAliases.mockResolvedValue({ aliases: [] })
   client.decisions.mockResolvedValue({ decisions: [] })
@@ -117,6 +120,7 @@ describe('Orion navigation', () => {
     await flushPromises()
     expect(wrapper.get('.page-heading h1').text()).toBe('Tasks')
     await vi.waitFor(() => expect(wrapper.find('a[href="#/logs?task=acme-certificate"]').exists()).toBe(true))
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     const link = wrapper.get('a[href="#/logs?task=acme-certificate"]')
     window.history.pushState(null, '', link.attributes('href'))
     window.dispatchEvent(new Event('hashchange'))
@@ -139,6 +143,7 @@ describe('Orion navigation', () => {
       await flushPromises()
       expect(wrapper.find('a[href="#/tasks"]').exists()).toBe(false)
       expect(client.acmeConfiguration).not.toHaveBeenCalled()
+      expect(client.recurringTasks).not.toHaveBeenCalled()
       expect(client.scopedLogFiles).not.toHaveBeenCalled()
       expect(window.location.hash).toBe('#/overview')
     })
