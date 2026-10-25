@@ -30,21 +30,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitFileAccessTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @TempDir
     Path directory;
 
     @Test
     void writesDifferentMessagesWithTheSameAuthor() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
-        EVENTS.own(provider);
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(testRuntime.events());
+        testRuntime.own(provider);
         NativeGitRepository repository = provider.create("metadata").valueOrFailure("repository");
         GitCommitAuthor author = new GitCommitAuthor("Ирина", "irina@example.test");
         for (String message : List.of("first commit", "обновление\nвторая строка")) {
@@ -65,8 +61,8 @@ class GitFileAccessTest {
     @ParameterizedTest
     @ValueSource(strings = {"", " \t"})
     void preservesDefaultCommitIdentityAndMessage(String message) throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
-        EVENTS.own(provider);
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(testRuntime.events());
+        testRuntime.own(provider);
         NativeGitRepository repository = provider.create("metadata").valueOrFailure("repository");
         String revision = repository.files().withAccess("main", new GitCommitMetadata(null, message), access -> {
             access.write("file", new byte[]{1});
@@ -83,7 +79,7 @@ class GitFileAccessTest {
 
     @Test
     void initializesCurrentSymbolicHeadButNotDetachedHead() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             repository.index().withAccess(index -> {
                 index.updateHead(new Head.Symbolic(new RefId("refs/heads/trunk")));
@@ -130,7 +126,7 @@ class GitFileAccessTest {
 
     @Test
     void streamsOneFileAndReusesUntouchedTrees() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             repository
                     .files()
@@ -160,7 +156,7 @@ class GitFileAccessTest {
 
     @Test
     void discardsWhenCallbackFailsAndLeavesBorrowedInputOpen() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             InputStream input = new ByteArrayInputStream(new byte[]{1}) {
                 @Override
@@ -195,7 +191,7 @@ class GitFileAccessTest {
 
     @Test
     void rejectsConcurrentUpdateAtApply() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             repository
                     .files()
@@ -224,7 +220,7 @@ class GitFileAccessTest {
 
     @Test
     void rejectsTruncatedInputWithoutPublishing() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             assertThatThrownBy(
                             () ->
@@ -259,7 +255,7 @@ class GitFileAccessTest {
         }
         try (NativeGitRepository repository =
                 NativeGitRepositoryProvider.file(
-                                directory.resolve("repositories"), EVENTS.manager())
+                                directory.resolve("repositories"), testRuntime.events())
                         .create("demo")
                         .valueOrFailure("repository")) {
             repository
@@ -291,7 +287,7 @@ class GitFileAccessTest {
 
     @Test
     void rejectsExplicitCreationWhenTheBranchAlreadyExists() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             repository
                     .files()
@@ -317,7 +313,7 @@ class GitFileAccessTest {
     @ParameterizedTest
     @ValueSource(strings = {"main", "configuration"})
     void createsAnExplicitlyAbsentBranch(String branch) throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             repository.files().withAccess(branch, null,
                     new GitCommitMetadata(GitCommitAuthor.EMPTY, "creation"), access -> {
@@ -338,7 +334,7 @@ class GitFileAccessTest {
 
     @Test
     void streamsTheRequestedRevisionAfterTheBranchMoves() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             repository
                     .files()
@@ -377,7 +373,7 @@ class GitFileAccessTest {
 
     @Test
     void returnsCallbackResultWithoutApplyingImplicitly() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             String result =
                     repository

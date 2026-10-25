@@ -38,20 +38,16 @@ import static pro.deta.orion.git.parser.v2.data.FileMode.EXECUTABLE_FILE;
 import static pro.deta.orion.git.parser.v2.data.FileMode.SYMLINK;
 
 class NativeGitFileModesTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @TempDir
     Path directory;
 
     @Test
     void savesExplicitModesForNewFilesAndUpdatesIncludingModeOnlyChanges() throws Exception {
-        NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
+        NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository");
         byte[] script = bytes("#!/bin/sh\nexit 0\n");
         Map<String, byte[]> initial = Map.of(
@@ -89,7 +85,7 @@ class NativeGitFileModesTest {
                             return null;
                         });
 
-        NativeGitRepository reopened = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
+        NativeGitRepository reopened = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .find("demo").valueOrFailure("repository");
         assertContents(reopened, updated);
         try (InMemoryRepository observed = new InMemoryRepository(new DfsRepositoryDescription())) {
@@ -120,7 +116,7 @@ class NativeGitFileModesTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void preservesUntouchedModesAndIdsAcrossFileSaveAndReopen(boolean withGitlink) throws Exception {
-        NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
+        NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository");
         ObjectId executable = write(repository, GitObjectType.BLOB, bytes("#!/bin/sh\nexit 0\n"));
         ObjectId link = write(repository, GitObjectType.BLOB, bytes("run.sh"));
@@ -155,7 +151,7 @@ class NativeGitFileModesTest {
                                                 }))
                 .doesNotThrowAnyException();
 
-        NativeGitRepository reopened = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
+        NativeGitRepository reopened = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .find("demo").valueOrFailure("repository");
         try (InMemoryRepository observed = new InMemoryRepository(new DfsRepositoryDescription())) {
             copyPacks(reopened, observed);
@@ -187,7 +183,7 @@ class NativeGitFileModesTest {
         expected.put("a/x", updated);
         Map<String, FileMode> modes = Map.of("\uE000", FileMode.EXECUTABLE_FILE,
                 "nested/\uD800\uDC00", FileMode.SYMLINK);
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             repository
                     .files()
@@ -227,7 +223,7 @@ class NativeGitFileModesTest {
             assertContents(repository, expected, modes);
         }
 
-        try (NativeGitRepository reopened = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
+        try (NativeGitRepository reopened = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .find("demo").valueOrFailure("repository")) {
             assertContents(reopened, expected, modes);
         }
@@ -246,7 +242,7 @@ class NativeGitFileModesTest {
         Map<String, FileMode> modes = Map.of(
                 "\uE000", FileMode.EXECUTABLE_FILE, "nested/\uE000", FileMode.EXECUTABLE_FILE,
                 "\uD800\uDC00", FileMode.SYMLINK, "nested/\uD800\uDC00", FileMode.SYMLINK);
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             ObjectId executableId = write(repository, GitObjectType.BLOB, executable);
             ObjectId linkId = write(repository, GitObjectType.BLOB, link);
@@ -279,7 +275,7 @@ class NativeGitFileModesTest {
             assertContents(repository, expected, modes);
         }
 
-        try (NativeGitRepository reopened = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
+        try (NativeGitRepository reopened = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .find("demo").valueOrFailure("repository")) {
             assertContents(reopened, expected, modes);
         }

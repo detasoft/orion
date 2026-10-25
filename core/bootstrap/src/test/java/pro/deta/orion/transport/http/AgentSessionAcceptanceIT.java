@@ -230,6 +230,8 @@ class AgentSessionAcceptanceIT {
     }
 
     static final class Fixture implements AutoCloseable {
+        private final pro.deta.orion.test.util.OrionTestRuntime runtime =
+                new pro.deta.orion.test.util.OrionTestRuntime();
         private final Path directory;
         private final boolean allowUnsecure;
         private final Path local = Files.createTempDirectory(Path.of("/tmp"), "orion-acceptance-");
@@ -288,8 +290,8 @@ class AgentSessionAcceptanceIT {
             var configuration = JettyHTTPServerIT.httpConfiguration(allowUnsecure);
             configuration.getTransport().getHttp().setPort(port);
             http = new JettyHTTPServer(configuration,
-                    allowUnsecure ? JettyHTTPServerIT.desiredStateWithoutHttps().editor()
-                            : JettyHTTPServerIT.desiredState(OrionHttpsConfiguration.ClientAuthentication.DISABLED,
+                    allowUnsecure ? JettyHTTPServerIT.desiredStateWithoutHttps(runtime).editor()
+                            : JettyHTTPServerIT.desiredState(runtime, OrionHttpsConfiguration.ClientAuthentication.DISABLED,
                                     List.of(), port).editor(), material.owner(), routes, null, owner);
             http.onStart();
             port = allowUnsecure ? http.boundHttpPort() : http.boundHttpsPort();
@@ -431,7 +433,11 @@ class AgentSessionAcceptanceIT {
                 try {
                     owner.onStop();
                 } finally {
-                    material.close();
+                    try {
+                        runtime.close();
+                    } finally {
+                        material.close();
+                    }
                 }
             }
             Path evidence = Files.createDirectories(Path.of("target/acceptance").resolve(directory.getFileName()));

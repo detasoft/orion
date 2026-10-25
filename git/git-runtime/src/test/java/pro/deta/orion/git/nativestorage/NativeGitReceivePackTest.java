@@ -18,13 +18,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class NativeGitReceivePackTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final String ZERO = "0".repeat(40);
     private static final String MAIN = "refs/heads/main";
@@ -249,8 +245,8 @@ class NativeGitReceivePackTest {
         assertThat(repository.refs()).containsEntry(MAIN, concurrent);
     }
 
-    private static NativeGitRepository repository() {
-        return NativeGitRepositoryProvider.inMemory(EVENTS.manager())
+    private NativeGitRepository repository() {
+        return NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo")
                 .valueOrFailure("repository");
     }

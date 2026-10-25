@@ -7,18 +7,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class InMemoryNativeGitRepositoryProviderTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @Test
     void canonicalizesNamesBeforeLookupAndCollisionChecks() {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
 
         NativeGitRepository created = provider.create("team%2Frepo")
                 .valueOrFailure("repository");
@@ -34,7 +30,7 @@ class InMemoryNativeGitRepositoryProviderTest {
     @Test
     void rejectsInvalidNamesBeforeAccessingStorage() {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
 
         assertThatThrownBy(() -> provider.exists("Repo"))
                 .isInstanceOf(IllegalArgumentException.class);

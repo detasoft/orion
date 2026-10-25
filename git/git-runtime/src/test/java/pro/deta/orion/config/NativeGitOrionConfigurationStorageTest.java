@@ -36,13 +36,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class NativeGitOrionConfigurationStorageTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final String ACL_PATH = "config/orion.xml";
 
@@ -50,7 +46,7 @@ class NativeGitOrionConfigurationStorageTest {
     void requiresConfigurationRepositoryBootstrap() {
         assertThatThrownBy(() -> new NativeGitOrionConfigurationStorage(
                 new NativeGitRepositoryFactory(
-                        pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager())),
+                        pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(testRuntime.events())),
                 new BootstrapConfigurationSourceConfig()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Orion configuration requires a resolved Git repository");
@@ -59,7 +55,7 @@ class NativeGitOrionConfigurationStorageTest {
     @Test
     void resolverUsesRepositoryBackedSourceAlias() throws Exception {
         String secondaryPath = "config/roles.xml";
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository = provider.create("bootstrap/proxy-alias")
                 .valueOrFailure("create proxy alias");
         repository
@@ -92,7 +88,7 @@ class NativeGitOrionConfigurationStorageTest {
     void usesOneCanonicalResolvedIdentityForEncodedReadsAndWrites(@TempDir Path root)
             throws Exception {
         NativeGitRepositoryFactory provider = new NativeGitRepositoryFactory(
-                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.file(root, EVENTS.manager()));
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.file(root, testRuntime.events()));
         NativeGitRepository selected = provider.provider().create("team/repo")
                 .valueOrFailure("selected repository");
         String ref = "refs/heads/configuration";
@@ -129,7 +125,7 @@ class NativeGitOrionConfigurationStorageTest {
 
     @Test
     void storageDoesNotCreateRepositoryDuringAclStartup() {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(testRuntime.events());
 
         assertThatThrownBy(() -> resolvedStorage(provider, ACL_PATH))
                 .isInstanceOf(IllegalStateException.class);
@@ -140,7 +136,7 @@ class NativeGitOrionConfigurationStorageTest {
     @ValueSource(booleans = {false, true})
     void createsConfiguredRepositoryAndCommitsInitialAcl(boolean useDefaults, @TempDir Path rootDirectory) {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
         OrionVersionedConfigurationStorage storage = preparedStorage(provider);
 
         assertThat(storage.load().revision()).isInstanceOf(OrionRevision.Absent.class);
@@ -175,16 +171,16 @@ class NativeGitOrionConfigurationStorageTest {
     @Test
     void reusesExistingRepositoryAndConfiguredRefAfterRestart(@TempDir Path rootDirectory) {
         try (NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager())) {
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events())) {
             OrionVersionedConfigurationStorage first = preparedStorage(provider);
             first.save(
                     new OrionRevision.Absent(),
                     document("persisted acl"),
                     new ChangeMetadata(UserEmail.EMPTY, "bootstrap ACL"));
-            EVENTS.await();
+            testRuntime.awaitEvents();
         }
         try (NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager())) {
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events())) {
             OrionVersionedConfigurationStorage restarted = preparedStorage(provider);
             assertThat(
                             restarted
@@ -198,7 +194,7 @@ class NativeGitOrionConfigurationStorageTest {
     void createsMissingDocumentThroughEditorAtTheExistingStorageRevision(
             @TempDir Path rootDirectory) throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
         NativeGitRepository repository = provider.create("internal/configuration")
                 .valueOrFailure("repository");
         repository
@@ -237,7 +233,7 @@ class NativeGitOrionConfigurationStorageTest {
     @Test
     void rejectsConcurrentCreationAfterEditorReadsAnEmptyVersionedStorage() throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("internal/configuration").valueOrFailure("repository");
         repository
@@ -270,17 +266,17 @@ class NativeGitOrionConfigurationStorageTest {
                 .isEqualTo(bytes("existing file"));
     }
 
-    private static OrionConfigurationEditor editor(OrionVersionedConfigurationStorage storage) {
+    private OrionConfigurationEditor editor(OrionVersionedConfigurationStorage storage) {
         return new OrionConfigurationEditor(
                 storage,
                 pro.deta.orion.keymaterial.OrionKeyMaterial.unavailable(),
-                EVENTS.manager());
+                testRuntime.events());
     }
 
     @Test
     void retainsTheStorageRevisionWhenTheDocumentCannotBeDecoded() throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("internal/configuration").valueOrFailure("repository");
         repository
@@ -313,7 +309,7 @@ class NativeGitOrionConfigurationStorageTest {
     @Test
     void loadsOnlyTheConfiguredFile(@TempDir Path rootDirectory) throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
         NativeGitRepository repository = provider.create("internal/configuration")
                 .valueOrFailure("repository");
         repository
@@ -337,11 +333,11 @@ class NativeGitOrionConfigurationStorageTest {
     void reportsExactSnapshotsOfAcceptedUpdatesEvenAfterTheBranchMoves(@TempDir Path rootDirectory)
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
         CountDownLatch processingFirstUpdate = new CountDownLatch(1);
         CountDownLatch resumeProcessing = new CountDownLatch(1);
         AtomicBoolean gateFailed = new AtomicBoolean();
-        try (Subscription gate = EVENTS.manager().subscribe(RepositoryRefChanged.class, event -> {
+        try (Subscription gate = testRuntime.events().subscribe(RepositoryRefChanged.class, event -> {
             if (!event.update().ref().value().equals("refs/heads/configuration")) return;
             processingFirstUpdate.countDown();
             try {
@@ -353,7 +349,7 @@ class NativeGitOrionConfigurationStorageTest {
         })) {
             OrionVersionedConfigurationStorage storage = preparedStorage(provider);
             List<OrionDocumentRevision> changes = new ArrayList<>();
-            Subscription subscription = EVENTS.manager().subscribe(ConfigurationChanged.class, event -> {
+            Subscription subscription = testRuntime.events().subscribe(ConfigurationChanged.class, event -> {
                 if (event.storage() == storage) changes.add(event.snapshot());
             });
             try {
@@ -372,10 +368,10 @@ class NativeGitOrionConfigurationStorageTest {
                 OrionRevision.Stored second = storage.save(first, document("second"),
                         new ChangeMetadata(UserEmail.EMPTY, "second"));
                 resumeProcessing.countDown();
-                EVENTS.await();
+                testRuntime.awaitEvents();
                 subscription.close();
                 storage.save(second, document("third"), new ChangeMetadata(UserEmail.EMPTY, "third"));
-                EVENTS.await();
+                testRuntime.awaitEvents();
 
                 assertThat(gateFailed).isFalse();
                 assertThat(changes).extracting(OrionDocumentRevision::revision).containsExactly(first, second);
@@ -391,7 +387,7 @@ class NativeGitOrionConfigurationStorageTest {
     @Test
     void staleVersionedSaveCannotOverwriteWinningAclOrUnrelatedFiles(@TempDir Path rootDirectory) throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
         OrionVersionedConfigurationStorage storage = preparedStorage(provider);
         storage.save(
                 new OrionRevision.Absent(),
@@ -431,7 +427,7 @@ class NativeGitOrionConfigurationStorageTest {
     void createsMissingConfigurationAtExistingRevisionKeepingOtherFiles(@TempDir Path rootDirectory)
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
         NativeGitRepository repository = provider.create("internal/configuration").valueOrFailure("repository");
         repository
                 .files()
@@ -458,7 +454,7 @@ class NativeGitOrionConfigurationStorageTest {
 
     @Test
     void failsWhenTheStorageRevisionCannotBeDetermined() {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(testRuntime.events());
         OrionVersionedConfigurationStorage storage = preparedStorage(provider);
         provider.close();
 
@@ -472,7 +468,7 @@ class NativeGitOrionConfigurationStorageTest {
         RecordingProvider provider =
                 new RecordingProvider(
                         pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.file(
-                                rootDirectory, EVENTS.manager()));
+                                rootDirectory, testRuntime.events()));
         OrionVersionedConfigurationStorage storage = preparedStorage(provider);
         provider.find("internal/configuration")
                 .valueOrFailure("repository")
@@ -498,7 +494,7 @@ class NativeGitOrionConfigurationStorageTest {
         RecordingProvider provider =
                 new RecordingProvider(
                         pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.file(
-                                rootDirectory, EVENTS.manager()));
+                                rootDirectory, testRuntime.events()));
         OrionVersionedConfigurationStorage storage = preparedStorage(provider);
 
         storage.save(
@@ -519,7 +515,7 @@ class NativeGitOrionConfigurationStorageTest {
         return config;
     }
 
-    private static OrionVersionedConfigurationStorage preparedStorage(
+    private OrionVersionedConfigurationStorage preparedStorage(
             NativeGitRepositoryProvider provider) {
         if (!provider.exists("internal/configuration")) {
             provider.create("internal/configuration").valueOrFailure("repository");
@@ -527,12 +523,12 @@ class NativeGitOrionConfigurationStorageTest {
         return resolvedStorage(provider, ACL_PATH);
     }
 
-    private static OrionVersionedConfigurationStorage resolvedStorage(
+    private OrionVersionedConfigurationStorage resolvedStorage(
             NativeGitRepositoryProvider provider, String path) {
-        EVENTS.own(provider);
+        testRuntime.own(provider);
         NativeGitOrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(provider,
                 "internal/configuration", "refs/heads/configuration", path);
-        EVENTS.own(storage);
+        testRuntime.own(storage);
         return storage;
     }
 

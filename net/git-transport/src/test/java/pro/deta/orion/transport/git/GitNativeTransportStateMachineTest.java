@@ -51,20 +51,16 @@ import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_ST
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.*;
 
 class GitNativeTransportStateMachineTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @Test
     void disabledNativeTransportDoesNotBindSocket() {
         GitNativeTransportService service = new GitNativeTransportService(
                 config(false),
                 new DefaultGitNativeRepositoryService(
-                        NativeGitRepositoryProvider.inMemory(EVENTS.manager())));
+                        NativeGitRepositoryProvider.inMemory(testRuntime.events())));
 
         service.onStart();
 
@@ -77,7 +73,7 @@ class GitNativeTransportStateMachineTest {
         GitNativeTransportService service = new GitNativeTransportService(
                 config(true),
                 new DefaultGitNativeRepositoryService(
-                        NativeGitRepositoryProvider.inMemory(EVENTS.manager())));
+                        NativeGitRepositoryProvider.inMemory(testRuntime.events())));
 
         try {
             service.onStart();
@@ -98,7 +94,7 @@ class GitNativeTransportStateMachineTest {
                 new GitNativeTransportService(
                         config,
                         new DefaultGitNativeRepositoryService(
-                                NativeGitRepositoryProvider.inMemory(EVENTS.manager())));
+                                NativeGitRepositoryProvider.inMemory(testRuntime.events())));
 
         try {
             try (ServerSocket occupied = new ServerSocket()) {
@@ -139,7 +135,7 @@ class GitNativeTransportStateMachineTest {
                 new GitNativeTransportService(
                         config,
                         new DefaultGitNativeRepositoryService(
-                                NativeGitRepositoryProvider.inMemory(EVENTS.manager())));
+                                NativeGitRepositoryProvider.inMemory(testRuntime.events())));
 
         try (ServerSocket occupied = new ServerSocket()) {
             occupied.bind(new InetSocketAddress("127.0.0.1", 0));
@@ -224,7 +220,7 @@ class GitNativeTransportStateMachineTest {
         GitNativeTransportService service = new GitNativeTransportService(
                 config(true),
                 new DefaultGitNativeRepositoryService(
-                        NativeGitRepositoryProvider.inMemory(EVENTS.manager())));
+                        NativeGitRepositoryProvider.inMemory(testRuntime.events())));
 
         try (ConnectionFailureLogCapture logs = new ConnectionFailureLogCapture()) {
             service.onStart();
@@ -484,7 +480,7 @@ class GitNativeTransportStateMachineTest {
         return config;
     }
 
-    private static final class RecordingNativeGitRepositoryProvider
+    private final class RecordingNativeGitRepositoryProvider
             extends NativeGitRepositoryProvider {
         @Override
         public void close() {
@@ -492,14 +488,14 @@ class GitNativeTransportStateMachineTest {
         }
 
         private final NativeGitRepositoryProvider delegate =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         private final CountDownLatch handled;
         private final AtomicBoolean virtualThread;
 
         private RecordingNativeGitRepositoryProvider(
                 CountDownLatch handled,
                 AtomicBoolean virtualThread) {
-            super(pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager()));
+            super(pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(testRuntime.events()));
             this.handled = handled;
             this.virtualThread = virtualThread;
             delegate.create("repo");

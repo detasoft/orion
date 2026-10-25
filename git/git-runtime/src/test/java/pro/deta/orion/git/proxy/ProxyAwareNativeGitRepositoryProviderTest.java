@@ -47,13 +47,9 @@ import static pro.deta.orion.git.proxy.NativeGitRepositoryFactory.SyncStatus.*;
 import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class ProxyAwareNativeGitRepositoryProviderTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @Test
     void bootstrapKeepsItsNameAndInstanceIndependentlyOfUiProxies() throws Exception {
@@ -162,7 +158,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
 
     @Test
     void aliasCollisionLeavesTheActiveProxyAndLocalRepositoryIntact() throws Exception {
-        NativeGitRepositoryBackend backend = NativeGitRepositoryBackend.inMemory(EVENTS.manager());
+        NativeGitRepositoryBackend backend = NativeGitRepositoryBackend.inMemory(testRuntime.events());
         var provider = provider(backend);
         var first = proxyDocument("first", "file:///first.git");
         provider.activate(() -> first, secrets(first));
@@ -192,7 +188,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
     void retriesOnlyTheSelectedAliasAndRetainsFailedBindingsForRecovery() {
         var visited = new ArrayList<String>();
         var unavailable = new AtomicBoolean(true);
-        var provider = new NativeGitRepositoryFactory(NativeGitRepositoryBackend.inMemory(EVENTS.manager()),
+        var provider = new NativeGitRepositoryFactory(NativeGitRepositoryBackend.inMemory(testRuntime.events()),
                 new BootstrapSecretResolver(Map.of()), (location, transport, repository) -> {
                     visited.add(location.remoteUri().getPath());
                     if (location.remoteUri().getPath().equals("/other.git") && unavailable.get()) {
@@ -248,7 +244,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
     void recordsSafeNativeAuthenticationFailureThenRecovery() {
         var failure = new AtomicReference<GitClientFailure>();
         var provider = new NativeGitRepositoryFactory(
-                NativeGitRepositoryBackend.inMemory(EVENTS.manager()), new BootstrapSecretResolver(Map.of()),
+                NativeGitRepositoryBackend.inMemory(testRuntime.events()), new BootstrapSecretResolver(Map.of()),
                 (location, transport, repository) -> {
                     if (failure.get() != null) {
                         new NativeBootstrapGitFetcher().fetch(location, (service, uri, options) -> {
@@ -287,7 +283,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
     void passesPreparedPackUnchangedToTheUpstreamPusher() throws Exception {
         ArrayList<byte[]> forwarded = new ArrayList<>();
         NativeGitRepositoryFactory provider = new NativeGitRepositoryFactory(
-                NativeGitRepositoryBackend.inMemory(EVENTS.manager()), new BootstrapSecretResolver(Map.of()),
+                NativeGitRepositoryBackend.inMemory(testRuntime.events()), new BootstrapSecretResolver(Map.of()),
                 (location, transport, repository) -> { },
                 (location, transport, repository, received, updates, atomic) -> {
                     ByteArrayOutputStream exported = new ByteArrayOutputStream();
@@ -626,7 +622,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
 
     @Test
     void keepsOrdinaryLocalRepositoriesDirect() throws Exception {
-        NativeGitRepositoryBackend backend = NativeGitRepositoryBackend.inMemory(EVENTS.manager());
+        NativeGitRepositoryBackend backend = NativeGitRepositoryBackend.inMemory(testRuntime.events());
         AtomicInteger refreshes = new AtomicInteger();
         NativeGitRepositoryFactory provider = new NativeGitRepositoryFactory(backend, new BootstrapSecretResolver(Map.of()),
                 (location, transport, repository) -> refreshes.incrementAndGet(), (location, transport,
@@ -757,11 +753,11 @@ class ProxyAwareNativeGitRepositoryProviderTest {
 
     @Test
     void hidesCacheAfterProviderRestartAndAllowsBootstrapToRebindIt(@TempDir Path root) {
-        NativeGitRepositoryBackend backend = NativeGitRepositoryBackend.file(root, EVENTS.manager());
+        NativeGitRepositoryBackend backend = NativeGitRepositoryBackend.file(root, testRuntime.events());
         NativeGitRepositoryFactory original = provider(backend);
         String name = original.prepareProvisional("configuration", remoteSource("orion.xml"));
         NativeGitRepositoryFactory restarted =
-                provider(NativeGitRepositoryBackend.file(root, EVENTS.manager()));
+                provider(NativeGitRepositoryBackend.file(root, testRuntime.events()));
 
         assertUnavailableCache(restarted, name);
         assertThat(restarted.prepareProvisional("configuration", remoteSource("orion.xml"))).isEqualTo(name);
@@ -771,7 +767,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
 
     @Test
     void failedBootstrapRefreshLeavesNoAccessibleCacheAndAllowsNewAuthentication() {
-        NativeGitRepositoryBackend backend = NativeGitRepositoryBackend.inMemory(EVENTS.manager());
+        NativeGitRepositoryBackend backend = NativeGitRepositoryBackend.inMemory(testRuntime.events());
         AtomicInteger refreshes = new AtomicInteger();
         NativeGitRepositoryFactory provider = new NativeGitRepositoryFactory(
                 backend, new BootstrapSecretResolver(Map.of("OLD_TOKEN", "old", "NEW_TOKEN", "new")),
@@ -803,7 +799,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
     void failedSharedRefreshPreservesOriginalBindingAndReleasesTheNewSource() {
         AtomicInteger refreshes = new AtomicInteger();
         NativeGitRepositoryFactory provider = new NativeGitRepositoryFactory(
-                NativeGitRepositoryBackend.inMemory(EVENTS.manager()), new BootstrapSecretResolver(Map.of()),
+                NativeGitRepositoryBackend.inMemory(testRuntime.events()), new BootstrapSecretResolver(Map.of()),
                 (location, transport, repository) -> {
                     if (refreshes.incrementAndGet() == 2) {
                         throw new IllegalStateException("upstream unavailable");
@@ -828,7 +824,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
 
     @Test
     void missingRequiredRefLeavesNoProvisionalBinding() {
-        NativeGitRepositoryBackend backend = NativeGitRepositoryBackend.inMemory(EVENTS.manager());
+        NativeGitRepositoryBackend backend = NativeGitRepositoryBackend.inMemory(testRuntime.events());
         NativeGitRepositoryFactory provider = provider(backend);
         BootstrapSourceConfig source = remoteSource("orion.xml");
 
@@ -849,7 +845,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
 
     @Test
     void missingRequiredPathLeavesNoProvisionalBinding() throws Exception {
-        NativeGitRepositoryBackend backend = NativeGitRepositoryBackend.inMemory(EVENTS.manager());
+        NativeGitRepositoryBackend backend = NativeGitRepositoryBackend.inMemory(testRuntime.events());
         BootstrapSourceConfig source = remoteSource("orion.xml");
         String name = "bootstrap";
         NativeGitRepositoryFactory provider = provider(backend);
@@ -890,7 +886,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
 
     @Test
     void failedSharedSourcePreservesPreviouslyResolvedBinding() throws Exception {
-        NativeGitRepositoryBackend backend = NativeGitRepositoryBackend.inMemory(EVENTS.manager());
+        NativeGitRepositoryBackend backend = NativeGitRepositoryBackend.inMemory(testRuntime.events());
         BootstrapSourceConfig configuration = remoteSource("orion.xml");
         String name = "bootstrap";
         NativeGitRepositoryFactory provider = provider(backend);
@@ -962,18 +958,18 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                         Collections.nCopies(updates.size(), true));
     }
 
-    private static NativeGitRepositoryFactory provider(
+    private NativeGitRepositoryFactory provider(
             AtomicInteger refreshes,
             AtomicInteger pushes) {
         return provider(refreshes, pushes, Map.of());
     }
 
-    private static NativeGitRepositoryFactory provider(
+    private NativeGitRepositoryFactory provider(
             AtomicInteger refreshes,
             AtomicInteger pushes,
             Map<String, String> environment) {
         return new NativeGitRepositoryFactory(
-                NativeGitRepositoryBackend.inMemory(EVENTS.manager()),
+                NativeGitRepositoryBackend.inMemory(testRuntime.events()),
                 new BootstrapSecretResolver(environment),
                 (location, transport, repository) -> refreshes.incrementAndGet(),
                 (location, transport, repository, received, updates, atomic) -> {

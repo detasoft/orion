@@ -38,18 +38,14 @@ import java.util.*;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ConfiguredStorageManagementTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private final MemoryStorage storage = new MemoryStorage();
     private final OrganizationId organization = new OrganizationId("acme");
     private final NativeGitRepositoryProvider repositories =
-            NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+            NativeGitRepositoryProvider.inMemory(testRuntime.events());
     private OrionKeyMaterial material;
     private ConfiguredStorageManagement management;
     private OrionConfigurationEditor editor;
@@ -71,7 +67,7 @@ class ConfiguredStorageManagementTest {
         storage.set(new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()), List.of(org)));
         editor = new OrionConfigurationEditor(storage,
                 material,
-                EVENTS.manager());
+                testRuntime.events());
         acl =
                 new OrionAccessControlServiceImpl(
                         new OrionPasswordHashingService(),
@@ -103,7 +99,7 @@ class ConfiguredStorageManagementTest {
         char[] secret = "private-access-secret".toCharArray();
         StorageManagement.Outcome<StorageManagement.Connections> result = management.saveConnection(actor,
                 Optional.of(organization), revision(), true, input(secret));
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertThat(result).isInstanceOf(StorageManagement.Success.class);
         assertThat(secret).containsOnly('\0');
         assertThat(storage.snapshot.result().valueOrFailure("Cannot read configuration document").toString())
@@ -122,14 +118,14 @@ class ConfiguredStorageManagementTest {
     void deniesForeignOrganizationDefaultCredentialsAndStaleRevisionWithoutMutation() {
         assertFailure(management.saveConnection(actor, Optional.of(new OrganizationId("other")), revision(),
                 true, input("secret".toCharArray())), StorageManagement.FailureCode.DENIED);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertFailure(management.saveConnection(actor, Optional.of(organization), revision(), true,
                 new StorageManagement.S3Input("archive", null, "us-east-1", true, null, null, null, true)),
                 StorageManagement.FailureCode.DENIED);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertFailure(management.saveConnection(actor, Optional.of(organization), "stale", true,
                 input("secret".toCharArray())), StorageManagement.FailureCode.CONFLICT);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertThat(storage.saves).isZero();
     }
 
@@ -137,10 +133,10 @@ class ConfiguredStorageManagementTest {
     void localCreationRetainsDuplicateBehavior() {
         assertThat(management.createRepository(actor, "acme/team/local", Optional.empty()))
                 .isEqualTo(new StorageManagement.Success<>(new StorageManagement.Created(true)));
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertThat(management.createRepository(actor, "acme/team/local", Optional.empty()))
                 .isEqualTo(new StorageManagement.Success<>(new StorageManagement.Created(false)));
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertThat(activeDocument().organizations().getFirst().teams().getFirst().repositories())
                 .extracting(OrionDocument.Repository::id).containsExactly("local");
     }
@@ -156,7 +152,7 @@ class ConfiguredStorageManagementTest {
 
         assertThat(management.createRepository(actor, "acme/team/local", Optional.empty()))
                 .isEqualTo(new StorageManagement.Success<>(new StorageManagement.Created(true)));
-        EVENTS.await();
+        testRuntime.awaitEvents();
 
         assertThat(pro.deta.orion.auth.check.rule.RepositoryAccessRules.read()
                 .evaluate(actor, resource).allowed()).isTrue();
@@ -205,7 +201,7 @@ class ConfiguredStorageManagementTest {
     void localStorageFailureRetainsRegistrationForAnIdenticalRetry() {
         java.util.concurrent.atomic.AtomicBoolean failed = new java.util.concurrent.atomic.AtomicBoolean(true);
         try (NativeGitRepositoryProvider observed = new NativeGitRepositoryProvider(
-                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager())) {
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(testRuntime.events())) {
             @Override
             public Result<NativeGitRepository> create(String name) {
                 assertThat(activeDocument().organizations().getFirst().teams().getFirst().repositories())
@@ -230,7 +226,7 @@ class ConfiguredStorageManagementTest {
     void replacementUsesNewSecretAndOmittedFieldsPreserveValues() throws Exception {
         assertThat(management.saveConnection(actor, Optional.of(organization), revision(), true,
                 input("original-secret".toCharArray()))).isInstanceOf(StorageManagement.Success.class);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         OrionDocument before = activeDocument();
         Connection.S3 original = (Connection.S3) before.organizations().getFirst().connections().getFirst();
         String oldReference = original.secretKey().orElseThrow();
@@ -240,10 +236,10 @@ class ConfiguredStorageManagementTest {
         storage.set(new OrionDocument(before.system(), List.of(new OrionDocument.Organization(org.id(),
                 org.displayName(), org.users(), org.grants(), org.roles(), org.teams(), org.secrets(),
                 org.oidcProviders(), org.invitations(), List.of(original, shared)))));
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertThat(management.saveConnection(actor, Optional.of(organization), revision(), false,
                 input("replacement-secret".toCharArray()))).isInstanceOf(StorageManagement.Success.class);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         OrionDocument replaced = activeDocument();
         Connection.S3 replacement = (Connection.S3) OrionDocument.findConnection(
                 replaced.organizations().getFirst().connections(), "archive");
@@ -255,7 +251,7 @@ class ConfiguredStorageManagementTest {
         assertThat(management.saveConnection(actor, Optional.of(organization), revision(), false,
                 new StorageManagement.S3Input("archive", null, "eu-west-1", false, null, null, null, false)))
                 .isInstanceOf(StorageManagement.Success.class);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         Connection.S3 kept = (Connection.S3) OrionDocument.findConnection(
                 activeDocument().organizations().getFirst().connections(), "archive");
         assertThat(kept.secretKey()).isEqualTo(replacement.secretKey());
@@ -272,17 +268,17 @@ class ConfiguredStorageManagementTest {
                 new StorageManagement.S3Input("archive", null, "us-east-1", true, "id",
                         "secret".toCharArray(), "session-secret".toCharArray(), false)))
                 .isInstanceOf(StorageManagement.Success.class);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         Connection.S3 original = (Connection.S3) activeDocument().organizations()
                 .getFirst().connections().getFirst();
         management.saveConnection(actor, Optional.of(organization), revision(), false,
                 new StorageManagement.S3Input("archive", null, "us-east-1", true, null, null, null, false));
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertThat(((Connection.S3) activeDocument().organizations().getFirst().connections()
                 .getFirst()).sessionToken()).isEqualTo(original.sessionToken());
         management.saveConnection(actor, Optional.of(organization), revision(), false,
                 new StorageManagement.S3Input("archive", null, "us-east-1", true, null, null, new char[0], false));
-        EVENTS.await();
+        testRuntime.awaitEvents();
         Connection.S3 cleared = (Connection.S3) activeDocument().organizations()
                 .getFirst().connections().getFirst();
         assertThat(cleared.sessionToken()).isEmpty();
@@ -293,12 +289,12 @@ class ConfiguredStorageManagementTest {
     void creationChangeAndUseAreIndependentAndRevocationIsCheckedAgainstStoredDocument() throws Exception {
         assertThat(management.saveConnection(actor, Optional.of(organization), revision(), true,
                 input("secret".toCharArray()))).isInstanceOf(StorageManagement.Success.class);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         OrionDocument old = activeDocument();
         setGrants(List.of(grant(GrantKey.CONNECTION, "*", GrantKey.CREATE)), false);
         assertFailure(management.saveConnection(actor, Optional.of(organization), revision(), false,
                 input("replacement".toCharArray())), StorageManagement.FailureCode.CONFLICT);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         // A matching revision from storage with a stale identity still cannot authorize the revoked change.
         assertFailure(management.saveConnection(actor, Optional.of(organization),
                 ((OrionRevision.Stored) storage.snapshot.revision()).value(), false,
@@ -314,17 +310,17 @@ class ConfiguredStorageManagementTest {
         assertThat(view.connections().getFirst().canChange()).isFalse();
         assertFailure(management.saveConnection(actor, Optional.of(organization), revision(), false,
                 input("replacement".toCharArray())), StorageManagement.FailureCode.DENIED);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertFailure(management.createRepository(actor, "acme/team/new", Optional.of(s3Binding())),
                 StorageManagement.FailureCode.DENIED);
-        EVENTS.await();
+        testRuntime.awaitEvents();
     }
 
     @Test
     void falseConnectionUseGrantDoesNotAuthorizeUsingConnection() throws Exception {
         assertThat(management.saveConnection(actor, Optional.of(organization), revision(), true,
                 input("secret".toCharArray()))).isInstanceOf(StorageManagement.Success.class);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         setGrants(List.of(new Grant("connection-use", List.of(
                 new GrantExpression(GrantKey.CONNECTION, "*"),
                 new GrantExpression(GrantKey.READ, "true"),
@@ -339,12 +335,12 @@ class ConfiguredStorageManagementTest {
     @Test
     void metadataFailureRetainsBindingAndIdenticalRetryCompletesWithoutLocalFallback() {
         management.saveConnection(actor, Optional.of(organization), revision(), true, input("secret".toCharArray()));
-        EVENTS.await();
+        testRuntime.awaitEvents();
         java.util.concurrent.atomic.AtomicInteger fail = new java.util.concurrent.atomic.AtomicInteger(1);
         pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider observed =
                 new pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider(
                         pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(
-                                EVENTS.manager())) {
+                                testRuntime.events())) {
                     @Override
                     public void close() {
                         repositories.close();
@@ -389,40 +385,40 @@ class ConfiguredStorageManagementTest {
                 };
         ConfiguredStorageManagement operation = new ConfiguredStorageManagement(acl, editor, material, observed);
         StorageManagement.Outcome<?> failed = operation.createRepository(actor, "acme/team/archive", Optional.of(s3Binding()));
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertFailure(failed, StorageManagement.FailureCode.STORAGE_RETRY);
         assertThat(failed.toString()).doesNotContain("credential-should-not-leak");
         assertThat(repositories.exists("acme/team/archive")).isFalse();
         fail.set(2);
         assertFailure(operation.createRepository(actor, "acme/team/archive", Optional.of(s3Binding())),
                 StorageManagement.FailureCode.STORAGE_RETRY);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         fail.set(0);
         assertThat(operation.createRepository(actor, "acme/team/archive", Optional.of(s3Binding())))
                 .isEqualTo(new StorageManagement.Success<>(new StorageManagement.Created(true)));
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertThat(operation.createRepository(actor, "acme/team/archive", Optional.of(s3Binding())))
                 .isEqualTo(new StorageManagement.Success<>(new StorageManagement.Created(false)));
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertFailure(operation.createRepository(actor, "acme/team/archive", Optional.of(new S3StorageBinding(
                 s3Binding().connection(), java.net.URI.create("s3://other-bucket/prefix")))),
                 StorageManagement.FailureCode.CONFLICT);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertFailure(operation.createRepository(actor, "acme/team/archive", Optional.empty()),
                 StorageManagement.FailureCode.CONFLICT);
-        EVENTS.await();
+        testRuntime.awaitEvents();
     }
 
     @Test
     void rejectsOverlongMultibytePrefixBeforePersistingBinding() {
         management.saveConnection(actor, Optional.of(organization), revision(), true, input("secret".toCharArray()));
-        EVENTS.await();
+        testRuntime.awaitEvents();
         int saves = storage.saves;
         S3StorageBinding invalid = new S3StorageBinding(s3Binding().connection(),
                 java.net.URI.create("s3://test-bucket/" + "é".repeat(500)));
         assertFailure(management.createRepository(actor, "acme/team/archive", Optional.of(invalid)),
                 StorageManagement.FailureCode.INVALID);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertThat(storage.saves).isEqualTo(saves);
         assertThat(repositories.repositoryNames()).isEmpty();
     }
@@ -443,7 +439,7 @@ class ConfiguredStorageManagementTest {
                 .isEqualTo(new pro.deta.orion.command.CommandResult.Message("Repository created"));
         assertThat(repositories.exists("acme/team/ssh")).isTrue();
         management.saveConnection(actor, Optional.of(organization), revision(), true, input("secret".toCharArray()));
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertThat(dispatcher.dispatch(new pro.deta.orion.command.CommandRequest(
                 "repository create acme/team/s3 connection=organization/archive location=s3://test-bucket/prefix", context)))
                 .isEqualTo(new pro.deta.orion.command.CommandResult.Message("Repository created"));
@@ -459,7 +455,7 @@ class ConfiguredStorageManagementTest {
     @Test
     void scopedDenyWinsAndRepositoryCreateWithoutConnectionUseHasNoSideEffects() throws Exception {
         management.saveConnection(actor, Optional.of(organization), revision(), true, input("secret".toCharArray()));
-        EVENTS.await();
+        testRuntime.awaitEvents();
         OrionDocument document = activeDocument();
         OrionDocument.Organization org = document.organizations().getFirst();
         ConfigurationScope scope = ConfigurationScope.organization(organization);
@@ -472,11 +468,11 @@ class ConfiguredStorageManagementTest {
         storage.set(new OrionDocument(document.system(), List.of(new OrionDocument.Organization(org.id(), "",
                 List.of(user), List.of(deny), List.of(role), org.teams(), org.secrets(), org.oidcProviders(),
                 org.invitations(), org.connections()))));
-        EVENTS.await();
+        testRuntime.awaitEvents();
         int saves = storage.saves;
         assertFailure(management.createRepository(actor, "acme/team/archive", Optional.of(s3Binding())),
                 StorageManagement.FailureCode.DENIED);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertThat(storage.saves).isEqualTo(saves);
         assertThat(repositories.repositoryNames()).isEmpty();
         StorageManagement.Connections view = ((StorageManagement.Success<StorageManagement.Connections>)
@@ -488,7 +484,7 @@ class ConfiguredStorageManagementTest {
     @Test
     void matchingCreateAndChangeDeniesOverrideAllowsAndKeepSecretsUnchanged() throws Exception {
         management.saveConnection(actor, Optional.of(organization), revision(), true, input("original".toCharArray()));
-        EVENTS.await();
+        testRuntime.awaitEvents();
         for (GrantKey action : List.of(GrantKey.CREATE, GrantKey.READ_WRITE)) {
             OrionDocument document = activeDocument();
             OrionDocument.Organization org = document.organizations().getFirst();
@@ -501,14 +497,14 @@ class ConfiguredStorageManagementTest {
             storage.set(new OrionDocument(document.system(), List.of(new OrionDocument.Organization(org.id(), "",
                     List.of(user), List.of(deny), List.of(role), org.teams(), org.secrets(), org.oidcProviders(),
                     org.invitations(), org.connections()))));
-            EVENTS.await();
+            testRuntime.awaitEvents();
             int saves = storage.saves;
             boolean create = action == GrantKey.CREATE;
             char[] secret = "replacement".toCharArray();
             assertFailure(management.saveConnection(actor, Optional.of(organization), revision(), create,
                     new StorageManagement.S3Input(create ? "archive-new" : "archive", null, "us-east-1", true,
                             "access-id", secret, null, false)), StorageManagement.FailureCode.DENIED);
-        EVENTS.await();
+        testRuntime.awaitEvents();
             assertThat(secret).containsOnly('\0');
             assertThat(storage.saves).isEqualTo(saves);
             assertThat(activeDocument().organizations().getFirst().secrets()).isEqualTo(org.secrets());
@@ -518,14 +514,14 @@ class ConfiguredStorageManagementTest {
     @Test
     void repositoryReaderNeedsNoConnectionUseAndExistingLocalRepositoryCannotBeRebound() throws Exception {
         management.saveConnection(actor, Optional.of(organization), revision(), true, input("secret".toCharArray()));
-        EVENTS.await();
+        testRuntime.awaitEvents();
         management.createRepository(actor, "acme/team/local", Optional.empty());
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertFailure(management.createRepository(actor, "acme/team/local", Optional.of(s3Binding())),
                 StorageManagement.FailureCode.CONFLICT);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         management.createRepository(actor, "acme/team/archive", Optional.of(s3Binding()));
-        EVENTS.await();
+        testRuntime.awaitEvents();
         setGrants(List.of(grant(GrantKey.REPOSITORY, "acme/team/archive", GrantKey.READ)), true);
         assertThat(pro.deta.orion.auth.check.rule.RepositoryAccessRules.read().evaluate(actor,
                 pro.deta.orion.auth.check.resource.RepositoryResource.of("acme/team/archive")).allowed()).isTrue();
@@ -541,27 +537,27 @@ class ConfiguredStorageManagementTest {
                         new GrantExpression(GrantKey.ADMIN, "true")))));
         storage.set(new OrionDocument(new OrionDocument.SystemConfiguration(
                 new AccessControl(List.of(adminUser), List.of(), List.of())), document.organizations()));
-        EVENTS.await();
+        testRuntime.awaitEvents();
         SecurityContext admin = SecurityContext.createContext().withUserIdentity(new InternalUserImpl("operator", List.of()));
         StorageManagement.S3Input defaults = new StorageManagement.S3Input("archive", null, "us-east-1", false,
                 null, null, null, true);
         assertThat(management.saveConnection(admin, Optional.empty(), revision(), true, defaults))
                 .isInstanceOf(StorageManagement.Success.class);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertFailure(management.connections(actor, Optional.empty()), StorageManagement.FailureCode.DENIED);
         assertFailure(management.createRepository(actor, "acme/team/archive", Optional.of(new S3StorageBinding(
                 new ConnectionReference(ConnectionReference.Scope.SYSTEM, "archive"), s3Binding().location()))),
                 StorageManagement.FailureCode.DENIED);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertThat(management.saveConnection(admin, Optional.of(organization), revision(), true, defaults))
                 .isInstanceOf(StorageManagement.Success.class);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertFailure(management.createRepository(actor, "acme/team/archive", Optional.of(s3Binding())),
                 StorageManagement.FailureCode.DENIED);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertThat(management.saveConnection(actor, Optional.of(organization), revision(), false,
                 input("own-explicit-secret".toCharArray()))).isInstanceOf(StorageManagement.Success.class);
-        EVENTS.await();
+        testRuntime.awaitEvents();
         assertThat(((StorageManagement.Success<StorageManagement.Connections>) management.connections(
                 actor, Optional.of(organization))).value().connections().getFirst().canUse()).isTrue();
     }
@@ -569,9 +565,9 @@ class ConfiguredStorageManagementTest {
     @Test
     void preparingConfiguredS3RepositoryPreservesItsBindingWithoutConnectionUse() throws Exception {
         management.saveConnection(actor, Optional.of(organization), revision(), true, input("secret".toCharArray()));
-        EVENTS.await();
+        testRuntime.awaitEvents();
         management.createRepository(actor, "acme/team/archive", Optional.of(s3Binding()));
-        EVENTS.await();
+        testRuntime.awaitEvents();
         setGrants(List.of(grant(GrantKey.REPOSITORY, "acme/team/archive", GrantKey.CREATE),
                 grant(GrantKey.REPOSITORY, "acme/team/archive", GrantKey.READ_WRITE)), true);
         assertThat(management.prepareRepository(actor, "acme/team/archive"))
@@ -596,12 +592,12 @@ class ConfiguredStorageManagementTest {
     }
 
     private String revision() {
-        EVENTS.await();
+        testRuntime.awaitEvents();
         return ((OrionRevision.Stored) editor.current().revision()).value();
     }
 
     private OrionDocument activeDocument() {
-        EVENTS.await();
+        testRuntime.awaitEvents();
         return editor.current().result().valueOrFailure("Cannot read configuration document");
     }
 
@@ -621,7 +617,7 @@ class ConfiguredStorageManagementTest {
                 failure -> assertThat(failure.code()).isEqualTo(code));
     }
 
-    private static final class MemoryStorage implements OrionVersionedConfigurationStorage {
+    private final class MemoryStorage implements OrionVersionedConfigurationStorage {
         private OrionDocumentRevision snapshot;
         private int saves;
         private int replacements;
@@ -638,7 +634,7 @@ class ConfiguredStorageManagementTest {
         }
 
         private void publish() {
-            EVENTS.manager().publishAndWait(new ConfigurationChanged(this, snapshot));
+            testRuntime.events().publishAndWait(new ConfigurationChanged(this, snapshot));
         }
 
         @Override
@@ -666,7 +662,7 @@ class ConfiguredStorageManagementTest {
                     .equals(document)) return stored;
             OrionRevision.Stored saved = new OrionRevision.Stored("v" + ++saves);
             snapshot = new OrionDocumentRevision(Result.of(document), saved);
-            EVENTS.manager().publish(new ConfigurationChanged(this, snapshot));
+            testRuntime.events().publish(new ConfigurationChanged(this, snapshot));
             return saved;
         }
     }

@@ -41,13 +41,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class BootstrapSshTrustTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @ParameterizedTest
     @CsvSource({"configuration,accessControl", "material,keyMaterial"})
@@ -171,13 +167,20 @@ class BootstrapSshTrustTest {
         }
     }
 
-    private static final class Fixture implements AutoCloseable {
+    private final class Fixture implements AutoCloseable {
         private final SshServer server = SshServer.setUpDefaultServer();
         private final AtomicReference<KeyPair> keyPair = new AtomicReference<>(
                 KeyPairGenerator.getInstance("EC").generateKeyPair());
         private final AtomicInteger authentications = new AtomicInteger();
         private final Logger logger = (Logger) LoggerFactory.getLogger(BootstrapGitTransportFactory.class);
-        private final ListAppender<ILoggingEvent> events = new ListAppender<>();
+        private final ListAppender<ILoggingEvent> events = new ListAppender<>() {
+            @Override
+            protected void append(ILoggingEvent event) {
+                if (event.getFormattedMessage().contains("[127.0.0.1]:" + server.getPort() + ";")) {
+                    super.append(event);
+                }
+            }
+        };
         private final NativeGitRepositoryFactory provider;
 
         private Fixture() throws Exception {
@@ -192,7 +195,7 @@ class BootstrapSshTrustTest {
             });
             server.setCommandFactory((channel, command) -> new UnknownCommand(command));
             server.start();
-            provider = new NativeGitRepositoryFactory(NativeGitRepositoryBackend.inMemory(EVENTS.manager()),
+            provider = new NativeGitRepositoryFactory(NativeGitRepositoryBackend.inMemory(testRuntime.events()),
                     new BootstrapSecretResolver(Map.of("SSH_PASSWORD", "secret-password")),
                     (location, transport, repository) -> {
                         try (GitClientTransportSession session = transport.open(GitClientService.UPLOAD_PACK,

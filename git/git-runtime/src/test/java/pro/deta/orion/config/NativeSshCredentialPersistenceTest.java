@@ -37,13 +37,9 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class NativeSshCredentialPersistenceTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @TempDir
     Path root;
@@ -51,7 +47,7 @@ class NativeSshCredentialPersistenceTest {
     @Test
     void activatesAndReloadsANewKeyWithoutChangingOtherFiles() throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.file(root, EVENTS.manager());
+                NativeGitRepositoryProvider.file(root, testRuntime.events());
         NativeGitRepository repository = provider.create("acl").valueOrFailure("create repository");
         OrionVersionedConfigurationStorage storage = new NativeGitOrionConfigurationStorage(
                 provider, "acl", "refs/heads/main", "users.xml");
@@ -79,7 +75,7 @@ class NativeSshCredentialPersistenceTest {
         KeyPair key = generator.generateKeyPair();
         OrionConfigurationEditor editor = new OrionConfigurationEditor(storage,
                 pro.deta.orion.keymaterial.OrionKeyMaterial.unavailable(),
-                EVENTS.manager());
+                testRuntime.events());
         OrionAccessControlServiceImpl service = service(editor);
         try {
             editor.onStart();
@@ -100,7 +96,7 @@ class NativeSshCredentialPersistenceTest {
             } finally {
                 access.discard();
             }
-            EVENTS.await();
+            testRuntime.awaitEvents();
             assertThat(service.authenticateSshUser("alice", key.getPublic().getEncoded()))
                     .isInstanceOf(AuthenticationResult.Success.class);
         } finally {
@@ -109,12 +105,12 @@ class NativeSshCredentialPersistenceTest {
         }
         OrionConfigurationEditor reopenedEditor = new OrionConfigurationEditor(
                         new NativeGitOrionConfigurationStorage(
-                                NativeGitRepositoryProvider.file(root, EVENTS.manager()),
+                                NativeGitRepositoryProvider.file(root, testRuntime.events()),
                                 "acl",
                                 "refs/heads/main",
                                 "users.xml"),
                         pro.deta.orion.keymaterial.OrionKeyMaterial.unavailable(),
-                        EVENTS.manager());
+                        testRuntime.events());
         OrionAccessControlServiceImpl reopened = service(reopenedEditor);
         try {
             reopenedEditor.onStart();

@@ -27,13 +27,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AcmeConfigurationTest {
-    private final pro.deta.orion.test.util.TestEvents events =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        events.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime events =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final String EAB_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
 
@@ -97,7 +93,7 @@ class AcmeConfigurationTest {
             service.save(new AcmeCertificateService.Settings(
                     "r1", view.provider(), view.directoryUrl(), view.accountEmail(), view.domains(),
                     "", null, null), "root");
-            events.await();
+            events.awaitEvents();
             OrionDocument updated = desired.stored().result().valueOrFailure("configuration");
             OrionAcmeConfiguration enabled = updated.system().https().orElseThrow().acme().orElseThrow();
             assertThat(enabled.enabled()).isTrue();
@@ -202,7 +198,7 @@ class AcmeConfigurationTest {
         AcmeCertificateService.View saved = service.save(new AcmeCertificateService.Settings(
                 service.view().revision(), provider, "https://ca.example/directory", "admin@example.test",
                 List.of("example.test"), kid, key.toCharArray(), null), "root");
-        events.await();
+        events.awaitEvents();
         assertThat(desired.stored().revision())
                 .isEqualTo(new pro.deta.orion.config.OrionRevision.Stored(saved.revision()));
         return desired.stored().result().valueOrFailure("configuration");

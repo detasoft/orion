@@ -29,13 +29,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Timeout(120)
 class S3GitDataIT {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @Test
     void packBytesAndPublishedObjectsSurviveFreshProviderWithoutLocalState() throws Exception {
@@ -171,9 +167,9 @@ class S3GitDataIT {
         }
     }
 
-    private static NativeGitRepositoryProvider provider(MinioS3TestServer server) {
+    private NativeGitRepositoryProvider provider(MinioS3TestServer server) {
         return S3NativeGitRepositoryFactory.repositories("s3://" + server.bucketName() + "/repos", server.endpoint(),
                 Map.of("accessKeyId", server.accessKeyId(), "secretAccessKey", "env:SECRET"),
-                Map.of("SECRET", server.secretAccessKey()), EVENTS.manager());
+                Map.of("SECRET", server.secretAccessKey()), testRuntime.events());
     }
 }

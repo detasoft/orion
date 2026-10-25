@@ -39,18 +39,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class ProxyNativeGitRepositoryTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @Test
     void rejectedUpstreamCasDoesNotAdvanceLocalRef() throws Exception {
         BootstrapGitLocation location = fileLocation();
-        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
+        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create(location.proxyName()).valueOrFailure("create proxy");
         repository
                 .files()
@@ -89,7 +85,7 @@ class ProxyNativeGitRepositoryTest {
     @ValueSource(booleans = {true, false})
     void fetchAndPushFailuresReachTheSameDecisionHandlerWithoutChangingRefs(boolean failFetch) throws Exception {
         BootstrapGitLocation location = fileLocation();
-        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
+        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create(location.proxyName()).valueOrFailure("create proxy");
         repository
                 .files()

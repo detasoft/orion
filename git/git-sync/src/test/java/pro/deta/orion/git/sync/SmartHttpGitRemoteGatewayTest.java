@@ -37,13 +37,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class SmartHttpGitRemoteGatewayTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final String NULL_ID = "0".repeat(40);
 
@@ -211,11 +207,11 @@ class SmartHttpGitRemoteGatewayTest {
         return new SmartHttpGitRemoteGateway(connection);
     }
 
-    private static NativeGitRepository nativeRepository(Path directory) throws Exception {
+    private NativeGitRepository nativeRepository(Path directory) throws Exception {
         Path gitDirectory = directory.resolve(".git");
         Files.createDirectories(gitDirectory);
         return NativeGitRepository.openLocal(
-                RepositoryName.parse("project"), gitDirectory, "refs/heads/main", EVENTS.manager());
+                RepositoryName.parse("project"), gitDirectory, "refs/heads/main", testRuntime.events());
     }
 
     private static Seed seedRemote(
@@ -256,7 +252,7 @@ class SmartHttpGitRemoteGatewayTest {
                 .call();
     }
 
-    private static final class RacingRepository extends NativeGitRepository {
+    private final class RacingRepository extends NativeGitRepository {
         private RefUpdate concurrentUpdate;
 
         private RacingRepository(Path directory) throws IOException {
@@ -268,7 +264,7 @@ class SmartHttpGitRemoteGatewayTest {
                     "project",
                     storage,
                     new LocalGitIndex(directory.resolve(".git"), new RefId("refs/heads/main")),
-                    EVENTS.manager());
+                    testRuntime.events());
         }
 
         @Override

@@ -130,13 +130,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class JettyHTTPServerIT {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final AgentProtocolCodec AGENT_CODEC =
             new AgentProtocolCodec(AgentProtocolLimits.defaults());
@@ -372,7 +368,7 @@ class JettyHTTPServerIT {
             });
             JettyHTTPServer server = server(
                     httpConfiguration(false),
-                    desiredState(OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of()),
+                    desiredState(testRuntime, OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of()),
                     owner,
                     new OkRoute());
 
@@ -415,7 +411,7 @@ class JettyHTTPServerIT {
             BootstrapConfiguration bootstrap = httpConfiguration(false);
             bootstrap.getTransport().setHttp(new HttpTransportConfig("127.0.0.1", occupied.getLocalPort()));
             JettyHTTPServer server = server(
-                    bootstrap, desiredStateWithoutHttps(), OrionKeyMaterial.unavailable(), new OkRoute());
+                    bootstrap, desiredStateWithoutHttps(testRuntime), OrionKeyMaterial.unavailable(), new OkRoute());
 
             assertThatThrownBy(server::onStart)
                     .isInstanceOf(IllegalStateException.class)
@@ -429,7 +425,7 @@ class JettyHTTPServerIT {
         BootstrapConfiguration bootstrap = httpConfiguration(true);
         bootstrap.getTransport().getHttp().setBacklog(37);
         JettyHTTPServer server = server(
-                bootstrap, desiredStateWithoutHttps(), OrionKeyMaterial.unavailable(), new OkRoute());
+                bootstrap, desiredStateWithoutHttps(testRuntime), OrionKeyMaterial.unavailable(), new OkRoute());
         server.onStart();
 
         try {
@@ -447,7 +443,7 @@ class JettyHTTPServerIT {
         BootstrapConfiguration bootstrap = httpConfiguration(true);
         BlockingRoute route = new BlockingRoute();
         JettyHTTPServer server = server(
-                bootstrap, desiredStateWithoutHttps(), OrionKeyMaterial.unavailable(), route);
+                bootstrap, desiredStateWithoutHttps(testRuntime), OrionKeyMaterial.unavailable(), route);
         ExecutorService clientExecutor = Executors.newSingleThreadExecutor();
         server.onStart();
 
@@ -470,7 +466,7 @@ class JettyHTTPServerIT {
     void compressesApplicationJavaScriptResponses() throws Exception {
         JettyHTTPServer server = server(
                 httpConfiguration(true),
-                desiredStateWithoutHttps(),
+                desiredStateWithoutHttps(testRuntime),
                 OrionKeyMaterial.unavailable(),
                 new JavascriptRoute());
         server.onStart();
@@ -914,7 +910,7 @@ class JettyHTTPServerIT {
         assertThat(futures).allMatch(CompletableFuture::isDone);
     }
 
-    private static void assertHttpsSucceeds(
+    private void assertHttpsSucceeds(
             MaterialFixture material,
             OrionHttpsConfiguration.ClientAuthentication mode,
             List<TrustedCertificateDescriptor> clientRoots,
@@ -929,7 +925,7 @@ class JettyHTTPServerIT {
         }
     }
 
-    private static void assertHttpsFails(
+    private void assertHttpsFails(
             MaterialFixture material,
             OrionHttpsConfiguration.ClientAuthentication mode,
             List<TrustedCertificateDescriptor> clientRoots,
@@ -945,14 +941,14 @@ class JettyHTTPServerIT {
         }
     }
 
-    private static JettyHTTPServer startHttps(
+    private JettyHTTPServer startHttps(
             MaterialFixture material,
             OrionHttpsConfiguration.ClientAuthentication mode,
             List<TrustedCertificateDescriptor> clientRoots) throws IOException {
         return startHttps(material, false, mode, clientRoots, new OkRoute());
     }
 
-    private static JettyHTTPServer startHttps(
+    private JettyHTTPServer startHttps(
             MaterialFixture material,
             boolean httpEnabled,
             OrionHttpsConfiguration.ClientAuthentication mode,
@@ -967,7 +963,7 @@ class JettyHTTPServerIT {
                 routes);
     }
 
-    private static JettyHTTPServer startHttps(
+    private JettyHTTPServer startHttps(
             MaterialFixture material,
             boolean httpEnabled,
             OrionHttpsConfiguration.ClientAuthentication mode,
@@ -978,7 +974,7 @@ class JettyHTTPServerIT {
         while (true) {
             JettyHTTPServer server = server(
                     httpConfiguration(httpEnabled),
-                    desiredState(mode, clientRoots, portSupplier.next()),
+                    desiredState(testRuntime, mode, clientRoots, portSupplier.next()),
                     material.owner(),
                     routes);
             try {
@@ -1107,12 +1103,14 @@ class JettyHTTPServerIT {
     }
 
     static TestConfiguration desiredState(
+            pro.deta.orion.test.util.OrionTestRuntime testRuntime,
             OrionHttpsConfiguration.ClientAuthentication mode,
             List<TrustedCertificateDescriptor> clientRoots) throws IOException {
-        return desiredState(mode, clientRoots, NetworkUtils.findAvailablePort());
+        return desiredState(testRuntime, mode, clientRoots, NetworkUtils.findAvailablePort());
     }
 
     static TestConfiguration desiredState(
+            pro.deta.orion.test.util.OrionTestRuntime testRuntime,
             OrionHttpsConfiguration.ClientAuthentication mode,
             List<TrustedCertificateDescriptor> clientRoots,
             int port) {
@@ -1130,7 +1128,7 @@ class JettyHTTPServerIT {
                 mode,
                 references,
                 Optional.empty());
-        return desiredState(Optional.of(https));
+        return desiredState(testRuntime, Optional.of(https));
     }
 
     @FunctionalInterface
@@ -1138,12 +1136,14 @@ class JettyHTTPServerIT {
         int next() throws IOException;
     }
 
-    static TestConfiguration desiredStateWithoutHttps() {
-        return desiredState(Optional.empty());
+    static TestConfiguration desiredStateWithoutHttps(
+            pro.deta.orion.test.util.OrionTestRuntime testRuntime) {
+        return desiredState(testRuntime, Optional.empty());
     }
 
-    static TestConfiguration desiredState(Optional<OrionHttpsConfiguration> https) {
-        TestConfiguration desiredState = new TestConfiguration(EVENTS);
+    static TestConfiguration desiredState(
+            pro.deta.orion.test.util.OrionTestRuntime testRuntime, Optional<OrionHttpsConfiguration> https) {
+        TestConfiguration desiredState = new TestConfiguration(testRuntime);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(), https, List.of(), List.of(), List.of(),
                 List.of(), List.of()),

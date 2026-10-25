@@ -67,13 +67,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 class AcmeCertificateServiceTest {
-    private final pro.deta.orion.test.util.TestEvents events =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        events.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime events =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final KeyMaterialDescriptor ACCOUNT = descriptor(
             "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT);
@@ -554,7 +550,7 @@ class AcmeCertificateServiceTest {
     @Test
     void activatesRenewedCertificateOnTheRunningHttpsListener() throws Exception {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore(),
-                events.manager())) {
+                events.events())) {
             BootstrapConfiguration bootstrap = bootstrap();
             bootstrap.getTransport().getHttp().setEnabled(false);
             TestConfiguration desired = desiredState(false);
@@ -577,10 +573,10 @@ class AcmeCertificateServiceTest {
             JettyHTTPServer server = new JettyHTTPServer(bootstrap, desired.editor(), owner,
                     new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of()),
                             new OrionHttpResponseWriter(mapper)), null, null);
-            NativeGitRepositoryProvider repositories = NativeGitRepositoryProvider.inMemory(events.manager());
+            NativeGitRepositoryProvider repositories = NativeGitRepositoryProvider.inMemory(events.events());
             GitPackCleanupTask cleanup = new GitPackCleanupTask(repositories);
             JettyHTTPServerStateMachine machine = new JettyHTTPServerStateMachine(() -> server,
-                () -> cleanup, events.manager(), events.executor());
+                () -> cleanup, events.events(), events.executor());
             assertThat(machine.start().failed()).isFalse();
             try {
                 int port = server.boundHttpsPort();
@@ -590,7 +586,7 @@ class AcmeCertificateServiceTest {
                 X509Certificate renewed = service.savedCertificate().orElseThrow().certificateChain().getFirst();
                 assertThat(renewed).isNotEqualTo(initial);
                 assertThat(server.boundHttpsPort()).isEqualTo(port);
-                events.await();
+                events.awaitEvents();
                 assertThat(OrionUtils.waitForCondition(() -> {
                     try {
                         return servedCertificate(port).equals(renewed);
@@ -723,7 +719,7 @@ class AcmeCertificateServiceTest {
             JettyHTTPServer server = new JettyHTTPServer(bootstrap, desired.editor(), owner, null, null, null);
             JettyHTTPServerStateMachine http = new JettyHTTPServerStateMachine(() -> server,
                     () -> { throw new AssertionError("Disabled HTTP must not start Git cleanup"); },
-                    events.manager(), events.executor());
+                    events.events(), events.executor());
             AcmeCertificateServiceStateMachine acme = new AcmeCertificateServiceStateMachine(() -> service);
             assertThat(http.start().failed()).isFalse();
             try {
@@ -805,7 +801,7 @@ class AcmeCertificateServiceTest {
         AcmeCertificateService.View settings = service.view();
         service.save(new AcmeCertificateService.Settings(settings.revision(), settings.provider(),
                 settings.directoryUrl(), settings.accountEmail(), settings.domains(), "", null, null), "root");
-        events.await();
+        events.awaitEvents();
     }
 
     private TestConfiguration desiredState(boolean allowRequestedDomains) {

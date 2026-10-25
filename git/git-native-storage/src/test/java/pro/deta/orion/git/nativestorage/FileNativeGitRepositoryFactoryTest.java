@@ -13,17 +13,13 @@ import java.nio.file.Path;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class FileNativeGitRepositoryFactoryTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @Test
     void opensIndependentHandlesAndLeavesTheirLifecycleToTheCaller(@TempDir Path root) {
-        NativeGitRepositoryBackend factory = new FileNativeGitRepositoryFactory(root, EVENTS.manager());
+        NativeGitRepositoryBackend factory = new FileNativeGitRepositoryFactory(root, testRuntime.events());
         RepositoryName name = RepositoryName.parse("team/repo");
         byte[] content = "persisted".getBytes(StandardCharsets.UTF_8);
         ObjectId blob;
@@ -42,7 +38,7 @@ class FileNativeGitRepositoryFactoryTest {
     @Test
     void missingOpenDoesNotPreventCreationAndDuplicateCreatePreservesContents(@TempDir Path root) {
         RepositoryName name = RepositoryName.parse("team/repo");
-        try (NativeGitRepositoryBackend factory = new FileNativeGitRepositoryFactory(root, EVENTS.manager())) {
+        try (NativeGitRepositoryBackend factory = new FileNativeGitRepositoryFactory(root, testRuntime.events())) {
             Result<NativeGitRepository> missing = factory.open(name);
             assertThat(missing).isInstanceOf(Result.Failure.class);
             assertThat(((Result.Failure<?>) missing).code()).isEqualTo(Result.FailureCode.NOT_FOUND);

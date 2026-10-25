@@ -2,6 +2,8 @@ package pro.deta.orion.transport.http;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import pro.deta.orion.test.util.OrionTestRuntime;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.GitTransportConfig;
@@ -24,13 +26,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OrionAdminTransportsRouteTest {
-    private final pro.deta.orion.test.util.TestEvents events =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        events.close();
-    }
+    @RegisterExtension
+    final OrionTestRuntime runtime = new OrionTestRuntime();
 
     @Test
     void reportsOnlyRunningTransportEndpoints() {
@@ -100,7 +97,7 @@ class OrionAdminTransportsRouteTest {
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
                 new OrionHttpRouteRegistry(Set.of()),
                 new OrionHttpResponseWriter(new ObjectMapper()));
-        TestConfiguration desiredState = new TestConfiguration(events);
+        TestConfiguration desiredState = new TestConfiguration(runtime);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of(), List.of(),
                 List.of(), List.of()),
@@ -132,7 +129,7 @@ class OrionAdminTransportsRouteTest {
     @Test
     void reportsDesiredStateHttpsWhenBootstrapTransportsAreAbsent() {
         BootstrapConfiguration configuration = new BootstrapConfiguration();
-        TestConfiguration desiredState = new TestConfiguration(events);
+        TestConfiguration desiredState = new TestConfiguration(runtime);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(
                         new AccessControl(),

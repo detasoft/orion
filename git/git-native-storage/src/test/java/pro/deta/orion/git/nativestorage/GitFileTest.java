@@ -13,18 +13,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 
 class GitFileTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @Test
     void writesConsumeBytesImmediatelyAndReadsHaveIndependentContent() throws Exception {
         byte[] content = new byte[]{1, 2};
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             repository
                     .files()
@@ -47,7 +43,7 @@ class GitFileTest {
 
     @Test
     void rejectsModesWhosePayloadIsNotFileContentWithoutPublishing() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             for (FileMode mode : new FileMode[]{FileMode.TREE, FileMode.GITLINK}) {
                 assertThatThrownBy(

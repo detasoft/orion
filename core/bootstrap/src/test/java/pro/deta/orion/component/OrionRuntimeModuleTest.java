@@ -55,13 +55,9 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class OrionRuntimeModuleTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final String BRANCH = "master";
     private static final String ACL_FILE = "acl.xml";
@@ -74,7 +70,7 @@ class OrionRuntimeModuleTest {
     @NullSource
     @ValueSource(strings = {"acme", "acme/platform", "acme/platform/api"})
     void decisionAuthorizationPreservesOrganizationBoundary(String scopePath) {
-        TestConfiguration desired = new TestConfiguration(EVENTS);
+        TestConfiguration desired = new TestConfiguration(testRuntime);
         desired.publish(decisionAccessDocument(true), Optional.empty());
         try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
                 DecisionRegistry registry = OrionRuntimeModule.decisionRegistry(executor, desired.acl())) {
@@ -106,7 +102,7 @@ class OrionRuntimeModuleTest {
 
     @Test
     void decisionAccessRevocationAppliesToReadsAnswersRetriesAndDismissal() {
-        TestConfiguration desired = new TestConfiguration(EVENTS);
+        TestConfiguration desired = new TestConfiguration(testRuntime);
         desired.publish(decisionAccessDocument(true), Optional.empty());
         PrincipalAddress actor = PrincipalAddress.parse("acme/reviewer");
         try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
@@ -134,7 +130,7 @@ class OrionRuntimeModuleTest {
 
     @Test
     void pendingDecisionRechecksRoleRevocationAndUserRemoval() {
-        TestConfiguration desired = new TestConfiguration(EVENTS);
+        TestConfiguration desired = new TestConfiguration(testRuntime);
         OrionDocument base = decisionAccessDocument(false);
         OrionDocument.Organization organization = base.organizations().getFirst();
         ScopedGrant grant = new ScopedGrant(
@@ -172,7 +168,7 @@ class OrionRuntimeModuleTest {
 
     @Test
     void revokedPendingDecisionCannotRunAndDeletedUserCannotAdminister() {
-        TestConfiguration desired = new TestConfiguration(EVENTS);
+        TestConfiguration desired = new TestConfiguration(testRuntime);
         desired.publish(decisionAccessDocument(true), Optional.empty());
         PrincipalAddress actor = PrincipalAddress.parse("acme/reviewer");
         try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
@@ -196,7 +192,7 @@ class OrionRuntimeModuleTest {
 
     @Test
     void systemAdministrationUsesCurrentRolesAndPreservesPrincipalIsolation() {
-        TestConfiguration desired = new TestConfiguration(EVENTS);
+        TestConfiguration desired = new TestConfiguration(testRuntime);
         OrionDocument base = decisionAccessDocument(false);
         desired.publish(base.replaceAccessControl(DefaultAccessControl.create("hash")), Optional.empty());
         OrionAccessControlServiceImpl acl = desired.acl();
@@ -222,7 +218,7 @@ class OrionRuntimeModuleTest {
 
     @Test
     void repositoryQualifiedAdminGrantDoesNotAuthorizeOtherScopes() {
-        TestConfiguration desired = new TestConfiguration(EVENTS);
+        TestConfiguration desired = new TestConfiguration(testRuntime);
         OrionDocument base = decisionAccessDocument(false);
         OrionDocument.Organization organization = base.organizations().getFirst();
         User restricted = new User("reviewer", null, null, null, List.of(), List.of(),
@@ -319,7 +315,7 @@ class OrionRuntimeModuleTest {
     void localLocatorUsesConfiguredNativeRepository() {
         BootstrapConfiguration configuration = configurationWithAcl("local:internal/settings");
         NativeGitRepositoryFactory provider = new NativeGitRepositoryFactory(
-                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager()));
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(testRuntime.events()));
 
         OrionVersionedConfigurationStorage storage = resolvedStorage(configuration, provider);
         storage.save(
@@ -354,7 +350,7 @@ class OrionRuntimeModuleTest {
     private OrionVersionedConfigurationStorage runtimeOrionVersionedConfigurationStorage(
             BootstrapConfiguration configuration) {
         return resolvedStorage(configuration, new NativeGitRepositoryFactory(
-                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager())));
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(testRuntime.events())));
     }
 
     private static OrionVersionedConfigurationStorage resolvedStorage(

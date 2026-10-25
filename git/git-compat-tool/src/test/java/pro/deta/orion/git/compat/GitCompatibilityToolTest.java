@@ -13,13 +13,9 @@ import java.nio.file.Path;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class GitCompatibilityToolTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @TempDir
     Path root;
@@ -27,7 +23,7 @@ class GitCompatibilityToolTest {
     @Test
     void exportsANewBareRepositoryFromCommandLineArguments() throws Exception {
         Path store = root.resolve("store");
-        try (NativeGitRepository ignored = NativeGitRepositoryProvider.file(store, EVENTS.manager())
+        try (NativeGitRepository ignored = NativeGitRepositoryProvider.file(store, testRuntime.events())
                 .create("demo").valueOrFailure("source repository")) {
             // An empty source still has a default HEAD and is a valid export.
         }

@@ -14,13 +14,9 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionStorageConnectionsRouteTest {
-    private final pro.deta.orion.test.util.TestEvents events =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        events.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime events =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final SecurityContext root = SecurityContext.createContext()
@@ -31,7 +27,7 @@ class OrionStorageConnectionsRouteTest {
         try (OrionKeyMaterial material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
                 KeyMaterialOptions.pkcs12("test-password".toCharArray()))) {
             StorageManagementFixture.State fixture = StorageManagementFixture.open(events,
-                    NativeGitRepositoryProvider.inMemory(events.manager()), List.of(), material);
+                    NativeGitRepositoryProvider.inMemory(events.events()), List.of(), material);
             OrionStorageConnectionsRoute route = new OrionStorageConnectionsRoute(fixture.management(), mapper);
             String body = """
                     {"revision":"v1","create":true,"connection":{"name":"archive","region":"us-east-1",
@@ -51,7 +47,7 @@ class OrionStorageConnectionsRouteTest {
     void anonymousAndOrganizationIdentitiesCannotManageSystemConnections() throws Exception {
         StorageManagement management =
                 StorageManagementFixture.create(
-                        events, NativeGitRepositoryProvider.inMemory(events.manager()), List.of());
+                        events, NativeGitRepositoryProvider.inMemory(events.events()), List.of());
         OrionStorageConnectionsRoute route = new OrionStorageConnectionsRoute(management, mapper);
         for (SecurityContext context : List.of(SecurityContext.createContext(), SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl("alice", new OrganizationId("acme"),

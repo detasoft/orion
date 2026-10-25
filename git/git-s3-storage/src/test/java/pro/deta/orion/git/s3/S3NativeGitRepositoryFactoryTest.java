@@ -24,13 +24,9 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class S3NativeGitRepositoryFactoryTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @Test
     void createsConditionallyAndOpensFreshHandlesWithoutOwningTheConnection() throws Exception {
@@ -75,7 +71,7 @@ class S3NativeGitRepositoryFactoryTest {
                     "http://127.0.0.1:" + server.getAddress().getPort(), "us-east-1", true,
                     Optional.of(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test"))));
             NativeGitRepositoryBackend factory = new S3NativeGitRepositoryFactory("bucket", "prefix/",
-                    transport, overrides, EVENTS.manager());
+                    transport, overrides, testRuntime.events());
             RepositoryName name = RepositoryName.parse("team/repo");
             Result<NativeGitRepository> missing = factory.open(name);
             assertThat(missing).isInstanceOf(Result.Failure.class);
@@ -97,7 +93,7 @@ class S3NativeGitRepositoryFactoryTest {
             factory.close();
             try (NativeGitRepositoryProvider other =
                     S3NativeGitRepositoryFactory.repositories(
-                            "s3://bucket/prefix", transport, overrides, EVENTS.manager())) {
+                            "s3://bucket/prefix", transport, overrides, testRuntime.events())) {
                 assertThat(other.exists(name.value())).isTrue();
             }
             assertThat(requests).contains("GET", "PUT");

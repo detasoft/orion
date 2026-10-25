@@ -24,8 +24,8 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 final class S3ConfigurationFixture implements AutoCloseable {
-    private final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
+    private final pro.deta.orion.test.util.OrionTestRuntime EVENTS =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     static final OrganizationId ORGANIZATION = new OrganizationId("acme");
     final AtomicReference<OrionDocument> current = new AtomicReference<>(new OrionDocument(
@@ -42,12 +42,12 @@ final class S3ConfigurationFixture implements AutoCloseable {
 
     S3ConfigurationFixture(Path directory) throws Exception {
         localRoot = directory.resolve("local-repositories");
-        local = NativeGitRepositoryProvider.file(localRoot, EVENTS.manager());
+        local = NativeGitRepositoryProvider.file(localRoot, EVENTS.events());
         factory =
                 new ConfiguredNativeGitRepositoryFactory(
-                        NativeGitRepositoryBackend.file(localRoot, EVENTS.manager()),
+                        NativeGitRepositoryBackend.file(localRoot, EVENTS.events()),
                         transport,
-                        EVENTS.manager());
+                        EVENTS.events());
         provider = new NativeGitRepositoryProvider(factory);
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-material".toCharArray())) {
             material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options);

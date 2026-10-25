@@ -63,13 +63,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class GitBlockingWireSessionTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final String MAIN_ID = "88d050b1908057b53d38b42702ebc659e3d7f696";
     private static final String WANT = "2".repeat(40);
@@ -156,7 +152,7 @@ class GitBlockingWireSessionTest {
 
     @Test
     void organizationBranchDenyFiltersBothProtocolVersionsAndReceiveDiscovery() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository = provider.create("acme/team/project").valueOrFailure("repository");
         ObjectId id = repository.writeObject(GitObjectType.BLOB, "shared".getBytes(StandardCharsets.UTF_8));
         for (String ref : List.of("refs/heads/main", "refs/heads/secret", "refs/tags/lightweight")) {
@@ -208,7 +204,7 @@ class GitBlockingWireSessionTest {
 
     @Test
     void unbornHeadUsesItsBranchPermissionAndPrefixesCannotRevealHiddenRefs() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(testRuntime.events());
         provider.create("project").valueOrFailure("repository");
         assertThat(refAdvertisement(provider, visibilityHook("main"), uploadV2Request(), false))
                 .contains("unborn HEAD symref-target:refs/heads/main");
@@ -228,7 +224,7 @@ class GitBlockingWireSessionTest {
 
     @Test
     void detachedHeadRequiresReachabilityFromAReadableBranch() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
         ObjectId tree = repository.writeObject(GitObjectType.TREE, new byte[0]);
         ObjectId ancestor = visibilityCommit(repository, tree, Optional.empty(), "ancestor");
@@ -246,7 +242,7 @@ class GitBlockingWireSessionTest {
         }
     }
 
-    private static NativeGitRepositoryProvider providerWithVisibilityRefs() {
+    private NativeGitRepositoryProvider providerWithVisibilityRefs() {
         NativeGitRepositoryProvider provider = providerWithMainRef();
         NativeGitRepository repository = provider.find("project").valueOrFailure("repository");
         ObjectId secret = repository.writeObject(GitObjectType.BLOB, "secret".getBytes(StandardCharsets.UTF_8));
@@ -319,7 +315,7 @@ class GitBlockingWireSessionTest {
 
     @Test
     void receivePreservesOriginalPackThroughTheWireAndProvider() throws Exception {
-        NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository = backend.create("project").valueOrFailure("repository");
         FileTestSupport.Prepared prepared = FileTestSupport.prepared(repository.files(), "main", "prepared",
                 GitCommitAuthor.EMPTY, fileAccess -> {
@@ -328,7 +324,7 @@ class GitBlockingWireSessionTest {
         });
         byte[] original = prepared.pack();
         NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider(
-                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager())) {
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(testRuntime.events())) {
             @Override
             public boolean isPublicRepositoryName(String name) {
                 return backend.isPublicRepositoryName(name);
@@ -495,7 +491,7 @@ class GitBlockingWireSessionTest {
     @Test
     void smartHttpPostWritesFetchPackfileResponse() throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         ObjectId blob = repository.writeObject(
@@ -522,7 +518,7 @@ class GitBlockingWireSessionTest {
     void sshCommandServesLsRefsThenFetchOnSameProtocolV2Connection()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         repository
@@ -567,7 +563,7 @@ class GitBlockingWireSessionTest {
     void smartHttpPostWritesSidebandFetchPackfileResponseForWantedRefs()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         ObjectId blob = repository.writeObject(
@@ -598,7 +594,7 @@ class GitBlockingWireSessionTest {
     @Test
     void smartHttpPostAcceptsAdvertisedFetchServerOption() throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         ObjectId blob = repository.writeObject(
@@ -668,7 +664,7 @@ class GitBlockingWireSessionTest {
     void smartHttpPostWritesLegacyUploadPackResponseOneByteAtATime()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         ObjectId blob = repository.writeObject(
@@ -696,7 +692,7 @@ class GitBlockingWireSessionTest {
     void smartHttpPostWritesLegacyMultiAckDetailedCommonAndFinalAckOnDone()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         ObjectId want = repository.writeObject(
@@ -728,7 +724,7 @@ class GitBlockingWireSessionTest {
     @Test
     void smartHttpPostEndsReadyNegotiationRoundWithNak() throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         repository
@@ -776,7 +772,7 @@ class GitBlockingWireSessionTest {
     void smartHttpPostDoesNotSignalReadyUntilEveryWantReachesACommonHave()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         repository
@@ -824,7 +820,7 @@ class GitBlockingWireSessionTest {
     void commandPreservesLegacyNegotiationAcrossFlushDelimitedRounds()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         repository
@@ -877,7 +873,7 @@ class GitBlockingWireSessionTest {
     void smartHttpPostWritesLegacyMultiAckDetailedNakWhenNoHaveIsCommon()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         ObjectId want = repository.writeObject(
@@ -905,7 +901,7 @@ class GitBlockingWireSessionTest {
     void smartHttpPostWritesLegacyMultiAckContinueForCommonHave()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         ObjectId want = repository.writeObject(
@@ -978,7 +974,7 @@ class GitBlockingWireSessionTest {
     void smartHttpPostWritesLegacyShallowBoundaryBeforeNegotiation()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         repository
@@ -1221,7 +1217,7 @@ class GitBlockingWireSessionTest {
     void smartHttpPostReportsMalformedReceivePackThroughStatusV2()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         provider.create("project").valueOrFailure("repository");
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
@@ -1251,7 +1247,7 @@ class GitBlockingWireSessionTest {
     @Test
     void smartHttpPostAcceptsEmptyReceiveCommandSection() throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         provider.create("project").valueOrFailure("repository");
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
@@ -1370,9 +1366,9 @@ class GitBlockingWireSessionTest {
                 wire);
     }
 
-    private static NativeGitRepositoryProvider providerWithMainRef() {
+    private NativeGitRepositoryProvider providerWithMainRef() {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
         ObjectId id = repository.writeObject(GitObjectType.BLOB, "main".getBytes(StandardCharsets.US_ASCII));
         assertThat(id.toHex()).isEqualTo(MAIN_ID);

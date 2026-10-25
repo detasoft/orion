@@ -2,7 +2,7 @@ package pro.deta.orion.transport.git.command;
 
 import pro.deta.orion.test.integration.TestConfiguration;
 
-import pro.deta.orion.test.util.TestEvents;
+import pro.deta.orion.test.util.OrionTestRuntime;
 import pro.deta.orion.acl.AccessControlAccess;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -74,7 +74,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class LegacySshCommandCatalogTest {
-    private final TestEvents events = new TestEvents();
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final OrionTestRuntime events = new OrionTestRuntime();
     @TempDir
     Path root;
     private AgentSessionServer agentServer;
@@ -98,7 +99,6 @@ class LegacySshCommandCatalogTest {
     @AfterEach
     void closeDecisions() {
         decisions.close();
-        events.close();
     }
 
     @ParameterizedTest

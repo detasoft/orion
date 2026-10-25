@@ -4,7 +4,7 @@ import pro.deta.orion.config.OrionConfigurationEditor;
 
 import pro.deta.orion.test.integration.TestConfiguration;
 
-import pro.deta.orion.test.util.TestEvents;
+import pro.deta.orion.test.util.OrionTestRuntime;
 import pro.deta.orion.acl.AccessControlAccess;
 import org.apache.sshd.client.SshClient;
 import org.apache.sshd.client.auth.password.UserAuthPasswordFactory;
@@ -69,7 +69,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.ERR;
 
 class GitSshTransportStateMachineTest {
-    private final TestEvents events = new TestEvents();
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final OrionTestRuntime events = new OrionTestRuntime();
     @TempDir
     private Path tempDir;
 
@@ -84,7 +85,6 @@ class GitSshTransportStateMachineTest {
         if (executor != null) {
             executor.shutdownNow();
         }
-        events.close();
     }
 
     @Test

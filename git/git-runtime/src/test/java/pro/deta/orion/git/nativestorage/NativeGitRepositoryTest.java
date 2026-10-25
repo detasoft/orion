@@ -29,13 +29,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class NativeGitRepositoryTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final String NULL_ID = "0".repeat(40);
 
@@ -150,7 +146,7 @@ class NativeGitRepositoryTest {
         try (NativeGitRepository repository = repository()) {
             ObjectId blob = repository.writeObject(GitObjectType.BLOB, "first".getBytes(StandardCharsets.UTF_8));
             List<RefUpdate> updates = new ArrayList<>();
-            EVENTS.manager().subscribe(RepositoryRefChanged.class, event -> {
+            testRuntime.events().subscribe(RepositoryRefChanged.class, event -> {
                 if (event.repository() == repository) updates.add(event.update());
             });
             repository.updateRef("refs/heads/main", NULL_ID, blob.toHex());
@@ -161,7 +157,7 @@ class NativeGitRepositoryTest {
             });
             repository.publishPack(prepared.pack(), prepared.refUpdates(), true,
                     GitNativeRepositoryAccessHook.ALLOW_ALL);
-            EVENTS.await();
+            testRuntime.awaitEvents();
             assertThat(updates).extracting(update -> update.ref().value())
                     .containsExactly("refs/heads/main", "refs/heads/configuration");
         }
@@ -172,9 +168,9 @@ class NativeGitRepositoryTest {
         try (NativeGitRepository repository = repository()) {
             ObjectId blob = repository.writeObject(GitObjectType.BLOB, new byte[]{1});
             repository.updateRef("refs/heads/main", NULL_ID, blob.toHex());
-            EVENTS.await();
+            testRuntime.awaitEvents();
             List<RefUpdate> updates = new ArrayList<>();
-            EVENTS.manager().subscribe(RepositoryRefChanged.class, event -> {
+            testRuntime.events().subscribe(RepositoryRefChanged.class, event -> {
                 if (event.repository() == repository) {
                     updates.add(event.update());
                 }
@@ -184,7 +180,7 @@ class NativeGitRepositoryTest {
                     RefUpdate.fromWire("refs/heads/main", "3".repeat(40), blob.toHex())), true);
             assertThat(result).extracting(RefUpdateResult::status).containsExactly(
                     RefUpdateResult.Status.ATOMIC_ABORTED, RefUpdateResult.Status.EXPECTED_OLD_MISMATCH);
-            EVENTS.await();
+            testRuntime.awaitEvents();
             assertThat(updates).isEmpty();
             assertThat(repository.refs()).doesNotContainKey("refs/heads/topic");
         }
@@ -207,7 +203,7 @@ class NativeGitRepositoryTest {
     void repositorySavesFilesToNewBranchAndLoadsThemBack() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), EVENTS.manager());
+                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), testRuntime.events());
 
         repository
                 .files()
@@ -231,7 +227,7 @@ class NativeGitRepositoryTest {
     void preparedFileUpdateDoesNotMoveRefUntilPublished() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), EVENTS.manager());
+                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), testRuntime.events());
 
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "prepared acl",
                 GitCommitAuthor.EMPTY, fileAccess -> {
@@ -251,7 +247,7 @@ class NativeGitRepositoryTest {
     void repositorySavesFilesOverExistingBranchContent() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), EVENTS.manager());
+                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), testRuntime.events());
 
         repository
                 .files()
@@ -290,7 +286,7 @@ class NativeGitRepositoryTest {
     void conditionalFileSaveRejectsAStaleVersionWithoutReplacingWinningContent() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), EVENTS.manager());
+                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), testRuntime.events());
         repository
                 .files()
                 .withAccess(
@@ -341,7 +337,7 @@ class NativeGitRepositoryTest {
     @Test
     void conditionalFileSaveRejectsStaleVersionAcrossProviders(@TempDir Path rootDirectory) throws Exception {
         NativeGitRepositoryProvider firstProvider =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
         NativeGitRepository first = firstProvider.create("demo").valueOrFailure("repository");
         first.files()
                 .withAccess(
@@ -354,7 +350,7 @@ class NativeGitRepositoryTest {
                             return null;
                         });
         NativeGitRepositoryProvider secondProvider =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
         NativeGitRepository second = secondProvider.find("demo").valueOrFailure("repository");
         String versionOne = second.refs().get("refs/heads/main");
         FileTestSupport.Prepared update = FileTestSupport.prepared(second.files(), "main", versionOne, "stale",
@@ -395,7 +391,7 @@ class NativeGitRepositoryTest {
     void conditionalFileSaveBuildsFromExpectedVersionAndPreservesItsOtherFiles() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), EVENTS.manager());
+                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), testRuntime.events());
         repository
                 .files()
                 .withAccess(
@@ -431,7 +427,7 @@ class NativeGitRepositoryTest {
     void repositoryPopulatesDefaultHeadWhenSavingDifferentFirstBranch() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), EVENTS.manager());
+                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), testRuntime.events());
 
         repository
                 .files()
@@ -449,12 +445,12 @@ class NativeGitRepositoryTest {
                 .isEqualTo(repository.refs().get("refs/heads/master"));
     }
 
-    private static NativeGitRepository repository() {
+    private NativeGitRepository repository() {
         InMemoryStorage storage = new InMemoryStorage();
         return new NativeGitRepository(
                 "demo.git",
                 storage,
                 new InMemoryIndex(new RefId("refs/heads/main")),
-                EVENTS.manager());
+                testRuntime.events());
     }
 }

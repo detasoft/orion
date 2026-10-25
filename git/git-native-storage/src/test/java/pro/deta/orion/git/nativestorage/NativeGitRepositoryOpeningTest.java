@@ -14,20 +14,16 @@ import java.nio.file.Path;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class NativeGitRepositoryOpeningTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @Test
     void createsIndependentMemoryRepositories() throws Exception {
         RepositoryName name = RepositoryName.parse("team/repo");
         byte[] content = "memory".getBytes(StandardCharsets.UTF_8);
-        try (NativeGitRepository first = NativeGitRepository.createInMemory(name, EVENTS.manager());
-             NativeGitRepository second = NativeGitRepository.createInMemory(name, EVENTS.manager())) {
+        try (NativeGitRepository first = NativeGitRepository.createInMemory(name, testRuntime.events());
+             NativeGitRepository second = NativeGitRepository.createInMemory(name, testRuntime.events())) {
             ObjectId blob = first.writeObject(GitObjectType.BLOB, content);
 
             assertThat(first.name()).isEqualTo(name.value());
@@ -45,14 +41,14 @@ class NativeGitRepositoryOpeningTest {
         byte[] content = "persistent".getBytes(StandardCharsets.UTF_8);
         ObjectId blob;
         try (NativeGitRepository repository =
-                NativeGitRepository.openLocal(name, directory, head, EVENTS.manager())) {
+                NativeGitRepository.openLocal(name, directory, head, testRuntime.events())) {
             assertThat(repository.index().getHEAD()).isEqualTo(new Head.Symbolic(new RefId(head)));
             blob = repository.writeObject(GitObjectType.BLOB, content);
             repository.updateRef(head, "0".repeat(40), blob.toHex());
         }
 
         try (NativeGitRepository reopened =
-                NativeGitRepository.openLocal(name, directory, head, EVENTS.manager())) {
+                NativeGitRepository.openLocal(name, directory, head, testRuntime.events())) {
             assertThat(reopened.name()).isEqualTo(name.value());
             assertThat(reopened.index().getHEAD()).isEqualTo(new Head.Symbolic(new RefId(head)));
             assertThat(reopened.refs()).containsEntry(head, blob.toHex());

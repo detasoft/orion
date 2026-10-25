@@ -20,13 +20,9 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class GitAttachmentTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final String NULL_ID = "0".repeat(40);
     private static final String A = objectId("A");
@@ -177,10 +173,10 @@ class GitAttachmentTest {
         return new GitAttachment(repository, gateway, relationships);
     }
 
-    private static NativeGitRepository repository() {
+    private NativeGitRepository repository() {
         NativeGitRepository repository =
                 NativeGitRepository.createInMemory(
-                        RepositoryName.parse("project"), EVENTS.manager());
+                        RepositoryName.parse("project"), testRuntime.events());
         populate(repository);
         return repository;
     }
@@ -291,7 +287,7 @@ class GitAttachmentTest {
         }
     }
 
-    private static final class RacingRepository extends NativeGitRepository {
+    private final class RacingRepository extends NativeGitRepository {
         private final String racedRef;
         private final String expectedOldId;
         private final String concurrentId;
@@ -307,7 +303,7 @@ class GitAttachmentTest {
 
         private RacingRepository(InMemoryStorage storage, String racedRef,
                                  String expectedOldId, String concurrentId) {
-            super("project", storage, new InMemoryIndex(new RefId("refs/heads/main")), EVENTS.manager());
+            super("project", storage, new InMemoryIndex(new RefId("refs/heads/main")), testRuntime.events());
             populate(this);
             this.racedRef = racedRef;
             this.expectedOldId = expectedOldId;

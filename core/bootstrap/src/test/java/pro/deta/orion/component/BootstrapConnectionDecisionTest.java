@@ -43,13 +43,9 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class BootstrapConnectionDecisionTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final PrincipalAddress ACTOR = PrincipalAddress.parse("system/operator");
     @TempDir Path directory;
@@ -67,7 +63,7 @@ class BootstrapConnectionDecisionTest {
                     .system().proxies())
                     .containsExactly(fixture.previous);
             fixture.decisions.decide(request.id(), new DecisionAnswer(0, ACTOR)).valueOrFailure("approve");
-            EVENTS.await();
+            testRuntime.awaitEvents();
             assertThat(fixture.editor.current().result()
                     .valueOrFailure("Cannot read configuration document")
                     .system().proxies()).singleElement()
@@ -124,9 +120,9 @@ class BootstrapConnectionDecisionTest {
                                                     document.system().oidcProviders(), document.system().invitations()),
                                             document.organizations()))
                     .apply();
-            EVENTS.await();
+            testRuntime.awaitEvents();
             fixture.decisions.decide(request.id(), new DecisionAnswer(0, ACTOR)).valueOrFailure("approve");
-            EVENTS.await();
+            testRuntime.awaitEvents();
             assertThat(fixture.editor.current().result()
                     .valueOrFailure("Cannot read configuration document")
                     .system().proxies()).contains(unrelated);
@@ -155,9 +151,9 @@ class BootstrapConnectionDecisionTest {
                             new ChangeMetadata(UserEmail.EMPTY, "concurrent edit"))
                     .update(document -> withBinding(concurrent))
                     .apply();
-            EVENTS.await();
+            testRuntime.awaitEvents();
             fixture.decisions.decide(request.id(), new DecisionAnswer(0, ACTOR)).valueOrFailure("approve");
-            EVENTS.await();
+            testRuntime.awaitEvents();
             assertThat(fixture.editor.current().result()
                     .valueOrFailure("Cannot read configuration document")
                     .system().proxies()).containsExactly(concurrent);
@@ -171,7 +167,7 @@ class BootstrapConnectionDecisionTest {
                 List.of(), List.of()), List.of());
     }
 
-    private static final class Fixture implements AutoCloseable {
+    private final class Fixture implements AutoCloseable {
         final Path upstream;
         final GitProxyBinding previous;
         final DecisionRegistry decisions = new DecisionRegistry(10, Runnable::run, (actor, scope) -> true);
@@ -185,9 +181,9 @@ class BootstrapConnectionDecisionTest {
         final pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory configured =
                 new pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory(
                         pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(
-                                EVENTS.manager()),
+                                testRuntime.events()),
                         transport,
-                        EVENTS.manager());
+                        testRuntime.events());
 
         Fixture(Path directory) throws Exception {
             upstream = directory.resolve("moved.git");
@@ -230,7 +226,7 @@ class BootstrapConnectionDecisionTest {
             }
             editor = new OrionConfigurationEditor(storage,
                 material,
-                EVENTS.manager());
+                testRuntime.events());
             acl =
                     new OrionAccessControlServiceImpl(
                             new OrionPasswordHashingService(),

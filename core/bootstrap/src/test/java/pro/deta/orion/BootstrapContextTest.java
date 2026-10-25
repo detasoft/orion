@@ -79,13 +79,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class BootstrapContextTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final String PASSWORD_ENV = "ORION_TEST_KEY_MATERIAL_PASSWORD";
     private static final Map<String, String> ENVIRONMENT = Map.of(PASSWORD_ENV, "correct-password");
@@ -93,12 +89,12 @@ class BootstrapContextTest {
     @TempDir
     private Path tempDir;
 
-    private static pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend borrow(
+    private pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend borrow(
             NativeGitRepositoryProvider owner) {
         return backend(owner, false);
     }
 
-    private static pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend backend(
+    private pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend backend(
             NativeGitRepositoryProvider owner, boolean closeOwner) {
         return new pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend() {
             @Override
@@ -128,11 +124,11 @@ class BootstrapContextTest {
         };
     }
 
-    private static Result<NativeGitRepository> borrowed(Result<NativeGitRepository> result) {
+    private Result<NativeGitRepository> borrowed(Result<NativeGitRepository> result) {
         if (result instanceof Result.Success<NativeGitRepository> success) {
             NativeGitRepository repository = success.value();
             return new Result.Success<>(new NativeGitRepository(repository.name(), repository.storage(),
-                    repository.index(), EVENTS.rawManager()) {
+                    repository.index(), testRuntime.unstartedEvents()) {
                 @Override
                 public void close() {
                 }
@@ -141,33 +137,33 @@ class BootstrapContextTest {
         return result;
     }
 
-    private static BootstrapContext openContext(BootstrapConfiguration configuration, Map<String, String> environment) {
-        return BootstrapContext.open(configuration, environment, EVENTS.rawManager());
+    private BootstrapContext openContext(BootstrapConfiguration configuration, Map<String, String> environment) {
+        return BootstrapContext.open(configuration, environment, testRuntime.unstartedEvents());
     }
 
-    private static BootstrapContext openContext(BootstrapConfiguration configuration, Map<String, String> environment,
+    private BootstrapContext openContext(BootstrapConfiguration configuration, Map<String, String> environment,
             boolean createIfMissing) {
         return BootstrapContext.open(
                 configuration,
                 environment,
                 new KeyMaterialCreation(createIfMissing),
-                EVENTS.rawManager());
+                testRuntime.unstartedEvents());
     }
 
-    private static BootstrapContext openContext(BootstrapConfiguration configuration, Map<String, String> environment,
+    private BootstrapContext openContext(BootstrapConfiguration configuration, Map<String, String> environment,
             NativeGitRepositoryProvider owner) {
-        return BootstrapContext.open(configuration, environment, backend(owner, true), EVENTS.rawManager());
+        return BootstrapContext.open(configuration, environment, backend(owner, true), testRuntime.unstartedEvents());
     }
 
-    private static BootstrapContext openContext(BootstrapConfiguration configuration, Map<String, String> environment,
+    private BootstrapContext openContext(BootstrapConfiguration configuration, Map<String, String> environment,
             NativeGitRepositoryProvider owner, boolean createIfMissing) {
         return BootstrapContext.open(configuration, environment, backend(owner, true),
-                new KeyMaterialCreation(createIfMissing), EVENTS.rawManager());
+                new KeyMaterialCreation(createIfMissing), testRuntime.unstartedEvents());
     }
 
-    private static BootstrapContext openContext(BootstrapConfiguration configuration, Map<String, String> environment,
+    private BootstrapContext openContext(BootstrapConfiguration configuration, Map<String, String> environment,
             pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend backing) {
-        return BootstrapContext.open(configuration, environment, backing, EVENTS.rawManager());
+        return BootstrapContext.open(configuration, environment, backing, testRuntime.unstartedEvents());
     }
 
     @Test
@@ -501,7 +497,7 @@ class BootstrapContextTest {
         String location = "git+" + upstream.bare().toUri();
         configuration.getBootstrap().getAccessControl().setLocation(location);
         configuration.getBootstrap().getKeyMaterial().setLocation(location);
-        NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(EVENTS.rawManager());
+        NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(testRuntime.unstartedEvents());
         try {
             try (BootstrapContext context = openContext(configuration, ENVIRONMENT, backend)) {
                 String configurationRepository = context.repositoryFactory()
@@ -533,7 +529,7 @@ class BootstrapContextTest {
                 "git+" + configurationUpstream.bare().toUri());
         configuration.getBootstrap().getKeyMaterial().setLocation(
                 "git+" + materialUpstream.bare().toUri());
-        NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(EVENTS.rawManager());
+        NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(testRuntime.unstartedEvents());
         try {
             try (BootstrapContext context = openContext(configuration, ENVIRONMENT, backend)) {
                 String configurationRepository = context.repositoryFactory()
@@ -562,7 +558,7 @@ class BootstrapContextTest {
         try (S3Transport transport = new S3Transport()) {
             assertThat(
                             BootstrapContext.createRepositoryBackend(
-                                    configuration, ENVIRONMENT, transport, EVENTS.rawManager()))
+                                    configuration, ENVIRONMENT, transport, testRuntime.unstartedEvents()))
                     .isInstanceOf(
                             pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.class);
         }
@@ -571,7 +567,7 @@ class BootstrapContextTest {
         try (S3Transport transport = new S3Transport();
              pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend backend =
                      BootstrapContext.createRepositoryBackend(
-                             configuration, Map.of("S3_SECRET", "test"), transport, EVENTS.rawManager())) {
+                             configuration, Map.of("S3_SECRET", "test"), transport, testRuntime.unstartedEvents())) {
             assertThat(backend).isNotNull();
         }
     }
@@ -593,7 +589,7 @@ class BootstrapContextTest {
             try (S3Transport transport = new S3Transport();
                  pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend ignored =
                          BootstrapContext.createRepositoryBackend(
-                                 configuration, Map.of("S3_SECRET", "test"), transport, EVENTS.rawManager())) {
+                                 configuration, Map.of("S3_SECRET", "test"), transport, testRuntime.unstartedEvents())) {
                 // Close the client if invalid endpoint validation regresses.
             }
         }).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("S3 endpoint");
@@ -630,7 +626,7 @@ class BootstrapContextTest {
             try (S3Transport transport = new S3Transport();
                  pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend backend =
                          BootstrapContext.createRepositoryBackend(
-                                 configuration, Map.of("S3_SECRET", "test"), transport, EVENTS.rawManager())) {
+                                 configuration, Map.of("S3_SECRET", "test"), transport, testRuntime.unstartedEvents())) {
                 assertThat(backend.open(pro.deta.orion.schema.orion.v2.RepositoryName.parse("missing")))
                         .isInstanceOf(Result.Failure.class);
                 assertThat(backend.exists(pro.deta.orion.schema.orion.v2.RepositoryName.parse("missing")))
@@ -642,7 +638,7 @@ class BootstrapContextTest {
             try (S3Transport transport = new S3Transport();
                  pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend ignored =
                          BootstrapContext.createRepositoryBackend(
-                                 configuration, Map.of("S3_SECRET", "test"), transport, EVENTS.rawManager())) {
+                                 configuration, Map.of("S3_SECRET", "test"), transport, testRuntime.unstartedEvents())) {
                 assertThat(configuration.getStorage().getEndpoint()).isNull();
             }
         } finally {
@@ -657,7 +653,7 @@ class BootstrapContextTest {
         NativeGitRepositoryProvider backend =
                 S3NativeGitRepositoryFactory.repositories("s3://bucket/repositories", null,
                         Map.of("accessKeyId", "test", "secretAccessKey", "env:S3_SECRET"),
-                        Map.of("S3_SECRET", "test"), EVENTS.rawManager());
+                        Map.of("S3_SECRET", "test"), testRuntime.unstartedEvents());
         assertThatThrownBy(() -> openContext(configuration, ENVIRONMENT, backend))
                 .isInstanceOf(IllegalStateException.class)
                 .hasRootCauseMessage("Bootstrap source path must not be blank");
@@ -719,7 +715,7 @@ class BootstrapContextTest {
                 assertThat(component.orionApplicationLifecycle().runApplication()).isEqualTo(RUNNING);
             } finally {
                 component.orionApplicationLifecycle().shutdownApplication();
-                EVENTS.close();
+                testRuntime.close();
             }
         }
 
@@ -732,7 +728,7 @@ class BootstrapContextTest {
                 assertThat(component.orionApplicationLifecycle().runApplication()).isEqualTo(RUNNING);
             } finally {
                 component.orionApplicationLifecycle().shutdownApplication();
-                EVENTS.close();
+                testRuntime.close();
             }
         }
     }
@@ -862,7 +858,7 @@ class BootstrapContextTest {
         BootstrapConfiguration configuration = configuration();
         configuration.getBootstrap().getAccessControl().setLocation(location);
         assertBootstrapFailure(() -> openContext(configuration, ENVIRONMENT,
-                NativeGitRepositoryProvider.inMemory(EVENTS.rawManager())));
+                NativeGitRepositoryProvider.inMemory(testRuntime.unstartedEvents())));
     }
 
     @Test
@@ -875,7 +871,7 @@ class BootstrapContextTest {
         assertBootstrapFailure(() -> openContext(
                 configuration,
                 ENVIRONMENT,
-                NativeGitRepositoryProvider.inMemory(EVENTS.rawManager())));
+                NativeGitRepositoryProvider.inMemory(testRuntime.unstartedEvents())));
     }
 
     @Test
@@ -943,7 +939,7 @@ class BootstrapContextTest {
         assertBootstrapFailure(() -> openContext(
                 configuration,
                 ENVIRONMENT,
-                NativeGitRepositoryProvider.inMemory(EVENTS.rawManager())));
+                NativeGitRepositoryProvider.inMemory(testRuntime.unstartedEvents())));
     }
 
     @Test
@@ -1019,7 +1015,7 @@ class BootstrapContextTest {
         AdoptionStorage storage = new AdoptionStorage(xml());
         try (var ignored = upstream.git();
              BootstrapContext context = openContext(configuration, ENVIRONMENT,
-                     NativeGitRepositoryProvider.inMemory(EVENTS.rawManager()))) {
+                     NativeGitRepositoryProvider.inMemory(testRuntime.unstartedEvents()))) {
             var source = context.repositoryFactory()
                     .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE);
             OrionDocument adopted = adopt(context, storage);
@@ -1048,7 +1044,7 @@ class BootstrapContextTest {
             OrionDocument adopted;
             OrionRevision adoptedRevision;
             try (BootstrapContext first = openContext(configuration, ENVIRONMENT,
-                    NativeGitRepositoryProvider.inMemory(EVENTS.rawManager()))) {
+                    NativeGitRepositoryProvider.inMemory(testRuntime.unstartedEvents()))) {
                 OrionVersionedConfigurationStorage storage =
                         new NativeGitOrionConfigurationStorage(
                                 first.repositoryFactory(),
@@ -1062,7 +1058,7 @@ class BootstrapContextTest {
                 assertThat(adoptedRevision).isEqualTo(initialRevision);
             }
             try (BootstrapContext restarted = openContext(configuration, ENVIRONMENT,
-                    NativeGitRepositoryProvider.inMemory(EVENTS.rawManager()))) {
+                    NativeGitRepositoryProvider.inMemory(testRuntime.unstartedEvents()))) {
                 OrionVersionedConfigurationStorage storage =
                         new NativeGitOrionConfigurationStorage(
                                 restarted.repositoryFactory(),
@@ -1368,7 +1364,7 @@ class BootstrapContextTest {
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("provisional phase");
             } finally {
                 lifecycle.shutdownApplication();
-                EVENTS.close();
+                testRuntime.close();
             }
         }
     }
@@ -1426,7 +1422,7 @@ class BootstrapContextTest {
                 assertThat(repository.refs().get("refs/heads/main")).isEqualTo(invalidCommit);
             } finally {
                 lifecycle.shutdownApplication();
-                EVENTS.close();
+                testRuntime.close();
             }
         }
     }
@@ -1464,7 +1460,7 @@ class BootstrapContextTest {
                 assertThat(component.orionAccessControlService().userExists("later-user")).isTrue();
             } finally {
                 lifecycle.shutdownApplication();
-                EVENTS.close();
+                testRuntime.close();
             }
         }
     }
@@ -1486,7 +1482,7 @@ class BootstrapContextTest {
         String location = "git+" + upstream.bare().toUri();
         configuration.getBootstrap().getAccessControl().setLocation(location);
         configuration.getBootstrap().getKeyMaterial().setLocation(location);
-        NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(EVENTS.rawManager());
+        NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(testRuntime.unstartedEvents());
 
         try (Git ignored = upstream.git();
              Git ignoredUnrelated = unrelatedUpstream.git();
@@ -1508,7 +1504,7 @@ class BootstrapContextTest {
                         });
                 String invalidB = source.refs().get("refs/heads/main");
 
-                EVENTS.await();
+                testRuntime.awaitEvents();
                 assertThat(component.configurationEditor().current().result()
                         .valueOrFailure("Cannot read configuration document")).isEqualTo(first);
                 assertThat(source.refs().get("refs/heads/main")).isEqualTo(invalidB);
@@ -1537,12 +1533,12 @@ class BootstrapContextTest {
                                 });
                 String validC = source.refs().get("refs/heads/main");
                 assertThat(validC).isNotEqualTo(invalidB);
-                EVENTS.await();
+                testRuntime.awaitEvents();
                 assertThat(component.orionAccessControlService().userExists("later-user")).isTrue();
                 assertThat(source.refs().get("refs/heads/main")).isEqualTo(validC);
             } finally {
                 lifecycle.shutdownApplication();
-                EVENTS.close();
+                testRuntime.close();
             }
         }
     }
@@ -1580,7 +1576,7 @@ class BootstrapContextTest {
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("provisional phase");
             } finally {
                 lifecycle.shutdownApplication();
-                EVENTS.close();
+                testRuntime.close();
             }
         }
     }
@@ -1610,7 +1606,7 @@ class BootstrapContextTest {
                 }
             } finally {
                 lifecycle.shutdownApplication();
-                EVENTS.close();
+                testRuntime.close();
             }
         }
     }
@@ -1628,19 +1624,19 @@ class BootstrapContextTest {
         }
     }
 
-    private static OrionDocument adopt(BootstrapContext context, OrionVersionedConfigurationStorage storage) {
+    private OrionDocument adopt(BootstrapContext context, OrionVersionedConfigurationStorage storage) {
         return adoptApproved(context, storage, approved(storage)).orElseThrow().result()
                 .valueOrFailure("Cannot read configuration document");
     }
 
-    private static Optional<OrionDocumentRevision> adoptApproved(
+    private Optional<OrionDocumentRevision> adoptApproved(
             BootstrapContext context,
             OrionVersionedConfigurationStorage storage,
             OrionDocumentRevision approved) {
         return BootstrapContext.adoptProxies(
                 new OrionConfigurationEditor(
                         storage, context.keyMaterial(),
-                        EVENTS.rawManager()),
+                        testRuntime.unstartedEvents()),
                 context.repositoryFactory(), context.keyMaterial(), approved);
     }
 
@@ -1648,14 +1644,14 @@ class BootstrapContextTest {
         return storage.load();
     }
 
-    private static OrionComponent runtimeComponent(
+    private OrionComponent runtimeComponent(
             BootstrapConfiguration configuration, BootstrapContext context) throws Exception {
         return DaggerOrionComponent.builder()
                 .bootstrapConfiguration(configuration)
                 .rootPasswordReset(new RootPasswordReset(false))
                 .signingMaterial(context.signingMaterial())
                 .keyMaterial(context.keyMaterial())
-                .eventManager(EVENTS.rawManager())
+                .eventManager(testRuntime.unstartedEvents())
                 .sshHostKeyProvider(context.sshHostKeys(List.of()))
                 .nativeGitRepositoryProvider(context.repositoryFactory())
                 .configuredRepositoryFactory(context.storageFactory())
@@ -1674,10 +1670,10 @@ class BootstrapContextTest {
         return configuration;
     }
 
-    private static NativeGitRepositoryProvider repositoryWith(
+    private NativeGitRepositoryProvider repositoryWith(
             BootstrapConfiguration configuration,
             Map<String, byte[]> files) throws Exception {
-        NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(EVENTS.rawManager());
+        NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(testRuntime.unstartedEvents());
         NativeGitRepository repository = backend.create("orion").valueOrFailure("create repository");
         repository
                 .files()

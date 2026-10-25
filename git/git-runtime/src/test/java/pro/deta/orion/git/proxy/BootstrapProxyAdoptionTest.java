@@ -30,13 +30,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class BootstrapProxyAdoptionTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @Test
     void keepsSharedBootstrapSourcesPrivateWithoutCreatingAnAlias() throws Exception {
@@ -155,8 +151,8 @@ class BootstrapProxyAdoptionTest {
         return source;
     }
 
-    private static NativeGitRepositoryFactory provider(String token) {
-        return new NativeGitRepositoryFactory(NativeGitRepositoryBackend.inMemory(EVENTS.manager()),
+    private NativeGitRepositoryFactory provider(String token) {
+        return new NativeGitRepositoryFactory(NativeGitRepositoryBackend.inMemory(testRuntime.events()),
                 new BootstrapSecretResolver(Map.of("TOKEN", token)), (location, transport, repository) -> { },
                 (location, transport, repository, received, updates, atomic) -> List.of());
     }

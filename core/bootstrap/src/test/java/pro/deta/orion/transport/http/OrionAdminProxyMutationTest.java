@@ -56,13 +56,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionAdminProxyMutationTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final PrincipalAddress OPERATOR = PrincipalAddress.parse("system/operator");
 
@@ -72,7 +68,7 @@ class OrionAdminProxyMutationTest {
             assertThat(f.createSsh(Set.of()).status).isEqualTo(201);
             f.answer(f.decisions.list(OPERATOR).getFirst(), "1");
             f.work.remove().run();
-            EVENTS.await();
+            testRuntime.awaitEvents();
             assertThat(f.decisions.list(OPERATOR)).isEmpty();
             String repository =
                     f.editor.current()
@@ -95,7 +91,7 @@ class OrionAdminProxyMutationTest {
             assertThat(f.createSsh(Set.of()).status).isEqualTo(201);
             f.answer(f.decisions.list(OPERATOR).getFirst(), "1");
             f.work.remove().run();
-            EVENTS.await();
+            testRuntime.awaitEvents();
             f.provider.activate(() -> f.editor.current().result()
                     .valueOrFailure("Cannot read configuration document"), f.secrets);
             assertThat(f.decisions.list(OPERATOR)).hasSize(1);
@@ -132,7 +128,7 @@ class OrionAdminProxyMutationTest {
             assertThat(f.createSsh(Set.of()).status).isEqualTo(201);
             f.answer(f.decisions.list(OPERATOR).getFirst(), "1");
             f.work.remove().run();
-            EVENTS.await();
+            testRuntime.awaitEvents();
             Decision unrelated = new Decision(UUID.randomUUID(), Optional.empty(), "Other operation", "",
                     List.of(new DecisionAction("Confirm", false, actor -> Result.of(null))));
             f.decisions.register(unrelated).valueOrFailure("fill queue");
@@ -189,7 +185,7 @@ class OrionAdminProxyMutationTest {
             assertThat(f.sshAuthentications).hasValue(0);
             assertThat(f.work).hasSize(1);
             f.work.remove().run();
-            EVENTS.await();
+            testRuntime.awaitEvents();
 
             assertThat(f.storage.saves).isEqualTo(saves + 1);
             f.acl.onStop();
@@ -230,7 +226,7 @@ class OrionAdminProxyMutationTest {
             DecisionRequest first = f.decisions.list(OPERATOR).getFirst();
             assertThat(f.answer(first, "1").status).isEqualTo(204);
             f.work.remove().run();
-            EVENTS.await();
+            testRuntime.awaitEvents();
             assertThat(f.decisions.list(OPERATOR)).isEmpty();
             assertThat(f.work).isEmpty();
             assertThat(f.storage.saves).isEqualTo(saves);
@@ -257,10 +253,10 @@ class OrionAdminProxyMutationTest {
                             List.of(new pro.deta.orion.schema.acl.User("concurrent", null, null, null,
                                     List.of(), List.of(), List.of())), List.of(), List.of())))
                     .apply();
-            EVENTS.await();
+            testRuntime.awaitEvents();
             int saves = f.storage.saves;
             f.work.remove().run();
-            EVENTS.await();
+            testRuntime.awaitEvents();
             assertThat(f.storage.saves).isEqualTo(saves);
             assertThat(f.sshAuthentications).hasValue(0);
             assertThat(
@@ -285,7 +281,7 @@ class OrionAdminProxyMutationTest {
             f.answer(f.decisions.list(OPERATOR).getFirst(), "0");
             f.storage.failSave = true;
             f.work.remove().run();
-            EVENTS.await();
+            testRuntime.awaitEvents();
             assertThat(f.storage.saves).isEqualTo(saves);
             assertThat(f.sshAuthentications).hasValue(0);
             assertThat(
@@ -308,7 +304,7 @@ class OrionAdminProxyMutationTest {
             assertThat(f.answer(failed, "retry").status).isEqualTo(204);
             assertThat(f.answer(failed, "retry").status).isEqualTo(404);
             f.work.remove().run();
-            EVENTS.await();
+            testRuntime.awaitEvents();
             assertThat(f.decisions.list(OPERATOR)).isEmpty();
             assertThat(f.storage.saves).isEqualTo(saves + 1);
             assertThat(
@@ -510,7 +506,7 @@ class OrionAdminProxyMutationTest {
                                         document.organizations());
                             })
                     .apply();
-                    EVENTS.await();
+                    testRuntime.awaitEvents();
 
             assertThat(f.post(f.command("replace-credential", "first", null, "new-private-token")).status)
                     .isEqualTo(200);
@@ -550,7 +546,7 @@ class OrionAdminProxyMutationTest {
                     new OrionDocumentRevision(
                             Result.of(f.storage.snapshot.result()
                                     .valueOrFailure("Cannot read configuration document")), new OrionRevision.Stored("external"));
-            EVENTS.manager().publishAndWait(new ConfigurationChanged(f.storage, f.storage.snapshot));
+            testRuntime.events().publishAndWait(new ConfigurationChanged(f.storage, f.storage.snapshot));
             assertThat(f.post(old).status).isEqualTo(409);
             Reply listing = f.request("GET", Map.of(), true);
             assertThat(listing.json.get("revision").asText()).isEqualTo("external");
@@ -676,7 +672,7 @@ class OrionAdminProxyMutationTest {
                                         document.organizations());
                             })
                     .apply();
-                    EVENTS.await();
+                    testRuntime.awaitEvents();
             OrionDocument original = f.editor.current().result()
                     .valueOrFailure("Cannot read configuration document");
             String upstream = original.system().proxies().getFirst().upstream(original.system()).toString();
@@ -723,13 +719,13 @@ class OrionAdminProxyMutationTest {
         }
     }
 
-    private static final class Fixture implements AutoCloseable {
+    private final class Fixture implements AutoCloseable {
         final ObjectMapper mapper = new ObjectMapper();
         final OrionKeyMaterial material;
         final MemoryStorage storage = new MemoryStorage();
         final NativeGitRepositoryFactory provider =
                 new NativeGitRepositoryFactory(
-                        pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager()));
+                        pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(testRuntime.events()));
         final ConfigurationSecrets secrets;
         final OrionConfigurationEditor editor;
         final OrionAccessControlServiceImpl acl;
@@ -764,7 +760,7 @@ class OrionAdminProxyMutationTest {
             }
             editor = new OrionConfigurationEditor(storage,
                 material,
-                EVENTS.manager());
+                testRuntime.events());
             acl =
                     new OrionAccessControlServiceImpl(
                             new OrionPasswordHashingService(),
@@ -876,16 +872,16 @@ class OrionAdminProxyMutationTest {
                 case "getWriter" -> new PrintWriter(output);
                 default -> throw new UnsupportedOperationException(called.toString());
             });
-            EVENTS.await();
+            testRuntime.awaitEvents();
             servlet.service(request, response);
-            EVENTS.await();
+            testRuntime.awaitEvents();
             return new Reply(status[0], output.toString().isEmpty() ? mapper.nullNode()
                     : contentType[0].contains("json") ? mapper.readTree(output.toString())
                     : mapper.getNodeFactory().textNode(output.toString()));
         }
 
         @Override public void close() throws Exception {
-            EVENTS.await();
+            testRuntime.awaitEvents();
             acl.onStop();
             editor.onStop();
             decisions.close();
@@ -895,7 +891,7 @@ class OrionAdminProxyMutationTest {
         }
     }
 
-    private static final class MemoryStorage implements OrionVersionedConfigurationStorage {
+    private final class MemoryStorage implements OrionVersionedConfigurationStorage {
         OrionDocumentRevision snapshot = new OrionDocumentRevision(
                 Result.of(OrionDocument.withAccessControl(new AccessControl())), new OrionRevision.Stored("0"));
         int saves;
@@ -926,7 +922,7 @@ class OrionAdminProxyMutationTest {
                     .equals(document)) return stored;
             OrionRevision.Stored saved = new OrionRevision.Stored(Integer.toString(++saves));
             snapshot = new OrionDocumentRevision(Result.of(document), saved);
-            EVENTS.manager().publish(new ConfigurationChanged(this, snapshot));
+            testRuntime.events().publish(new ConfigurationChanged(this, snapshot));
             return saved;
         }
     }

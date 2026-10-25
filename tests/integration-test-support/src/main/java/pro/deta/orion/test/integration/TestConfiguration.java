@@ -28,25 +28,25 @@ import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
-import pro.deta.orion.test.util.TestEvents;
+import pro.deta.orion.test.util.OrionTestRuntime;
 import pro.deta.orion.util.Result;
 
 /** Provides a real ACL and editor backed by versioned documents in memory. */
 public final class TestConfiguration implements AutoCloseable {
-    private final TestEvents events;
+    private final OrionTestRuntime events;
     private final MemoryStorage storage = new MemoryStorage();
     private final OrionConfigurationEditor editor;
     private final OrionAccessControlServiceImpl acl;
     private final OrionKeyMaterial material;
 
-    public TestConfiguration(TestEvents events) {
+    public TestConfiguration(OrionTestRuntime events) {
         this(events, new BootstrapConfiguration(), defaultMaterial(events));
     }
 
-    public TestConfiguration(TestEvents events, BootstrapConfiguration bootstrap, OrionKeyMaterial material) {
+    public TestConfiguration(OrionTestRuntime events, BootstrapConfiguration bootstrap, OrionKeyMaterial material) {
         this.events = events;
         this.material = material;
-        editor = new OrionConfigurationEditor(storage, material, events.manager());
+        editor = new OrionConfigurationEditor(storage, material, events.events());
         SigningMaterialSet signing = new SigningMaterialSet(
                 new KeyMaterialDescriptor("signing", Set.of(KeyMaterialPurpose.SERVER_SIGNING),
                         KeyMaterialAlgorithm.RSA, 1), List.of());
@@ -74,7 +74,7 @@ public final class TestConfiguration implements AutoCloseable {
                 .valueOrFailure("Cannot read configuration document"), material);
     }
 
-    private static OrionKeyMaterial defaultMaterial(TestEvents events) {
+    private static OrionKeyMaterial defaultMaterial(OrionTestRuntime events) {
         try {
             OrionKeyMaterial material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
                     KeyMaterialOptions.pkcs12("test-password".toCharArray()));
@@ -115,7 +115,7 @@ public final class TestConfiguration implements AutoCloseable {
         OrionRevision selected = revision.<OrionRevision>map(OrionRevision.Stored::new)
                 .orElseGet(() -> new OrionRevision.Stored("published-" + ++storage.revision));
         storage.snapshot = new OrionDocumentRevision(Result.of(document), selected);
-        events.manager().publishAndWait(new ConfigurationChanged(storage, storage.snapshot));
+        events.events().publishAndWait(new ConfigurationChanged(storage, storage.snapshot));
     }
 
     @Override
@@ -155,7 +155,7 @@ public final class TestConfiguration implements AutoCloseable {
                     .equals(document)) return stored;
             OrionRevision.Stored saved = new OrionRevision.Stored("saved-" + ++revision);
             snapshot = new OrionDocumentRevision(Result.of(document), saved);
-            events.manager().publish(new ConfigurationChanged(this, snapshot));
+            events.events().publish(new ConfigurationChanged(this, snapshot));
             return saved;
         }
     }

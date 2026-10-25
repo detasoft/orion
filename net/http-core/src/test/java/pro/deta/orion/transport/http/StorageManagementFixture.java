@@ -22,14 +22,14 @@ import java.util.Optional;
 
 final class StorageManagementFixture {
     static StorageManagement create(
-            pro.deta.orion.test.util.TestEvents events,
+            pro.deta.orion.test.util.OrionTestRuntime events,
             NativeGitRepositoryProvider repositories,
             List<OrionDocument.Organization> orgs) {
         return open(events, repositories, orgs, OrionKeyMaterial.unavailable()).management();
     }
 
     static State open(
-            pro.deta.orion.test.util.TestEvents events,
+            pro.deta.orion.test.util.OrionTestRuntime events,
             NativeGitRepositoryProvider repositories,
             List<OrionDocument.Organization> orgs,
             OrionKeyMaterial material) {

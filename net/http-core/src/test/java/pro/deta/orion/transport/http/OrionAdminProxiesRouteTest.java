@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import pro.deta.orion.test.util.OrionTestRuntime;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -33,18 +35,13 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionAdminProxiesRouteTest {
-    private final pro.deta.orion.test.util.TestEvents events =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        events.close();
-    }
+    @RegisterExtension
+    final OrionTestRuntime runtime = new OrionTestRuntime();
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private final TestConfiguration desired = new TestConfiguration(events);
+    private final TestConfiguration desired = new TestConfiguration(runtime);
     private final NativeGitRepositoryFactory provider = new NativeGitRepositoryFactory(
-            pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(events.manager()));
+            pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(runtime.events()));
     private final NativeGitRepositoryProvider backend = provider.provider();
     private final OrionAdminProxiesRoute route =
             new OrionAdminProxiesRoute(provider, desired.editor(), null, null, mapper);

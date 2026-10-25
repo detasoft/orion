@@ -1,6 +1,6 @@
 package pro.deta.orion.transport.git.ssh;
 
-import pro.deta.orion.test.util.TestEvents;
+import pro.deta.orion.test.util.OrionTestRuntime;
 
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.test.integration.TestConfiguration;
@@ -86,19 +86,15 @@ import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICA
 
 @Timeout(5)
 class SshCommandFactoryTest {
-    private static final TestEvents EVENTS =
-            new TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final OrionTestRuntime testRuntime =
+            new OrionTestRuntime();
 
     private final List<OrionExecutor> executors = new java.util.ArrayList<>();
 
     @Test
     void firstPushPreparesRegistrationBeforeCreatingStorage() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(testRuntime.events());
         AtomicInteger preparations = new AtomicInteger();
         StorageManagement management = (StorageManagement) Proxy.newProxyInstance(
                 StorageManagement.class.getClassLoader(), new Class<?>[]{StorageManagement.class},
@@ -116,7 +112,7 @@ class SshCommandFactoryTest {
         OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
         executors.add(executor);
         SshCommandFactory factory = new SshCommandFactory(executor, null, new PlainCommandRenderer(),
-                new DefaultGitNativeRepositoryService(provider), null, null, new TestConfiguration(EVENTS).editor(),
+                new DefaultGitNativeRepositoryService(provider), null, null, new TestConfiguration(testRuntime).editor(),
                 management);
         ExitOutcome result = run(factory, channel, "git-receive-pack '/demo.git'", new ByteArrayOutputStream(),
                 new ByteArrayOutputStream(), new ByteArrayInputStream("0000".getBytes(StandardCharsets.US_ASCII)));
@@ -152,7 +148,7 @@ class SshCommandFactoryTest {
 
     @Test
     void nextGitOperationOnTheSameSessionCannotUseRevokedRepositoryGrants() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(testRuntime.events());
         provider.create("demo").valueOrFailure("repository");
         Grant grant = new Grant("read", List.of(new GrantExpression(GrantKey.REPOSITORY, "demo")));
         AtomicReference<UserIdentity> current = new AtomicReference<>(
@@ -221,7 +217,7 @@ class SshCommandFactoryTest {
     @Test
     void readOnlyDomainExecRendersPlainOutputWithoutPromptOrAnsi() throws Exception {
         DefaultOperatorDomainSource source = new DefaultOperatorDomainSource(
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager()),
+                NativeGitRepositoryProvider.inMemory(testRuntime.events()),
                 new AggregateStateMachine(StateMachineDefinition.define().name("runtime").build()),
                 () -> new OperatorDomainViews.SystemResourceView(1, 0, 0, 0));
         DefaultCommandDispatcher dispatcher = new DefaultCommandDispatcher(
@@ -634,7 +630,7 @@ class SshCommandFactoryTest {
             ByteArrayOutputStream error = new ByteArrayOutputStream();
             ExitOutcome exit =
                     run(
-                            gitFactory(NativeGitRepositoryProvider.inMemory(EVENTS.manager())),
+                            gitFactory(NativeGitRepositoryProvider.inMemory(testRuntime.events())),
                             channel(true),
                             service + " '/demo.git'",
                             output,
@@ -652,15 +648,22 @@ class SshCommandFactoryTest {
     @Test
     void gitFailureKeepsFullStackTraceInServerLogOnly() throws Exception {
         Logger logger = (Logger) LoggerFactory.getLogger(SshCommandFactory.class);
-        ListAppender<ILoggingEvent> events = new ListAppender<>();
+        IllegalStateException failure = new IllegalStateException("Repository unavailable");
+        failure.setStackTrace(new StackTraceElement[]{
+                new StackTraceElement("Example", "method", "Example.java", 12)});
+        ListAppender<ILoggingEvent> events = new ListAppender<>() {
+            @Override
+            protected void append(ILoggingEvent event) {
+                if (event.getThrowableProxy() instanceof ThrowableProxy proxy && proxy.getThrowable() == failure) {
+                    super.append(event);
+                }
+            }
+        };
         events.start();
         logger.addAppender(events);
         try {
-            IllegalStateException failure = new IllegalStateException("Repository unavailable");
-            failure.setStackTrace(new StackTraceElement[]{
-                    new StackTraceElement("Example", "method", "Example.java", 12)});
             NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider(
-                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager())) {
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(testRuntime.events())) {
                 @Override
                 public boolean isPublicRepositoryName(String repositoryName) {
                     throw failure;
@@ -690,7 +693,7 @@ class SshCommandFactoryTest {
 
     @Test
     void gitAuthenticationAndExecutorRejectionUseStderr() throws Exception {
-        SshCommandFactory factory = gitFactory(NativeGitRepositoryProvider.inMemory(EVENTS.manager()));
+        SshCommandFactory factory = gitFactory(NativeGitRepositoryProvider.inMemory(testRuntime.events()));
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         ByteArrayOutputStream error = new ByteArrayOutputStream();
         ExitOutcome unauthenticated = run(factory, channel(false), "git-receive-pack '/demo.git'",
@@ -709,7 +712,7 @@ class SshCommandFactoryTest {
 
     @Test
     void gitFailureAfterAdvertisementPreservesProtocolOutput() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(testRuntime.events());
         provider.create("demo").valueOrFailure("repository");
         TestChannelSession channel = channel(true);
         Grant grant = new Grant("repository", List.of(
@@ -748,7 +751,7 @@ class SshCommandFactoryTest {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         ExitOutcome exit =
                 run(
-                        gitFactory(NativeGitRepositoryProvider.inMemory(EVENTS.manager())),
+                        gitFactory(NativeGitRepositoryProvider.inMemory(testRuntime.events())),
                         channel(true),
                         "git-receive-pack '/demo.git'",
                         output,
@@ -765,7 +768,7 @@ class SshCommandFactoryTest {
                 new PlainCommandRenderer(),
                 new DefaultGitNativeRepositoryService(provider),
                 null,
-                null, new TestConfiguration(EVENTS).editor(), null);
+                null, new TestConfiguration(testRuntime).editor(), null);
     }
 
     private static Environment environment(Map<String, String> values) {
@@ -796,7 +799,7 @@ class SshCommandFactoryTest {
                 new PlainCommandRenderer(),
                 null,
                 null,
-                accessControlService, new TestConfiguration(EVENTS).editor(), null);
+                accessControlService, new TestConfiguration(testRuntime).editor(), null);
     }
 
     private static ExitOutcome run(

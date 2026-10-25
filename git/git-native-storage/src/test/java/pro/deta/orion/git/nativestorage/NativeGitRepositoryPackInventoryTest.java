@@ -26,13 +26,9 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class NativeGitRepositoryPackInventoryTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final RefId MAIN = new RefId("refs/heads/main");
     @TempDir
@@ -44,7 +40,7 @@ class NativeGitRepositoryPackInventoryTest {
         GitStorageApi storage = memory ? new InMemoryStorage() : new LocalGitStorage(directory);
         GitIndexApi index = memory ? new InMemoryIndex(MAIN) : new LocalGitIndex(directory, MAIN);
         try (NativeGitRepository repository = new NativeGitRepository(
-                "project.git", storage, index, EVENTS.manager())) {
+                "project.git", storage, index, testRuntime.events())) {
             repository.writeObject(GitObjectType.BLOB, new byte[]{1});
             PackId published = index.withAccess(access -> access.packs().getFirst().packId());
             PackId orphan = PackId.create();
@@ -87,7 +83,7 @@ class NativeGitRepositoryPackInventoryTest {
     @Test
     void deletesOnlyExpiredUnpublishedLocalPacksWhenIndexIsIdle() throws Exception {
         try (NativeGitRepository repository = new NativeGitRepository("project.git",
-                new LocalGitStorage(directory), new LocalGitIndex(directory, MAIN), EVENTS.manager())) {
+                new LocalGitStorage(directory), new LocalGitIndex(directory, MAIN), testRuntime.events())) {
             repository.writeObject(GitObjectType.BLOB, new byte[]{1});
             PackId published = repository.index().withAccess(access -> access.packs().getFirst().packId());
             PackId expired = PackId.create();

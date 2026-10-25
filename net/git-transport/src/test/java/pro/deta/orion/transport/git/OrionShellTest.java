@@ -79,13 +79,9 @@ import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICA
 
 @Timeout(10)
 class OrionShellTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private final OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
 
@@ -147,7 +143,7 @@ class OrionShellTest {
     @Test
     void interactiveShellDispatchesTheReadOnlyWhoamiCommand() throws Exception {
         DefaultOperatorDomainSource source = new DefaultOperatorDomainSource(
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager()),
+                NativeGitRepositoryProvider.inMemory(testRuntime.events()),
                 new AggregateStateMachine(StateMachineDefinition.define().name("runtime").build()),
                 () -> new OperatorDomainViews.SystemResourceView(1, 0, 0, 0));
         CommandNode tree = new ReadOnlyDomainCommandCatalog(source).commandTree();

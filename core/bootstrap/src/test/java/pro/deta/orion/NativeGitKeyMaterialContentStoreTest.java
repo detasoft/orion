@@ -24,13 +24,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class NativeGitKeyMaterialContentStoreTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final String REPOSITORY = "orion";
     private static final String REF = "refs/heads/main";
@@ -96,7 +92,7 @@ class NativeGitKeyMaterialContentStoreTest {
 
     @Test
     void rejectsAnUpdateCommittedBetweenPreparationAndPublication() throws Exception {
-        NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository = backend.create(REPOSITORY).valueOrFailure("create repository");
         repository
                 .files()
@@ -159,7 +155,7 @@ class NativeGitKeyMaterialContentStoreTest {
         }
 
         NativeGitRepositoryFactory factory = new NativeGitRepositoryFactory(
-                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager()));
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(testRuntime.events()));
         BootstrapSourceConfig source = new BootstrapSourceConfig();
         source.setLocation("git+" + bare.toUri());
         source.setRef(REF);
@@ -187,9 +183,9 @@ class NativeGitKeyMaterialContentStoreTest {
         }
     }
 
-    private static Fixture fixture(Map<String, byte[]> initialFiles) throws Exception {
+    private Fixture fixture(Map<String, byte[]> initialFiles) throws Exception {
         NativeGitRepositoryFactory factory = new NativeGitRepositoryFactory(
-                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager()));
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(testRuntime.events()));
         NativeGitRepository repository = factory.provider().create(REPOSITORY).valueOrFailure("create repository");
         repository
                 .files()
@@ -218,7 +214,7 @@ class NativeGitKeyMaterialContentStoreTest {
         }
     }
 
-    private static final class InterleavingProvider extends NativeGitRepositoryProvider {
+    private final class InterleavingProvider extends NativeGitRepositoryProvider {
         @Override
         public void close() {
             delegate.close();
@@ -229,7 +225,7 @@ class NativeGitKeyMaterialContentStoreTest {
         private boolean interleaved;
 
         private InterleavingProvider(NativeGitRepositoryProvider delegate, Runnable beforePublish) {
-            super(pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager()));
+            super(pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(testRuntime.events()));
             this.delegate = delegate;
             this.beforePublish = beforePublish;
         }

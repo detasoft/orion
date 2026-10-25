@@ -1,6 +1,8 @@
 package pro.deta.orion.transport.http;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import pro.deta.orion.test.util.OrionTestRuntime;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -19,13 +21,8 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class GitPackCleanupTaskTest {
-    private final pro.deta.orion.test.util.TestEvents events =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        events.close();
-    }
+    @RegisterExtension
+    final OrionTestRuntime runtime = new OrionTestRuntime();
 
     @TempDir
     Path directory;
@@ -33,7 +30,7 @@ class GitPackCleanupTaskTest {
     @Test
     void recurringRunDeletesExpiredLocalPackAndRecordsNextAttempt() throws Exception {
         try (NativeGitRepository repository = NativeGitRepository.openLocal(
-                RepositoryName.parse("team/repo"), directory, "refs/heads/main", events.manager())) {
+                RepositoryName.parse("team/repo"), directory, "refs/heads/main", runtime.events())) {
             PackId orphan = PackId.create();
             GitStorageAccess bytes = repository.storage().createAccess();
             try (PackHandle handle = bytes.newPack(orphan)) {
@@ -59,7 +56,7 @@ class GitPackCleanupTaskTest {
     @Test
     void nonLocalPackIsObservedWithoutDeletion() throws Exception {
         try (NativeGitRepository repository = NativeGitRepository.createInMemory(
-                RepositoryName.parse("team/repo"), events.manager())) {
+                RepositoryName.parse("team/repo"), runtime.events())) {
             PackId orphan = PackId.create();
             GitStorageAccess bytes = repository.storage().createAccess();
             try (PackHandle handle = bytes.newPack(orphan)) {
@@ -76,7 +73,7 @@ class GitPackCleanupTaskTest {
 
     private NativeGitRepositoryProvider provider(NativeGitRepository repository) {
         return new NativeGitRepositoryProvider(
-                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(events.manager())) {
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(runtime.events())) {
             public List<String> repositoryNames() { return List.of(repository.name()); }
             public boolean exists(String name) { return repository.name().equals(name); }
             public Result<NativeGitRepository> find(String name) { return Result.of(repository); }

@@ -31,20 +31,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class NativeGitFileUpdateTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @TempDir
     private Path directory;
 
     @Test
     void nestedWriteCannotReplaceAnExistingFileWithADirectory() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             repository
                     .files()
@@ -80,7 +76,7 @@ class NativeGitFileUpdateTest {
 
     @Test
     void writingAFileCannotSilentlyReplaceAnExistingDirectory() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             repository
                     .files()
@@ -117,7 +113,7 @@ class NativeGitFileUpdateTest {
 
     @Test
     void nestedWritePreservesUntouchedSubtreeWithoutPackingItsObjects() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             repository
                     .files()
@@ -150,7 +146,7 @@ class NativeGitFileUpdateTest {
 
     @Test
     void explicitChangesCanReplaceAFileWithADirectoryAndBack() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             repository
                     .files()
@@ -192,7 +188,7 @@ class NativeGitFileUpdateTest {
 
     @Test
     void deletionAndReplacementPublishTogetherAndPreserveOtherFiles() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             repository
                     .files()
@@ -241,7 +237,7 @@ class NativeGitFileUpdateTest {
 
     @Test
     void invalidOrConflictingDeletionDoesNotPublishAnything() throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             repository
                     .files()
@@ -291,7 +287,7 @@ class NativeGitFileUpdateTest {
     @Test
     void fileSavePublishesAReadablePack() throws Exception {
         try (NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.file(directory, EVENTS.manager())) {
+                NativeGitRepositoryProvider.file(directory, testRuntime.events())) {
             NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
             repository
                     .files()
@@ -314,7 +310,7 @@ class NativeGitFileUpdateTest {
             });
         }
         try (NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.file(directory, EVENTS.manager())) {
+                NativeGitRepositoryProvider.file(directory, testRuntime.events())) {
             NativeGitRepository reopened = provider.find("demo").valueOrFailure("repository");
             assertThat(reopened.files().readBytes("main", "config.txt")).isEqualTo(bytes("first"));
         }
@@ -322,7 +318,7 @@ class NativeGitFileUpdateTest {
 
     @Test
     void staleFileSaveRetainsValidatedPackWithoutChangingTheBranch() throws Exception {
-        NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
+        NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository");
         repository
                 .files()
@@ -372,7 +368,7 @@ class NativeGitFileUpdateTest {
 
     @Test
     void preparedPackIsIndependentOfItsReadersAndUnderstoodByJGit() throws Exception {
-        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
+        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository");
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "prepared",
                 GitCommitAuthor.EMPTY, fileAccess -> {
@@ -399,7 +395,7 @@ class NativeGitFileUpdateTest {
             }
         }
 
-        NativeGitRepository another = NativeGitRepositoryProvider.inMemory(EVENTS.manager())
+        NativeGitRepository another = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("another").valueOrFailure("repository");
         for (NativeGitRepository target : List.of(repository, another)) {
             assertThat(target.publishPack(update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
@@ -411,7 +407,7 @@ class NativeGitFileUpdateTest {
 
     @Test
     void corruptOrIncompletePackCannotPublishRefs() throws Exception {
-        NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, EVENTS.manager())
+        NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository");
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "prepared",
                 GitCommitAuthor.EMPTY, fileAccess -> {

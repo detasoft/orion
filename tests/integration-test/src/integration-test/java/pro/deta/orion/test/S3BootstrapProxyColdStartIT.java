@@ -45,13 +45,9 @@ import static pro.deta.orion.test.RemoteBootstrapTestSupport.runtimeComponent;
 
 @Timeout(120)
 class S3BootstrapProxyColdStartIT {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final String REF = "refs/heads/bootstrap";
     private static final String CONFIGURATION_PATH = "configuration/orion.xml";
@@ -123,7 +119,7 @@ class S3BootstrapProxyColdStartIT {
                                 });
                 try (NativeGitRepositoryProvider empty = S3NativeGitRepositoryFactory.repositories(
                         configuration.getStorage().getLocation(), configuration.getStorage().getEndpoint(),
-                        configuration.getStorage().getAuth(), environment, EVENTS.manager())) {
+                        configuration.getStorage().getAuth(), environment, testRuntime.events())) {
                     assertThat(empty.repositoryNames()).isEmpty();
                 }
                 assertThat(localRoot).isEmptyDirectory();
@@ -179,7 +175,7 @@ class S3BootstrapProxyColdStartIT {
             }
             try (NativeGitRepositoryProvider reopened = S3NativeGitRepositoryFactory.repositories(
                     configuration.getStorage().getLocation(), configuration.getStorage().getEndpoint(),
-                    configuration.getStorage().getAuth(), environment, EVENTS.manager())) {
+                    configuration.getStorage().getAuth(), environment, testRuntime.events())) {
                 NativeGitRepository persisted = reopened.find(cacheName).valueOrFailure("persisted S3 proxy cache");
                 assertThat(persisted.files().readBytes(REF, CONFIGURATION_PATH)).isEqualTo(loadedConfiguration);
                 assertThat(persisted.files().readBytes(REF, MATERIAL_PATH)).isEqualTo(material);

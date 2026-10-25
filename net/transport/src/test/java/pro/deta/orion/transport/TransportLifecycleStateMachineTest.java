@@ -30,13 +30,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.*;
 
 class TransportLifecycleStateMachineTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @Test
     void transportAggregateIsStartedDirectlyByParentMachine() {
@@ -133,7 +129,7 @@ class TransportLifecycleStateMachineTest {
         return configuration;
     }
 
-    private static TransportLifecycleStateMachine machine(
+    private TransportLifecycleStateMachine machine(
             BootstrapConfiguration configuration,
             RecordingGitNativeTransportService service) {
         GitNativeTransportStateMachine gitNative = new GitNativeTransportStateMachine(() -> service);
@@ -159,10 +155,10 @@ class TransportLifecycleStateMachineTest {
                 null));
     }
 
-    private static JettyHTTPServerStateMachine disabledHttpMachine() {
+    private JettyHTTPServerStateMachine disabledHttpMachine() {
         BootstrapConfiguration disabled = new BootstrapConfiguration();
         disabled.getTransport().getHttp().setEnabled(false);
-        TestConfiguration desiredState = new TestConfiguration(EVENTS);
+        TestConfiguration desiredState = new TestConfiguration(testRuntime);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of(), List.of(),
                 List.of(), List.of()),
@@ -170,7 +166,7 @@ class TransportLifecycleStateMachineTest {
         return new JettyHTTPServerStateMachine(() -> new JettyHTTPServer(
                 disabled, desiredState.editor(), OrionKeyMaterial.unavailable(), null, null, null),
                 () -> { throw new AssertionError("Disabled HTTP must not start Git cleanup"); },
-                EVENTS.rawManager(), EVENTS.executor());
+                testRuntime.unstartedEvents(), testRuntime.executor());
     }
 
     private static Throwable rootCause(Throwable error) {
@@ -181,7 +177,7 @@ class TransportLifecycleStateMachineTest {
         return result;
     }
 
-    private static final class RecordingGitNativeTransportService extends GitNativeTransportService {
+    private final class RecordingGitNativeTransportService extends GitNativeTransportService {
         private final boolean enabled;
         private boolean running;
         private int startCalls;
@@ -192,7 +188,7 @@ class TransportLifecycleStateMachineTest {
             super(
                     configuration.getTransport().getGit(),
                     new DefaultGitNativeRepositoryService(
-                            NativeGitRepositoryProvider.inMemory(EVENTS.manager())));
+                            NativeGitRepositoryProvider.inMemory(testRuntime.events())));
             enabled = configuration.getTransport().getGit().isEnabled();
         }
 

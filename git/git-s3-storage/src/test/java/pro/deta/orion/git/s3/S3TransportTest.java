@@ -30,13 +30,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Timeout(20)
 class S3TransportTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
@@ -123,7 +119,7 @@ class S3TransportTest {
         }
     }
 
-    private static NativeGitRepositoryProvider provider(S3Transport transport, Server server,
+    private NativeGitRepositoryProvider provider(S3Transport transport, Server server,
             String id, String region) {
         return transport.repositories(
                 "s3://bucket/prefix",
@@ -133,7 +129,7 @@ class S3TransportTest {
                 Optional.of(
                         StaticCredentialsProvider.create(
                                 AwsSessionCredentials.create(id, "secret", id + "-token"))),
-                EVENTS.manager());
+                testRuntime.events());
     }
 
     private static void assertRequest(Request request, String id, String region) {

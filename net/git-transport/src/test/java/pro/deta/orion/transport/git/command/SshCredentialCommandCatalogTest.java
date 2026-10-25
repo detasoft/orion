@@ -1,8 +1,7 @@
 package pro.deta.orion.transport.git.command;
 
-import org.junit.jupiter.api.AfterEach;
 
-import pro.deta.orion.test.util.TestEvents;
+import pro.deta.orion.test.util.OrionTestRuntime;
 import pro.deta.orion.test.integration.TestConfiguration;
 import pro.deta.orion.acl.AccessControlAccess;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
@@ -46,13 +45,10 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class SshCredentialCommandCatalogTest {
-    private final TestEvents events = new TestEvents();
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final OrionTestRuntime events = new OrionTestRuntime();
     private final TestConfiguration configuration = new TestConfiguration(events);
 
-    @AfterEach
-    void closeConfiguration() {
-        events.close();
-    }
 
     private final RecordingService service = new RecordingService();
     private final DefaultCommandDispatcher dispatcher = new DefaultCommandDispatcher(

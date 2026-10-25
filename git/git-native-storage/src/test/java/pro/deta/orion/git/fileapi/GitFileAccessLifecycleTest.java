@@ -25,13 +25,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitFileAccessLifecycleTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @ParameterizedTest
     @CsvSource({"false, false", "true, false", "false, true", "true, true"})
@@ -65,7 +61,7 @@ class GitFileAccessLifecycleTest {
                     return invoke(delegateStorage, accessMethod, accessArgs);
                 });
             });
-            NativeGitRepository repository = new NativeGitRepository("demo", observed, owner, EVENTS.manager());
+            NativeGitRepository repository = new NativeGitRepository("demo", observed, owner, testRuntime.events());
             GitFileAccess access = new GitFileAccess(repository, index, "main", Optional.empty(),
                     GitCommitMetadata.EMPTY, false, owner.getHEAD());
             try {

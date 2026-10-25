@@ -1,8 +1,7 @@
 package pro.deta.orion.transport.git.auth;
 
-import org.junit.jupiter.api.AfterEach;
 
-import pro.deta.orion.test.util.TestEvents;
+import pro.deta.orion.test.util.OrionTestRuntime;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.test.integration.TestConfiguration;
 import pro.deta.orion.acl.AccessControlAccess;
@@ -55,12 +54,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionSshAuthenticatorTest {
-    private static final TestEvents EVENTS = new TestEvents();
-
-    @AfterEach
-    void closeConfiguration() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final OrionTestRuntime testRuntime = new OrionTestRuntime();
 
     private static final long AUTH_TIMEOUT_SECONDS = 5;
     private static final List<org.apache.sshd.client.auth.UserAuthFactory> PUBLIC_KEY_ONLY =
@@ -277,7 +272,7 @@ class OrionSshAuthenticatorTest {
         RecordingAccessControlService accessControl = new RecordingAccessControlService();
         accessControl.addUser("alice", current.getPublic());
         OrionSshAuthenticator authenticator =
-                new OrionSshAuthenticator(accessControl, new TestConfiguration(EVENTS).editor());
+                new OrionSshAuthenticator(accessControl, new TestConfiguration(testRuntime).editor());
         ServerSession session = serverSession();
 
         assertThat(authenticator.authenticate("alice", firstCandidate.getPublic(), session)).isTrue();
@@ -308,7 +303,7 @@ class OrionSshAuthenticatorTest {
         RecordingAccessControlService accessControl = new RecordingAccessControlService();
         accessControl.addUser("alice");
         OrionSshAuthenticator authenticator =
-                new OrionSshAuthenticator(accessControl, new TestConfiguration(EVENTS).editor());
+                new OrionSshAuthenticator(accessControl, new TestConfiguration(testRuntime).editor());
         ServerSession session = serverSession();
         for (KeyPair candidate : List.of(selected, unselected)) {
             assertThat(authenticator.authenticate("alice", candidate.getPublic(), session)).isTrue();
@@ -441,7 +436,7 @@ class OrionSshAuthenticatorTest {
 
         private Fixture() throws Exception {
             OrionSshAuthenticator authenticator =
-                    new OrionSshAuthenticator(accessControl, new TestConfiguration(EVENTS).editor());
+                    new OrionSshAuthenticator(accessControl, new TestConfiguration(testRuntime).editor());
             KeyPair hostKey = keyPair();
             server.setHost("127.0.0.1");
             server.setPort(0);

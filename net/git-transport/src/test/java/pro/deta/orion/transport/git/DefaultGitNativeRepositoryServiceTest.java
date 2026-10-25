@@ -58,30 +58,20 @@ import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
 import static pro.deta.orion.transport.git.GitWireTestClient.*;
 import pro.deta.orion.test.integration.git.FileTestSupport;
 
-class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
-        implements GitNativeRepositoryAccessHook {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccessHook {
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     DefaultGitNativeRepositoryServiceTest() {
-        super(pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager()));
+        testRuntime.own(provider);
     }
 
-    @Override
-    public void close() {
-        backend.close();
-        if (replacement != null) replacement.close();
-    }
-
-    private NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+    private NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(testRuntime.events());
     private NativeGitRepositoryProvider replacement;
     private final List<String> calls = new ArrayList<>();
-    private final DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(this);
+    private final RecordingProvider provider = new RecordingProvider();
+    private final DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
     private boolean publicName = true;
     private boolean rejectRead;
     private boolean rejectReceive;
@@ -238,7 +228,7 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
 
     @Test
     void keepsPersistedPackWhenAtomicRefTransactionIsStale(@TempDir Path directory) throws Exception {
-        backend = NativeGitRepositoryProvider.file(directory, EVENTS.manager());
+        backend = NativeGitRepositoryProvider.file(directory, testRuntime.events());
         NativeGitRepository repository = createRepository(backend, "demo");
         repository
                 .files()
@@ -266,7 +256,7 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
             backend.close();
         }
         try (NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.file(directory, EVENTS.manager())) {
+                NativeGitRepositoryProvider.file(directory, testRuntime.events())) {
             NativeGitRepository reopened = provider.find("demo").valueOrFailure("repository");
             assertThat(reopened.refs()).containsEntry("refs/heads/main", initial);
             reopened.index().withAccess(access2 -> {
@@ -304,7 +294,7 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
     @Test
     void retainsRepositoryOpenedBeforeRefAuthorization() throws Exception {
         NativeGitRepository original = createRepository(backend, "demo");
-        replacement = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        replacement = NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository other = createRepository(replacement, "demo");
         try (GitRepositoryContext context = service.open(receiveRequest("demo"), this)) {
             List<RefUpdateResult> results = context.publish(Optional.empty(),
@@ -597,40 +587,53 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
         }
     }
 
-    @Override
-    public boolean isPublicRepositoryName(String name) {
-        return publicName;
-    }
-
-    @Override
-    public boolean exists(String name) {
-        lookups++;
-        return backend.exists(name);
-    }
-
-    @Override
-    public Result<NativeGitRepository> find(String name) {
-        lookups++;
-        return backend.find(name);
-    }
-
-    @Override
-    public Result<NativeGitRepository> create(String name) {
-        return backend.create(name);
-    }
-
-    @Override
-    public List<RefUpdateResult> publish(NativeGitRepository repository, Optional<PackChecksum> received,
-            List<RefUpdate> updates, boolean atomic) {
-        publishCalls++;
-        if (!rejectPublication) {
-            return super.publish(repository, received, updates, atomic);
+    private final class RecordingProvider extends NativeGitRepositoryProvider {
+        private RecordingProvider() {
+            super(pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(testRuntime.events()));
         }
-        List<RefUpdateResult> results = new ArrayList<>();
-        for (RefUpdate update : updates) {
-            results.add(new RefUpdateResult(update, EXPECTED_OLD_MISMATCH, Optional.empty()));
+
+        @Override
+        public void close() {
+            backend.close();
+            if (replacement != null) replacement.close();
+            super.close();
         }
-        return results;
+
+        @Override
+        public boolean isPublicRepositoryName(String name) {
+            return publicName;
+        }
+
+        @Override
+        public boolean exists(String name) {
+            lookups++;
+            return backend.exists(name);
+        }
+
+        @Override
+        public Result<NativeGitRepository> find(String name) {
+            lookups++;
+            return backend.find(name);
+        }
+
+        @Override
+        public Result<NativeGitRepository> create(String name) {
+            return backend.create(name);
+        }
+
+        @Override
+        public List<RefUpdateResult> publish(NativeGitRepository repository, Optional<PackChecksum> received,
+                List<RefUpdate> updates, boolean atomic) {
+            publishCalls++;
+            if (!rejectPublication) {
+                return super.publish(repository, received, updates, atomic);
+            }
+            List<RefUpdateResult> results = new ArrayList<>();
+            for (RefUpdate update : updates) {
+                results.add(new RefUpdateResult(update, EXPECTED_OLD_MISMATCH, Optional.empty()));
+            }
+            return results;
+        }
     }
 
     @Override

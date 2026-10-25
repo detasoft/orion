@@ -35,13 +35,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
 
 class GitRefsStorageTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final RefId MAIN = new RefId("refs/heads/main");
     private static final RefId OTHER = new RefId("refs/heads/other");
@@ -55,7 +51,7 @@ class GitRefsStorageTest {
     @BeforeEach
     void openRepository() {
         nativeRepository = NativeGitRepository.openLocal(
-                RepositoryName.parse("test"), repository, MAIN.value(), EVENTS.manager());
+                RepositoryName.parse("test"), repository, MAIN.value(), testRuntime.events());
         factory = nativeRepository.index();
     }
 

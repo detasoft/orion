@@ -40,13 +40,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AcmeCertificateSettingsTest {
-    private final pro.deta.orion.test.util.TestEvents events =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        events.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime events =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final String EAB_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
 
@@ -86,7 +82,7 @@ class AcmeCertificateSettingsTest {
             assertThat(view.accountMaterial()).isEqualTo(reference);
             assertThat(desired.stored().result().valueOrFailure("Cannot read configuration document")
                     .system().https().orElseThrow().acme().orElseThrow().accountMaterial()).contains(reference);
-            events.await();
+            events.awaitEvents();
             assertThat(service.view().accountMaterial()).isEqualTo(reference);
             DefaultCommandDispatcher dispatcher = AcmeAdministrationTest.dispatcher(
                     new AcmeCommandCatalog(service, null));
@@ -177,7 +173,7 @@ class AcmeCertificateSettingsTest {
                     .system().secrets())
                     .extracting(pro.deta.orion.schema.orion.v2.ConfigurationSecret::envelope)
                     .allSatisfy(value -> assertThat(value).doesNotContain(EAB_KEY));
-            events.await();
+            events.awaitEvents();
             assertThat(service.view()).usingRecursiveComparison().ignoringFields("renewal").isEqualTo(result);
             AcmeCertificateService.Settings stale = settings("zerossl", "key-id", EAB_KEY);
             assertThatThrownBy(() -> service.save(stale, "root"))

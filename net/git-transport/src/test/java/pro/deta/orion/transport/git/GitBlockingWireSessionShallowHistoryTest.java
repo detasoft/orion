@@ -29,13 +29,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitBlockingWireSessionShallowHistoryTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final String MAIN_ID = "88d050b1908057b53d38b42702ebc659e3d7f696";
     private static final String WANT = "2".repeat(40);
@@ -44,7 +40,7 @@ class GitBlockingWireSessionShallowHistoryTest {
     void smartHttpPostAcceptsClientShallowStateAndRelativeDepth()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         ObjectId blob = repository.writeObject(
@@ -79,7 +75,7 @@ class GitBlockingWireSessionShallowHistoryTest {
     void smartHttpPostSerializesShallowInfoForDeepenSince()
             throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         ObjectId rootBlob = repository.writeObject(
@@ -155,7 +151,7 @@ class GitBlockingWireSessionShallowHistoryTest {
 
     @Test
     void duplicateShallowDeclarationsDoNotDuplicateTheResponse() throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
         repository
                 .files()
@@ -191,9 +187,9 @@ class GitBlockingWireSessionShallowHistoryTest {
                 wire);
     }
 
-    private static NativeGitRepositoryProvider providerWithMainRef() {
+    private NativeGitRepositoryProvider providerWithMainRef() {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+                NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
         ObjectId id = repository.writeObject(GitObjectType.BLOB, "main".getBytes(StandardCharsets.US_ASCII));
         assertThat(id.toHex()).isEqualTo(MAIN_ID);

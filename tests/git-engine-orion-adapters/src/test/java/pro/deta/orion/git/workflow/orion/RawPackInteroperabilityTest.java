@@ -43,13 +43,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static pro.deta.orion.git.client.GitTransportScheme.*;
 
 class RawPackInteroperabilityTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @TempDir
     Path directory;
@@ -91,7 +87,7 @@ class RawPackInteroperabilityTest {
             source.addRemote("origin", remote);
             source.push("origin", "main");
             NativeGitRepositoryProvider provider =
-                    NativeGitRepositoryProvider.file(directory.resolve("copy"), EVENTS.manager());
+                    NativeGitRepositoryProvider.file(directory.resolve("copy"), testRuntime.events());
             try (NativeGitRepository copy = provider.create("project").valueOrFailure("repository")) {
                 fetch(client, remote, common, List.of(), copy);
                 source.writeFile("README.md", "updated\n");

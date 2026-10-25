@@ -48,13 +48,9 @@ import static pro.deta.orion.test.RemoteBootstrapTestSupport.runtimeComponent;
 
 @Timeout(120)
 class S3BootstrapRestartIT {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final String SECRET_ID = "stateless-restart-secret";
     private static final String SECRET_VALUE = "persisted encrypted bootstrap credential";
@@ -97,7 +93,7 @@ class S3BootstrapRestartIT {
             Map<String, String> refs;
             try (NativeGitRepositoryProvider provider = S3NativeGitRepositoryFactory.repositories(
                     configuration.getStorage().getLocation(), configuration.getStorage().getEndpoint(),
-                    configuration.getStorage().getAuth(), environment, EVENTS.manager())) {
+                    configuration.getStorage().getAuth(), environment, testRuntime.events())) {
                 NativeGitRepository repository = provider.create("orion").valueOrFailure("seed S3 bootstrap");
                 repository
                         .files()

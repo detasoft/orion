@@ -28,13 +28,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class NativeGitRepositoryPackIngestionTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @Test
     void retryPublicationRegistersItsPackBeforeCheckingStoredBytes() throws Exception {
@@ -44,7 +40,7 @@ class NativeGitRepositoryPackIngestionTest {
         PackId id = PackId.create();
         PackMetadata pack = new PackMetadata(id, new PackChecksum("a".repeat(40)), id.toString(), 1, 36);
         try (NativeGitRepository repository = new NativeGitRepository(
-                "project.git", storage, index, EVENTS.manager())) {
+                "project.git", storage, index, testRuntime.events())) {
             assertThatThrownBy(() -> repository.publishPack(pack)).isInstanceOf(IOException.class)
                     .hasMessageContaining("Cannot publish missing pack");
             assertThat(storage.checked).isTrue();
@@ -58,7 +54,7 @@ class NativeGitRepositoryPackIngestionTest {
         TrackingStorage storage = new TrackingStorage(index);
         storage.missing = true;
         try (NativeGitRepository repository = new NativeGitRepository(
-                "project.git", storage, index, EVENTS.manager())) {
+                "project.git", storage, index, testRuntime.events())) {
             byte[] bytes = preparedPack(repository);
             try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
                 assertThatThrownBy(() -> repository.ingestAndPublish(input)).isInstanceOf(IOException.class)
@@ -78,7 +74,7 @@ class NativeGitRepositoryPackIngestionTest {
     void independentIngestionsPublishDistinctPacksWithTheSameChecksum() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         try (NativeGitRepository repository = new NativeGitRepository(
-                "project.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), EVENTS.manager())) {
+                "project.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), testRuntime.events())) {
             byte[] bytes = preparedPack(repository);
             try (BufferedByteInputV2 firstInput = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
                  BufferedByteInputV2 secondInput = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {

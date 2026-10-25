@@ -2,13 +2,15 @@ package pro.deta.orion.test.util;
 
 import java.util.ArrayList;
 import java.util.List;
+import org.junit.jupiter.api.extension.AfterEachCallback;
+import org.junit.jupiter.api.extension.ExtensionContext;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.OrionEvent;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 
-/** Owns the event dispatcher used by one test and drains it before teardown. */
-public final class TestEvents implements AutoCloseable {
+/** Provides events, an executor, and owned resources for one test, and closes them after execution. */
+public final class OrionTestRuntime implements AfterEachCallback, AutoCloseable {
     private OrionEventManager manager;
     private OrionExecutor executor;
     private final List<AutoCloseable> resources = new ArrayList<>();
@@ -17,13 +19,13 @@ public final class TestEvents implements AutoCloseable {
         resources.add(resource);
     }
 
-    public OrionEventManager manager() {
-        rawManager();
+    public OrionEventManager events() {
+        unstartedEvents();
         if (!manager.isRunning()) manager.onStart();
         return manager;
     }
 
-    public OrionEventManager rawManager() {
+    public OrionEventManager unstartedEvents() {
         if (manager == null) manager = new OrionEventManager();
         return manager;
     }
@@ -36,15 +38,20 @@ public final class TestEvents implements AutoCloseable {
         return executor;
     }
 
-    public void await() {
+    public void awaitEvents() {
         if (manager != null && manager.isRunning()) manager.publishAndWait(new Barrier());
+    }
+
+    @Override
+    public void afterEach(ExtensionContext context) {
+        close();
     }
 
     @Override
     public void close() {
         IllegalStateException failures = null;
         try {
-            await();
+            awaitEvents();
             for (AutoCloseable resource : resources.reversed()) {
                 try {
                     resource.close();

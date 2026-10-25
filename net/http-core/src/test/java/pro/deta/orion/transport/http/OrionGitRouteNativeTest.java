@@ -53,13 +53,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionGitRouteNativeTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final String REPOSITORY_NAME = "team/project";
     private static final String NULL_ID = "0".repeat(40);
@@ -78,7 +74,7 @@ class OrionGitRouteNativeTest {
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(), List.of());
         OrionDocument.Organization org = new OrionDocument.Organization(organization, "", List.of(alice),
                 List.of(), List.of(), List.of(team), List.of(), List.of(), List.of(), List.of());
-        StorageManagementFixture.State fixture = StorageManagementFixture.open(EVENTS, provider, List.of(org),
+        StorageManagementFixture.State fixture = StorageManagementFixture.open(testRuntime, provider, List.of(org),
                 pro.deta.orion.keymaterial.OrionKeyMaterial.unavailable());
         SecurityContext actor = SecurityContext.createContext().withUserIdentity(new InternalUserImpl("alice",
                 organization, () -> fixture.desired().editor().current().result().valueOrFailure("configuration")));
@@ -649,7 +645,7 @@ class OrionGitRouteNativeTest {
         NativeGitRepositoryProvider provider = provider();
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider,
-                StorageManagementFixture.create(EVENTS, provider, List.of()));
+                StorageManagementFixture.create(testRuntime, provider, List.of()));
         ResponseRecorder denied = new ResponseRecorder();
         service(route, request("GET", "/r/team/project.git/info/refs", null, "git-receive-pack",
                 Map.of(), new byte[0], repositoryWriteSecurityContext()), denied.proxy());
@@ -724,7 +720,7 @@ class OrionGitRouteNativeTest {
     }
 
     private NativeGitRepositoryProvider provider() {
-        return NativeGitRepositoryProvider.file(tempDir, EVENTS.manager());
+        return NativeGitRepositoryProvider.file(tempDir, testRuntime.events());
     }
 
     private static GitTransportConfig autoPackfileUriConfig() {

@@ -43,13 +43,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class NativeBootstrapGitPackReplayTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final String ZERO = "0".repeat(40);
     private static final String REF = "refs/tags/payload";
@@ -66,11 +62,11 @@ class NativeBootstrapGitPackReplayTest {
                     disk
                             ? NativeGitRepositoryProvider.file(
                                             directory.resolve("cache-" + upstreamHasBase),
-                                            EVENTS.manager())
+                                            testRuntime.events())
                                     .create("proxy")
                                     .valueOrFailure("repository")
                             : NativeGitRepository.createInMemory(
-                                    RepositoryName.parse("proxy"), EVENTS.manager());
+                                    RepositoryName.parse("proxy"), testRuntime.events());
             byte[] base = new byte[8192];
             new Random(37).nextBytes(base);
             byte[] target = base.clone();
@@ -136,7 +132,7 @@ class NativeBootstrapGitPackReplayTest {
     @Test
     void buildsMissingObjectsWhenIncomingPackDoesNotCoverTheRequestedCommit() throws Exception {
         NativeGitRepository repository =
-                NativeGitRepository.createInMemory(RepositoryName.parse("proxy"), EVENTS.manager());
+                NativeGitRepository.createInMemory(RepositoryName.parse("proxy"), testRuntime.events());
         repository
                 .files()
                 .withAccess(

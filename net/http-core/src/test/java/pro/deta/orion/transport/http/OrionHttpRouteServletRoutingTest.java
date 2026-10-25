@@ -44,13 +44,9 @@ import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Authorizati
 import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.GET;
 
 class OrionHttpRouteServletRoutingTest {
-    private final pro.deta.orion.test.util.TestEvents events =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        events.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime events =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
@@ -207,7 +203,7 @@ class OrionHttpRouteServletRoutingTest {
     @Test
     void repositoryValidationIs400ButProviderArgumentFailureIs500() throws Exception {
         NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider(
-                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(events.manager())) {
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(events.events())) {
             @Override
             public Result<NativeGitRepository> create(String repositoryName) {
                 throw new IllegalArgumentException("private provider details");

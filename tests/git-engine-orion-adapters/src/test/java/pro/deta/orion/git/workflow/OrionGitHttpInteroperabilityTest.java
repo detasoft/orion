@@ -57,13 +57,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionGitHttpInteroperabilityTest {
-    private final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final GitCommandRunner GIT = new GitCommandRunner("git", Duration.ofSeconds(30));
 
@@ -76,7 +72,7 @@ class OrionGitHttpInteroperabilityTest {
     @Execution(ExecutionMode.CONCURRENT)
     void discoversAndFetchesInitialAndUpdatedHistory(String engine, int divergence) throws Exception {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.file(directory.resolve("server"), EVENTS.manager());
+                NativeGitRepositoryProvider.file(directory.resolve("server"), testRuntime.events());
         NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
         List<String> versions = new CopyOnWriteArrayList<>();
         AtomicInteger uploadRequests = new AtomicInteger();
@@ -198,7 +194,7 @@ class OrionGitHttpInteroperabilityTest {
                     new GitSmartHttpClientTransport(http, GitCredentials.none(), true));
             assertThat(client.discover(remote, GitClientOptions.defaults())).isInstanceOf(GitClientResult.Success.class);
             NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(
-                    Files.createTempDirectory(directory, "received-"), EVENTS.manager());
+                    Files.createTempDirectory(directory, "received-"), testRuntime.events());
             try (NativeGitRepository received = provider.create("copy").valueOrFailure("copy")) {
                 GitClientResult<GitUploadPackResult<PackMetadata>> result = client.fetch(
                         remote, GitClientOptions.defaults(),

@@ -37,13 +37,9 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionAdminAccessControlRouteTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @ParameterizedTest
     @ValueSource(strings = {"alice", "José-東京-Ирина"})
@@ -54,7 +50,7 @@ class OrionAdminAccessControlRouteTest {
         AccessControl acl = new AccessControl(List.of(user), List.of(), List.of());
         OrionXml.write(OrionDocument.withAccessControl(acl), output);
         byte[] content = output.toByteArray();
-        TestConfiguration configuration = new TestConfiguration(EVENTS);
+        TestConfiguration configuration = new TestConfiguration(testRuntime);
         configuration.publish(OrionDocument.withAccessControl(acl), Optional.of("revision-1"));
         Grant grant = new Grant("admin", List.of(
                 new GrantExpression(GrantKey.ADMIN, "true")));

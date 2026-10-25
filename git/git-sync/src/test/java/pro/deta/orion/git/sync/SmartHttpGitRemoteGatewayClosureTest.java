@@ -32,13 +32,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SmartHttpGitRemoteGatewayClosureTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
@@ -93,8 +89,8 @@ class SmartHttpGitRemoteGatewayClosureTest {
         }
     }
 
-    private static NativeGitRepository repository() {
-        return NativeGitRepository.createInMemory(RepositoryName.parse("project"), EVENTS.manager());
+    private NativeGitRepository repository() {
+        return NativeGitRepository.createInMemory(RepositoryName.parse("project"), testRuntime.events());
     }
 
     private static Entry commit(String tree, String message) {

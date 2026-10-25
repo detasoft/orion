@@ -38,19 +38,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class FileNativeGitRepositoryProviderTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     private static final String NULL_ID = "0".repeat(40);
 
     @Test
     void closesCachedRepositoriesAndRejectsNewLookups(@TempDir Path root) throws Exception {
-        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(root, EVENTS.manager());
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(root, testRuntime.events());
         NativeGitRepository first = provider.create("first").valueOrFailure("create first");
         NativeGitRepository second = provider.create("second").valueOrFailure("create second");
         provider.close();
@@ -58,7 +54,7 @@ class FileNativeGitRepositoryProviderTest {
         assertThatThrownBy(() -> first.index().createAccess()).hasMessageContaining("closed");
         assertThatThrownBy(() -> second.index().createAccess()).hasMessageContaining("closed");
         assertThatThrownBy(() -> provider.find("first")).hasMessageContaining("closed");
-        try (NativeGitRepositoryProvider reopened = NativeGitRepositoryProvider.file(root, EVENTS.manager())) {
+        try (NativeGitRepositoryProvider reopened = NativeGitRepositoryProvider.file(root, testRuntime.events())) {
             assertThat(reopened.exists("first")).isTrue();
         }
     }
@@ -66,7 +62,7 @@ class FileNativeGitRepositoryProviderTest {
     @Test
     void reopensPersistedRefsAndObjects(@TempDir Path rootDirectory) throws Exception {
         NativeGitRepositoryProvider first =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
         NativeGitRepository repository = first.create(
                 "team/project").valueOrFailure("repository");
         ObjectId blob = repository.writeObject(
@@ -75,7 +71,7 @@ class FileNativeGitRepositoryProviderTest {
         repository.updateRef("refs/heads/main", NULL_ID, blob.toHex());
 
         NativeGitRepositoryProvider second =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
         NativeGitRepository reopened = second.find("team/project")
                 .valueOrFailure("repository");
 
@@ -97,7 +93,7 @@ class FileNativeGitRepositoryProviderTest {
     void repositoryNamesDoNotMapDirectlyToFileSystemPaths(
             @TempDir Path rootDirectory) {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
 
         provider.create("team/project")
                 .valueOrFailure("repository");
@@ -108,12 +104,12 @@ class FileNativeGitRepositoryProviderTest {
     @Test
     void listsPersistedRepositoriesInStableOrder(@TempDir Path rootDirectory) {
         NativeGitRepositoryProvider first =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
         first.create("team/zeta").valueOrFailure("repository");
         first.create("alpha").valueOrFailure("repository");
 
         NativeGitRepositoryProvider reopened =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
 
         assertThat(reopened.repositoryNames()).containsExactly("alpha", "team/zeta");
     }
@@ -121,7 +117,7 @@ class FileNativeGitRepositoryProviderTest {
     @Test
     void createFailsWhenRepositoryAlreadyExists(@TempDir Path rootDirectory) {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
         provider.create("project").valueOrFailure("repository");
 
         Result<NativeGitRepository> result = provider.create("project");
@@ -134,7 +130,7 @@ class FileNativeGitRepositoryProviderTest {
     @Test
     void findDoesNotCreateRepository(@TempDir Path rootDirectory) {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
 
         Result<NativeGitRepository> result = provider.find("missing");
 
@@ -146,7 +142,7 @@ class FileNativeGitRepositoryProviderTest {
     void canonicalizesNamesBeforeLookupAndPersistsTheCanonicalIdentity(
             @TempDir Path rootDirectory) {
         NativeGitRepositoryProvider first =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
 
         NativeGitRepository created = first.create("team%2Frepo")
                 .valueOrFailure("repository");
@@ -157,7 +153,7 @@ class FileNativeGitRepositoryProviderTest {
         assertThat(first.create("team/repo")).isInstanceOf(Result.Failure.class);
 
         NativeGitRepositoryProvider reopened =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
         assertThat(reopened.find("team/repo").valueOrFailure("repository").name())
                 .isEqualTo("team/repo");
         assertThat(reopened.repositoryNames()).containsExactly("team/repo");
@@ -166,7 +162,7 @@ class FileNativeGitRepositoryProviderTest {
     @Test
     void rejectsInvalidPersistedRepositoryNames(@TempDir Path rootDirectory) throws IOException {
         NativeGitRepositoryProvider provider =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
         provider.create("team/repo").valueOrFailure("repository");
         Path metadata = singlePathWithSuffix(
                 rootDirectory,
@@ -178,7 +174,7 @@ class FileNativeGitRepositoryProviderTest {
                 StandardCharsets.UTF_8);
 
         NativeGitRepositoryProvider reopened =
-                NativeGitRepositoryProvider.file(rootDirectory, EVENTS.manager());
+                NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
 
         assertThatThrownBy(reopened::repositoryNames)
                 .isInstanceOf(IllegalArgumentException.class);
@@ -188,7 +184,7 @@ class FileNativeGitRepositoryProviderTest {
 
     @Test
     void reopensReceivedPackAndItsIndexWithoutChangingBytes(@TempDir Path root) throws Exception {
-        NativeGitRepository repository = NativeGitRepositoryProvider.file(root, EVENTS.manager())
+        NativeGitRepository repository = NativeGitRepositoryProvider.file(root, testRuntime.events())
                 .create("packed").valueOrFailure("repository");
         byte[] first = "published-one".getBytes(StandardCharsets.UTF_8);
         byte[] second = "published-two".getBytes(StandardCharsets.UTF_8);
@@ -196,7 +192,7 @@ class FileNativeGitRepositoryProviderTest {
         PackChecksum id = persist(repository, bytes);
         assertThat(id.toHex()).isEqualTo(packChecksum(bytes));
         repository.close();
-        try (NativeGitRepository reopened = NativeGitRepositoryProvider.file(root, EVENTS.manager())
+        try (NativeGitRepository reopened = NativeGitRepositoryProvider.file(root, testRuntime.events())
                 .find("packed").valueOrFailure("repository")) {
             ByteArrayOutputStream exported = new ByteArrayOutputStream();
             reopened.index().withAccess(access1 -> {
@@ -217,7 +213,7 @@ class FileNativeGitRepositoryProviderTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void readsOffsetAndCompletedReferenceDeltasAfterReopen(boolean reference, @TempDir Path root) throws Exception {
-        NativeGitRepository repository = NativeGitRepositoryProvider.file(root, EVENTS.manager())
+        NativeGitRepository repository = NativeGitRepositoryProvider.file(root, testRuntime.events())
                 .create("packed").valueOrFailure("repository");
         byte[] base = "hello world".getBytes(StandardCharsets.UTF_8);
         byte[] target = "hello native".getBytes(StandardCharsets.UTF_8);
@@ -227,7 +223,7 @@ class FileNativeGitRepositoryProviderTest {
         PackChecksum id = persist(repository, reference
                 ? packWithReferenceDelta(blobId(base), base, target) : packWithOffsetDelta(base, target));
         repository.close();
-        try (NativeGitRepository reopened = NativeGitRepositoryProvider.file(root, EVENTS.manager())
+        try (NativeGitRepository reopened = NativeGitRepositoryProvider.file(root, testRuntime.events())
                 .find("packed").valueOrFailure("repository")) {
             {
                 GitIndexAccess access2 = reopened.index().createAccess();
@@ -255,7 +251,7 @@ class FileNativeGitRepositoryProviderTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void rejectsThinPackWithMissingOrCorruptBase(boolean corrupt, @TempDir Path root) throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(root, EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(root, testRuntime.events())
                 .create("packed").valueOrFailure("repository")) {
             byte[] base = "hello world".getBytes(StandardCharsets.UTF_8);
             byte[] target = "hello native".getBytes(StandardCharsets.UTF_8);
@@ -279,7 +275,7 @@ class FileNativeGitRepositoryProviderTest {
 
     @Test
     void malformedPackLeavesNoPublishedObjectsOrRefs(@TempDir Path root) throws Exception {
-        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(root, EVENTS.manager())
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(root, testRuntime.events())
                 .create("packed").valueOrFailure("repository")) {
             byte[] bytes = pack("broken".getBytes(StandardCharsets.UTF_8));
             bytes[bytes.length - 1] ^= 1;

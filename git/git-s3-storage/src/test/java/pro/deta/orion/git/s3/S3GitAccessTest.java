@@ -14,13 +14,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class S3GitAccessTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @Test
     void closingOwnersPreventsNewAccessesButExistingAccessesCanFinish() throws Exception {
@@ -40,7 +36,7 @@ class S3GitAccessTest {
                                                         software.amazon.awssdk.auth.credentials
                                                                 .AwsBasicCredentials.create(
                                                                 "id", "key"))),
-                                        EVENTS.manager())
+                                        testRuntime.events())
                                 .create("repo")
                                 .valueOrFailure("create")) {
             GitIndexAccess index = repository.index().createAccess();

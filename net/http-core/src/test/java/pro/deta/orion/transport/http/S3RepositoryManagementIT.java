@@ -25,13 +25,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @Timeout(120)
 class S3RepositoryManagementIT {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
-            new pro.deta.orion.test.util.TestEvents();
-
-    @org.junit.jupiter.api.AfterEach
-    void stopTestEvents() {
-        EVENTS.close();
-    }
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
 
     @Test
     void encryptedManagementPersistsActivatesCreatesAndReopensMetadataInMinio() throws Exception {
@@ -39,20 +35,20 @@ class S3RepositoryManagementIT {
              OrionKeyMaterial material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
                      KeyMaterialOptions.pkcs12("test-password".toCharArray()));
              S3Transport transport = new S3Transport();
-             NativeGitRepositoryProvider local = NativeGitRepositoryProvider.inMemory(EVENTS.manager())) {
+             NativeGitRepositoryProvider local = NativeGitRepositoryProvider.inMemory(testRuntime.events())) {
             ConfiguredNativeGitRepositoryFactory configuredFactory =
                     new ConfiguredNativeGitRepositoryFactory(
                             pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(
-                                    EVENTS.manager()),
+                                    testRuntime.events()),
                             transport,
-                            EVENTS.manager());
+                            testRuntime.events());
             NativeGitRepositoryProvider configured = new NativeGitRepositoryProvider(configuredFactory);
             OrionDocument.Organization organization = new OrionDocument.Organization(new OrganizationId("acme"), "",
                     List.of(), List.of(), List.of(), List.of(new OrionDocument.Team(new TeamId("team"), "",
                     List.of(), List.of(), List.of())), List.of(), List.of(), List.of(), List.of());
             StorageManagementFixture.State fixture =
                     StorageManagementFixture.open(
-                            EVENTS, configured, List.of(organization), material);
+                            testRuntime, configured, List.of(organization), material);
             ConfigurationSecrets secrets =
                     new ConfigurationSecrets(
                             () -> fixture.desired().editor().current().result()
@@ -92,9 +88,9 @@ class S3RepositoryManagementIT {
             ConfiguredNativeGitRepositoryFactory reopenedFactory =
                     new ConfiguredNativeGitRepositoryFactory(
                             pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(
-                                    EVENTS.manager()),
+                                    testRuntime.events()),
                             transport,
-                            EVENTS.manager());
+                            testRuntime.events());
             NativeGitRepositoryProvider reopened = new NativeGitRepositoryProvider(reopenedFactory);
             reopenedFactory.activate(
                     () -> fixture.desired().editor().current().result()
