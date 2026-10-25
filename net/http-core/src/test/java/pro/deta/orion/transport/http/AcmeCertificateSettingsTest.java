@@ -84,7 +84,7 @@ class AcmeCertificateSettingsTest {
             EVENTS.await();
             assertThat(service.view().accountMaterial()).isEqualTo(reference);
             DefaultCommandDispatcher dispatcher = AcmeAdministrationTest.dispatcher(
-                    new AcmeCommandCatalog(service));
+                    new AcmeCommandCatalog(service, null));
             assertThat(dispatcher.dispatch(AcmeAdministrationTest.request(
                     "/acme configure revision=saved-1 provider=letsencrypt email=admin@example.test "
                             + "domains=example.test account-key=existing-account account-key-version=1",
@@ -94,7 +94,8 @@ class AcmeCertificateSettingsTest {
             assertThat(dispatcher.dispatch(AcmeAdministrationTest.request(
                     "/acme configure account-key=existing-account", AcmeAdministrationTest.admin())))
                     .isInstanceOf(CommandResult.Failure.class);
-            OrionAdminAcmeConfigurationRoute route = new OrionAdminAcmeConfigurationRoute(service, new ObjectMapper());
+            OrionAdminAcmeConfigurationRoute route =
+                    new OrionAdminAcmeConfigurationRoute(service, new ObjectMapper(), null);
             assertThat(route.doPost(AcmeAdministrationTest.httpRequest("POST", "/api/admin/acme/configuration", """
                     {"revision":"saved-1","provider":"letsencrypt","accountEmail":"admin@example.test",
                      "domains":["example.test"],"accountMaterial":{"alias":"existing-account","version":1}}
@@ -227,13 +228,14 @@ class AcmeCertificateSettingsTest {
             assertThatThrownBy(() -> service.save(stale, "root"))
                     .isInstanceOf(OrionConfigurationConcurrentUpdateException.class);
             assertThat(stale.eabHmacKey()).containsOnly('\0');
-            DefaultCommandDispatcher dispatcher = AcmeAdministrationTest.dispatcher(new AcmeCommandCatalog(service));
+            DefaultCommandDispatcher dispatcher =
+                    AcmeAdministrationTest.dispatcher(new AcmeCommandCatalog(service, null));
             assertThat(dispatcher.dispatch(AcmeAdministrationTest.request(
                     "/acme configure revision=saved-1 provider=zerossl email=admin@example.test "
                             + "domains=example.test eab-kid=key-id", AcmeAdministrationTest.admin())))
                     .isInstanceOf(CommandResult.ObjectValue.class);
             OrionAdminAcmeConfigurationRoute settingsRoute = new OrionAdminAcmeConfigurationRoute(
-                    service, new ObjectMapper());
+                    service, new ObjectMapper(), null);
             assertThat(settingsRoute.doPost(AcmeAdministrationTest.httpRequest("POST",
                     "/api/admin/acme/configuration", """
                     {"revision":"saved-1","provider":"zerossl","accountEmail":"admin@example.test",
@@ -247,7 +249,7 @@ class AcmeCertificateSettingsTest {
                     .doPost(AcmeAdministrationTest.httpRequest("POST", "/api/admin/acme/certificate", "",
                             AcmeAdministrationTest.admin())).status()).isEqualTo(200);
             Instant due = Instant.parse(restarted.renewalStatus().nextAttempt());
-            restarted.maintainCertificate(due, () -> {});
+            restarted.maintainCertificate(due);
             assertThat(accountKeys).hasSize(3);
             assertThat(service.view().renewal().state()).isEqualTo("stopped");
             assertThat(dispatcher.dispatch(AcmeAdministrationTest.request("/acme show",

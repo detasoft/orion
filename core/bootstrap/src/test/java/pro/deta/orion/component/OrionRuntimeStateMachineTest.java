@@ -101,7 +101,7 @@ class OrionRuntimeStateMachineTest {
                         new GitSshTransportStateMachine(OrionRuntimeStateMachineTest::unstartedService),
                         new JettyHTTPServerStateMachine(OrionRuntimeStateMachineTest::unstartedService,
                                 OrionRuntimeStateMachineTest::unstartedService,
-                                OrionRuntimeStateMachineTest::unstartedService)),
+                                OrionRuntimeStateMachineTest::unstartedService, new OrionEventManager())),
                 () -> { throw new AssertionError("Bootstrap proxies must not start"); }, decisions);
     }
     private static Result<Decision> register(DecisionRegistry decisions) {

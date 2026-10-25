@@ -1,5 +1,6 @@
 package pro.deta.orion.keymaterial;
 
+import pro.deta.orion.event.type.OrionEventPublisher;
 import pro.deta.orion.keymaterial.KeyMaterialModification.Addition;
 
 import javax.crypto.Cipher;
@@ -44,6 +45,7 @@ public class KeyMaterialService implements AutoCloseable {
     private final KeyMaterialContentStore store;
     private final KeyMaterialOptions options;
     private final KeyMaterialStorageCertificateFactory storageCertificateFactory;
+    private final OrionEventPublisher eventPublisher;
     private final KeyStore keyStore;
     private String version;
     private long revision;
@@ -53,11 +55,13 @@ public class KeyMaterialService implements AutoCloseable {
             KeyMaterialContentStore store,
             KeyMaterialOptions options,
             KeyMaterialStorageCertificateFactory storageCertificateFactory,
+            OrionEventPublisher eventPublisher,
             KeyStore keyStore,
             String version) throws GeneralSecurityException {
         this.store = store;
         this.options = options;
         this.storageCertificateFactory = storageCertificateFactory;
+        this.eventPublisher = eventPublisher;
         this.keyStore = keyStore;
         this.version = version;
         for (String alias : physicalAliases()) {
@@ -77,6 +81,15 @@ public class KeyMaterialService implements AutoCloseable {
             KeyMaterialOptions options,
             KeyMaterialStorageCertificateFactory storageCertificateFactory)
             throws IOException, GeneralSecurityException {
+        return open(store, options, storageCertificateFactory, event -> {});
+    }
+
+    public static synchronized KeyMaterialService open(
+            KeyMaterialContentStore store,
+            KeyMaterialOptions options,
+            KeyMaterialStorageCertificateFactory storageCertificateFactory,
+            OrionEventPublisher eventPublisher)
+            throws IOException, GeneralSecurityException {
         if (store == null) {
             throw new IllegalArgumentException("Key material store must not be null");
         }
@@ -85,6 +98,9 @@ public class KeyMaterialService implements AutoCloseable {
         }
         if (storageCertificateFactory == null) {
             throw new IllegalArgumentException("Storage certificate factory must not be null");
+        }
+        if (eventPublisher == null) {
+            throw new IllegalArgumentException("Orion event publisher must not be null");
         }
         KeyMaterialOptions ownedOptions = options.copy();
 
@@ -104,6 +120,7 @@ public class KeyMaterialService implements AutoCloseable {
                             store,
                             ownedOptions,
                             storageCertificateFactory,
+                            eventPublisher,
                             keyStore,
                             snapshot.get().version());
                 }
@@ -112,6 +129,7 @@ public class KeyMaterialService implements AutoCloseable {
                         store,
                         ownedOptions,
                         storageCertificateFactory,
+                        eventPublisher,
                         keyStore,
                         null);
             } finally {
@@ -777,6 +795,14 @@ public class KeyMaterialService implements AutoCloseable {
             }
             for (Addition addition : additions) append(keyStore, addition, nextVersion);
             revision = nextVersion;
+            try {
+                Set<String> resources = new HashSet<>();
+                for (Addition addition : additions) resources.add(addition.alias());
+                eventPublisher.publishIfRunning(new KeyMaterialChanged(Set.copyOf(resources)));
+            } catch (RuntimeException failure) {
+                System.getLogger(KeyMaterialService.class.getName()).log(System.Logger.Level.WARNING,
+                        "Could not publish key material change event", failure);
+            }
         } catch (GeneralSecurityException failure) {
             close();
             throw new IOException("Cannot save key material", failure);

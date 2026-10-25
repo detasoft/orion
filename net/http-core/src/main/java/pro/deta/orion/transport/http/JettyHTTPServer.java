@@ -58,6 +58,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
     private final AtomicReference<Server> jettyServer = new AtomicReference<>();
     @Getter(lombok.AccessLevel.NONE)
     private volatile ActiveTls activeTls;
+    private volatile String certificateActivationError = "";
 
     @Inject
     public JettyHTTPServer(
@@ -83,6 +84,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
             Server server = getNewServer();
             jettyServer.set(server);
             server.start();
+            certificateActivationError = "";
         } catch (Exception e) {
             destroyFailedServer();
             throw new IllegalStateException("Cannot start Jetty HTTP server", e);
@@ -112,12 +114,32 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
         return boundPort("https");
     }
 
+    public String certificateActivationError() {
+        return certificateActivationError;
+    }
+
+    boolean usesKeyMaterialResources(Set<String> resources) {
+        ActiveTls current = activeTls;
+        if (current == null) return false;
+        return containsResource(resources, current.material().identity().alias());
+    }
+
+    private static boolean containsResource(Set<String> resources, String alias) {
+        for (String resource : resources) {
+            if (resource.equalsIgnoreCase(alias)) return true;
+        }
+        return false;
+    }
+
     void reloadHttpsCertificate() {
         ActiveTls current = activeTls;
         if (current == null || !isRunning()) return;
         try {
             List<X509Certificate> chain = keyMaterial.certificateChain(current.material().identity());
-            if (chain.equals(current.chain())) return;
+            if (chain.equals(current.chain())) {
+                certificateActivationError = "";
+                return;
+            }
             SSLContext replacement = keyMaterial.createTlsContext(current.material());
             SSLContext previous = current.factory().getSslContext();
             try {
@@ -131,9 +153,15 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
                 throw failure;
             }
             activeTls = new ActiveTls(current.material(), current.factory(), List.copyOf(chain));
+            certificateActivationError = "";
         } catch (Exception failure) {
+            certificateActivationError = "Could not activate the saved certificate. Retrying automatically.";
             throw new IllegalStateException("Cannot activate the saved HTTPS certificate", failure);
         }
+    }
+
+    void reloadHttpsCertificate(Set<String> resources) {
+        if (usesKeyMaterialResources(resources)) reloadHttpsCertificate();
     }
 
     private record ActiveTls(TlsMaterialConfiguration material, SslContextFactory.Server factory,

@@ -50,10 +50,10 @@ class AcmeAdministrationTest {
 
     @Test
     void enforcesAdminAccessOnBothTransportsAndRedactsSshSecrets() throws Exception {
-        DefaultCommandDispatcher dispatcher = dispatcher(new AcmeCommandCatalog(null));
+        DefaultCommandDispatcher dispatcher = dispatcher(new AcmeCommandCatalog(null, null));
         ObjectMapper mapper = new ObjectMapper();
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of(
-                new OrionAdminAcmeConfigurationRoute(null, mapper),
+                new OrionAdminAcmeConfigurationRoute(null, mapper, null),
                 new OrionAdminKeyMaterialRoute(OrionKeyMaterial.unavailable(), mapper),
                 new OrionAdminAcmeCertificateRoute(null, mapper))), new OrionHttpResponseWriter(mapper));
         for (SecurityContext context : List.of(SecurityContext.createContext(),
@@ -85,13 +85,13 @@ class AcmeAdministrationTest {
                 OrionKeyMaterial.unavailable(), null, null);
         ObjectMapper mapper = new ObjectMapper();
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of(
-                new OrionAdminAcmeConfigurationRoute(configuration, mapper))), new OrionHttpResponseWriter(mapper));
+                new OrionAdminAcmeConfigurationRoute(configuration, mapper, null))), new OrionHttpResponseWriter(mapper));
         Response response = new Response();
         servlet.service(httpRequest("GET", "/api/admin/acme/configuration", "", admin()), response.proxy());
         assertThat(response.status).isEqualTo(200);
         assertThat(response.body.toString()).contains("letsencrypt", "zerossl", "google", "custom", "revision", "renewal", "disabled")
                 .doesNotContain("eabHmacKey");
-        assertThat(dispatcher(new AcmeCommandCatalog(configuration)).dispatch(request("/acme show", admin())))
+        assertThat(dispatcher(new AcmeCommandCatalog(configuration, null)).dispatch(request("/acme show", admin())))
                 .isInstanceOfSatisfying(CommandResult.ObjectValue.class, result ->
                         assertThat(result.fields().get("renewalState").asText()).isEqualTo("disabled"));
     }

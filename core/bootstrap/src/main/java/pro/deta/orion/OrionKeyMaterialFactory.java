@@ -5,6 +5,7 @@ import java.util.Set;
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
+import pro.deta.orion.event.type.OrionEventPublisher;
 import pro.deta.orion.keymaterial.KeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
@@ -42,6 +43,14 @@ public final class OrionKeyMaterialFactory {
             BootstrapConfiguration configuration,
             Map<String, String> environment,
             KeyMaterialCreation creation) throws IOException, GeneralSecurityException {
+        return open(configuration, environment, creation, event -> {});
+    }
+
+    public static OrionKeyMaterial open(
+            BootstrapConfiguration configuration,
+            Map<String, String> environment,
+            KeyMaterialCreation creation,
+            OrionEventPublisher eventPublisher) throws IOException, GeneralSecurityException {
         if (configuration == null) {
             throw new IllegalArgumentException("Orion configuration must not be null");
         }
@@ -51,7 +60,7 @@ public final class OrionKeyMaterialFactory {
         KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard(environment);
         String location = resolveAgainstBaseDirectory(material.getLocation(), baseDirectory, "location");
         KeyMaterialContentStore store = resolver.resolveStore(location);
-        return open(configuration, environment, store, creation);
+        return open(configuration, environment, store, creation, eventPublisher);
     }
 
     public static OrionKeyMaterial open(
@@ -66,6 +75,15 @@ public final class OrionKeyMaterialFactory {
             Map<String, String> environment,
             KeyMaterialContentStore store,
             KeyMaterialCreation creation) throws IOException, GeneralSecurityException {
+        return open(configuration, environment, store, creation, event -> {});
+    }
+
+    public static OrionKeyMaterial open(
+            BootstrapConfiguration configuration,
+            Map<String, String> environment,
+            KeyMaterialContentStore store,
+            KeyMaterialCreation creation,
+            OrionEventPublisher eventPublisher) throws IOException, GeneralSecurityException {
         if (configuration == null) {
             throw new IllegalArgumentException("Orion configuration must not be null");
         }
@@ -76,7 +94,8 @@ public final class OrionKeyMaterialFactory {
         String password = resolveAgainstBaseDirectory(material.getPassword(), baseDirectory, "password");
         SigningMaterialSet signingMaterial = signingMaterial(material);
         try (KeyMaterialOptions options = resolver.pkcs12Options(password)) {
-            OrionKeyMaterial keys = OrionKeyMaterial.open(store, options);
+            OrionKeyMaterial keys = OrionKeyMaterial.open(store, options, signingMaterial,
+                    KeyMaterialConstants.RSA_KEY_SIZE_BITS, creation, eventPublisher);
             try {
                 if (!keys.hasDurableSnapshot()) {
                     if (!creation.allowed()) {

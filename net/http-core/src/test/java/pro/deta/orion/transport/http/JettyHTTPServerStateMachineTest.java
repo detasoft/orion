@@ -38,7 +38,8 @@ class JettyHTTPServerStateMachineTest {
                         null,
                         null);
         JettyHTTPServerStateMachine machine = new JettyHTTPServerStateMachine(
-                () -> server, () -> { throw new AssertionError(); }, () -> { throw new AssertionError(); });
+                () -> server, () -> { throw new AssertionError(); }, () -> { throw new AssertionError(); },
+                EVENTS.rawManager());
 
         assertEquals("http", machine.stateMachine().name());
         assertEquals(Set.of(machine.startAction().id(), machine.stopAction().id()), machine.stateMachine().availableActions());

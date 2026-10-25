@@ -1,5 +1,7 @@
 package pro.deta.orion.keymaterial;
 
+import pro.deta.orion.event.type.OrionEventPublisher;
+
 import java.util.Set;
 
 import com.google.gson.stream.JsonReader;
@@ -58,6 +60,15 @@ public class OrionKeyMaterial implements AutoCloseable {
     public static OrionKeyMaterial open(
             KeyMaterialContentStore store,
             KeyMaterialOptions options,
+            OrionEventPublisher eventPublisher) throws IOException, GeneralSecurityException {
+        return new OrionKeyMaterial(
+                KeyMaterialService.open(store, options, new KeyMaterialStorageCertificateFactory(), eventPublisher),
+                SigningIdentity.unavailable());
+    }
+
+    public static OrionKeyMaterial open(
+            KeyMaterialContentStore store,
+            KeyMaterialOptions options,
             SigningMaterialSet signingMaterial,
             int activeKeySize) throws IOException, GeneralSecurityException {
         return open(store, options, signingMaterial, activeKeySize, new KeyMaterialCreation(false));
@@ -69,8 +80,19 @@ public class OrionKeyMaterial implements AutoCloseable {
             SigningMaterialSet signingMaterial,
             int activeKeySize,
             KeyMaterialCreation creation) throws IOException, GeneralSecurityException {
+        return open(store, options, signingMaterial, activeKeySize, creation, event -> {});
+    }
+
+    public static OrionKeyMaterial open(
+            KeyMaterialContentStore store,
+            KeyMaterialOptions options,
+            SigningMaterialSet signingMaterial,
+            int activeKeySize,
+            KeyMaterialCreation creation,
+            OrionEventPublisher eventPublisher) throws IOException, GeneralSecurityException {
         requireRsa(signingMaterial);
-        KeyMaterialService service = KeyMaterialService.open(store, options);
+        KeyMaterialService service = KeyMaterialService.open(store, options,
+                new KeyMaterialStorageCertificateFactory(), eventPublisher);
         try {
             if (!service.hasDurableSnapshot()) {
                 if (!creation.allowed()) {

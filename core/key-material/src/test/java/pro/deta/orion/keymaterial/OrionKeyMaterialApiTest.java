@@ -1,5 +1,6 @@
 package pro.deta.orion.keymaterial;
 
+import pro.deta.orion.event.type.OrionEventPublisher;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -163,6 +164,29 @@ class OrionKeyMaterialApiTest {
             assertThat(reloaded.publicKey(SIGNING).getEncoded()).isEqualTo(publicKey);
             assertThat(reloaded.verify(SIGNING, payload, signature)).isTrue();
             assertThat(reloaded.verify(SIGNING, new byte[]{1}, signature)).isFalse();
+        }
+    }
+
+    @Test
+    void reportsChangedAliasesOnlyAfterACommittedModification() throws Exception {
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        List<KeyMaterialChanged> changes = new ArrayList<>();
+        try (OrionKeyMaterial material = open(store, event -> changes.add((KeyMaterialChanged) event))) {
+            KeyMaterialModification discarded = material.modify();
+            discarded.generateKey(SIGNING, 2048);
+            discarded.discard();
+            material.modify().apply();
+            assertThat(changes).isEmpty();
+            X509Certificate root = TestCertificateChain.root("Root").certificate();
+
+            material.withModification(modification -> {
+                modification.generateKey(SIGNING, 2048);
+                modification.setTrustedCertificate(ROOT, root);
+                modification.apply();
+            });
+
+            assertThat(changes).extracting(KeyMaterialChanged::resources)
+                    .containsExactly(Set.of(SIGNING.alias(), ROOT.alias()));
         }
     }
 
@@ -512,6 +536,13 @@ class OrionKeyMaterialApiTest {
     private static OrionKeyMaterial open(KeyMaterialContentStore store) throws Exception {
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password())) {
             return OrionKeyMaterial.open(store, options);
+        }
+    }
+
+    private static OrionKeyMaterial open(KeyMaterialContentStore store, OrionEventPublisher eventPublisher)
+            throws Exception {
+        try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password())) {
+            return OrionKeyMaterial.open(store, options, eventPublisher);
         }
     }
 

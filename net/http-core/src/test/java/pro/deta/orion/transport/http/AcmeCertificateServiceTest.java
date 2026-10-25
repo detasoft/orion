@@ -23,6 +23,7 @@ import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
+import pro.deta.orion.keymaterial.KeyMaterialChanged;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -31,6 +32,7 @@ import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
+import pro.deta.orion.util.OrionUtils;
 
 import java.io.IOException;
 import java.net.URI;
@@ -395,7 +397,7 @@ class AcmeCertificateServiceTest {
                 assertTimeoutPreemptively(Duration.ofSeconds(1), () -> assertThatThrownBy(
                         () -> service.issue(AcmeCertificateService.IssueRequest.EMPTY))
                         .isInstanceOf(AcmeCertificateService.IssuanceBusyException.class));
-                service.maintainCertificate(Instant.now().plus(Duration.ofDays(90)), () -> {});
+                service.maintainCertificate(Instant.now().plus(Duration.ofDays(90)));
                 assertThat(store.read().orElseThrow().bytes()).isEqualTo(before);
                 assertThat(owner.version()).isEqualTo(beforeVersion);
                 assertThat(issuer.issueCalls()).isEqualTo(1);
@@ -438,20 +440,20 @@ class AcmeCertificateServiceTest {
             X509Certificate initial = service.issue(AcmeCertificateService.IssueRequest.EMPTY)
                     .certificateChain().getFirst();
             Instant due = Instant.parse(service.renewalStatus().nextAttempt());
-            service.maintainCertificate(due.minusSeconds(1), () -> {});
+            service.maintainCertificate(due.minusSeconds(1));
             assertThat(appender.list).isEmpty();
             issuer.failure = new AcmeCertificateIssueException("private provider response");
-            service.maintainCertificate(due, () -> {});
+            service.maintainCertificate(due);
             assertThat(appender.list).hasSize(2);
             assertThat(appender.list.getFirst().getLevel()).isEqualTo(Level.WARN);
             assertThat(appender.list.getFirst().getFormattedMessage())
                     .contains("Starting ACME certificate renewal", "example.test",
                             initial.getNotAfter().toInstant().toString(), due.toString())
                     .doesNotContain("private provider response", "admin@example.test", "eab");
-            service.maintainCertificate(due.plusSeconds(60), () -> {});
+            service.maintainCertificate(due.plusSeconds(60));
             assertThat(appender.list).hasSize(2);
             issuer.failure = null;
-            service.maintainCertificate(due.plusSeconds(3600), () -> {});
+            service.maintainCertificate(due.plusSeconds(3600));
             assertThat(appender.list).hasSize(3);
             assertThat(appender.list.getLast().getLevel()).isEqualTo(Level.WARN);
             assertThat(appender.list.getLast().getFormattedMessage())
@@ -468,7 +470,7 @@ class AcmeCertificateServiceTest {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             RecordingIssuer issuer = new RecordingIssuer(false);
             AcmeCertificateService service = new AcmeCertificateService(desiredState(false).editor(), owner, issuer, null);
-            service.maintainCertificate(Instant.now(), () -> {});
+            service.maintainCertificate(Instant.now());
             assertThat(issuer.lastRequest).isNull();
             X509Certificate initial = service.issue(AcmeCertificateService.IssueRequest.EMPTY)
                     .certificateChain().getFirst();
@@ -476,16 +478,16 @@ class AcmeCertificateServiceTest {
             Instant due = initial.getNotAfter().toInstant().minus(
                     Duration.between(initial.getNotBefore().toInstant(), initial.getNotAfter().toInstant())
                             .dividedBy(3));
-            service.maintainCertificate(due.minusSeconds(1), () -> {});
+            service.maintainCertificate(due.minusSeconds(1));
             assertThat(service.savedCertificate().orElseThrow().certificateChain().getFirst()).isEqualTo(initial);
-            service.maintainCertificate(due, () -> {});
+            service.maintainCertificate(due);
             assertThat(service.savedCertificate().orElseThrow().certificateChain().getFirst()).isNotEqualTo(initial);
             assertThat(issuer.lastRequest.accountKeyPair().getPublic()).isEqualTo(account.getPublic());
         }
     }
 
     @Test
-    void retriesFailureAfterOneHourKeepsOldCertificateAndRetriesActivationWithoutReissuing() throws Exception {
+    void retriesFailureAfterOneHourAndKeepsOldCertificate() throws Exception {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             RecordingIssuer issuer = new RecordingIssuer(false);
             AcmeCertificateService service = new AcmeCertificateService(desiredState(false).editor(), owner, issuer, null);
@@ -493,27 +495,22 @@ class AcmeCertificateServiceTest {
                     .certificateChain().getFirst();
             Instant due = Instant.parse(service.renewalStatus().nextAttempt());
             issuer.failure = new AcmeCertificateIssueException("private provider response");
-            service.maintainCertificate(due, () -> {});
+            service.maintainCertificate(due);
             assertThat(service.savedCertificate().orElseThrow().certificateChain().getFirst()).isEqualTo(initial);
             assertThat(service.renewalStatus().state()).isEqualTo("stopped");
             assertThat(service.renewalStatus().message()).doesNotContain("private provider response");
             assertThat(service.renewalStatus().nextAttempt()).isEqualTo(due.plusSeconds(3600).toString());
             assertThat(issuer.calls).isEqualTo(2);
-            service.maintainCertificate(due.plusSeconds(3599), () -> {});
+            service.maintainCertificate(due.plusSeconds(3599));
             assertThat(issuer.calls).isEqualTo(2);
             issuer.failure = null;
-            service.maintainCertificate(due.plusSeconds(3600), () -> {
-                throw new IllegalStateException("private TLS error");
-            });
+            service.maintainCertificate(due.plusSeconds(3600));
             assertThat(issuer.calls).isEqualTo(3);
             assertThat(service.renewalStatus().state()).isEqualTo("stopped");
-            assertThat(service.renewalStatus().activationError()).contains("Could not activate")
-                    .doesNotContain("private TLS error");
-            service.maintainCertificate(due.plusSeconds(3660), () -> {});
-            assertThat(service.renewalStatus().activationError()).isEmpty();
+            service.maintainCertificate(due.plusSeconds(3660));
             assertThat(issuer.calls).isEqualTo(3);
             service.stopMaintenance();
-            service.maintainCertificate(due.plusSeconds(7200), () -> { throw new AssertionError(); });
+            service.maintainCertificate(due.plusSeconds(7200));
             assertThat(issuer.calls).isEqualTo(3);
         }
     }
@@ -528,7 +525,7 @@ class AcmeCertificateServiceTest {
             service.issue(AcmeCertificateService.IssueRequest.EMPTY);
             Instant due = Instant.parse(service.renewalStatus().nextAttempt());
             desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("removed"));
-            service.maintainCertificate(due, () -> {});
+            service.maintainCertificate(due);
             assertThat(issuer.calls).isEqualTo(1);
             assertThat(service.renewalStatus().state()).isEqualTo("disabled");
         }
@@ -536,7 +533,8 @@ class AcmeCertificateServiceTest {
 
     @Test
     void activatesRenewedCertificateOnTheRunningHttpsListener() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore(),
+                EVENTS.manager())) {
             BootstrapConfiguration bootstrap = bootstrap();
             bootstrap.getTransport().getHttp().setEnabled(false);
             TestConfiguration desired = desiredState(false);
@@ -558,19 +556,34 @@ class AcmeCertificateServiceTest {
             JettyHTTPServer server = new JettyHTTPServer(bootstrap, desired.editor(), owner,
                     new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of()),
                             new OrionHttpResponseWriter(mapper)), null, null);
-            server.onStart();
+            NativeGitRepositoryProvider repositories = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+            GitPackCleanupTask cleanup = new GitPackCleanupTask(repositories);
+            JettyHTTPServerStateMachine machine = new JettyHTTPServerStateMachine(
+                    () -> server, () -> service, () -> cleanup, EVENTS.manager());
+            assertThat(machine.start().failed()).isFalse();
             try {
                 int port = server.boundHttpsPort();
                 assertThat(servedCertificate(port)).isEqualTo(initial);
+                EVENTS.manager().publishAndWait(new KeyMaterialChanged(Set.of("acme-account")));
+                assertThat(servedCertificate(port)).isEqualTo(initial);
                 Instant due = Instant.parse(service.renewalStatus().nextAttempt());
-                service.maintainCertificate(due, server::reloadHttpsCertificate);
+                service.maintainCertificate(due);
                 X509Certificate renewed = service.savedCertificate().orElseThrow().certificateChain().getFirst();
                 assertThat(renewed).isNotEqualTo(initial);
                 assertThat(server.boundHttpsPort()).isEqualTo(port);
+                EVENTS.await();
+                assertThat(OrionUtils.waitForCondition(() -> {
+                    try {
+                        return servedCertificate(port).equals(renewed);
+                    } catch (Exception failure) {
+                        return false;
+                    }
+                })).isTrue();
                 assertThat(servedCertificate(port)).isEqualTo(renewed);
-                assertThat(service.renewalStatus().activationError()).isEmpty();
+                assertThat(server.certificateActivationError()).isEmpty();
             } finally {
-                server.onStop();
+                assertThat(machine.stop().failed()).isFalse();
+                repositories.close();
             }
         }
     }
@@ -623,7 +636,7 @@ class AcmeCertificateServiceTest {
                     .certificateChain().getFirst();
             // A restart reconstructs the due date from the persisted certificate.
             AcmeCertificateService restarted = new AcmeCertificateService(desiredState(false).editor(), owner, issuer, null);
-            restarted.startMaintenance(() -> { throw new AssertionError("Stopped maintenance must not activate"); });
+            restarted.startMaintenance();
             try {
                 assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
             } finally {
@@ -669,9 +682,9 @@ class AcmeCertificateServiceTest {
                     .certificateChain().getFirst();
             Instant due = initial.getNotAfter().toInstant().minus(Duration.ofDays(30));
             assertThat(service.renewalStatus().nextAttempt()).isEqualTo(due.toString());
-            service.maintainCertificate(due.minusSeconds(1), () -> {});
+            service.maintainCertificate(due.minusSeconds(1));
             assertThat(issuer.calls).isEqualTo(1);
-            service.maintainCertificate(due, () -> {});
+            service.maintainCertificate(due);
             assertThat(issuer.calls).isEqualTo(2);
         }
     }
@@ -686,24 +699,18 @@ class AcmeCertificateServiceTest {
             AcmeCertificateService service = new AcmeCertificateService(desired.editor(), owner, new RecordingIssuer(false), null);
             service.issue(AcmeCertificateService.IssueRequest.EMPTY);
             assertThat(service.renewalStatus().state()).isEqualTo("stopped");
-            CountDownLatch checked = new CountDownLatch(1);
             ObjectMapper mapper = new ObjectMapper();
             JettyHTTPServer server = new JettyHTTPServer(bootstrap, desired.editor(), owner,
                     new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of()),
-                            new OrionHttpResponseWriter(mapper)), null, null) {
-                @Override
-                void reloadHttpsCertificate() {
-                    super.reloadHttpsCertificate();
-                    checked.countDown();
-                }
-            };
+                            new OrionHttpResponseWriter(mapper)), null, null);
             GitPackCleanupTask cleanup =
                     new GitPackCleanupTask(NativeGitRepositoryProvider.inMemory(EVENTS.manager()));
             JettyHTTPServerStateMachine machine = new JettyHTTPServerStateMachine(
-                    () -> server, () -> service, () -> cleanup);
+                    () -> server, () -> service, () -> cleanup, EVENTS.manager());
             try {
                 assertThat(machine.start().failed()).isFalse();
-                assertThat(checked.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(OrionUtils.waitForCondition(
+                        () -> service.renewalStatus().state().equals("scheduled"))).isTrue();
                 assertThat(service.renewalStatus().state()).isEqualTo("scheduled");
             } finally {
                 assertThat(machine.stop().failed()).isFalse();
@@ -714,7 +721,8 @@ class AcmeCertificateServiceTest {
             bootstrap.getTransport().getHttp().setEnabled(false);
             JettyHTTPServerStateMachine disabled = new JettyHTTPServerStateMachine(() -> server,
                     () -> { throw new AssertionError("Disabled HTTP must not resolve ACME maintenance"); },
-                    () -> { throw new AssertionError("Disabled HTTP must not resolve Git cleanup"); });
+                    () -> { throw new AssertionError("Disabled HTTP must not resolve Git cleanup"); },
+                    EVENTS.manager());
             assertThat(disabled.start().failed()).isFalse();
             assertThat(server.isRunning()).isFalse();
             assertThat(disabled.stop().failed()).isFalse();
@@ -764,8 +772,13 @@ class AcmeCertificateServiceTest {
     }
 
     private static OrionKeyMaterial owner(InMemoryKeyMaterialContentStore store) throws Exception {
+        return owner(store, event -> {});
+    }
+
+    private static OrionKeyMaterial owner(InMemoryKeyMaterialContentStore store,
+            pro.deta.orion.event.type.OrionEventPublisher eventPublisher) throws Exception {
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray())) {
-            return OrionKeyMaterial.open(store, options);
+            return OrionKeyMaterial.open(store, options, eventPublisher);
         }
     }
 

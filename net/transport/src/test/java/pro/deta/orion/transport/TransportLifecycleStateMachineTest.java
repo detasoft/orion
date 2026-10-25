@@ -170,7 +170,8 @@ class TransportLifecycleStateMachineTest {
         return new JettyHTTPServerStateMachine(() -> new JettyHTTPServer(
                 disabled, desiredState.editor(), OrionKeyMaterial.unavailable(), null, null, null),
                 () -> { throw new AssertionError("Disabled HTTP must not start ACME maintenance"); },
-                () -> { throw new AssertionError("Disabled HTTP must not start Git cleanup"); });
+                () -> { throw new AssertionError("Disabled HTTP must not start Git cleanup"); },
+                EVENTS.rawManager());
     }
 
     private static Throwable rootCause(Throwable error) {

@@ -1,6 +1,7 @@
 package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
+import jakarta.inject.Provider;
 import pro.deta.orion.util.LogScope;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.auth.SecurityContext;
@@ -28,10 +29,12 @@ import java.util.Set;
 /** SSH entry points use the same ACME service as the admin HTTP routes. */
 public final class AcmeCommandCatalog {
     private final AcmeCertificateService certificates;
+    private final Provider<JettyHTTPServer> serverProvider;
 
     @Inject
-    public AcmeCommandCatalog(AcmeCertificateService certificates) {
+    public AcmeCommandCatalog(AcmeCertificateService certificates, Provider<JettyHTTPServer> serverProvider) {
         this.certificates = certificates;
+        this.serverProvider = serverProvider;
     }
 
     public CommandNode commandTree() {
@@ -112,7 +115,7 @@ public final class AcmeCommandCatalog {
         return new CommandResult.Failure(CommandFailureCode.HANDLER_FAILED, message, List.of());
     }
 
-    private static CommandResult view(AcmeCertificateService.View view) {
+    private CommandResult view(AcmeCertificateService.View view) {
         Map<String, CommandValue> fields = new LinkedHashMap<>();
         fields.put("revision", CommandValue.text(view.revision()));
         fields.put("enabled", CommandValue.bool(view.enabled()));
@@ -132,7 +135,9 @@ public final class AcmeCommandCatalog {
         fields.put("lastAttempt", CommandValue.text(view.renewal().lastAttempt()));
         fields.put("lastSuccess", CommandValue.text(view.renewal().lastSuccess()));
         fields.put("renewalMessage", CommandValue.text(view.renewal().message()));
-        fields.put("activationError", CommandValue.text(view.renewal().activationError()));
+        JettyHTTPServer server = serverProvider == null ? null : serverProvider.get();
+        fields.put("activationError", CommandValue.text(
+                server == null ? "" : server.certificateActivationError()));
         return new CommandResult.ObjectValue(fields);
     }
 }

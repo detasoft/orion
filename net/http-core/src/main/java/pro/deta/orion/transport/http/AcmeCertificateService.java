@@ -66,7 +66,6 @@ public class AcmeCertificateService {
     private final ConfigurationSecrets secrets;
     private final AtomicBoolean issuanceInProgress = new AtomicBoolean();
     private volatile RenewalAttempt renewalAttempt;
-    private volatile String activationError = "";
     private volatile boolean maintenanceStopped;
     private volatile ScheduledExecutorService maintenance;
 
@@ -305,12 +304,12 @@ public class AcmeCertificateService {
         }
     }
 
-    synchronized void startMaintenance(Runnable activate) {
+    synchronized void startMaintenance() {
         if (maintenance != null) throw new IllegalStateException("ACME maintenance is already running");
         maintenanceStopped = false;
         maintenance = Executors.newSingleThreadScheduledExecutor(
                 Thread.ofPlatform().daemon(true).name("acme-renewal").factory());
-        maintenance.scheduleWithFixedDelay(() -> maintainCertificate(Instant.now(), activate),
+        maintenance.scheduleWithFixedDelay(() -> maintainCertificate(Instant.now()),
                 0, 60, TimeUnit.SECONDS);
     }
 
@@ -324,7 +323,7 @@ public class AcmeCertificateService {
         maintenance = null;
     }
 
-    void maintainCertificate(Instant now, Runnable activate) {
+    void maintainCertificate(Instant now) {
         try (LogScope user = LogScope.user(null); LogScope task = LogScope.task("acme-certificate")) {
             if (maintenanceStopped) return;
             if (issuanceInProgress.compareAndSet(false, true)) {
@@ -346,15 +345,6 @@ public class AcmeCertificateService {
                     issuanceInProgress.set(false);
                 }
             }
-            if (!maintenanceStopped && !Thread.currentThread().isInterrupted()) {
-                try {
-                    activate.run();
-                    activationError = "";
-                } catch (RuntimeException failure) {
-                    activationError = "Could not activate the saved certificate. Retrying automatically.";
-                    LOG.warn(activationError);
-                }
-            }
         }
     }
 
@@ -372,12 +362,12 @@ public class AcmeCertificateService {
                     .orElse(""), chain.map(c -> nextAttempt(settings, c.getFirst()).toString()).orElse(""),
                     attempt == null ? "" : attempt.started().toString(),
                     attempt == null || attempt.lastSuccess() == null ? "" : attempt.lastSuccess().toString(),
-                    attempt == null ? "" : attempt.error(), activationError);
+                    attempt == null ? "" : attempt.error(), "");
         } catch (ConfigurationUnavailableException disabled) {
-            return new RenewalStatus("disabled", "", "", "", "", "", activationError);
+            return new RenewalStatus("disabled", "", "", "", "", "", "");
         } catch (GeneralSecurityException | RuntimeException failure) {
             return new RenewalStatus("unavailable", "", "", "", "",
-                    "Could not read certificate renewal status. Check ACME settings and key material.", activationError);
+                    "Could not read certificate renewal status. Check ACME settings and key material.", "");
         }
     }
 

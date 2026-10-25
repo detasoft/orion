@@ -125,7 +125,7 @@ public final class BootstrapContext implements AutoCloseable {
                     configuredMaterial,
                     creation.allowed());
             keyMaterial = openKeyMaterial(configuration, environment, provider.provider(),
-                    materialRepository, configuredMaterial, creation);
+                    materialRepository, configuredMaterial, creation, events);
             return new BootstrapContext(provider, keyMaterial,
                     OrionKeyMaterialFactory.signingMaterial(configuredMaterial));
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {
@@ -306,7 +306,8 @@ public final class BootstrapContext implements AutoCloseable {
             NativeGitRepositoryProvider provider,
             Optional<String> repositoryName,
             KeyMaterialConfig source,
-            KeyMaterialCreation creation) throws IOException, GeneralSecurityException {
+            KeyMaterialCreation creation,
+            OrionEventManager events) throws IOException, GeneralSecurityException {
         if (repositoryName.isPresent()) {
             return OrionKeyMaterialFactory.open(
                     configuration,
@@ -316,9 +317,9 @@ public final class BootstrapContext implements AutoCloseable {
                             repositoryName.orElseThrow(),
                             NativeGitRepositoryFactory.sourceRefName(source),
                             NativeGitRepositoryFactory.repositoryPath(source.getPath())),
-                    creation);
+                    creation, events);
         }
-        return OrionKeyMaterialFactory.open(configuration, environment, creation);
+        return OrionKeyMaterialFactory.open(configuration, environment, creation, events);
     }
 
     private static Path directFileRoot(
