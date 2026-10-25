@@ -101,14 +101,14 @@ final class GrantAccess {
         boolean repositoryRestricted = hasKey(expressions, GrantKey.REPOSITORY);
         if (repositoryRestricted && !repositoryGrant(repositoryName).matchesAny(expressions)) return false;
         if (action == GrantKey.READ) {
-            if (hasKey(expressions, GrantKey.READ)
-                    || hasKey(expressions, GrantKey.READ_WRITE)) return true;
-            return repositoryRestricted && !hasKey(expressions, GrantKey.CREATE)
-                    && !hasKey(expressions, GrantKey.FORCE)
-                    && !hasKey(expressions, GrantKey.ADMIN)
-                    && !hasKey(expressions, GrantKey.SHUTDOWN);
+            if (GrantMatcher.enabled(GrantKey.READ).matchesAny(expressions)
+                    || GrantMatcher.enabled(GrantKey.READ_WRITE).matchesAny(expressions)) return true;
+            return repositoryRestricted && !GrantMatcher.enabled(GrantKey.CREATE).matchesAny(expressions)
+                    && !GrantMatcher.enabled(GrantKey.FORCE).matchesAny(expressions)
+                    && !GrantMatcher.enabled(GrantKey.ADMIN).matchesAny(expressions)
+                    && !GrantMatcher.enabled(GrantKey.SHUTDOWN).matchesAny(expressions);
         }
-        return hasKey(expressions, action);
+        return GrantMatcher.enabled(action).matchesAny(expressions);
     }
 
     private static boolean matchesBranch(List<GrantExpression> expressions, String branch) {

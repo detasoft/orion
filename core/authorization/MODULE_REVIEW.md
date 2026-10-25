@@ -1,40 +1,5 @@
 # Module Review: `core/authorization`
 
-## 6. Boolean-looking privilege values are accepted but ignored
-
-**Problem.** In an ALLOW grant, `READ_WRITE=false`, `FORCE=false`, or `ADMIN=false` still activates the
-privilege: operation matching tests for the key's presence. An administrator editing XML can therefore enable
-the exact operation they attempted to disable. A false value in a DENY grant likewise remains an active deny.
-
-**Sources.** [GrantMatcher.of(key)](src/main/java/pro/deta/orion/auth/check/GrantMatcher.java) installs an
-always-true value matcher. Consumers include the
-[repository rules](src/main/java/pro/deta/orion/auth/check/rule/RepositoryAccessRules.java),
-[scoped matcher](src/main/java/pro/deta/orion/auth/check/rule/GrantAccess.java), and
-[application rules](src/main/java/pro/deta/orion/auth/check/rule/ApplicationAccessRules.java).
-The [XML mapper](../schema/src/main/java/pro/deta/orion/schema/orion/v2/OrionV2Mapper.java) and
-[expression record](../schema/src/main/java/pro/deta/orion/schema/acl/GrantExpression.java) retain arbitrary
-string values. Existing [access tests](src/test/java/pro/deta/orion/auth/check/AccessRulesTest.java) use `true`
-for operation keys and do not establish false-value behavior.
-
-**Documented behavior.** [README](../../README.md) uses `READ_WRITE` and API `readWrite: true` to represent
-permission. No explicit presence-only contract or validation rule for false operation values was found.
-
-**Contract.** Persisted operation values must have an unambiguous meaning. Resource patterns such as
-`REPOSITORY`, `BRANCH`, and `CONNECTION` must retain their existing matching semantics.
-
-**Minimal repair.** Decide between accepting only canonical `true` operation values and making false values
-inactive. Enforce that decision at the existing document-validation/matching boundaries for both system and
-organization grants. Test ALLOW, DENY, and invalid values behaviorally, including `ADMIN`.
-
-**Alternatives and consequences.** Rejecting false values is a smaller fail-closed configuration change;
-interpreting booleans preserves editable enable/disable semantics but changes existing grant evaluation.
-Both require checking persisted XML consumers. A second privilege representation is unnecessary.
-
-**Confidence.** High for current matching and accepted model values; intended value semantics need a decision.
-
-**Priority signals.** Importance: high for accidentally enabled write, force, or administration. Repair ease:
-medium, because the correction is local but persisted configuration semantics must be settled first.
-
 ## 7. Repository safety policy is persisted without enforcement in receive-pack
 
 **Problem.** A configured repository can have `allowForcePushes=false`, `allowBranchDeletes=false`, and

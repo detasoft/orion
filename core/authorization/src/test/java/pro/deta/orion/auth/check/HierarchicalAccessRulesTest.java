@@ -66,6 +66,26 @@ class HierarchicalAccessRulesTest {
     }
 
     @Test
+    void scopedOperationValuesOnlyGrantOrDenyWhenExactlyTrue() {
+        for (String value : List.of("false", "enabled")) {
+            ScopedGrant inactiveAllow = new ScopedGrant(new GrantId("inactive-allow"),
+                    ScopedGrant.Effect.ALLOW, List.of(expression(READ_WRITE, value)));
+            SecurityContext denied = context(document(List.of("acme/developer"), List.of(),
+                    List.of(inactiveAllow)));
+            assertThat(RepositoryAccessRules.write().evaluate(denied, REPOSITORY).allowed())
+                    .as("ALLOW READ_WRITE=%s", value).isFalse();
+
+            ScopedGrant allow = grant("allow", ScopedGrant.Effect.ALLOW, READ_WRITE);
+            ScopedGrant inactiveDeny = new ScopedGrant(new GrantId("inactive-deny"),
+                    ScopedGrant.Effect.DENY, List.of(expression(READ_WRITE, value)));
+            SecurityContext allowed = context(document(List.of("acme/developer"), List.of(),
+                    List.of(allow, inactiveDeny)));
+            assertThat(RepositoryAccessRules.write().evaluate(allowed, REPOSITORY).allowed())
+                    .as("DENY READ_WRITE=%s", value).isTrue();
+        }
+    }
+
+    @Test
     void unrestrictedReadRejectsAssignedBranchDeniesEvenWithWildcardAllow() {
         ScopedGrant allow = new ScopedGrant(new GrantId("read"), ScopedGrant.Effect.ALLOW,
                 List.of(expression(READ, "true"), expression(BRANCH, "*")));

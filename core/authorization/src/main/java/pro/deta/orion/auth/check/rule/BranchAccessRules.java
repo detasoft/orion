@@ -89,7 +89,7 @@ public final class BranchAccessRules {
                 securityContext.getUserIdentity(),
                 repository.repositoryName());
         if (action != GrantKey.READ) {
-            branchGrants = filterGrants(branchGrants, GrantMatcher.of(action));
+            branchGrants = filterGrants(branchGrants, GrantMatcher.enabled(action));
         }
         if (branchGrants.isEmpty()) {
             return AccessDecision.allow("parent repository grant has no branch restriction");

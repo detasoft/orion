@@ -32,7 +32,8 @@ public final class ApplicationAccessRules {
         if (securityContext.getUserIdentity().getOrganizationId().isPresent()) {
             return AccessDecision.deny("system identity is required");
         }
-        boolean allowed = GrantAccess.hasGrant(securityContext.getUserIdentity(), GrantMatcher.of(GrantKey.SHUTDOWN));
+        boolean allowed = GrantAccess.hasGrant(securityContext.getUserIdentity(),
+                GrantMatcher.enabled(GrantKey.SHUTDOWN));
         if (allowed) {
             return AccessDecision.allow("shutdown grant matched");
         }
@@ -43,7 +44,8 @@ public final class ApplicationAccessRules {
         if (securityContext.getUserIdentity().getOrganizationId().isPresent()) {
             return AccessDecision.deny("system identity is required");
         }
-        boolean allowed = GrantAccess.hasGrant(securityContext.getUserIdentity(), GrantMatcher.of(GrantKey.ADMIN));
+        boolean allowed = GrantAccess.hasGrant(securityContext.getUserIdentity(),
+                GrantMatcher.enabled(GrantKey.ADMIN));
         if (allowed) {
             return AccessDecision.allow("admin grant matched");
         }

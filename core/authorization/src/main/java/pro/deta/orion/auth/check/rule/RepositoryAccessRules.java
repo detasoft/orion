@@ -56,7 +56,7 @@ public final class RepositoryAccessRules {
         boolean allowed = GrantAccess.hasGrant(
                 userIdentity,
                 GrantAccess.repositoryGrant(resource.repositoryName()),
-                GrantMatcher.of(GrantKey.CREATE));
+                GrantMatcher.enabled(GrantKey.CREATE));
         if (allowed) {
             return AccessDecision.allow("repository create grant matched");
         }
@@ -100,7 +100,7 @@ public final class RepositoryAccessRules {
         boolean allowed = GrantAccess.hasGrant(
                 userIdentity,
                 GrantAccess.repositoryGrant(resource.repositoryName()),
-                GrantMatcher.of(GrantKey.READ_WRITE));
+                GrantMatcher.enabled(GrantKey.READ_WRITE));
         if (allowed) {
             return AccessDecision.allow("repository write grant matched");
         }
@@ -115,7 +115,7 @@ public final class RepositoryAccessRules {
         boolean allowed = GrantAccess.hasGrant(
                 userIdentity,
                 GrantAccess.repositoryGrant(resource.repositoryName()),
-                GrantMatcher.of(GrantKey.FORCE));
+                GrantMatcher.enabled(GrantKey.FORCE));
         if (allowed) {
             return AccessDecision.allow("repository force grant matched");
         }

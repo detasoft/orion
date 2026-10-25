@@ -24,6 +24,10 @@ public class GrantMatcher {
         return new GrantMatcher(key, GrantMatcher::alwaysTrue);
     }
 
+    public static GrantMatcher enabled(GrantKey key) {
+        return of(key, "true"::equals);
+    }
+
     private static boolean alwaysTrue(String v) {
         return true;
     }

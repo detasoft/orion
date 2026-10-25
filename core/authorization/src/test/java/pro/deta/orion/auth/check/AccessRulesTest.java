@@ -232,6 +232,24 @@ public class AccessRulesTest {
     }
 
     @Test
+    void operationGrantsRequireCanonicalTrueValue() {
+        for (String value : List.of("false", "enabled")) {
+            Grant writeGrant = grantDraft("write")
+                    .addKey(GrantKey.REPOSITORY, "project")
+                    .addKey(GrantKey.READ_WRITE, value)
+                    .toAccessControl();
+            SecurityContext writer = securityContext(new InternalUserImpl("writer", List.of(writeGrant)));
+            assertThat(RepositoryAccessRules.write().evaluate(writer, RepositoryResource.of("project")).allowed())
+                    .as("READ_WRITE=%s", value).isFalse();
+
+            Grant adminGrant = grantDraft("admin").addKey(GrantKey.ADMIN, value).toAccessControl();
+            SecurityContext admin = securityContext(new InternalUserImpl("admin", List.of(adminGrant)));
+            assertThat(ApplicationAccessRules.admin().evaluate(admin,
+                    ApplicationAdminResource.applicationAdmin()).allowed()).as("ADMIN=%s", value).isFalse();
+        }
+    }
+
+    @Test
     public void forceAccessRequiresRepositoryForceGrant() {
         Grant writeGrant = grantDraft("write")
                 .addKey(GrantKey.REPOSITORY, "project")

@@ -224,6 +224,22 @@ class ConfiguredStorageManagementTest {
     }
 
     @Test
+    void falseConnectionUseGrantDoesNotAuthorizeUsingConnection() throws Exception {
+        assertThat(management.saveConnection(actor, Optional.of(organization), revision(), true,
+                input("secret".toCharArray()))).isInstanceOf(StorageManagement.Success.class);
+        EVENTS.await();
+        setGrants(List.of(new Grant("connection-use", List.of(
+                new GrantExpression(GrantKey.CONNECTION, "*"),
+                new GrantExpression(GrantKey.READ, "true"),
+                new GrantExpression(GrantKey.CONNECTION_USE, "false")))), true);
+
+        StorageManagement.Connections connections = ((StorageManagement.Success<StorageManagement.Connections>)
+                management.connections(actor, Optional.of(organization))).value();
+        assertThat(connections.connections()).hasSize(1);
+        assertThat(connections.connections().getFirst().canUse()).isFalse();
+    }
+
+    @Test
     void metadataFailureRetainsBindingAndIdenticalRetryCompletesWithoutLocalFallback() {
         management.saveConnection(actor, Optional.of(organization), revision(), true, input("secret".toCharArray()));
         EVENTS.await();

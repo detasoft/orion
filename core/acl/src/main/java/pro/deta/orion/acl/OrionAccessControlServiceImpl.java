@@ -192,14 +192,14 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         if (!(grants instanceof Result.Success<List<Grant>>(var assigned))) return false;
         for (Grant grant : assigned) {
             if (!GrantMatcher.of(GrantKey.CONNECTION).matchesAny(grant.info())
-                    && GrantMatcher.of(GrantKey.ADMIN).matchesAny(grant.info())) return true;
+                    && GrantMatcher.enabled(GrantKey.ADMIN).matchesAny(grant.info())) return true;
         }
         return false;
     }
 
     private static boolean matchesScopedAdministration(List<GrantExpression> expressions,
             ConfigurationScope scope) {
-        if (!GrantMatcher.of(GrantKey.ADMIN).matchesAny(expressions)) return false;
+        if (!GrantMatcher.enabled(GrantKey.ADMIN).matchesAny(expressions)) return false;
         boolean repositoryRestricted = false;
         boolean repositoryMatches = false;
         for (GrantExpression expression : expressions) {

@@ -217,7 +217,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                     }
                     return GrantMatcher.of(GrantKey.CONNECTION,
                             pattern -> MatcherUtils.matchExpressionValue(pattern, name)).matchesAny(expressions)
-                            && GrantMatcher.of(action).matchesAny(expressions);
+                            && GrantMatcher.enabled(action).matchesAny(expressions);
                 });
     }
 

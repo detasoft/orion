@@ -503,6 +503,18 @@ class OrionAccessControlServiceImplTest {
     }
 
     @Test
+    void falseSystemAdminGrantDoesNotAuthorizeConfigurationAdministration() {
+        User actor = new User("alice", "", "", "", List.of(), List.of(), List.of(new Grant("admin",
+                List.of(new GrantExpression(GrantKey.ADMIN, "false")))));
+        OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(
+                new AccessControl(List.of(actor), List.of(), List.of())), List.of());
+        try (ServiceFixture fixture = fixture(new AclFixture())) {
+            assertThat(fixture.service.canAdminister(PrincipalAddress.parse("system/alice"),
+                    Optional.empty(), document)).isFalse();
+        }
+    }
+
+    @Test
     void userMutationsArePersistedAndActiveWhenTheyReturn() throws Exception {
         OrionPasswordHashingService hashing = new OrionPasswordHashingService();
         try (ServiceFixture fixture = fixture(new AclFixture())) {
