@@ -32,17 +32,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionAdminCreateRepositoryRouteTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+    private final pro.deta.orion.test.util.TestEvents events =
             new pro.deta.orion.test.util.TestEvents();
 
     @org.junit.jupiter.api.AfterEach
     void stopTestEvents() {
-        EVENTS.close();
+        events.close();
     }
 
-    private final NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+    private final NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(events.manager());
     private final OrionAdminCreateRepositoryRoute route = new OrionAdminCreateRepositoryRoute(
-            provider, StorageManagementFixture.create(EVENTS, provider, organizationDocument().organizations()),
+            provider, StorageManagementFixture.create(events, provider, organizationDocument().organizations()),
             new ObjectMapper());
 
     private static OrionDocument organizationDocument() {
