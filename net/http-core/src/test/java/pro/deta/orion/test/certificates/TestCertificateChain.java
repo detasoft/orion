@@ -1,4 +1,4 @@
-package pro.deta.orion.transport.http;
+package pro.deta.orion.test.certificates;
 
 import org.bouncycastle.asn1.x509.BasicConstraints;
 import org.bouncycastle.asn1.x509.Extension;
@@ -19,30 +19,30 @@ import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.concurrent.atomic.AtomicLong;
 
-final class TestCertificateChain {
+public final class TestCertificateChain {
     private static final AtomicLong SERIAL = new AtomicLong(1);
 
     private TestCertificateChain() {
     }
 
-    static X509Certificate selfSignedLeaf(String commonName, KeyPair keyPair) throws Exception {
+    public static X509Certificate selfSignedLeaf(String commonName, KeyPair keyPair) throws Exception {
         X500Principal subject = new X500Principal("CN=" + commonName);
         return issue(subject, keyPair, subject, keyPair, false);
     }
 
-    static X509Certificate selfSignedLeaf(String commonName, KeyPair keyPair, Instant before, Instant after)
+    public static X509Certificate selfSignedLeaf(String commonName, KeyPair keyPair, Instant before, Instant after)
             throws Exception {
         X500Principal subject = new X500Principal("CN=" + commonName);
         return issue(subject, keyPair, subject, keyPair, false, before, after);
     }
 
-    static Authority root(String commonName) throws Exception {
+    public static Authority root(String commonName) throws Exception {
         KeyPair keyPair = keyPair();
         X500Principal subject = new X500Principal("CN=" + commonName);
         return new Authority(keyPair, issue(subject, keyPair, subject, keyPair, true));
     }
 
-    static X509Certificate leaf(String commonName, KeyPair keyPair, Authority issuer) throws Exception {
+    public static X509Certificate leaf(String commonName, KeyPair keyPair, Authority issuer) throws Exception {
         return issue(
                 issuer.certificate().getSubjectX500Principal(),
                 issuer.keyPair(),
@@ -51,7 +51,7 @@ final class TestCertificateChain {
                 false);
     }
 
-    static KeyPair keyPair() throws Exception {
+    public static KeyPair keyPair() throws Exception {
         KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
         generator.initialize(2048);
         return generator.generateKeyPair();
@@ -92,6 +92,6 @@ final class TestCertificateChain {
         return certificate;
     }
 
-    record Authority(KeyPair keyPair, X509Certificate certificate) {
+    public record Authority(KeyPair keyPair, X509Certificate certificate) {
     }
 }

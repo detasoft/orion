@@ -1,4 +1,4 @@
-package pro.deta.orion.transport.http;
+package pro.deta.orion.acme;
 
 public class AcmeCertificateIssueException extends RuntimeException {
     public AcmeCertificateIssueException(String message) {

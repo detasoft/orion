@@ -1,4 +1,4 @@
-package pro.deta.orion.transport.http;
+package pro.deta.orion.acme;
 
 import org.shredzone.acme4j.Account;
 import org.shredzone.acme4j.AccountBuilder;

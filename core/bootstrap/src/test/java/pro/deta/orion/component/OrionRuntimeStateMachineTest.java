@@ -16,7 +16,7 @@ import pro.deta.orion.transport.TransportLifecycleStateMachine;
 import pro.deta.orion.transport.git.GitNativeTransportStateMachine;
 import pro.deta.orion.transport.git.GitSshTransportStateMachine;
 import pro.deta.orion.transport.http.JettyHTTPServerStateMachine;
-import pro.deta.orion.transport.http.AcmeCertificateServiceStateMachine;
+import pro.deta.orion.acme.AcmeCertificateServiceStateMachine;
 import pro.deta.orion.util.Result;
 
 import java.util.List;

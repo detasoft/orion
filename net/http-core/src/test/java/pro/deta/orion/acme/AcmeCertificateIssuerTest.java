@@ -1,4 +1,6 @@
-package pro.deta.orion.transport.http;
+package pro.deta.orion.acme;
+
+import pro.deta.orion.test.certificates.TestCertificateChain;
 
 import org.junit.jupiter.api.Test;
 import org.shredzone.acme4j.Status;

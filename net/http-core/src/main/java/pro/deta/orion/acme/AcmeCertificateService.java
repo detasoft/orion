@@ -1,4 +1,4 @@
-package pro.deta.orion.transport.http;
+package pro.deta.orion.acme;
 
 import java.io.IOException;
 import java.net.URI;
@@ -467,7 +467,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
 
         if (acme.eabSecret().isPresent() && effectiveRequest.directoryUrl() != null
                 && !effectiveRequest.directoryUrl().equals(acme.directoryUrl().toString())) {
-            throw new HttpRequestValidationException("Save ACME provider settings before changing the directory URL");
+            throw new ValidationException("Save ACME provider settings before changing the directory URL");
         }
 
         List<String> domains = domainsFrom(effectiveRequest, acme);
@@ -564,7 +564,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
         }
         List<String> configuredDomains = validatedDomainsOrEmpty(configuration.domains());
         if (configuredDomains.isEmpty()) {
-            throw new HttpRequestValidationException("At least one ACME domain is required");
+            throw new ValidationException("At least one ACME domain is required");
         }
         return configuredDomains;
     }
@@ -581,7 +581,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
         if (configuration.allowRequestedDomains() || requestedDomains.equals(configuredDomains)) {
             return;
         }
-        throw new HttpRequestValidationException("Requested ACME domains are not allowed by configuration");
+        throw new ValidationException("Requested ACME domains are not allowed by configuration");
     }
 
     private static boolean isTrustAnchor(X509Certificate certificate) {
@@ -604,7 +604,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
         List<String> result = new ArrayList<>();
         for (String domain : domains) {
             if (domain == null || domain.isBlank()) {
-                throw new HttpRequestValidationException("ACME domain is required");
+                throw new ValidationException("ACME domain is required");
             }
             result.add(domain);
         }
@@ -614,7 +614,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
     private static String firstNotBlank(String requested, String configured, String message) {
         String result = firstNonBlank(requested, configured);
         if (result == null) {
-            throw new HttpRequestValidationException(message);
+            throw new ValidationException(message);
         }
         return result;
     }
@@ -632,7 +632,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
     private static long secondsOrDefault(Long requested, long configured, String message) {
         long result = requested == null ? configured : requested;
         if (result <= 0) {
-            throw new HttpRequestValidationException(message);
+            throw new ValidationException(message);
         }
         return result;
     }
@@ -669,7 +669,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
             Long authorizationTimeoutSeconds,
             Long orderTimeoutSeconds,
             Boolean agreeToTermsOfService) {
-        static final IssueRequest EMPTY = new IssueRequest(null, null, null, null, null, null, null);
+        public static final IssueRequest EMPTY = new IssueRequest(null, null, null, null, null, null, null);
     }
 
     private record IssueSettings(
@@ -697,12 +697,21 @@ public class AcmeCertificateService implements ServiceLifecycle {
             Optional<TrustedCertificateDescriptor> issuerTrustAnchor) {
     }
 
-    static final class ConfigurationUnavailableException extends RuntimeException {
+    public static final class ConfigurationUnavailableException extends RuntimeException {
         private ConfigurationUnavailableException(String message) {
             super(message);
         }
     }
 
-    static final class IssuanceBusyException extends RuntimeException {
+    public static final class IssuanceBusyException extends RuntimeException {
+        public IssuanceBusyException() {
+        }
+    }
+
+    /** An invalid ACME request whose message is safe to return to the caller. */
+    public static final class ValidationException extends IllegalArgumentException {
+        private ValidationException(String message) {
+            super(message);
+        }
     }
 }

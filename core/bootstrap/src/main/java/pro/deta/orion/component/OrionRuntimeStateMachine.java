@@ -15,7 +15,7 @@ import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.lifecycle.state.StateTransitionResult;
 import pro.deta.orion.transport.TransportLifecycleStateMachine;
-import pro.deta.orion.transport.http.AcmeCertificateServiceStateMachine;
+import pro.deta.orion.acme.AcmeCertificateServiceStateMachine;
 
 import java.util.List;
 import java.util.function.Supplier;

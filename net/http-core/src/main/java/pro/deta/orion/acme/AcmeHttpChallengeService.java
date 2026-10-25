@@ -1,4 +1,4 @@
-package pro.deta.orion.transport.http;
+package pro.deta.orion.acme;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;

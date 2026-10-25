@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.acme.AcmeCertificateService;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import jakarta.inject.Inject;

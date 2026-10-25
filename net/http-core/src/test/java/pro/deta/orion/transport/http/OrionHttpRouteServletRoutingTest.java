@@ -1,5 +1,8 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.acme.AcmeCertificateService;
+import pro.deta.orion.acme.AcmeCertificateIssuer;
+
 import pro.deta.orion.config.OrionConfigurationEditor;
 
 import com.fasterxml.jackson.databind.ObjectMapper;

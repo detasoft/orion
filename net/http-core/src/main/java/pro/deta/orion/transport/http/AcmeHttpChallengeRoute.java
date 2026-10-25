@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.acme.AcmeHttpChallengeService;
+
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 

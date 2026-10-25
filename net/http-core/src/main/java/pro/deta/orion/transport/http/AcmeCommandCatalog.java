@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.acme.AcmeCertificateService;
+
 import jakarta.inject.Inject;
 import jakarta.inject.Provider;
 import pro.deta.orion.util.LogScope;

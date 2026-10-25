@@ -1,5 +1,9 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.acme.AcmeCertificateService;
+import pro.deta.orion.acme.AcmeCertificateIssueException;
+import pro.deta.orion.acme.IssuedAcmeCertificate;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.inject.Inject;
 import pro.deta.orion.util.LogScope;
@@ -67,6 +71,8 @@ public class OrionAdminAcmeCertificateRoute extends BaseAdminRoute {
             return OrionHttpResponse.json(SC_CONFLICT, Map.of(
                     "status", "busy",
                     "message", "ACME certificate issuance is already in progress"));
+        } catch (AcmeCertificateService.ValidationException invalid) {
+            throw new HttpRequestValidationException(invalid.getMessage());
         }
     }
 
