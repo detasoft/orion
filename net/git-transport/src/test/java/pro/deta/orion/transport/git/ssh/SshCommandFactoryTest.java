@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.auth.StorageManagement;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.auth.SshConnectionCredentials;
 import pro.deta.orion.OrionAccessControlService;
@@ -94,6 +95,35 @@ class SshCommandFactoryTest {
     }
 
     private final List<OrionExecutor> executors = new java.util.ArrayList<>();
+
+    @Test
+    void firstPushPreparesRegistrationBeforeCreatingStorage() throws Exception {
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        AtomicInteger preparations = new AtomicInteger();
+        StorageManagement management = (StorageManagement) Proxy.newProxyInstance(
+                StorageManagement.class.getClassLoader(), new Class<?>[]{StorageManagement.class},
+                (proxy, method, args) -> {
+                    if (!method.getName().equals("prepareRepository")) throw new UnsupportedOperationException();
+                    assertEquals("demo", args[1]);
+                    assertFalse(provider.exists("demo"));
+                    preparations.incrementAndGet();
+                    return new StorageManagement.Success<Void>(null);
+                });
+        Grant grant = new Grant("creator", List.of(new GrantExpression(GrantKey.REPOSITORY, "demo"),
+                new GrantExpression(GrantKey.CREATE, "true"), new GrantExpression(GrantKey.READ_WRITE, "true")));
+        TestChannelSession channel = channel(true);
+        channel.getSession().setAttribute(SSH_AUTHENTICATED_USER, new InternalUserImpl("operator", List.of(grant)));
+        OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
+        executors.add(executor);
+        SshCommandFactory factory = new SshCommandFactory(executor, null, new PlainCommandRenderer(),
+                new DefaultGitNativeRepositoryService(provider), null, null, new TestConfiguration(EVENTS).editor(),
+                management);
+        ExitOutcome result = run(factory, channel, "git-receive-pack '/demo.git'", new ByteArrayOutputStream(),
+                new ByteArrayOutputStream(), new ByteArrayInputStream("0000".getBytes(StandardCharsets.US_ASCII)));
+        assertEquals(0, result.code());
+        assertEquals(1, preparations.get());
+        assertTrue(provider.exists("demo"));
+    }
 
     @Test
     void eachExecOnTheSameSessionResolvesCurrentIdentityOnce() throws Exception {
@@ -735,7 +765,7 @@ class SshCommandFactoryTest {
                 new PlainCommandRenderer(),
                 new DefaultGitNativeRepositoryService(provider),
                 null,
-                null, new TestConfiguration(EVENTS).editor());
+                null, new TestConfiguration(EVENTS).editor(), null);
     }
 
     private static Environment environment(Map<String, String> values) {
@@ -766,7 +796,7 @@ class SshCommandFactoryTest {
                 new PlainCommandRenderer(),
                 null,
                 null,
-                accessControlService, new TestConfiguration(EVENTS).editor());
+                accessControlService, new TestConfiguration(EVENTS).editor(), null);
     }
 
     private static ExitOutcome run(

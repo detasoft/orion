@@ -39,6 +39,7 @@ import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.bootstrap.config.GitPackfileUriConfig;
 import pro.deta.orion.bootstrap.config.GitTransportConfig;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
+import pro.deta.orion.auth.StorageManagement;
 import pro.deta.orion.transport.git.auth.AuthenticatedRepositoryAccessHook;
 import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
 import pro.deta.orion.transport.git.auth.RootSshKeyEnrollmentSession;
@@ -66,6 +67,7 @@ public class SshCommandFactory implements CommandFactory {
     private final GitTransportConfig gitTransportConfig;
     private final OrionAccessControlService accessControlService;
     private final OrionConfigurationEditor editor;
+    private final StorageManagement storageManagement;
 
     @Inject
     public SshCommandFactory(
@@ -75,7 +77,8 @@ public class SshCommandFactory implements CommandFactory {
             DefaultGitNativeRepositoryService repositoryService,
             GitTransportConfig gitTransportConfig,
             OrionAccessControlService accessControlService,
-            OrionConfigurationEditor editor) {
+            OrionConfigurationEditor editor,
+            StorageManagement storageManagement) {
         this.orionExecutor = orionExecutor;
         this.commandDispatcher = commandDispatcher;
         this.commandRenderer = commandRenderer;
@@ -83,6 +86,7 @@ public class SshCommandFactory implements CommandFactory {
         this.gitTransportConfig = gitTransportConfig;
         this.accessControlService = accessControlService;
         this.editor = editor;
+        this.storageManagement = storageManagement;
     }
 
     @Override
@@ -319,7 +323,8 @@ public class SshCommandFactory implements CommandFactory {
                             gitProtocol(environment));
                     new GitBlockingWireSession(
                             data -> repositoryService.open(data,
-                                    new AuthenticatedRepositoryAccessHook(securityContext), packfileUriBase()),
+                                    new AuthenticatedRepositoryAccessHook(securityContext), packfileUriBase(),
+                                    () -> storageManagement.prepareRepository(securityContext, data.repositoryPath())),
                             GitWireConfiguration.allSupported(),
                             bootstrap.wire())
                             .serveCommand(bootstrap.data());

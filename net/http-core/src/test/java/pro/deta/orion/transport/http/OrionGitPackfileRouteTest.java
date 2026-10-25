@@ -264,7 +264,7 @@ class OrionGitPackfileRouteTest {
     }
 
     private static OrionGitRoute gitRoute(NativeGitRepositoryProvider provider) {
-        return new OrionGitRoute(new DefaultGitNativeRepositoryService(provider), new GitTransportConfig(), provider);
+        return new OrionGitRoute(new DefaultGitNativeRepositoryService(provider), new GitTransportConfig(), provider, null);
     }
 
     private static OrionDocument organizationDocument(boolean denySecret) {

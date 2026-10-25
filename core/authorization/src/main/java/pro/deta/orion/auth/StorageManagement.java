@@ -9,6 +9,7 @@ import java.util.Optional;
 /** Authorized storage configuration and repository creation shared by HTTP and SSH. */
 public interface StorageManagement {
     Outcome<Created> createRepository(SecurityContext actor, String name, Optional<S3StorageBinding> storage);
+    Outcome<Void> prepareRepository(SecurityContext actor, String name);
     Outcome<Connections> connections(SecurityContext actor, Optional<OrganizationId> owner);
     Outcome<Connections> saveConnection(SecurityContext actor, Optional<OrganizationId> owner,
             String revision, boolean create, S3Input input);

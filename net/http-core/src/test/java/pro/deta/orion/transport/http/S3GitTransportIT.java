@@ -131,7 +131,7 @@ class S3GitTransportIT {
             SecurityContext actor = SecurityContext.createContext()
                     .withUserIdentity(new InternalUserImpl("tester", List.of(grant)));
             OrionGitRoute route = new OrionGitRoute(new DefaultGitNativeRepositoryService(provider),
-                    new GitTransportConfig(), provider);
+                    new GitTransportConfig(), provider, null);
             OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of(route)),
                     new OrionHttpResponseWriter(new ObjectMapper())) {
                 @Override

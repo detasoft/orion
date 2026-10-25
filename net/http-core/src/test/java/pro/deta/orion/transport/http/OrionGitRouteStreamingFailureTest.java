@@ -88,7 +88,7 @@ class OrionGitRouteStreamingFailureTest {
             }
         };
         OrionGitRoute route = new OrionGitRoute(new DefaultGitNativeRepositoryService(provider),
-                new GitTransportConfig(), provider);
+                new GitTransportConfig(), provider, null);
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
                 new OrionHttpRouteRegistry(Set.of(route)), new OrionHttpResponseWriter(new ObjectMapper())) {
             @Override

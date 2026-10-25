@@ -183,6 +183,19 @@ class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
         assertThat(backend.exists("demo")).isFalse();
     }
 
+    @Test
+    void failedRegistrationDoesNotCreateStorage() {
+        for (pro.deta.orion.auth.StorageManagement.FailureCode code : List.of(
+                pro.deta.orion.auth.StorageManagement.FailureCode.DENIED,
+                pro.deta.orion.auth.StorageManagement.FailureCode.CONFLICT)) {
+            assertThatThrownBy(() -> service.open(receiveRequest("demo"), this, Optional.empty(),
+                    () -> new pro.deta.orion.auth.StorageManagement.Failure<>(code, "registration rejected")))
+                    .isInstanceOf(code == pro.deta.orion.auth.StorageManagement.FailureCode.DENIED
+                            ? AccessDeniedException.class : java.io.IOException.class);
+            assertThat(backend.exists("demo")).isFalse();
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void publishesIndependentUpdatesAndAbortsAtomicGroupOnStaleRef(boolean atomic) throws Exception {

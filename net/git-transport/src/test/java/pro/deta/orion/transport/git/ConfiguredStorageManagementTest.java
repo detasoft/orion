@@ -12,6 +12,14 @@ import pro.deta.orion.config.*;
 import pro.deta.orion.auth.*;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.parser.wire.GitWireBootstrap;
+import pro.deta.orion.git.parser.v2.GitRepositoryContext;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
+import pro.deta.orion.transport.git.auth.AuthenticatedRepositoryAccessHook;
 import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
@@ -133,6 +141,89 @@ class ConfiguredStorageManagementTest {
         assertThat(management.createRepository(actor, "acme/team/local", Optional.empty()))
                 .isEqualTo(new StorageManagement.Success<>(new StorageManagement.Created(false)));
         EVENTS.await();
+        assertThat(activeDocument().organizations().getFirst().teams().getFirst().repositories())
+                .extracting(OrionDocument.Repository::id).containsExactly("local");
+    }
+
+    @Test
+    void localCreationRegistersScopeWithoutGrantingSiblingAccess() throws Exception {
+        setGrants(List.of(grant(GrantKey.REPOSITORY, "acme/team/local", GrantKey.CREATE),
+                grant(GrantKey.REPOSITORY, "acme/team/local", GrantKey.READ_WRITE)), true);
+        pro.deta.orion.auth.check.resource.RepositoryResource resource =
+                pro.deta.orion.auth.check.resource.RepositoryResource.of("acme/team/local");
+        assertThat(pro.deta.orion.auth.check.rule.RepositoryAccessRules.read()
+                .evaluate(actor, resource).allowed()).isFalse();
+
+        assertThat(management.createRepository(actor, "acme/team/local", Optional.empty()))
+                .isEqualTo(new StorageManagement.Success<>(new StorageManagement.Created(true)));
+        EVENTS.await();
+
+        assertThat(pro.deta.orion.auth.check.rule.RepositoryAccessRules.read()
+                .evaluate(actor, resource).allowed()).isTrue();
+        assertThat(pro.deta.orion.auth.check.rule.RepositoryAccessRules.write()
+                .evaluate(actor, resource).allowed()).isTrue();
+        assertThat(pro.deta.orion.auth.check.rule.RepositoryAccessRules.read().evaluate(actor,
+                pro.deta.orion.auth.check.resource.RepositoryResource.of("acme/team/sibling")).allowed())
+                .isFalse();
+        assertThat(activeDocument().organizations().getFirst().teams().getFirst().repositories())
+                .singleElement().satisfies(repository -> {
+                    assertThat(repository.id()).isEqualTo("local");
+                    assertThat(repository.storage()).isEmpty();
+                    assertThat(repository.grants()).isEmpty();
+                    assertThat(repository.roles()).isEmpty();
+                });
+    }
+
+    @Test
+    void firstPushRegistersBeforePublishingAndAllowsSubsequentRead() throws Exception {
+        setGrants(List.of(grant(GrantKey.REPOSITORY, "acme/team/local", GrantKey.CREATE),
+                grant(GrantKey.REPOSITORY, "acme/team/local", GrantKey.READ_WRITE)), true);
+        DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(repositories);
+        AuthenticatedRepositoryAccessHook hook = new AuthenticatedRepositoryAccessHook(actor);
+        try (GitRepositoryContext context = service.open(
+                GitWireBootstrap.sshCommandData("git-receive-pack 'acme/team/local'", null), hook,
+                Optional.empty(), () -> management.prepareRepository(actor, "acme/team/local"))) {
+            NativeGitRepository repository = repositories.openForWrite("acme/team/local")
+                    .valueOrFailure("repository");
+            ObjectId object = repository.writeObject(GitObjectType.BLOB, new byte[]{1});
+            assertThat(context.publish(Optional.empty(), List.of(RefUpdate.fromWire("refs/heads/main",
+                    "0".repeat(40), object.toHex())), false)).singleElement()
+                    .satisfies(result -> assertThat(result.status()).isEqualTo(
+                            RefUpdateResult.Status.APPLIED));
+        }
+        try (GitRepositoryContext ignored = service.open(
+                GitWireBootstrap.sshCommandData("git-upload-pack 'acme/team/local'", null), hook)) {
+            assertThat(repositories.exists("acme/team/local")).isTrue();
+        }
+        for (String denied : List.of("other/team/local", "acme/missing/local", "acme/team/sibling")) {
+            assertFailure(management.prepareRepository(actor, denied), StorageManagement.FailureCode.DENIED);
+            assertThat(repositories.exists(denied)).isFalse();
+        }
+    }
+
+    @Test
+    void localStorageFailureRetainsRegistrationForAnIdenticalRetry() {
+        java.util.concurrent.atomic.AtomicBoolean failed = new java.util.concurrent.atomic.AtomicBoolean(true);
+        try (NativeGitRepositoryProvider observed = new NativeGitRepositoryProvider(
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager())) {
+            @Override
+            public Result<NativeGitRepository> create(String name) {
+                assertThat(activeDocument().organizations().getFirst().teams().getFirst().repositories())
+                        .extracting(OrionDocument.Repository::id).containsExactly("local");
+                if (failed.get()) return new Result.Failure<>(Result.FailureCode.GENERAL);
+                return super.create(name);
+            }
+        }) {
+            ConfiguredStorageManagement operation = new ConfiguredStorageManagement(acl, editor, material, observed);
+            assertFailure(operation.createRepository(actor, "acme/team/local", Optional.empty()),
+                    StorageManagement.FailureCode.STORAGE_RETRY);
+            failed.set(false);
+            assertThat(operation.createRepository(actor, "acme/team/local", Optional.empty()))
+                    .isEqualTo(new StorageManagement.Success<>(new StorageManagement.Created(true)));
+            assertThat(operation.createRepository(actor, "acme/team/local", Optional.empty()))
+                    .isEqualTo(new StorageManagement.Success<>(new StorageManagement.Created(false)));
+            assertThat(storage.saves).isEqualTo(1);
+        }
     }
 
     @Test
@@ -357,7 +448,8 @@ class ConfiguredStorageManagementTest {
                 "repository create acme/team/s3 connection=organization/archive location=s3://test-bucket/prefix", context)))
                 .isEqualTo(new pro.deta.orion.command.CommandResult.Message("Repository created"));
         assertThat(activeDocument().organizations().getFirst().teams().getFirst()
-                .repositories().getFirst().storage()).contains(s3Binding());
+                .repositories()).filteredOn(repository -> repository.id().equals("s3"))
+                .singleElement().satisfies(repository -> assertThat(repository.storage()).contains(s3Binding()));
         assertThat(dispatcher.dispatch(new pro.deta.orion.command.CommandRequest(
                 "repository create acme/team/forbidden secret-key=secret", context)))
                 .isInstanceOf(pro.deta.orion.command.CommandResult.Failure.class);
@@ -472,6 +564,20 @@ class ConfiguredStorageManagementTest {
         EVENTS.await();
         assertThat(((StorageManagement.Success<StorageManagement.Connections>) management.connections(
                 actor, Optional.of(organization))).value().connections().getFirst().canUse()).isTrue();
+    }
+
+    @Test
+    void preparingConfiguredS3RepositoryPreservesItsBindingWithoutConnectionUse() throws Exception {
+        management.saveConnection(actor, Optional.of(organization), revision(), true, input("secret".toCharArray()));
+        EVENTS.await();
+        management.createRepository(actor, "acme/team/archive", Optional.of(s3Binding()));
+        EVENTS.await();
+        setGrants(List.of(grant(GrantKey.REPOSITORY, "acme/team/archive", GrantKey.CREATE),
+                grant(GrantKey.REPOSITORY, "acme/team/archive", GrantKey.READ_WRITE)), true);
+        assertThat(management.prepareRepository(actor, "acme/team/archive"))
+                .isEqualTo(new StorageManagement.Success<Void>(null));
+        assertThat(activeDocument().organizations().getFirst().teams().getFirst().repositories())
+                .singleElement().satisfies(repository -> assertThat(repository.storage()).contains(s3Binding()));
     }
 
     private S3StorageBinding s3Binding() {

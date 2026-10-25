@@ -317,7 +317,7 @@ class GitSshTransportStateMachineTest {
                 new PlainCommandRenderer(),
                 null,
                 null,
-                accessControlService, editor);
+                accessControlService, editor, null);
         OrionShell shell = new OrionShell(
                 dispatcher,
                 new CommandNavigator(CommandNode.builder().build()),

@@ -1010,6 +1010,11 @@ including for administrators with matching repository grants.
 Repository ACL grants use `READ_WRITE` for combined read/write access. The admin user API
 accepts `readWrite: true` in each repository grant. Existing ACL XML must replace the old
 `WRITE` key with `READ_WRITE`, and API clients must replace the `write` field with `readWrite`.
+Creating an organization repository through the API, SSH command, or first authenticated push
+registers it in the existing organization and team before creating storage. This applies to local
+repositories as well as S3 repositories and adds no grants. If storage creation fails after registration,
+retry the same request; the saved registration is retained. Missing teams and foreign organizations
+remain inaccessible to organization users.
 For system and organization identities alike, a bare `REPOSITORY` grant permits read access,
 as do `READ=true` and `READ_WRITE=true` grants for the repository. A grant dedicated to
 `CREATE`, `FORCE`, `ADMIN`, or `SHUTDOWN` does not imply read access; add `READ=true` or

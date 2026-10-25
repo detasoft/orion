@@ -28,6 +28,7 @@ import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.schema.orion.v2.*;
 import pro.deta.orion.util.Result;
+import pro.deta.orion.util.OrionUtils;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -61,6 +62,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
             OrionDocumentRevision snapshot = editor.current();
             requireRepositoryCreate(actor, snapshot.result()
                     .valueOrFailure("Cannot read configuration document"), name);
+            boolean registered = false;
             if (storage.isPresent()) {
                 RepositoryAddress address = RepositoryAddress.parse(name);
                 if (name.startsWith("bootstrap/") || name.startsWith("proxy/")) throw new IllegalArgumentException();
@@ -79,11 +81,13 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                     if (!(connection instanceof Connection.S3 s3)) throw new IllegalArgumentException();
                     // Organization-local grants never authorize the server's default credential chain.
                     if (s3.secretKey().isEmpty()) require(admin(actor, document));
-                    return bind(document, address, binding);
+                    return bind(document, address, Optional.of(binding));
                 }).apply();
             } else if (binding(snapshot.result()
                     .valueOrFailure("Cannot read configuration document"), name).isPresent()) {
                 throw new Conflict();
+            } else {
+                registered = registerRepository(actor, name, snapshot, Optional.empty());
             }
             Result<NativeGitRepository> result;
             try {
@@ -96,11 +100,53 @@ public final class ConfiguredStorageManagement implements StorageManagement {
             }
             Result.Failure<NativeGitRepository> failure = (Result.Failure<NativeGitRepository>) result;
             if (failure.code() == Result.FailureCode.FILE_ALREADY_EXISTS) return new Success<>(new Created(false));
-            return storage.isPresent()
+            return storage.isPresent() || registered
                     ? new Failure<>(FailureCode.STORAGE_RETRY,
-                            "Storage metadata creation failed. The binding is saved; retry the identical request.")
+                            "Storage metadata creation failed. The repository is registered; retry the identical request.")
                     : new Failure<>(FailureCode.UNAVAILABLE, "Repository creation failed");
         });
+    }
+
+    @Override
+    public Outcome<Void> prepareRepository(SecurityContext actor, String name) {
+        return safely(() -> {
+            RepositoryName.parse(name);
+            OrionDocumentRevision snapshot = editor.current();
+            OrionDocument document = snapshot.result().valueOrFailure("Cannot read configuration document");
+            requireRepositoryCreate(actor, document, name);
+            registerRepository(actor, name, snapshot, binding(document, name));
+            return new Success<>(null);
+        });
+    }
+
+    private boolean registerRepository(SecurityContext actor, String name, OrionDocumentRevision snapshot,
+            Optional<S3StorageBinding> storage) {
+        RepositoryAddress address;
+        try {
+            address = RepositoryAddress.parse(name);
+        } catch (IllegalArgumentException unscoped) {
+            return false;
+        }
+        OrionDocument document = snapshot.result().valueOrFailure("Cannot read configuration document");
+        for (OrionDocument.Organization organization : document.organizations()) {
+            if (!organization.id().equals(address.organizationId())) continue;
+            for (OrionDocument.Team team : organization.teams()) {
+                if (!team.id().equals(address.teamId())) continue;
+                editor.edit(snapshot, new ChangeMetadata(
+                        new UserEmail(actor.getUserIdentity().getUserId(), ""), "Register repository " + name))
+                        .update(current -> {
+                            requireRepositoryCreate(actor, current, name);
+                            return bind(current, address, storage);
+                        }).apply();
+                if (!OrionUtils.waitForCondition(() -> repository(editor.current().result()
+                        .valueOrFailure("Cannot read configuration document"), name)
+                        .map(entry -> entry.storage().equals(storage)).orElse(false))) {
+                    throw new IllegalStateException("Repository registration was not activated");
+                }
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
@@ -229,7 +275,11 @@ public final class ConfiguredStorageManagement implements StorageManagement {
     private void requireRepositoryCreate(SecurityContext actor, OrionDocument document, String name) {
         if (admin(actor, document)) return;
         UserIdentity identity = actor.getUserIdentity();
-        require(!identity.isAnonymous() && identity.getOrganizationId().isPresent());
+        require(!identity.isAnonymous());
+        if (identity.getOrganizationId().isEmpty()) {
+            require(RepositoryAccessRules.create().evaluate(actor, RepositoryResource.of(name)).allowed());
+            return;
+        }
         SecurityContext current = SecurityContext.createContext().withUserIdentity(new InternalUserImpl(
                 identity.getUserId(), identity.getOrganizationId().orElseThrow(), () -> document));
         require(RepositoryAccessRules.create().evaluate(current, RepositoryResource.of(name)).allowed());
@@ -242,7 +292,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                         Optional.empty(), document);
     }
 
-    private OrionDocument bind(OrionDocument document, RepositoryAddress address, S3StorageBinding storage) {
+    private OrionDocument bind(OrionDocument document, RepositoryAddress address, Optional<S3StorageBinding> storage) {
         OrionDocument.Organization organization = organization(document, address.organizationId());
         List<OrionDocument.Team> teams = new ArrayList<>();
         boolean found = false;
@@ -252,13 +302,13 @@ public final class ConfiguredStorageManagement implements StorageManagement {
             List<OrionDocument.Repository> entries = new ArrayList<>(team.repositories());
             for (OrionDocument.Repository repository : entries) {
                 if (!repository.id().equals(address.repositoryId())) continue;
-                if (!repository.storage().equals(Optional.of(storage))) throw new Conflict();
+                if (!repository.storage().equals(storage)) throw new Conflict();
                 return document;
             }
             if (repositories.exists(address.toString())) throw new Conflict();
             entries.add(new OrionDocument.Repository(address.repositoryId(), "",
                     OrionDocument.Repository.DEFAULT_BRANCH, List.of(), List.of(),
-                    List.of(), List.of(), Optional.of(storage)));
+                    List.of(), List.of(), storage));
             teams.add(new OrionDocument.Team(team.id(), team.displayName(), team.grants(), team.roles(), entries));
         }
         if (!found) throw new IllegalArgumentException();
@@ -268,11 +318,15 @@ public final class ConfiguredStorageManagement implements StorageManagement {
     }
 
     private static Optional<S3StorageBinding> binding(OrionDocument document, String name) {
+        return repository(document, name).flatMap(OrionDocument.Repository::storage);
+    }
+
+    private static Optional<OrionDocument.Repository> repository(OrionDocument document, String name) {
         for (OrionDocument.Organization organization : document.organizations()) {
             for (OrionDocument.Team team : organization.teams()) {
                 for (OrionDocument.Repository repository : team.repositories()) {
                     if (new RepositoryAddress(organization.id(), team.id(), repository.id()).toString().equals(name)) {
-                        return repository.storage();
+                        return Optional.of(repository);
                     }
                 }
             }

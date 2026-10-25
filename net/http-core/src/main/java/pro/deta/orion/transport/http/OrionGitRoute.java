@@ -4,6 +4,7 @@ import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.NonNull;
 import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.auth.StorageManagement;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.schema.orion.v2.RepositoryName;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
@@ -64,18 +65,21 @@ public class OrionGitRoute implements OrionHttpRoute {
     private final GitTransportConfig gitTransportConfig;
     private final NativeGitRepositoryProvider repositoryProvider;
     private final OrionGitPackfileHandler packfiles;
+    private final StorageManagement storageManagement;
 
     @Inject
     public OrionGitRoute(
             DefaultGitNativeRepositoryService repositoryService,
             GitTransportConfig gitTransportConfig,
-            NativeGitRepositoryProvider repositoryProvider) {
+            NativeGitRepositoryProvider repositoryProvider,
+            StorageManagement storageManagement) {
         this.repositoryService = Objects.requireNonNull(
                 repositoryService,
                 "repositoryService");
         this.gitTransportConfig = Objects.requireNonNull(gitTransportConfig, "gitTransportConfig");
         this.repositoryProvider = Objects.requireNonNull(repositoryProvider, "repositoryProvider");
         this.packfiles = new OrionGitPackfileHandler(repositoryProvider);
+        this.storageManagement = storageManagement;
     }
 
     @Override
@@ -280,7 +284,8 @@ public class OrionGitRoute implements OrionHttpRoute {
             GitBlockingWireTransport wire) {
         return new GitBlockingWireSession(
                 data -> repositoryService.open(data,
-                        new AuthenticatedRepositoryAccessHook(securityContext), packfileUriBase),
+                        new AuthenticatedRepositoryAccessHook(securityContext), packfileUriBase,
+                        () -> storageManagement.prepareRepository(securityContext, data.repositoryPath())),
                 GitWireConfiguration.allSupported(),
                 wire);
     }

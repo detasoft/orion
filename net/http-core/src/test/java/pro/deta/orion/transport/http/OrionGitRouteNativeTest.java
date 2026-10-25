@@ -8,6 +8,8 @@ import jakarta.servlet.WriteListener;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
@@ -26,6 +28,10 @@ import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.GrantKey;
+import pro.deta.orion.schema.acl.User;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
+import pro.deta.orion.schema.orion.v2.TeamId;
 import pro.deta.orion.bootstrap.config.GitTransportConfig;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 
@@ -61,13 +67,58 @@ class OrionGitRouteNativeTest {
     @TempDir
     private Path tempDir;
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void organizationLocalCreationAllowsPushAndReadThroughBothEntryPoints(boolean apiCreation) throws Exception {
+        NativeGitRepositoryProvider provider = provider();
+        Grant access = new Grant("access", List.of(new GrantExpression(GrantKey.REPOSITORY, "acme/team/new"),
+                new GrantExpression(GrantKey.CREATE, "true"), new GrantExpression(GrantKey.READ_WRITE, "true")));
+        User alice = new User("alice", null, null, null, List.of(), List.of(), List.of(access));
+        OrganizationId organization = new OrganizationId("acme");
+        OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(), List.of());
+        OrionDocument.Organization org = new OrionDocument.Organization(organization, "", List.of(alice),
+                List.of(), List.of(), List.of(team), List.of(), List.of(), List.of(), List.of());
+        StorageManagementFixture.State fixture = StorageManagementFixture.open(EVENTS, provider, List.of(org),
+                pro.deta.orion.keymaterial.OrionKeyMaterial.unavailable());
+        SecurityContext actor = SecurityContext.createContext().withUserIdentity(new InternalUserImpl("alice",
+                organization, () -> fixture.desired().editor().current().result().valueOrFailure("configuration")));
+        if (apiCreation) {
+            OrionAdminCreateRepositoryRoute creation = new OrionAdminCreateRepositoryRoute(provider,
+                    fixture.management(), new ObjectMapper());
+            assertThat(creation.doPost(StorageManagementFixture.request("{\"name\":\"acme/team/new\"}",
+                    actor, "acme")).status()).isEqualTo(HttpServletResponse.SC_CREATED);
+        }
+        OrionGitRoute route = new OrionGitRoute(new DefaultGitNativeRepositoryService(provider),
+                autoPackfileUriConfig(), provider, fixture.management());
+        byte[] data = "first-push".getBytes(StandardCharsets.UTF_8);
+        ObjectId object = blobId(data);
+        ResponseRecorder pushed = new ResponseRecorder();
+        service(route, request("POST", "/r/acme/team/new.git/git-receive-pack",
+                "application/x-git-receive-pack-request", null, Map.of(), receiveRequest(object, pack(object, data)),
+                actor), pushed.proxy());
+        assertThat(pushed.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(pushed.body()).contains("ok refs/heads/main\n");
+        ResponseRecorder read = new ResponseRecorder();
+        service(route, request("GET", "/r/acme/team/new.git/info/refs", null, "git-upload-pack",
+                Map.of(), new byte[0], actor), read.proxy());
+        assertThat(read.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(read.body()).contains(object.toHex() + " refs/heads/main");
+        ResponseRecorder denied = new ResponseRecorder();
+        service(route, request("GET", "/r/acme/team/sibling.git/info/refs", null, "git-upload-pack",
+                Map.of(), new byte[0], actor), denied.proxy());
+        assertThat(denied.status).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
+        assertThat(fixture.desired().editor().current().result().valueOrFailure("configuration")
+                .organizations().getFirst().teams().getFirst().repositories())
+                .extracting(OrionDocument.Repository::id).containsExactly("new");
+    }
+
     @Test
     void protocolV2DiscoveryOmitsServiceAnnouncement() throws Exception {
         NativeGitRepositoryProvider provider = provider();
         publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig(), provider);
+                autoPackfileUriConfig(), provider, null);
         ResponseRecorder response = new ResponseRecorder();
 
         service(route,
@@ -103,7 +154,7 @@ class OrionGitRouteNativeTest {
         NativeGitRepositoryProvider provider = provider();
         publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig(), provider);
+                autoPackfileUriConfig(), provider, null);
         ResponseRecorder response = new ResponseRecorder();
 
         service(route, request("GET", "/r/team/project.git/info/refs", null, "git-upload-pack",
@@ -126,7 +177,7 @@ class OrionGitRouteNativeTest {
                         .getBytes(StandardCharsets.UTF_8));
         repository.updateRef("refs/tags/private", NULL_ID, tag.toHex());
         OrionGitRoute route = new OrionGitRoute(new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig(), provider);
+                autoPackfileUriConfig(), provider, null);
         ResponseRecorder legacy = new ResponseRecorder();
 
         service(route, request("GET", "/r/team/project.git/info/refs", null, "git-upload-pack",
@@ -158,7 +209,7 @@ class OrionGitRouteNativeTest {
         NativeGitRepositoryProvider provider = provider();
         PublishedObjectFixture fixture = publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig(), provider);
+                autoPackfileUriConfig(), provider, null);
         ResponseRecorder response = new ResponseRecorder();
 
         assertThatThrownBy(() -> service(route, request("POST", "/r/team/project.git/git-upload-pack",
@@ -178,7 +229,7 @@ class OrionGitRouteNativeTest {
         ObjectId secret = repository.writeObject(GitObjectType.BLOB, "secret".getBytes(StandardCharsets.UTF_8));
         repository.updateRef("refs/heads/secret", NULL_ID, secret.toHex());
         OrionGitRoute route = new OrionGitRoute(new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig(), provider);
+                autoPackfileUriConfig(), provider, null);
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         writePacket(body, "command=fetch\n");
         body.writeBytes("0001".getBytes(StandardCharsets.US_ASCII));
@@ -226,7 +277,7 @@ class OrionGitRouteNativeTest {
         PublishedObjectFixture fixture = publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig(), provider);
+                autoPackfileUriConfig(), provider, null);
         ResponseRecorder response = new ResponseRecorder();
 
         service(route,
@@ -268,7 +319,7 @@ class OrionGitRouteNativeTest {
         PublishedObjectFixture fixture = publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig(), provider);
+                autoPackfileUriConfig(), provider, null);
         ResponseRecorder response = new ResponseRecorder();
 
         service(route,
@@ -300,7 +351,7 @@ class OrionGitRouteNativeTest {
         ObjectId objectId = blobId(data);
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig(), provider);
+                autoPackfileUriConfig(), provider, null);
         ResponseRecorder response = new ResponseRecorder();
 
         service(route,
@@ -330,7 +381,7 @@ class OrionGitRouteNativeTest {
         NativeGitRepositoryProvider provider = provider();
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig(), provider);
+                autoPackfileUriConfig(), provider, null);
         ResponseRecorder response = new ResponseRecorder();
 
         service(route,
@@ -354,7 +405,7 @@ class OrionGitRouteNativeTest {
         NativeGitRepositoryProvider provider = provider();
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig(), provider);
+                autoPackfileUriConfig(), provider, null);
         ResponseRecorder response = new ResponseRecorder();
 
         service(route,
@@ -379,7 +430,7 @@ class OrionGitRouteNativeTest {
         provider.create(REPOSITORY_NAME).valueOrFailure("repository");
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig(), provider);
+                autoPackfileUriConfig(), provider, null);
         ResponseRecorder response = new ResponseRecorder();
 
         service(route,
@@ -406,7 +457,7 @@ class OrionGitRouteNativeTest {
         provider.create(REPOSITORY_NAME).valueOrFailure("repository");
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig(), provider);
+                autoPackfileUriConfig(), provider, null);
 
         for (String contentType : List.of(
                 "application/x-git-upload-pack-request; charset=UTF-8",
@@ -436,7 +487,7 @@ class OrionGitRouteNativeTest {
         publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig(), provider);
+                autoPackfileUriConfig(), provider, null);
         ResponseRecorder response = new ResponseRecorder();
 
         service(route,
@@ -462,7 +513,7 @@ class OrionGitRouteNativeTest {
         NativeGitRepositoryProvider provider = provider();
         publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(
-                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
+                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider, null);
         for (String method : List.of("GET", "HEAD")) {
             ResponseRecorder response = new ResponseRecorder();
             service(route, request(method, "/r/team/project.git/info/refs", null, "git-unknown",
@@ -477,7 +528,7 @@ class OrionGitRouteNativeTest {
         NativeGitRepositoryProvider provider = provider();
         publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(
-                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
+                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider, null);
         for (String method : List.of("GET", "HEAD")) {
             for (String service : new String[]{null, "", " "}) {
                 ResponseRecorder response = new ResponseRecorder();
@@ -496,7 +547,7 @@ class OrionGitRouteNativeTest {
         NativeGitRepositoryProvider provider = provider();
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig(), provider);
+                autoPackfileUriConfig(), provider, null);
         ResponseRecorder getRpcResponse = new ResponseRecorder();
         ResponseRecorder postDiscoveryResponse = new ResponseRecorder();
 
@@ -537,7 +588,7 @@ class OrionGitRouteNativeTest {
         NativeGitRepositoryProvider provider = provider();
         publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(
-                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
+                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider, null);
         for (String path : List.of("/r/team/project/info/refs", "/r/team/project/git-upload-pack")) {
             ResponseRecorder response = new ResponseRecorder();
             service(route, request("GET", path, null, "git-upload-pack", Map.of(),
@@ -560,7 +611,7 @@ class OrionGitRouteNativeTest {
         String name = "organization/team/info/refs/project";
         provider.create(name).valueOrFailure("repository");
         OrionGitRoute route = new OrionGitRoute(
-                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
+                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider, null);
         ResponseRecorder response = new ResponseRecorder();
         service(route, request("GET", "/r/" + name + ".git/info/refs", null, "git-upload-pack",
                 Map.of("Git-Protocol", "version=2"), new byte[0], repositorySecurityContext(name)),
@@ -574,7 +625,7 @@ class OrionGitRouteNativeTest {
         NativeGitRepositoryProvider provider = provider();
         provider.create(REPOSITORY_NAME).valueOrFailure("repository");
         OrionGitRoute route = new OrionGitRoute(
-                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
+                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider, null);
         SecurityContext unrelated = repositorySecurityContext("other/repository");
         for (String operation : List.of("info/refs", "git-upload-pack", "git-receive-pack")) {
             HttpServletRequest original = request(operation.equals("info/refs") ? "GET" : "POST",
@@ -597,7 +648,8 @@ class OrionGitRouteNativeTest {
     void receiveDiscoveryRequiresCreateGrantForMissingRepository() throws Exception {
         NativeGitRepositoryProvider provider = provider();
         OrionGitRoute route = new OrionGitRoute(
-                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
+                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider,
+                StorageManagementFixture.create(EVENTS, provider, List.of()));
         ResponseRecorder denied = new ResponseRecorder();
         service(route, request("GET", "/r/team/project.git/info/refs", null, "git-receive-pack",
                 Map.of(), new byte[0], repositoryWriteSecurityContext()), denied.proxy());
@@ -619,7 +671,7 @@ class OrionGitRouteNativeTest {
     void unknownHttpVerbUsesChildAllowHeader() throws Exception {
         NativeGitRepositoryProvider provider = provider();
         OrionGitRoute route = new OrionGitRoute(
-                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
+                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider, null);
         for (String[] endpoint : new String[][]{
                 {"info/refs", "GET, HEAD"}, {"git-upload-pack", "POST"},
                 {"git-receive-pack", "POST"}, {"objects/pack/" + "a".repeat(40) + ".pack", "GET"}}) {
@@ -636,7 +688,7 @@ class OrionGitRouteNativeTest {
         NativeGitRepositoryProvider provider = provider();
         publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(
-                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
+                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider, null);
         HttpServletRequest original = request("GET", "/r/team/project.git/info/refs", null, "git-upload-pack",
                 Map.of("Git-Protocol", "version=2"), new byte[0], repositorySecurityContext());
         HttpServletRequest mounted = stub(HttpServletRequest.class, (proxy, method, args) ->

@@ -317,7 +317,7 @@ final class OrionGitServer implements GitServer {
             connector.setPort(0);
             http.addConnector(connector);
             OrionGitRoute route = new OrionGitRoute(
-                    repositories, new GitTransportConfig(), provider);
+                    repositories, new GitTransportConfig(), provider, null);
             OrionHttpRouteServlet servlet =
                     new OrionHttpRouteServlet(
                             new OrionHttpRouteRegistry(Set.of(route)),
@@ -355,7 +355,7 @@ final class OrionGitServer implements GitServer {
             });
             executor = new OrionExecutor(4, new OrionThreadFactory());
             ssh.setCommandFactory(new SshCommandFactory(
-                    executor, null, null, repositories, new GitTransportConfig(), null, null));
+                    executor, null, null, repositories, new GitTransportConfig(), null, null, null));
             ssh.start();
             boundPort = ssh.getPort();
         }
