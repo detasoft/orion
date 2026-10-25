@@ -23,7 +23,19 @@ import java.security.interfaces.RSAPrivateCrtKey;
 import java.security.spec.RSAPublicKeySpec;
 import java.security.spec.RSAPrivateCrtKeySpec;
 import java.security.cert.X509Certificate;
+import javax.crypto.AEADBadTagException;
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManagerFactory;
+import java.security.InvalidKeyException;
+import java.security.KeyStore;
+import java.security.SecureRandom;
+import java.security.Signature;
+import java.security.cert.Certificate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -40,21 +52,27 @@ import java.util.Optional;
  * a failed material save invalidates this owner so a caller must reopen the durable state before retrying.
  */
 public class OrionKeyMaterial implements AutoCloseable {
+    private static final int DATA_KEY_BITS = 256;
+    private static final int GCM_TAG_BITS = 128;
+    private static final int GCM_NONCE_BYTES = 12;
+
+    private final SecureRandom secureRandom = new SecureRandom();
     private final KeyMaterialService owner;
     private final SigningIdentity signingIdentity;
     private boolean closed;
 
     private OrionKeyMaterial(
             KeyMaterialService owner,
-            SigningIdentity signingIdentity) {
+            SigningMaterialSet signingMaterial) {
         this.owner = owner;
-        this.signingIdentity = signingIdentity;
+        this.signingIdentity = signingMaterial == null
+                ? SigningIdentity.unavailable() : new SigningIdentity(this, signingMaterial);
     }
 
     public static OrionKeyMaterial open(KeyMaterialContentStore store, KeyMaterialOptions options)
             throws IOException, GeneralSecurityException {
         return new OrionKeyMaterial(
-                KeyMaterialService.open(store, options), SigningIdentity.unavailable());
+                KeyMaterialService.open(store, options), null);
     }
 
     public static OrionKeyMaterial open(
@@ -63,7 +81,7 @@ public class OrionKeyMaterial implements AutoCloseable {
             OrionEventPublisher eventPublisher) throws IOException, GeneralSecurityException {
         return new OrionKeyMaterial(
                 KeyMaterialService.open(store, options, new KeyMaterialStorageCertificateFactory(), eventPublisher),
-                SigningIdentity.unavailable());
+                null);
     }
 
     public static OrionKeyMaterial open(
@@ -106,11 +124,10 @@ public class OrionKeyMaterial implements AutoCloseable {
                 service.generateKeyIfMissing(signingMaterial.active(), activeKeySize);
                 service.save();
             }
-            List<KeyMaterialDescriptor> descriptors = signingMaterial.verificationIncludingActive();
-            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, descriptors);
-            return new OrionKeyMaterial(
-                    service,
-                    capabilities.signingIdentity(signingMaterial));
+            for (KeyMaterialDescriptor descriptor : signingMaterial.verificationIncludingActive()) {
+                service.validateExisting(descriptor);
+            }
+            return new OrionKeyMaterial(service, signingMaterial);
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {
             service.close();
             throw failure;
@@ -206,8 +223,12 @@ public class OrionKeyMaterial implements AutoCloseable {
     public byte[] sign(KeyMaterialDescriptor descriptor, byte[] payload) throws GeneralSecurityException {
         requireAvailable();
         synchronized (owner) {
-            KeyMaterialCapabilities selected = signingOperations(descriptor);
-            return selected.signWith(descriptor, payload);
+            requireSigningMaterial(descriptor);
+            requireBytes(payload, "Payload");
+            Signature signer = Signature.getInstance(descriptor.algorithm().requireSignatureAlgorithm());
+            signer.initSign(owner.getKeyPair(descriptor.alias()).getPrivate());
+            signer.update(payload);
+            return signer.sign();
         }
     }
 
@@ -215,19 +236,23 @@ public class OrionKeyMaterial implements AutoCloseable {
             throws GeneralSecurityException {
         requireAvailable();
         synchronized (owner) {
-            KeyMaterialCapabilities selected = signingOperations(descriptor);
-            return selected.verifyWith(descriptor, payload, signature);
+            requireSigningMaterial(descriptor);
+            requireBytes(payload, "Payload");
+            requireBytes(signature, "Signature");
+            Signature verifier = Signature.getInstance(descriptor.algorithm().requireSignatureAlgorithm());
+            verifier.initVerify(owner.getKeyPair(descriptor.alias()).getPublic());
+            verifier.update(payload);
+            return verifier.verify(signature);
         }
     }
 
-    private KeyMaterialCapabilities signingOperations(KeyMaterialDescriptor descriptor)
-            throws GeneralSecurityException {
+    private void requireSigningMaterial(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
         Objects.requireNonNull(descriptor, "descriptor");
         if (!descriptor.purposes().contains(KeyMaterialPurpose.SERVER_SIGNING)
                 && !descriptor.purposes().contains(KeyMaterialPurpose.CERTIFICATE_AUTHORITY)) {
             throw new IllegalArgumentException("Signatures require server signing or CA material");
         }
-        return KeyMaterialCapabilities.open(owner, List.of(descriptor));
+        require(descriptor);
     }
 
     public ConfigurationSecretEnvelope seal(KeyMaterialDescriptor descriptor, byte[] plaintext,
@@ -239,8 +264,8 @@ public class OrionKeyMaterial implements AutoCloseable {
         synchronized (owner) {
             requireCipher(descriptor);
             prepareConfigurationCipher(descriptor);
-            return KeyMaterialCapabilities.open(owner, List.of(descriptor))
-                    .sealConfigurationSecret(descriptor, plaintext, context);
+            require(descriptor);
+            return sealConfigurationSecret(descriptor, plaintext, context);
         }
     }
 
@@ -249,8 +274,8 @@ public class OrionKeyMaterial implements AutoCloseable {
         requireAvailable();
         synchronized (owner) {
             requireCipher(descriptor);
-            return KeyMaterialCapabilities.open(owner, List.of(descriptor))
-                    .openConfigurationSecret(descriptor, envelope, context);
+            require(descriptor);
+            return openConfigurationSecret(descriptor, envelope, context);
         }
     }
 
@@ -265,7 +290,13 @@ public class OrionKeyMaterial implements AutoCloseable {
         Objects.requireNonNull(descriptor, "descriptor");
         requireAvailable();
         synchronized (owner) {
-            return KeyMaterialCapabilities.open(owner, List.of(descriptor)).x509CertificateChain(descriptor);
+            require(descriptor);
+            List<X509Certificate> chain = CertificateIdentity.requireX509Chain(
+                    Arrays.asList(owner.getCertificateChain(descriptor.alias())));
+            if (chain.size() > 1 && CertificateIdentity.isSelfSigned(chain.getLast())) {
+                return List.copyOf(chain.subList(0, chain.size() - 1));
+            }
+            return chain;
         }
     }
 
@@ -293,7 +324,14 @@ public class OrionKeyMaterial implements AutoCloseable {
     public SSLContext createTlsContext(TlsMaterialConfiguration configuration) throws GeneralSecurityException {
         requireAvailable();
         synchronized (owner) {
-            return certificateIdentity(configuration).createContext();
+            CertificateIdentity identity = certificateIdentity(configuration);
+            List<X509Certificate> chain = identity.certificateChain();
+            if (chain.size() == 1 && CertificateIdentity.isStorageCertificate(chain.getFirst())) {
+                throw new GeneralSecurityException("TLS identity must contain an issued certificate chain");
+            }
+            CertificateIdentity.validateCertificateChain(
+                    chain, publicKey(configuration.identity()), identity.issuerTrustAnchor());
+            return createTlsContext(configuration.identity(), chain, configuration.clientTrustAnchors());
         }
     }
 
@@ -514,14 +552,20 @@ public class OrionKeyMaterial implements AutoCloseable {
             throw new IllegalArgumentException("TLS material configuration must not be null");
         }
         requireAvailable();
-        List<TrustedCertificateDescriptor> trusted = new ArrayList<>();
-        configuration.serverIssuerTrustAnchor().ifPresent(trusted::add);
-        for (TrustedCertificateDescriptor root : configuration.clientTrustAnchors()) {
-            if (!trusted.contains(root)) trusted.add(root);
+        synchronized (owner) {
+            KeyMaterialDescriptor identity = configuration.identity();
+            if (contains(identity.alias(), Set.of())
+                    || !identity.purposes().equals(Set.of(KeyMaterialPurpose.TLS_IDENTITY))) {
+                require(identity);
+            }
+            if (configuration.serverIssuerTrustAnchor().isPresent()) {
+                contains(configuration.serverIssuerTrustAnchor().orElseThrow());
+            }
+            for (TrustedCertificateDescriptor root : configuration.clientTrustAnchors()) {
+                contains(root);
+            }
+            return new CertificateIdentity(this, configuration);
         }
-        return KeyMaterialCapabilities.open(owner, List.of(configuration.identity()), trusted)
-                .certificateIdentity(configuration.identity(), configuration.serverIssuerTrustAnchor(),
-                        configuration.clientTrustAnchors(), configuration.clientAuthentication());
     }
 
     private void requireAvailable() {
@@ -537,4 +581,146 @@ public class OrionKeyMaterial implements AutoCloseable {
         }
     }
 
+    private ConfigurationSecretEnvelope sealConfigurationSecret(
+            KeyMaterialDescriptor descriptor,
+            byte[] plaintext,
+            ConfigurationSecretContext context) throws GeneralSecurityException {
+        requireBytes(plaintext, "Configuration plaintext");
+        requireContext(context);
+        KeyGenerator generator = KeyGenerator.getInstance("AES");
+        generator.init(DATA_KEY_BITS, secureRandom);
+        SecretKey dataKey = generator.generateKey();
+        byte[] nonce = new byte[GCM_NONCE_BYTES];
+        secureRandom.nextBytes(nonce);
+
+        Cipher wrappingCipher = Cipher.getInstance(ConfigurationSecretEnvelopeCodec.AES_WRAP);
+        wrappingCipher.init(Cipher.WRAP_MODE, owner.secretKey(descriptor.alias()));
+        byte[] wrappedDataKey = wrappingCipher.wrap(dataKey);
+
+        Cipher encryptionCipher = Cipher.getInstance(ConfigurationSecretEnvelopeCodec.AES_GCM);
+        encryptionCipher.init(
+                Cipher.ENCRYPT_MODE,
+                dataKey,
+                new GCMParameterSpec(GCM_TAG_BITS, nonce));
+        encryptionCipher.updateAAD(context.authenticatedBytes());
+        byte[] ciphertext = encryptionCipher.doFinal(plaintext);
+        return new ConfigurationSecretEnvelope(
+                ConfigurationSecretEnvelopeCodec.CURRENT_VERSION,
+                descriptor.alias(),
+                descriptor.version(),
+                ConfigurationSecretEnvelopeCodec.AES_WRAP,
+                ConfigurationSecretEnvelopeCodec.AES_GCM,
+                ConfigurationSecretEnvelopeCodec.BASE64_URL,
+                wrappedDataKey,
+                nonce,
+                ciphertext);
+    }
+
+    private byte[] openConfigurationSecret(
+            KeyMaterialDescriptor descriptor,
+            ConfigurationSecretEnvelope envelope,
+            ConfigurationSecretContext context) throws GeneralSecurityException {
+        requireContext(context);
+        requireEnvelopeMatches(descriptor, envelope);
+        Cipher wrappingCipher = Cipher.getInstance(ConfigurationSecretEnvelopeCodec.AES_WRAP);
+        wrappingCipher.init(Cipher.UNWRAP_MODE, owner.secretKey(descriptor.alias()));
+        SecretKey dataKey;
+        try {
+            dataKey = (SecretKey) wrappingCipher.unwrap(
+                    envelope.wrappedDataKey(),
+                    "AES",
+                    Cipher.SECRET_KEY);
+        } catch (InvalidKeyException e) {
+            throw authenticationFailure(e);
+        }
+
+        Cipher decryptionCipher = Cipher.getInstance(ConfigurationSecretEnvelopeCodec.AES_GCM);
+        decryptionCipher.init(
+                Cipher.DECRYPT_MODE,
+                dataKey,
+                new GCMParameterSpec(GCM_TAG_BITS, envelope.nonce()));
+        decryptionCipher.updateAAD(context.authenticatedBytes());
+        try {
+            return decryptionCipher.doFinal(envelope.ciphertext());
+        } catch (AEADBadTagException e) {
+            throw authenticationFailure(e);
+        }
+    }
+
+    private static void requireEnvelopeMatches(
+            KeyMaterialDescriptor descriptor,
+            ConfigurationSecretEnvelope envelope) throws ConfigurationSecretException {
+        if (envelope == null) {
+            throw new IllegalArgumentException("Configuration secret envelope must not be null");
+        }
+        if (!descriptor.alias().equals(envelope.keyAlias())
+                || descriptor.version() != envelope.keyVersion()) {
+            throw new ConfigurationSecretException(
+                    ConfigurationSecretException.Reason.MATERIAL_MISMATCH,
+                    "Configuration secret wrapping material does not match the selected material");
+        }
+        if (envelope.version() != ConfigurationSecretEnvelopeCodec.CURRENT_VERSION
+                || !ConfigurationSecretEnvelopeCodec.AES_WRAP.equals(envelope.wrappingAlgorithm())
+                || !ConfigurationSecretEnvelopeCodec.AES_GCM.equals(envelope.encryptionAlgorithm())
+                || !ConfigurationSecretEnvelopeCodec.BASE64_URL.equals(envelope.encoding())) {
+            throw new ConfigurationSecretException(
+                    ConfigurationSecretException.Reason.UNSUPPORTED,
+                    "Configuration secret envelope metadata is unsupported");
+        }
+    }
+
+    private static void requireContext(ConfigurationSecretContext context) {
+        if (context == null) {
+            throw new IllegalArgumentException("Configuration secret context must not be null");
+        }
+    }
+
+    private static ConfigurationSecretException authenticationFailure(Throwable cause) {
+        return new ConfigurationSecretException(
+                ConfigurationSecretException.Reason.AUTHENTICATION_FAILED,
+                "Configuration secret authentication failed",
+                cause);
+    }
+
+    private SSLContext createTlsContext(
+            KeyMaterialDescriptor descriptor,
+            List<X509Certificate> identityChain,
+            List<TrustedCertificateDescriptor> clientTrust) throws GeneralSecurityException {
+        char[] password = java.util.UUID.randomUUID().toString().toCharArray();
+        try {
+            KeyStore keyStore = KeyStore.getInstance(KeyMaterialConstants.DEFAULT_KEY_STORE_TYPE);
+            keyStore.load(null, password);
+            KeyPair keyPair = owner.getKeyPair(descriptor.alias());
+            keyStore.setKeyEntry(
+                    descriptor.alias(),
+                    keyPair.getPrivate(),
+                    password,
+                    identityChain.toArray(Certificate[]::new));
+            KeyManagerFactory factory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+            factory.init(keyStore, password);
+            KeyStore trustStore = KeyStore.getInstance(KeyMaterialConstants.DEFAULT_KEY_STORE_TYPE);
+            trustStore.load(null, password);
+            for (TrustedCertificateDescriptor trustedCertificate : clientTrust) {
+                trustStore.setCertificateEntry(
+                        trustedCertificate.alias(),
+                        owner.getTrustedCertificate(trustedCertificate));
+            }
+            TrustManagerFactory trustFactory = TrustManagerFactory.getInstance(
+                    TrustManagerFactory.getDefaultAlgorithm());
+            trustFactory.init(trustStore);
+            SSLContext context = SSLContext.getInstance("TLS");
+            context.init(factory.getKeyManagers(), trustFactory.getTrustManagers(), secureRandom);
+            return context;
+        } catch (java.io.IOException e) {
+            throw new GeneralSecurityException("Cannot create TLS key store", e);
+        } finally {
+            Arrays.fill(password, '\0');
+        }
+    }
+
+    private static void requireBytes(byte[] value, String label) {
+        if (value == null || value.length == 0) {
+            throw new IllegalArgumentException(label + " must not be empty");
+        }
+    }
 }

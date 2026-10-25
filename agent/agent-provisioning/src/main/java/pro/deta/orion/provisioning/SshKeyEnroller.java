@@ -3,11 +3,9 @@ package pro.deta.orion.provisioning;
 import java.util.Objects;
 import pro.deta.orion.decision.ConnectionFailureHandler;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
-import pro.deta.orion.keymaterial.SshClientKeyCapability;
 import pro.deta.orion.lifecycle.state.TestOnly;
 
 import java.nio.charset.StandardCharsets;
-import java.security.GeneralSecurityException;
 import java.security.KeyPair;
 import java.security.PublicKey;
 import java.util.Optional;
@@ -121,17 +119,20 @@ public final class SshKeyEnroller {
 
     public void enroll(
             SshEndpoint endpoint,
-            SshClientKeyCapability keyCapability,
+            KeyPair selectedKey,
             Optional<BootstrapPassword> bootstrapPassword,
             ProvisioningOptions options) throws SshKeyEnrollmentException {
         if (bootstrapPassword == null) {
             throw new IllegalArgumentException("Bootstrap password option must not be null");
         }
         try {
-            if (endpoint == null || keyCapability == null || options == null) {
+            if (endpoint == null || selectedKey == null || options == null) {
                 throw new IllegalArgumentException("SSH key enrollment arguments must not be null");
             }
-            KeyPair selectedKey = selectedKey(keyCapability);
+            if (selectedKey.getPrivate() == null || selectedKey.getPublic() == null) {
+                throw new SshKeyEnrollmentException(
+                        EnrollmentFailure.KEY_MATERIAL, "SSH client key material is unavailable");
+            }
             if (alreadyEnrolled(endpoint, selectedKey, options)) {
                 return;
             }
@@ -144,20 +145,6 @@ public final class SshKeyEnroller {
             verifyEnrollment(endpoint, selectedKey, options);
         } finally {
             bootstrapPassword.ifPresent(BootstrapPassword::close);
-        }
-    }
-
-    private static KeyPair selectedKey(SshClientKeyCapability keyCapability)
-            throws SshKeyEnrollmentException {
-        try {
-            KeyPair keyPair = keyCapability.keyPair();
-            if (keyPair == null || keyPair.getPrivate() == null || keyPair.getPublic() == null) {
-                throw new GeneralSecurityException("Incomplete SSH client key pair");
-            }
-            return keyPair;
-        } catch (GeneralSecurityException error) {
-            throw new SshKeyEnrollmentException(
-                    EnrollmentFailure.KEY_MATERIAL, "SSH client key material is unavailable");
         }
     }
 

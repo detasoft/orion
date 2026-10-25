@@ -114,9 +114,9 @@ public final class KeyMaterialModification implements Modification {
             root = Optional.of((X509Certificate) ((KeyStore.TrustedCertificateEntry) trusted.entry())
                     .getTrustedCertificate());
         }
-        List<X509Certificate> certificates = KeyMaterialCapabilities.requireX509Chain(chain);
+        List<X509Certificate> certificates = CertificateIdentity.requireX509Chain(chain);
         KeyPair keyPair = new KeyPair(entry.getCertificate().getPublicKey(), entry.getPrivateKey());
-        KeyMaterialCapabilities.validateCertificateChain(certificates, keyPair.getPublic(), root);
+        CertificateIdentity.validateCertificateChain(certificates, keyPair.getPublic(), root);
         KeyStore.PrivateKeyEntry prepared = owner.prepareCertificateChain(identity, keyPair, certificates);
         add(identity.alias(), new KeyStore.PrivateKeyEntry(prepared.getPrivateKey(),
                 prepared.getCertificateChain(), entry.getAttributes()), false);

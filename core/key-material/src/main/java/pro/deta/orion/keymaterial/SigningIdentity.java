@@ -9,21 +9,18 @@ import java.util.Map;
 
 /** Selected active signing key and the explicitly retained verification keys, bound to their material owner. */
 public class SigningIdentity {
-    private final KeyMaterialService owner;
-    private final KeyMaterialCapabilities selected;
+    private final OrionKeyMaterial owner;
     private final SigningMaterialSet material;
     private final Map<String, KeyMaterialDescriptor> verification;
 
     protected SigningIdentity() {
         owner = null;
-        selected = null;
         material = null;
         verification = Map.of();
     }
 
-    SigningIdentity(KeyMaterialService owner, KeyMaterialCapabilities selected, SigningMaterialSet material) {
+    SigningIdentity(OrionKeyMaterial owner, SigningMaterialSet material) {
         this.owner = owner;
-        this.selected = selected;
         this.material = material;
         Map<String, KeyMaterialDescriptor> keys = new LinkedHashMap<>();
         for (KeyMaterialDescriptor descriptor : material.verificationIncludingActive()) {
@@ -42,8 +39,8 @@ public class SigningIdentity {
     }
 
     public byte[] sign(byte[] payload) throws GeneralSecurityException {
-        if (selected == null) throw new GeneralSecurityException("Server identity is not available");
-        return selected.signWith(material.active(), payload);
+        if (owner == null) throw new GeneralSecurityException("Server identity is not available");
+        return owner.sign(material.active(), payload);
     }
 
     public boolean hasVerificationKey(String keyId) {
@@ -52,19 +49,19 @@ public class SigningIdentity {
 
     public boolean verify(String keyId, byte[] payload, byte[] signature) throws GeneralSecurityException {
         KeyMaterialDescriptor descriptor = keyId == null ? null : verification.get(keyId);
-        return descriptor != null && selected.verification(List.of(descriptor)).verify(payload, signature);
+        return descriptor != null && owner.verify(descriptor, payload, signature);
     }
 
     public List<PublicKey> publicKeys() throws GeneralSecurityException {
         if (owner == null) return List.of();
-        return List.of(owner.getKeyPair(material.active().alias()).getPublic());
+        return List.of(owner.publicKey(material.active()));
     }
 
     public List<PublicKey> retainedPublicKeys() throws GeneralSecurityException {
         if (owner == null) return List.of();
         List<PublicKey> keys = new ArrayList<>();
         for (KeyMaterialDescriptor descriptor : material.verification()) {
-            keys.add(owner.getKeyPair(descriptor.alias()).getPublic());
+            keys.add(owner.publicKey(descriptor));
         }
         return List.copyOf(keys);
     }
