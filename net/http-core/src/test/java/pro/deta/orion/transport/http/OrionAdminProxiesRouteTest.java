@@ -33,18 +33,18 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionAdminProxiesRouteTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+    private final pro.deta.orion.test.util.TestEvents events =
             new pro.deta.orion.test.util.TestEvents();
 
     @org.junit.jupiter.api.AfterEach
     void stopTestEvents() {
-        EVENTS.close();
+        events.close();
     }
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private final TestConfiguration desired = new TestConfiguration(EVENTS);
+    private final TestConfiguration desired = new TestConfiguration(events);
     private final NativeGitRepositoryFactory provider = new NativeGitRepositoryFactory(
-            pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager()));
+            pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(events.manager()));
     private final NativeGitRepositoryProvider backend = provider.provider();
     private final OrionAdminProxiesRoute route =
             new OrionAdminProxiesRoute(provider, desired.editor(), null, null, mapper);

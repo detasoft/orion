@@ -24,12 +24,12 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OrionAdminTransportsRouteTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+    private final pro.deta.orion.test.util.TestEvents events =
             new pro.deta.orion.test.util.TestEvents();
 
     @org.junit.jupiter.api.AfterEach
     void stopTestEvents() {
-        EVENTS.close();
+        events.close();
     }
 
     @Test
@@ -100,7 +100,7 @@ class OrionAdminTransportsRouteTest {
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
                 new OrionHttpRouteRegistry(Set.of()),
                 new OrionHttpResponseWriter(new ObjectMapper()));
-        TestConfiguration desiredState = new TestConfiguration(EVENTS);
+        TestConfiguration desiredState = new TestConfiguration(events);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of(), List.of(),
                 List.of(), List.of()),
@@ -132,7 +132,7 @@ class OrionAdminTransportsRouteTest {
     @Test
     void reportsDesiredStateHttpsWhenBootstrapTransportsAreAbsent() {
         BootstrapConfiguration configuration = new BootstrapConfiguration();
-        TestConfiguration desiredState = new TestConfiguration(EVENTS);
+        TestConfiguration desiredState = new TestConfiguration(events);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(
                         new AccessControl(),
