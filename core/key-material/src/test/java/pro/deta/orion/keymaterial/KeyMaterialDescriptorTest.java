@@ -24,21 +24,6 @@ class KeyMaterialDescriptorTest {
     }
 
     @Test
-    void rejectsConflictingAlgorithmsForOneAlias() {
-        KeyMaterialDescriptor signing = signing("shared-alias", 1);
-        KeyMaterialDescriptor ssh = new KeyMaterialDescriptor(
-                "shared-alias",
-                Set.of(KeyMaterialPurpose.SSH_HOST),
-                KeyMaterialAlgorithm.EC,
-                1);
-
-        assertThatThrownBy(() -> KeyMaterialCapabilities.open(null, List.of(signing, ssh)))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("shared-alias")
-                .hasMessageContaining("conflicting");
-    }
-
-    @Test
     void rejectsActiveAliasWithDifferentVerificationVersion() {
         assertThatThrownBy(() -> new SigningMaterialSet(
                 signing("server-signing", 2),

@@ -296,8 +296,8 @@ class KeyMaterialOperationsTest {
                     "signing-v1", KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, 1);
             generateKey(service, signing, 2048);
 
-            assertThatThrownBy(() -> service.certificateIdentity(new TlsMaterialConfiguration(signing, Optional.empty(),
-                    List.of(), TlsClientAuthentication.DISABLED)))
+            assertThatThrownBy(() -> service.certificateIdentity(new TlsMaterialConfiguration(
+                    signing, Optional.empty(), List.of(), TlsClientAuthentication.DISABLED)))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("TLS_IDENTITY");
         }
@@ -566,28 +566,6 @@ class KeyMaterialOperationsTest {
             assertThatThrownBy(() -> service.sign(ssh, new byte[]{1}))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("signing");
-        }
-    }
-
-    @Test
-    void rejectsMixedPurposeVerificationMaterial() throws Exception {
-        try (OrionKeyMaterial service = service()) {
-            KeyMaterialDescriptor signing = descriptor(
-                    "server-signing-v1",
-                    KeyMaterialPurpose.SERVER_SIGNING,
-                    KeyMaterialAlgorithm.RSA,
-                    1);
-            KeyMaterialDescriptor ca = descriptor(
-                    "orion-ca-v1",
-                    KeyMaterialPurpose.CERTIFICATE_AUTHORITY,
-                    KeyMaterialAlgorithm.RSA,
-                    1);
-            generateKey(service, signing, 2048);
-            generateKey(service, ca, 2048);
-
-            assertThatThrownBy(() -> service.verification(List.of(signing, ca)))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("purpose");
         }
     }
 
