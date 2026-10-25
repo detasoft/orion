@@ -221,7 +221,7 @@ public class SshCommandFactory implements CommandFactory {
                     .withUserIdentity(identity)
                     .withSshConnectionCredentials(
                             OrionSshAuthenticator.connectionCredentials(channel.getSession()))
-                    .withRequestId(requestId);
+                    .withRequestId(requestId).snapshot();
             CommandCancellation cancellation = () -> cancelled.get() || Thread.currentThread().isInterrupted();
             CommandContext context = new CommandContext(
                     securityContext,
@@ -349,7 +349,7 @@ public class SshCommandFactory implements CommandFactory {
                 .withUserIdentity(userIdentity)
                 .withSshConnectionCredentials(
                         OrionSshAuthenticator.connectionCredentials(channelSession.getSession()))
-                .withRequestId(channelSession.getSession().toString());
+                .withRequestId(channelSession.getSession().toString()).snapshot();
     }
 
     static InitialRequestData initialRequestData(

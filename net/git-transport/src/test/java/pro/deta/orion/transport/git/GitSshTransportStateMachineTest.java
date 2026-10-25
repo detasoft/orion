@@ -22,6 +22,8 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
+import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.auth.SshCredential;
 import pro.deta.orion.auth.SshCredentialListResult;
 import pro.deta.orion.auth.TokenIssueResult;
@@ -211,9 +213,10 @@ class GitSshTransportStateMachineTest {
     }
 
     @Test
-    void realExecAndInteractiveShellUseCurrentCredentialCommands() throws Exception {
+    void realExecAndInteractiveShellObserveAccountRemovalOnAnOpenConnection() throws Exception {
         KeyPair keyPair = keyPair();
-        service = service(0, new RecordingAccessControlService(keyPair));
+        RecordingAccessControlService accessControl = new RecordingAccessControlService(keyPair);
+        service = service(0, accessControl);
         service.onStart();
 
         try (SshClient client = client(List.of(UserAuthPublicKeyFactory.INSTANCE));
@@ -230,6 +233,17 @@ class GitSshTransportStateMachineTest {
                 assertTrue(output.toString(StandardCharsets.UTF_8).contains("true"));
             }
 
+            accessControl.currentIdentity = SecurityContext.ANONYMOUS;
+            try (ClientChannel exec = session.createExecChannel("/auth/key ls")) {
+                ByteArrayOutputStream error = new ByteArrayOutputStream();
+                exec.setOut(new ByteArrayOutputStream());
+                exec.setErr(error);
+                exec.open().verify(5, TimeUnit.SECONDS);
+                exec.waitFor(EnumSet.of(ClientChannelEvent.CLOSED), TimeUnit.SECONDS.toMillis(5));
+                assertTrue(error.toString(StandardCharsets.UTF_8).contains("ACCESS_DENIED"));
+            }
+            accessControl.currentIdentity = new InternalUserImpl("alice", List.of());
+
             try (ClientChannel shell = session.createShellChannel()) {
                 ByteArrayOutputStream output = new ByteArrayOutputStream();
                 PipedInputStream shellInput = new PipedInputStream();
@@ -242,6 +256,10 @@ class GitSshTransportStateMachineTest {
                     clientInput.write("/auth/key ls\r".getBytes(StandardCharsets.UTF_8));
                     clientInput.flush();
                     awaitContains(output, "true");
+                    accessControl.currentIdentity = SecurityContext.ANONYMOUS;
+                    clientInput.write("/auth/key ls\r".getBytes(StandardCharsets.UTF_8));
+                    clientInput.flush();
+                    awaitContains(output, "ACCESS_DENIED");
                     clientInput.write("quit\r".getBytes(StandardCharsets.UTF_8));
                     clientInput.flush();
                 }
@@ -364,6 +382,7 @@ class GitSshTransportStateMachineTest {
 
     private static final class RecordingAccessControlService implements OrionAccessControlService {
         private final KeyPair acceptedKey;
+        private volatile UserIdentity currentIdentity = new InternalUserImpl("alice", List.of());
 
         private RecordingAccessControlService(KeyPair acceptedKey) {
             this.acceptedKey = acceptedKey;
@@ -433,7 +452,7 @@ class GitSshTransportStateMachineTest {
         }
 
         private AuthenticationResult success() {
-            return AuthenticationResult.success(new InternalUserImpl("alice", List.of()));
+            return AuthenticationResult.success(new InternalUserImpl("alice", () -> currentIdentity));
         }
     }
 }

@@ -6,6 +6,9 @@ import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.auth.UserIdentity;
+import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
+import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
 import pro.deta.orion.auth.check.resource.RepositoryResource;
 import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
 import pro.deta.orion.schema.orion.PrincipalAddress;
@@ -82,6 +85,72 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionAccessControlServiceImplTest {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void sshIdentityResolvesRevocationAndDeletionWithoutChangingAnOperationSnapshot(boolean gitUser) {
+        User alice = new User("alice", null, null, null,
+                List.of(new Credential(CredentialType.OPENSSH_PUBLIC_KEY, null, key(KEY_ONE.getPublic()))),
+                List.of("operators"), List.of());
+        Grant rights = new Grant("rights", List.of(
+                new GrantExpression(GrantKey.REPOSITORY, "team/repo"),
+                new GrantExpression(GrantKey.READ, "true"), new GrantExpression(GrantKey.ADMIN, "true")));
+        Role role = new Role("operators", List.of(), List.of("rights"));
+        AccessControl permitted = new AccessControl(List.of(alice), List.of(role), List.of(rights));
+        try (ServiceFixture fixture = fixture(OrionDocument.withAccessControl(permitted))) {
+            AuthenticationResult.Success authenticated = (AuthenticationResult.Success) (gitUser
+                    ? fixture.service.authenticateGitSshKey(KEY_ONE.getPublic().getEncoded())
+                    : fixture.service.authenticateSshUser("alice", KEY_ONE.getPublic().getEncoded()));
+            SecurityContext session = SecurityContext.createContext()
+                    .withUserIdentity(authenticated.userIdentity());
+            SecurityContext running = session.snapshot();
+            Consumer<AccessControl> publish = acl -> {
+                fixture.storage.save(fixture.storage.snapshot.revision(), OrionDocument.withAccessControl(acl),
+                        ChangeMetadata.EMPTY);
+                fixture.storage.awaitEvents();
+            };
+            RepositoryResource repository = RepositoryResource.of("team/repo");
+            assertThat(RepositoryAccessRules.read().evaluate(running, repository).allowed()).isTrue();
+            assertThat(ApplicationAccessRules.admin().evaluate(running,
+                    ApplicationAdminResource.applicationAdmin()).allowed()).isTrue();
+
+            publish.accept(new AccessControl(List.of(alice),
+                    List.of(new Role("operators", List.of(), List.of())), List.of(rights)));
+            SecurityContext revoked = session.snapshot();
+            assertThat(RepositoryAccessRules.read().evaluate(revoked, repository).allowed()).isFalse();
+            assertThat(ApplicationAccessRules.admin().evaluate(revoked,
+                    ApplicationAdminResource.applicationAdmin()).allowed()).isFalse();
+            assertThat(RepositoryAccessRules.read().evaluate(running, repository).allowed()).isTrue();
+            assertThat(ApplicationAccessRules.admin().evaluate(running,
+                    ApplicationAdminResource.applicationAdmin()).allowed()).isTrue();
+
+            publish.accept(permitted);
+            assertThat(RepositoryAccessRules.read().evaluate(session.snapshot(), repository).allowed())
+                    .isTrue();
+            publish.accept(new AccessControl(List.of(), List.of(role), List.of(rights)));
+            assertThat(session.snapshot().getUserIdentity().isAnonymous()).isTrue();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"root-auth-locked:locked", "root-auth-generation:recovery"})
+    void existingRootSshIdentityCannotStartOperationsAfterLockOrRecovery(String marker) {
+        Grant admin = new Grant("admin", List.of(new GrantExpression(GrantKey.ADMIN, "true")));
+        User root = new User("root", null, null, null, List.of(new Credential(CredentialType.OPENSSH_PUBLIC_KEY,
+                "root-auth-generation:first", key(KEY_ONE.getPublic()))), List.of(), List.of(admin));
+        try (ServiceFixture fixture = fixture(OrionDocument.withAccessControl(
+                new AccessControl(List.of(root), List.of(), List.of())))) {
+            UserIdentity identity = ((AuthenticationResult.Success) fixture.service.authenticateSshUser(
+                    "root", KEY_ONE.getPublic().getEncoded())).userIdentity();
+            assertThat(identity.snapshot().isAnonymous()).isFalse();
+            User unavailable = new User("root", null, null, null,
+                    List.of(new Credential(CredentialType.ARGON2, marker, "hash")), List.of(), List.of(admin));
+            fixture.storage.save(fixture.storage.snapshot.revision(), OrionDocument.withAccessControl(
+                    new AccessControl(List.of(unavailable), List.of(), List.of())), ChangeMetadata.EMPTY);
+            fixture.storage.awaitEvents();
+            assertThat(identity.snapshot().isAnonymous()).isTrue();
+        }
+    }
+
     private static final SigningMaterialSet SIGNING = new SigningMaterialSet(
             new KeyMaterialDescriptor("test-signing-key", Set.of(KeyMaterialPurpose.SERVER_SIGNING),
                     KeyMaterialAlgorithm.RSA, 1), List.of());

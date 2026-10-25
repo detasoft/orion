@@ -226,9 +226,8 @@ public final class InteractiveTerminal implements AutoCloseable {
             write("\u0007");
             return;
         }
-        CommandContext context = context(command.cancellation);
         try {
-            Future<?> future = executor.submit(() -> execute(command, context, operation));
+            Future<?> future = executor.submit(() -> execute(command, operation));
             command.attach(future);
         } catch (RuntimeException exception) {
             complete(command, this::handlerFailed);
@@ -237,14 +236,13 @@ public final class InteractiveTerminal implements AutoCloseable {
 
     private void execute(
             ActiveCommand command,
-            CommandContext context,
             Function<CommandContext, Runnable> operation) {
         if (command.cancellation.isCancelled() || closed.get()) {
             return;
         }
         Runnable result;
         try {
-            result = operation.apply(context);
+            result = operation.apply(context(command.cancellation));
         } catch (RuntimeException exception) {
             result = this::handlerFailed;
         }
@@ -357,7 +355,7 @@ public final class InteractiveTerminal implements AutoCloseable {
 
     private CommandContext context(CommandCancellation cancellation) {
         return new CommandContext(
-                connection.securityContext(),
+                connection.securityContext().snapshot(),
                 connection.requestId(),
                 connection.sessionId(),
                 connection.sourceAddress(),

@@ -68,6 +68,11 @@ public class SecurityContext {
         return userIdentity;
     }
 
+    public SecurityContext snapshot() {
+        return createContext().withUserIdentity(userIdentity.snapshot())
+                .withRequestId(requestId).withSshConnectionCredentials(sshConnectionCredentials);
+    }
+
     public SecurityContext withUserIdentity(UserIdentity userIdentity) {
         this.userIdentity = Objects.requireNonNullElse(userIdentity, ANONYMOUS);
         return this;

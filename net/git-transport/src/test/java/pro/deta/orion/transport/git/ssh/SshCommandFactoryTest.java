@@ -24,6 +24,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import pro.deta.orion.auth.InternalUserImpl;
+import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.auth.SshConnectionCredentials;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.acl.AccessControlAccess;
@@ -92,6 +94,58 @@ class SshCommandFactoryTest {
     }
 
     private final List<OrionExecutor> executors = new java.util.ArrayList<>();
+
+    @Test
+    void eachExecOnTheSameSessionResolvesCurrentIdentityOnce() throws Exception {
+        AtomicReference<UserIdentity> current = new AtomicReference<>(
+                new InternalUserImpl("operator", List.of()));
+        AtomicInteger resolutions = new AtomicInteger();
+        TestChannelSession channel = channel(true);
+        channel.getSession().setAttribute(SSH_AUTHENTICATED_USER, new InternalUserImpl("operator", () -> {
+            resolutions.incrementAndGet();
+            return current.get();
+        }));
+        List<Boolean> anonymous = new java.util.ArrayList<>();
+        SshCommandFactory factory = factory(request -> {
+            UserIdentity identity = request.context().securityContext().getUserIdentity();
+            anonymous.add(identity.isAnonymous());
+            current.set(SecurityContext.ANONYMOUS);
+            anonymous.add(identity.isAnonymous());
+            return new CommandResult.Message("handled");
+        });
+        run(factory, channel, "first", new ByteArrayOutputStream(), new ByteArrayOutputStream());
+        run(factory, channel, "second", new ByteArrayOutputStream(), new ByteArrayOutputStream());
+
+        assertEquals(List.of(false, false, true, true), anonymous);
+        assertEquals(2, resolutions.get());
+    }
+
+    @Test
+    void nextGitOperationOnTheSameSessionCannotUseRevokedRepositoryGrants() throws Exception {
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(EVENTS.manager());
+        provider.create("demo").valueOrFailure("repository");
+        Grant grant = new Grant("read", List.of(new GrantExpression(GrantKey.REPOSITORY, "demo")));
+        AtomicReference<UserIdentity> current = new AtomicReference<>(
+                new InternalUserImpl("operator", List.of(grant)));
+        AtomicInteger resolutions = new AtomicInteger();
+        TestChannelSession channel = channel(true);
+        channel.getSession().setAttribute(SSH_AUTHENTICATED_USER, new InternalUserImpl("operator", () -> {
+            resolutions.incrementAndGet();
+            return current.get();
+        }));
+        SshCommandFactory factory = gitFactory(provider);
+        ExitOutcome allowed = run(factory, channel, "git-upload-pack '/demo.git'",
+                new ByteArrayOutputStream(), new ByteArrayOutputStream(),
+                new ByteArrayInputStream("0000".getBytes(StandardCharsets.US_ASCII)));
+        assertEquals(0, allowed.code());
+        current.set(new InternalUserImpl("operator", List.of()));
+        ByteArrayOutputStream deniedOutput = new ByteArrayOutputStream();
+        ExitOutcome denied = run(factory, channel, "git-upload-pack '/demo.git'", deniedOutput,
+                new ByteArrayOutputStream());
+        assertNotEquals(0, denied.code());
+        assertEquals(0, deniedOutput.size());
+        assertEquals(2, resolutions.get());
+    }
 
     @AfterEach
     void stopExecutor() {

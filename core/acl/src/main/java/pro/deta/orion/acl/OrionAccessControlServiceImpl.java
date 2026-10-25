@@ -34,6 +34,7 @@ import pro.deta.orion.auth.AccessTokenIdentity;
 import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.auth.UserIdentity;
+import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
@@ -296,7 +297,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             if (isGenerationAwareRoot(matchedUser) && recoveryGeneration == null) {
                 return SshKeyEnrollmentAuthentication.failure("authentication failed");
             }
-            return switch (createUserIdentity(snapshot, matchedUser)) {
+            return switch (createSshUserIdentity(snapshot, matchedUser)) {
                 case AuthenticationResult.Success(UserIdentity identity) -> SshKeyEnrollmentAuthentication.success(
                         identity,
                         recoveryGeneration);
@@ -315,7 +316,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         if (user instanceof Result.Success<User>(var matchedUser)
                 && !isLockedRoot(matchedUser)
                 && performPublicKeyAuthentication(matchedUser, encodedPublicKey)) {
-            return createUserIdentity(snapshot, matchedUser);
+            return createSshUserIdentity(snapshot, matchedUser);
         }
         log.warn("SSH public-key authentication as '{}' failed.", userName);
         return AuthenticationResult.failure("authentication failed");
@@ -333,7 +334,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             }
         }
         if (matchingUsers.size() == 1) {
-            return createUserIdentity(currentAccessControl, matchingUsers.getFirst());
+            return createSshUserIdentity(currentAccessControl, matchingUsers.getFirst());
         }
         log.warn("Git SSH public key resolved to {} users.", matchingUsers.size());
         return AuthenticationResult.failure("authentication failed");
@@ -665,6 +666,28 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                     AuthenticationResult.failure("User " + u.id() + " failed to auth: [" + code + "] " + message, throwable);
             case Result.Success<List<Grant>>(var v) ->
                     AuthenticationResult.success(new InternalUserImpl(u.id(), v));
+        };
+    }
+
+    private AuthenticationResult createSshUserIdentity(AccessControl snapshot, User user) {
+        AuthenticationResult authenticated = createUserIdentity(snapshot, user);
+        if (authenticated instanceof AuthenticationResult.Failure) return authenticated;
+        String userId = user.id();
+        return AuthenticationResult.success(new InternalUserImpl(userId, () -> currentSshIdentity(userId)));
+    }
+
+    private UserIdentity currentSshIdentity(String userId) {
+        if (!(editor.current().result() instanceof Result.Success<OrionDocument>(var document))) {
+            return SecurityContext.ANONYMOUS;
+        }
+        AccessControl snapshot = document.system().accessControl();
+        if (!(findSingleUser(snapshot, userId) instanceof Result.Success<User>(var user))
+                || isLockedRoot(user) || rootRecoveryGeneration(user) != null) {
+            return SecurityContext.ANONYMOUS;
+        }
+        return switch (createUserIdentity(snapshot, user)) {
+            case AuthenticationResult.Success(var identity) -> identity;
+            case AuthenticationResult.Failure ignored -> SecurityContext.ANONYMOUS;
         };
     }
 

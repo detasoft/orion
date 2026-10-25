@@ -334,6 +334,11 @@ password, and token authentication. Normal restarts preserve that lock; only
 starting Orion with `--reset-root-pass` restores the one-time root key recovery
 flow.
 
+SSH sessions retain the authenticated user, while each new exec command, interactive action, or Git operation
+resolves a current ACL snapshot. Revoked grants and removed users therefore affect existing connections
+without reconnecting. An operation already running keeps its snapshot until completion. Root lock and
+recovery states prevent an existing session from starting ordinary operations.
+
 ### Read-only SSH commands
 
 Named SSH users can inspect Orion through the same command tree in exec and

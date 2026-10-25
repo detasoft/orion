@@ -12,7 +12,10 @@ import java.util.Optional;
 import java.util.Objects;
 import java.util.function.Supplier;
 
-/** System identities retain authenticated ACL grants; organization identities read current desired state. */
+/**
+ * Request identities retain resolved grants. SSH session identities keep a user id and resolver,
+ * producing a current snapshot when a new operation starts. Organization identities read desired state.
+ */
 @ToString
 @Getter
 public class InternalUserImpl implements UserIdentity {
@@ -21,13 +24,26 @@ public class InternalUserImpl implements UserIdentity {
     @Getter(AccessLevel.NONE)
     private final Supplier<OrionDocument> configuration;
     private final Optional<OrganizationId> organizationId;
+    @Getter(AccessLevel.NONE)
     private final List<Grant> grants;
+    @ToString.Exclude
+    @Getter(AccessLevel.NONE)
+    private final Supplier<UserIdentity> resolver;
 
     public InternalUserImpl(String userId, List<Grant> grants) {
         this.clientId = userId;
         this.organizationId = Optional.empty();
         this.grants = grants;
         this.configuration = null;
+        this.resolver = null;
+    }
+
+    public InternalUserImpl(String userId, Supplier<UserIdentity> resolver) {
+        this.clientId = userId;
+        this.organizationId = Optional.empty();
+        this.grants = List.of();
+        this.configuration = null;
+        this.resolver = Objects.requireNonNull(resolver, "resolver");
     }
 
     public InternalUserImpl(String userId, OrganizationId organizationId, Supplier<OrionDocument> configuration) {
@@ -35,6 +51,18 @@ public class InternalUserImpl implements UserIdentity {
         this.organizationId = Optional.of(organizationId);
         this.grants = List.of();
         this.configuration = Objects.requireNonNull(configuration, "configuration");
+        this.resolver = null;
+    }
+
+    @Override
+    public List<Grant> getGrants() {
+        return resolver == null ? grants : snapshot().getGrants();
+    }
+
+    @Override
+    public UserIdentity snapshot() {
+        if (resolver != null) return Objects.requireNonNull(resolver.get(), "resolved identity");
+        return this;
     }
 
     @Override

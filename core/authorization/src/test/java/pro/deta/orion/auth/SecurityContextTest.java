@@ -3,10 +3,38 @@ package pro.deta.orion.auth;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class SecurityContextTest {
+    @Test
+    void operationSnapshotResolvesOnceAndRetainsRequestMetadata() {
+        UserIdentity allowed = new InternalUserImpl("operator", List.of());
+        AtomicReference<UserIdentity> current = new AtomicReference<>(allowed);
+        AtomicInteger resolutions = new AtomicInteger();
+        UserIdentity sessionUser = new InternalUserImpl("operator", () -> {
+            resolutions.incrementAndGet();
+            return current.get();
+        });
+        SshConnectionCredentials credentials = new SshConnectionCredentials("SHA256:key", List.of());
+        SecurityContext session = SecurityContext.createContext().withUserIdentity(sessionUser)
+                .withRequestId("request-42").withSshConnectionCredentials(credentials);
+
+        SecurityContext running = session.snapshot();
+        current.set(SecurityContext.ANONYMOUS);
+
+        assertThat(running.getUserIdentity()).isSameAs(allowed);
+        assertThat(running.getUserIdentity().getGrants()).isEmpty();
+        assertThat(running.getRequestId()).isEqualTo("request-42");
+        assertThat(running.getSshConnectionCredentials()).isSameAs(credentials);
+        assertThat(resolutions).hasValue(1);
+        assertThat(session.snapshot().getUserIdentity().isAnonymous()).isTrue();
+        assertThat(resolutions).hasValue(2);
+        assertThat(session.getUserIdentity()).isSameAs(sessionUser);
+    }
+
     @Test
     void newContextStartsAsAnonymousWithoutRequestId() {
         SecurityContext context = SecurityContext.createContext();

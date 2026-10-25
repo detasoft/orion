@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.auth.InternalUserImpl;
+import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.auth.check.AccessDecision;
 import pro.deta.orion.command.CommandCompletion;
 import pro.deta.orion.command.CommandContext;
@@ -40,6 +42,35 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class InteractiveTerminalTest {
+    @Test
+    void eachSubmissionResolvesCurrentIdentityAndKeepsItUntilTheCommandCompletes() throws Exception {
+        UserIdentity permitted = new InternalUserImpl("alice", List.of());
+        AtomicReference<UserIdentity> current = new AtomicReference<>(permitted);
+        AtomicInteger resolutions = new AtomicInteger();
+        SecurityContext session = SecurityContext.createContext().withUserIdentity(
+                new InternalUserImpl("alice", () -> {
+                    resolutions.incrementAndGet();
+                    return current.get();
+                }));
+        List<Boolean> anonymous = new ArrayList<>();
+        CommandDispatcher dispatcher = request -> {
+            UserIdentity identity = request.context().securityContext().getUserIdentity();
+            anonymous.add(identity.isAnonymous());
+            current.set(SecurityContext.ANONYMOUS);
+            anonymous.add(identity.isAnonymous());
+            return new CommandResult.Message("handled");
+        };
+        InteractiveTerminal.Connection connection = new InteractiveTerminal.Connection(session, "alice",
+                "request-1", "session-1", "127.0.0.1", Map.of());
+        InteractiveTerminal terminal = new InteractiveTerminal(dispatcher, new CommandNavigator(tree()),
+                directExecutor(), connection, new ByteArrayOutputStream(), false, 80);
+
+        runSteps(terminal, "operate now\r", "operate now\r", "quit\r");
+
+        assertThat(anonymous).containsExactly(false, false, true, true);
+        assertThat(resolutions).hasValue(2);
+    }
+
     @Test
     void navigatesRendersHelpAndDispatchesOnlyOrionRequests() throws Exception {
         List<CommandRequest> requests = new ArrayList<>();
