@@ -19,7 +19,7 @@ import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
-import pro.deta.orion.OrionKeyMaterialFactory;
+import pro.deta.orion.BootstrapContext;
 import org.apache.sshd.common.keyprovider.KeyPairProvider;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.acl.RootPasswordReset;
@@ -87,7 +87,7 @@ public interface OrionComponent {
                     true);
             return bootstrapConfiguration(configuration)
                     .rootPasswordReset(new RootPasswordReset(false))
-                    .signingMaterial(OrionKeyMaterialFactory.signingMaterial(
+                    .signingMaterial(BootstrapContext.signingMaterial(
                             configuration.getBootstrap().getKeyMaterial()))
                     .keyMaterial(OrionKeyMaterial.unavailable())
                     .sshHostKeyProvider(session -> {

@@ -2,7 +2,6 @@ package pro.deta.orion.transport.http;
 
 import pro.deta.orion.test.certificates.TestCertificateChain;
 
-import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.config.OrionConfigurationEditor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -1393,8 +1392,11 @@ class OrionOidcOnboardingTest {
             KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor("signing",
                     Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
             try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
-                material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
-                        new SigningMaterialSet(descriptor, List.of()), 2048, new KeyMaterialCreation(true));
+                material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options);
+                material.withModification(modification -> {
+                    modification.generateKey(descriptor, 2048);
+                    modification.apply();
+                });
             }
             secrets = new ConfigurationSecrets(this::document,
                     material);

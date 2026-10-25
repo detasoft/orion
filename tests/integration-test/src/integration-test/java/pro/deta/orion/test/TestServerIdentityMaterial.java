@@ -4,9 +4,11 @@ import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import java.util.Set;
-import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
-import pro.deta.orion.OrionKeyMaterialFactory;
+import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialOptions;
+import pro.deta.orion.keymaterial.KeyMaterialResourceResolver;
+import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import org.apache.sshd.common.keyprovider.KeyPairProvider;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -40,17 +42,37 @@ final class TestServerIdentityMaterial implements AutoCloseable {
         configuration.getBootstrap().getKeyMaterial().setLocation(
                 baseDirectory.toRealPath().resolve("material.p12").toString());
         configuration.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);
-        OrionKeyMaterial material = OrionKeyMaterialFactory.open(
-                configuration, Map.of(PASSWORD_ENV, PASSWORD), new KeyMaterialCreation(true));
+        KeyMaterialContentStore store = KeyMaterialResourceResolver.standard(Map.of())
+                .resolveStore(configuration.getBootstrap().getKeyMaterial().getLocation());
+        OrionKeyMaterial material = openMaterial(configuration, Map.of(PASSWORD_ENV, PASSWORD), store);
         try {
+            if (!material.hasDurableSnapshot()) {
+                material.withModification(modification -> {
+                    modification.generateKey(BootstrapContext.signingMaterial(
+                            configuration.getBootstrap().getKeyMaterial()).active(),
+                            KeyMaterialConstants.RSA_KEY_SIZE_BITS);
+                    modification.apply();
+                });
+            }
             return new TestServerIdentityMaterial(
                     material,
-                    material.keyPair(OrionKeyMaterialFactory.signingMaterial(
+                    material.keyPair(BootstrapContext.signingMaterial(
                             configuration.getBootstrap().getKeyMaterial()).active()),
                     hostKeys(material));
         } catch (Exception failure) {
             material.close();
             throw failure;
+        }
+    }
+
+    static OrionKeyMaterial openMaterial(
+            BootstrapConfiguration configuration,
+            Map<String, String> environment,
+            KeyMaterialContentStore store) throws Exception {
+        KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard(environment);
+        try (KeyMaterialOptions options = resolver.pkcs12Options(
+                configuration.getBootstrap().getKeyMaterial().getPassword())) {
+            return OrionKeyMaterial.open(store, options);
         }
     }
 

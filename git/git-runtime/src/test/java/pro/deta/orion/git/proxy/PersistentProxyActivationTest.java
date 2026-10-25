@@ -6,7 +6,6 @@ import pro.deta.orion.git.fileapi.GitCommitAuthor;
 
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
 
-import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
@@ -19,7 +18,6 @@ import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
@@ -307,8 +305,11 @@ class PersistentProxyActivationTest {
             var signing = new KeyMaterialDescriptor("signing",
                     Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
             try (var options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
-                material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
-                        new SigningMaterialSet(signing, List.of()), 2048, new KeyMaterialCreation(true));
+                material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options);
+                material.withModification(modification -> {
+                    modification.generateKey(signing, 2048);
+                    modification.apply();
+                });
             }
             secrets = new ConfigurationSecrets(current::get, material);
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);

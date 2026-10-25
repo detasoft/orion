@@ -1,6 +1,5 @@
 package pro.deta.orion.git.proxy;
 
-import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -23,7 +22,6 @@ import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
@@ -159,8 +157,17 @@ class BootstrapSshTrustTest {
         KeyMaterialDescriptor signing = new KeyMaterialDescriptor("signing",
                 Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
-            return OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
-                    new SigningMaterialSet(signing, List.of()), 2048, new KeyMaterialCreation(true));
+            OrionKeyMaterial material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options);
+            try {
+                material.withModification(modification -> {
+                    modification.generateKey(signing, 2048);
+                    modification.apply();
+                });
+                return material;
+            } catch (Exception failure) {
+                material.close();
+                throw failure;
+            }
         }
     }
 

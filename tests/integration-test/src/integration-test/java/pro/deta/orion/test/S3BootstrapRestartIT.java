@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.BootstrapContext;
-import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
@@ -78,9 +77,9 @@ class S3BootstrapRestartIT {
             byte[] signature;
             String signingKeyId;
             byte[] xml;
-            try (OrionKeyMaterial material = OrionKeyMaterialFactory.open(
-                    configuration, environment, materialStore, new KeyMaterialCreation(false))) {
-                KeyMaterialDescriptor active = OrionKeyMaterialFactory.signingMaterial(
+            try (OrionKeyMaterial material = TestServerIdentityMaterial.openMaterial(
+                    configuration, environment, materialStore)) {
+                KeyMaterialDescriptor active = BootstrapContext.signingMaterial(
                         configuration.getBootstrap().getKeyMaterial()).active();
                 signingKeyId = active.alias();
                 signature = material.sign(active, payload);

@@ -2,12 +2,10 @@ package pro.deta.orion.test;
 
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
 
-import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.BootstrapContext;
-import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
@@ -85,8 +83,8 @@ class BootstrapProxyTransportIT {
             String upstreamCache = upstreamProvider.prepareProvisional(
                     "cache-isolation-probe", configuration.getBootstrap().getAccessControl());
             assertCacheIsNotRoutable(configuration, environment, upstreamCache);
-            try (var probeMaterial = OrionKeyMaterialFactory.open(configuration, environment,
-                    new InMemoryKeyMaterialContentStore(), new KeyMaterialCreation(true))) {
+            try (var probeMaterial = TestServerIdentityMaterial.openMaterial(
+                    configuration, environment, new InMemoryKeyMaterialContentStore())) {
                 var probeConfiguration = new AtomicReference<>(OrionXml.read(
                         new ByteArrayInputStream(originalConfiguration)));
                 var probeSecrets = new ConfigurationSecrets(probeConfiguration::get, probeMaterial);

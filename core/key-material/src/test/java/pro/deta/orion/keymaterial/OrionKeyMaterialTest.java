@@ -18,30 +18,31 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionKeyMaterialTest {
     @Test
-    void createsActiveIdentityOnlyForANewStoreAndReloadsIt() throws Exception {
+    void opensAnEmptyStoreWithoutCreatingKeysAndPersistsAnExplicitModification() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        SigningMaterialSet signing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());
+        KeyMaterialDescriptor signing = rsa("server-signing-v1", 1);
         byte[] payload = "jwt-input".getBytes(StandardCharsets.UTF_8);
         byte[] signature;
-
-        assertThatThrownBy(() -> OrionKeyMaterial.open(store, options(), signing, 2048))
-                .isInstanceOf(GeneralSecurityException.class)
-                .hasMessageContaining("creation was not requested");
-        assertThat(store.read()).isEmpty();
-
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
-                new KeyMaterialCreation(true))) {
-            signature = material.sign(signing.active(), payload);
-            assertThat(material.verify(signing.active(), payload, signature)).isTrue();
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options())) {
+            assertThat(material.inventory(Set.of())).isEmpty();
+            assertThat(material.version()).isZero();
+            assertThat(store.read()).isEmpty();
+            material.withModification(modification -> {
+                modification.generateKey(signing, 2048);
+                assertThat(material.contains(signing)).isFalse();
+                assertThat(store.read()).isEmpty();
+                modification.apply();
+            });
+            signature = material.sign(signing, payload);
+            assertThat(material.version()).isEqualTo(1);
         }
-
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048)) {
-            assertThat(material.verify(signing.active(), payload, signature)).isTrue();
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options())) {
+            assertThat(material.verify(signing, payload, signature)).isTrue();
         }
     }
 
     @Test
-    void retainsOlderSigningMaterialAcrossReloadAndRetirement() throws Exception {
+    void retainsSigningKeysAcrossReload() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialDescriptor old = rsa("server-signing-v1", 1);
         KeyMaterialDescriptor active = rsa("server-signing-v2", 2);
@@ -61,70 +62,23 @@ class OrionKeyMaterialTest {
             oldSignature = material.sign(old, payload);
         }
 
-        SigningMaterialSet signing = new SigningMaterialSet(active, List.of(old));
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048)) {
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options())) {
             byte[] activeSignature = material.sign(active, payload);
 
             assertThat(material.verify(old, payload, oldSignature)).isTrue();
             assertThat(material.verify(active, payload, activeSignature)).isTrue();
             assertThat(material.verify(old, payload, activeSignature)).isFalse();
         }
-        SigningMaterialSet retired = new SigningMaterialSet(active, List.of());
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), retired, 2048)) {
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options())) {
             assertThat(material.verify(old, payload, oldSignature)).isTrue();
         }
-    }
-
-    @Test
-    void doesNotGenerateMissingIdentityIntoAnExistingStore() throws Exception {
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        KeyMaterialDescriptor existing = rsa("other-signing", 1);
-        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            KeyMaterialModification modification = service.modify();
-            try {
-                modification.generateKey(existing, 2048);
-                modification.apply();
-            } finally {
-                modification.discard();
-            }
-        }
-        String before = store.read().orElseThrow().version();
-        SigningMaterialSet missing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());
-
-        assertThatThrownBy(() -> OrionKeyMaterial.open(store, options(), missing, 2048))
-                .isInstanceOf(Exception.class)
-                .hasMessageContaining("server-signing-v1");
-        assertThat(store.read().orElseThrow().version()).isEqualTo(before);
-    }
-
-    @Test
-    void rejectsNonRsaServerIdentityBeforeSigning() {
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        KeyMaterialDescriptor ed25519 = descriptor(
-                "server-signing-ed25519",
-                KeyMaterialPurpose.SERVER_SIGNING,
-                KeyMaterialAlgorithm.ED25519,
-                1);
-
-        assertThatThrownBy(() -> OrionKeyMaterial.open(
-                store,
-                options(),
-                new SigningMaterialSet(ed25519, List.of()),
-                0))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("RSA");
     }
 
     @Test
     void sharesInstalledCertificateIdentityWithTls() throws Exception {
         CountingStore store = new CountingStore();
         KeyMaterialDescriptor signing = rsa("server-signing-v1", 1);
-        OrionKeyMaterial material = OrionKeyMaterial.open(
-                store,
-                options(),
-                new SigningMaterialSet(signing, List.of()),
-                2048,
-                new KeyMaterialCreation(true));
+        OrionKeyMaterial material = openWithKey(store, signing);
         KeyMaterialDescriptor account = descriptor(
                 "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor identity = descriptor(
@@ -200,12 +154,11 @@ class OrionKeyMaterialTest {
     @Test
     void persistsConfigurationCipherBeforeReturningAnEnvelopeAndReusesItAfterRestart() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        SigningMaterialSet signing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());
+        KeyMaterialDescriptor signing = rsa("server-signing-v1", 1);
         ConfigurationSecretContext context = new ConfigurationSecretContext("system/proxy-token", "credential");
         ConfigurationSecretEnvelope envelope;
         String savedVersion;
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
-                new KeyMaterialCreation(true))) {
+        try (OrionKeyMaterial material = openWithKey(store, signing)) {
             String initialVersion = store.read().orElseThrow().version();
             assertThatThrownBy(() -> material.seal(material.configurationCipherKey(), new byte[0], context))
                     .isInstanceOf(IllegalArgumentException.class);
@@ -218,7 +171,7 @@ class OrionKeyMaterialTest {
             assertThat(material.open(material.configurationCipherKey(), envelope, context))
                     .isEqualTo("git-token".getBytes(StandardCharsets.UTF_8));
         }
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048)) {
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options())) {
             assertThat(material.open(material.configurationCipherKey(), envelope, context))
                     .isEqualTo("git-token".getBytes(StandardCharsets.UTF_8));
             material.seal(material.configurationCipherKey(), "another-token".getBytes(StandardCharsets.UTF_8), context);
@@ -230,15 +183,13 @@ class OrionKeyMaterialTest {
     void doesNotCreateAMissingCipherWhileOpeningAnExistingEnvelope() throws Exception {
         InMemoryKeyMaterialContentStore source = new InMemoryKeyMaterialContentStore();
         InMemoryKeyMaterialContentStore destination = new InMemoryKeyMaterialContentStore();
-        SigningMaterialSet signing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());
+        KeyMaterialDescriptor signing = rsa("server-signing-v1", 1);
         ConfigurationSecretContext context = new ConfigurationSecretContext("system/proxy-token", "credential");
         ConfigurationSecretEnvelope envelope;
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(source, options(), signing, 2048,
-                new KeyMaterialCreation(true))) {
+        try (OrionKeyMaterial material = openWithKey(source, signing)) {
             envelope = material.seal(material.configurationCipherKey(), new byte[]{1}, context);
         }
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(destination, options(), signing, 2048,
-                new KeyMaterialCreation(true))) {
+        try (OrionKeyMaterial material = openWithKey(destination, signing)) {
             String initialVersion = destination.read().orElseThrow().version();
             assertThatThrownBy(() -> material.open(material.configurationCipherKey(), envelope, context))
                     .isInstanceOf(GeneralSecurityException.class);
@@ -260,10 +211,9 @@ class OrionKeyMaterialTest {
             }
         }
         FailingStore store = new FailingStore();
-        SigningMaterialSet signing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());
+        KeyMaterialDescriptor signing = rsa("server-signing-v1", 1);
         ConfigurationSecretContext context = new ConfigurationSecretContext("system/proxy-token", "credential");
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
-                new KeyMaterialCreation(true))) {
+        try (OrionKeyMaterial material = openWithKey(store, signing)) {
             String before = store.read().orElseThrow().version();
             store.fail = true;
             assertThatThrownBy(() -> material.seal(material.configurationCipherKey(), new byte[]{1}, context))
@@ -273,7 +223,7 @@ class OrionKeyMaterialTest {
             assertThatThrownBy(() -> material.seal(material.configurationCipherKey(), new byte[]{2}, context))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
         }
-        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(store, options(), signing, 2048)) {
+        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(store, options())) {
             ConfigurationSecretEnvelope envelope = reopened.seal(reopened.configurationCipherKey(), new byte[]{3}, context);
             assertThat(reopened.open(reopened.configurationCipherKey(), envelope, context)).containsExactly((byte) 3);
         }
@@ -283,13 +233,12 @@ class OrionKeyMaterialTest {
     @ValueSource(booleans = {false, true})
     void closesGeneratedKeysAfterFailedSaveAndReopensOnlyDurableMaterial(boolean committed) throws Exception {
         FailingStore store = new FailingStore(committed);
-        SigningMaterialSet signing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());
+        KeyMaterialDescriptor signing = rsa("server-signing-v1", 1);
         TlsMaterialConfiguration configuration = tlsConfiguration();
         KeyMaterialDescriptor account = descriptor(
                 "account-v1", KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, 1);
         String afterFailure;
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
-                new KeyMaterialCreation(true))) {
+        try (OrionKeyMaterial material = openWithKey(store, signing)) {
             String before = store.read().orElseThrow().version();
             store.fail = true;
             assertThatThrownBy(() -> generateKeys(material, account, configuration.identity()))
@@ -302,7 +251,7 @@ class OrionKeyMaterialTest {
             assertThatThrownBy(() -> material.certificateIdentity(configuration).issuedCertificateChain())
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
         }
-        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(store, options(), signing, 2048)) {
+        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(store, options())) {
             generateKeys(reopened, account, configuration.identity());
             assertThat(reopened.keyPair(account).getPrivate()).isNotNull();
             assertThat(reopened.keyPair(configuration.identity()).getPrivate()).isNotNull();
@@ -315,13 +264,12 @@ class OrionKeyMaterialTest {
     void failedCertificateSaveClosesTheOwnerWithoutExposingAnUnsavedChain(boolean committed)
             throws Exception {
         FailingStore store = new FailingStore(committed);
-        SigningMaterialSet signing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());
+        KeyMaterialDescriptor signing = rsa("server-signing-v1", 1);
         TlsMaterialConfiguration configuration = tlsConfiguration();
         KeyMaterialDescriptor account = descriptor(
                 "account-v1", KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, 1);
         X509Certificate expected;
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
-                new KeyMaterialCreation(true))) {
+        try (OrionKeyMaterial material = openWithKey(store, signing)) {
             generateKeys(material, account, configuration.identity());
             TestCertificateChain.Authority issuer = TestCertificateChain.root("Certificate issuer");
             X509Certificate original = TestCertificateChain.leaf(
@@ -348,7 +296,7 @@ class OrionKeyMaterialTest {
             expected = committed ? replacement : original;
         }
         String durableVersion = store.read().orElseThrow().version();
-        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(store, options(), signing, 2048)) {
+        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(store, options())) {
             assertThat(reopened.certificateIdentity(configuration).issuedCertificateChain().orElseThrow())
                     .containsExactly(expected);
             assertThat(store.read().orElseThrow().version()).isEqualTo(durableVersion);
@@ -405,32 +353,30 @@ class OrionKeyMaterialTest {
     @Test
     void doesNotReplaceAnAliasOwnedByAnotherMaterialPurpose() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        SigningMaterialSet signing = new SigningMaterialSet(rsa("configuration-v1", 1), List.of());
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
-                new KeyMaterialCreation(true))) {
+        KeyMaterialDescriptor signing = rsa("configuration-v1", 1);
+        try (OrionKeyMaterial material = openWithKey(store, signing)) {
             String before = store.read().orElseThrow().version();
             assertThatThrownBy(() -> material.seal(material.configurationCipherKey(), new byte[]{1},
                     new ConfigurationSecretContext("system/token", "credential")))
                     .isInstanceOf(GeneralSecurityException.class);
             assertThat(store.read().orElseThrow().version()).isEqualTo(before);
-            assertThat(material.sign(signing.active(), new byte[]{1})).isNotEmpty();
+            assertThat(material.sign(signing, new byte[]{1})).isNotEmpty();
         }
     }
 
     @Test
     void reopensAConcurrentCipherWinnerWithoutOverwritingItsKey() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        SigningMaterialSet signing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());
+        KeyMaterialDescriptor signing = rsa("server-signing-v1", 1);
         ConfigurationSecretContext context = new ConfigurationSecretContext("system/token", "credential");
-        try (OrionKeyMaterial first = OrionKeyMaterial.open(store, options(), signing, 2048,
-                new KeyMaterialCreation(true));
-             OrionKeyMaterial second = OrionKeyMaterial.open(store, options(), signing, 2048)) {
+        try (OrionKeyMaterial first = openWithKey(store, signing);
+             OrionKeyMaterial second = OrionKeyMaterial.open(store, options())) {
             ConfigurationSecretEnvelope envelope = first.seal(first.configurationCipherKey(), new byte[]{1}, context);
             String winnerVersion = store.read().orElseThrow().version();
             assertThatThrownBy(() -> second.seal(second.configurationCipherKey(), new byte[]{2}, context))
                     .isInstanceOf(GeneralSecurityException.class);
             assertThat(store.read().orElseThrow().version()).isEqualTo(winnerVersion);
-            try (OrionKeyMaterial reopened = OrionKeyMaterial.open(store, options(), signing, 2048)) {
+            try (OrionKeyMaterial reopened = OrionKeyMaterial.open(store, options())) {
                 assertThat(reopened.open(reopened.configurationCipherKey(), envelope, context)).containsExactly((byte) 1);
             }
         }
@@ -451,20 +397,34 @@ class OrionKeyMaterialTest {
             }
         }
         LostResponseStore store = new LostResponseStore();
-        SigningMaterialSet signing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());
+        KeyMaterialDescriptor signing = rsa("server-signing-v1", 1);
         ConfigurationSecretContext context = new ConfigurationSecretContext("system/token", "credential");
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
-                new KeyMaterialCreation(true))) {
+        try (OrionKeyMaterial material = openWithKey(store, signing)) {
             store.loseResponse = true;
             assertThatThrownBy(() -> material.seal(material.configurationCipherKey(), new byte[]{1}, context))
                     .isInstanceOf(GeneralSecurityException.class);
         }
         String savedVersion = store.read().orElseThrow().version();
         store.loseResponse = false;
-        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(store, options(), signing, 2048)) {
+        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(store, options())) {
             ConfigurationSecretEnvelope envelope = reopened.seal(reopened.configurationCipherKey(), new byte[]{2}, context);
             assertThat(reopened.open(reopened.configurationCipherKey(), envelope, context)).containsExactly((byte) 2);
             assertThat(store.read().orElseThrow().version()).isEqualTo(savedVersion);
+        }
+    }
+
+    private static OrionKeyMaterial openWithKey(KeyMaterialContentStore store, KeyMaterialDescriptor key)
+            throws Exception {
+        OrionKeyMaterial material = OrionKeyMaterial.open(store, options());
+        try {
+            material.withModification(modification -> {
+                modification.generateKey(key, 2048);
+                modification.apply();
+            });
+            return material;
+        } catch (Exception failure) {
+            material.close();
+            throw failure;
         }
     }
 

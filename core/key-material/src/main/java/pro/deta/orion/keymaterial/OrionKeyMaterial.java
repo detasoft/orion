@@ -77,61 +77,6 @@ public class OrionKeyMaterial implements AutoCloseable {
                 KeyMaterialService.open(store, options, new KeyMaterialStorageCertificateFactory(), eventPublisher));
     }
 
-    public static OrionKeyMaterial open(
-            KeyMaterialContentStore store,
-            KeyMaterialOptions options,
-            SigningMaterialSet signingMaterial,
-            int activeKeySize) throws IOException, GeneralSecurityException {
-        return open(store, options, signingMaterial, activeKeySize, new KeyMaterialCreation(false));
-    }
-
-    public static OrionKeyMaterial open(
-            KeyMaterialContentStore store,
-            KeyMaterialOptions options,
-            SigningMaterialSet signingMaterial,
-            int activeKeySize,
-            KeyMaterialCreation creation) throws IOException, GeneralSecurityException {
-        return open(store, options, signingMaterial, activeKeySize, creation, event -> {});
-    }
-
-    public static OrionKeyMaterial open(
-            KeyMaterialContentStore store,
-            KeyMaterialOptions options,
-            SigningMaterialSet signingMaterial,
-            int activeKeySize,
-            KeyMaterialCreation creation,
-            OrionEventPublisher eventPublisher) throws IOException, GeneralSecurityException {
-        requireRsa(signingMaterial);
-        KeyMaterialService service = KeyMaterialService.open(store, options,
-                new KeyMaterialStorageCertificateFactory(), eventPublisher);
-        try {
-            if (!service.hasDurableSnapshot()) {
-                if (!creation.allowed()) {
-                    throw new GeneralSecurityException(
-                            "Key material store is missing and creation was not requested");
-                }
-                if (!signingMaterial.verification().isEmpty()) {
-                    throw new GeneralSecurityException(
-                            "A new material store cannot contain retained server identities");
-                }
-                KeyMaterialModification modification = service.modify();
-                try {
-                    modification.generateKey(signingMaterial.active(), activeKeySize);
-                    modification.apply();
-                } finally {
-                    modification.discard();
-                }
-            }
-            for (KeyMaterialDescriptor descriptor : signingMaterial.verificationIncludingActive()) {
-                service.validateExisting(descriptor);
-            }
-            return new OrionKeyMaterial(service);
-        } catch (IOException | GeneralSecurityException | RuntimeException failure) {
-            service.close();
-            throw failure;
-        }
-    }
-
     protected OrionKeyMaterial() {
         owner = null;
     }
@@ -563,15 +508,6 @@ public class OrionKeyMaterial implements AutoCloseable {
 
     private void requireAvailable() {
         if (owner == null) throw new IllegalStateException("Key material is not available");
-    }
-
-    private static void requireRsa(SigningMaterialSet signingMaterial) {
-        if (signingMaterial == null) {
-            throw new IllegalArgumentException("Server signing material must not be null");
-        }
-        if (signingMaterial.active().algorithm() != KeyMaterialAlgorithm.RSA) {
-            throw new IllegalArgumentException("JWT server identity material must use RSA");
-        }
     }
 
     private ConfigurationSecretEnvelope sealConfigurationSecret(

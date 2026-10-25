@@ -1,6 +1,5 @@
 package pro.deta.orion.transport.http;
 
-import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.config.OrionConfigurationEditor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -757,8 +756,11 @@ class OrionAdminProxyMutationTest {
             var signing = new KeyMaterialDescriptor("signing",
                     Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
             try (var options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
-                material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
-                        new SigningMaterialSet(signing, List.of()), 2048, new KeyMaterialCreation(true));
+                material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options);
+                material.withModification(modification -> {
+                    modification.generateKey(signing, 2048);
+                    modification.apply();
+                });
             }
             editor = new OrionConfigurationEditor(storage,
                 material,

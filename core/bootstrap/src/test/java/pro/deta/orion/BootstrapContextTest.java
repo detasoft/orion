@@ -1706,8 +1706,12 @@ class BootstrapContextTest {
     private static byte[] materialBytes(BootstrapConfiguration configuration,
             List<KeyMaterialDescriptor> descriptors) throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        try (OrionKeyMaterial material = OrionKeyMaterialFactory.open(
-                configuration, ENVIRONMENT, store, new KeyMaterialCreation(true))) {
+        try (OrionKeyMaterial material = BootstrapContext.openKeyMaterial(
+                configuration,
+                ENVIRONMENT,
+                store,
+                new KeyMaterialCreation(true),
+                event -> {})) {
             if (!descriptors.isEmpty()) {
                 material.withModification(modification -> {
                     for (KeyMaterialDescriptor descriptor : descriptors) {

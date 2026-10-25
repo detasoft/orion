@@ -9,7 +9,6 @@ import pro.deta.orion.test.certificates.TestCertificateChain;
 
 import java.util.Set;
 
-import pro.deta.orion.keymaterial.KeyMaterialCreation;
 
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.test.integration.TestConfiguration;
@@ -33,7 +32,6 @@ import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
@@ -241,14 +239,7 @@ class AcmeCertificateSettingsTest {
     }
 
     private static OrionKeyMaterial owner(InMemoryKeyMaterialContentStore store) throws Exception {
-        return OrionKeyMaterial.open(store, KeyMaterialOptions.pkcs12("password".toCharArray()),
-                new SigningMaterialSet(
-                        new KeyMaterialDescriptor(
-                                "signing",
-                                Set.of(KeyMaterialPurpose.SERVER_SIGNING),
-                                KeyMaterialAlgorithm.RSA,
-                                1), List.of()), 2048,
-                                        new KeyMaterialCreation(true));
+        return OrionKeyMaterial.open(store, KeyMaterialOptions.pkcs12("password".toCharArray()));
     }
 
     private static AcmeCertificateService.Settings settings(String provider, String kid, String key) {

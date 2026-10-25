@@ -4,14 +4,12 @@ import pro.deta.orion.git.fileapi.GitCommitAuthor;
 
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
 
-import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.BootstrapContext;
-import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.bootstrap.config.location.BootstrapConfigurationReader;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
@@ -107,8 +105,8 @@ class RemoteBootstrapConfigurationIT {
             materialStore.write(material, null);
             pro.deta.orion.event.OrionEventManager bootstrapEvents1 =
                     new pro.deta.orion.event.OrionEventManager();
-            try (var seededMaterial = OrionKeyMaterialFactory.open(configuration, environment, materialStore,
-                    new KeyMaterialCreation(false));
+            try (var seededMaterial = TestServerIdentityMaterial.openMaterial(
+                    configuration, environment, materialStore);
                  var bootstrap = BootstrapContext.open(configuration, environment, bootstrapEvents1)) {
                 byte[] payload = "remote material identity".getBytes(StandardCharsets.UTF_8);
                 assertThat(bootstrap.keyMaterial().verify(bootstrap.signingMaterial().active(),

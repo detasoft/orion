@@ -1,6 +1,5 @@
 package pro.deta.orion.transport.http;
 
-import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.bouncycastle.asn1.x509.BasicConstraints;
 import org.bouncycastle.asn1.x509.Extension;
@@ -66,7 +65,6 @@ import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.TlsMaterialConfiguration;
 import pro.deta.orion.keymaterial.TlsClientAuthentication;
-import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.HttpTransportConfig;
@@ -1092,12 +1090,20 @@ class JettyHTTPServerIT {
     }
 
     private static OrionKeyMaterial owner(InMemoryKeyMaterialContentStore store) throws Exception {
-        return OrionKeyMaterial.open(
-                store,
-                KeyMaterialOptions.pkcs12("test-password".toCharArray()),
-                new SigningMaterialSet(SIGNING, List.of()),
-                2048,
-                new KeyMaterialCreation(true));
+        OrionKeyMaterial material = OrionKeyMaterial.open(
+                store, KeyMaterialOptions.pkcs12("test-password".toCharArray()));
+        try {
+            if (!material.contains(SIGNING)) {
+                material.withModification(modification -> {
+                    modification.generateKey(SIGNING, 2048);
+                    modification.apply();
+                });
+            }
+            return material;
+        } catch (Exception failure) {
+            material.close();
+            throw failure;
+        }
     }
 
     static TestConfiguration desiredState(

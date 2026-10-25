@@ -10,13 +10,8 @@ import pro.deta.orion.test.certificates.TestCertificateChain;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
-import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
-import pro.deta.orion.keymaterial.SigningMaterialSet;
-import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.HttpTransportConfig;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -266,11 +261,8 @@ public class ACMECertificateChallengeTest {
     }
 
     private static OrionKeyMaterial keyMaterial() throws Exception {
-        KeyMaterialDescriptor signing = new KeyMaterialDescriptor("server-signing-v1",
-                Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
         return OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
-                KeyMaterialOptions.pkcs12("test-password".toCharArray()),
-                new SigningMaterialSet(signing, List.of()), 2048, new KeyMaterialCreation(true));
+                KeyMaterialOptions.pkcs12("test-password".toCharArray()));
     }
 
     private static final class WaitingChallengeIssuer extends AcmeCertificateIssuer {
