@@ -82,7 +82,7 @@ class AcmeAdministrationTest {
         TestConfiguration desired = new TestConfiguration(EVENTS);
         desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("revision"));
         AcmeCertificateService configuration = new AcmeCertificateService(desired.editor(),
-                OrionKeyMaterial.unavailable(), null, null);
+                OrionKeyMaterial.unavailable(), null, null, EVENTS.executor());
         ObjectMapper mapper = new ObjectMapper();
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of(
                 new OrionAdminAcmeConfigurationRoute(configuration, mapper, null))), new OrionHttpResponseWriter(mapper));

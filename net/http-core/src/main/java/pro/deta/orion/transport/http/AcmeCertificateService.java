@@ -14,10 +14,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
@@ -32,6 +32,7 @@ import pro.deta.orion.config.OrionConfigurationModification;
 import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.internal.ChangeMetadata;
+import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
@@ -39,6 +40,7 @@ import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
+import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter.ServiceLifecycle;
 import pro.deta.orion.schema.orion.v2.Connection;
 import pro.deta.orion.schema.orion.v2.GitProxyBinding;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
@@ -50,7 +52,7 @@ import pro.deta.orion.util.Result;
 
 /** Owns ACME settings, certificate issuance, and automatic renewal over configuration and key material. */
 @Singleton
-public class AcmeCertificateService {
+public class AcmeCertificateService implements ServiceLifecycle {
     private static final Logger LOG = LoggerFactory.getLogger(AcmeCertificateService.class);
     private static final int RSA_KEY_SIZE = KeyMaterialConstants.RSA_KEY_SIZE_BITS;
 
@@ -64,21 +66,25 @@ public class AcmeCertificateService {
     private final OrionKeyMaterial keyMaterial;
     private final AcmeCertificateIssuer certificateIssuer;
     private final ConfigurationSecrets secrets;
+    private final OrionExecutor executor;
     private final AtomicBoolean issuanceInProgress = new AtomicBoolean();
+    private final ReentrantLock maintenanceExecution = new ReentrantLock();
     private volatile RenewalAttempt renewalAttempt;
     private volatile boolean maintenanceStopped;
-    private volatile ScheduledExecutorService maintenance;
+    private volatile ScheduledFuture<?> maintenance;
 
     @Inject
     public AcmeCertificateService(
             OrionConfigurationEditor editor,
             OrionKeyMaterial keyMaterial,
             AcmeCertificateIssuer certificateIssuer,
-            ConfigurationSecrets secrets) {
+            ConfigurationSecrets secrets,
+            OrionExecutor executor) {
         this.editor = editor;
         this.keyMaterial = keyMaterial;
         this.certificateIssuer = certificateIssuer;
         this.secrets = secrets;
+        this.executor = executor;
     }
 
     public View view() {
@@ -304,23 +310,48 @@ public class AcmeCertificateService {
         }
     }
 
-    synchronized void startMaintenance() {
+    @Override
+    public synchronized void onStart() {
         if (maintenance != null) throw new IllegalStateException("ACME maintenance is already running");
         maintenanceStopped = false;
-        maintenance = Executors.newSingleThreadScheduledExecutor(
-                Thread.ofPlatform().daemon(true).name("acme-renewal").factory());
-        maintenance.scheduleWithFixedDelay(() -> maintainCertificate(Instant.now()),
+        maintenance = executor.scheduleWithFixedDelay(this::runMaintenance,
                 0, 60, TimeUnit.SECONDS);
     }
 
-    synchronized void stopMaintenance() throws InterruptedException {
+    @Override
+    public synchronized void onStop() throws InterruptedException {
         maintenanceStopped = true;
         if (maintenance == null) return;
-        maintenance.shutdownNow();
-        if (!maintenance.awaitTermination(5, TimeUnit.SECONDS)) {
+        maintenance.cancel(true);
+        if (!maintenanceExecution.tryLock(5, TimeUnit.SECONDS)) {
             throw new IllegalStateException("ACME maintenance has not stopped");
         }
+        maintenanceExecution.unlock();
         maintenance = null;
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return true;
+    }
+
+    @Override
+    public boolean isRunning() {
+        ScheduledFuture<?> current = maintenance;
+        return current != null && !current.isDone() && !maintenanceStopped;
+    }
+
+    private void runMaintenance() {
+        try {
+            maintenanceExecution.lockInterruptibly();
+            try {
+                maintainCertificate(Instant.now());
+            } finally {
+                maintenanceExecution.unlock();
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     void maintainCertificate(Instant now) {
@@ -354,7 +385,7 @@ public class AcmeCertificateService {
             Optional<List<X509Certificate>> chain =
                     keyMaterial.issuedCertificateChain(settings.material().identity());
             RenewalAttempt attempt = currentAttempt(settings);
-            String state = maintenance == null || maintenanceStopped ? "stopped"
+            String state = !isRunning() ? "stopped"
                     : issuanceInProgress.get() ? "issuing"
                     : chain.isEmpty() ? "awaiting_certificate"
                     : attempt != null && !attempt.error().isEmpty() ? "retrying" : "scheduled";

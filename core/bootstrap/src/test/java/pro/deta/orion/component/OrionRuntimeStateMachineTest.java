@@ -16,6 +16,7 @@ import pro.deta.orion.transport.TransportLifecycleStateMachine;
 import pro.deta.orion.transport.git.GitNativeTransportStateMachine;
 import pro.deta.orion.transport.git.GitSshTransportStateMachine;
 import pro.deta.orion.transport.http.JettyHTTPServerStateMachine;
+import pro.deta.orion.transport.http.AcmeCertificateServiceStateMachine;
 import pro.deta.orion.util.Result;
 
 import java.util.List;
@@ -100,8 +101,8 @@ class OrionRuntimeStateMachineTest {
                         new GitNativeTransportStateMachine(OrionRuntimeStateMachineTest::unstartedService),
                         new GitSshTransportStateMachine(OrionRuntimeStateMachineTest::unstartedService),
                         new JettyHTTPServerStateMachine(OrionRuntimeStateMachineTest::unstartedService,
-                                OrionRuntimeStateMachineTest::unstartedService,
-                                OrionRuntimeStateMachineTest::unstartedService, new OrionEventManager())),
+                                OrionRuntimeStateMachineTest::unstartedService, new OrionEventManager(), null)),
+                new AcmeCertificateServiceStateMachine(OrionRuntimeStateMachineTest::unstartedService),
                 () -> { throw new AssertionError("Bootstrap proxies must not start"); }, decisions);
     }
     private static Result<Decision> register(DecisionRegistry decisions) {

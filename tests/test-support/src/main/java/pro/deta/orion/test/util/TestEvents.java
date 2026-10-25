@@ -4,10 +4,13 @@ import java.util.ArrayList;
 import java.util.List;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.OrionEvent;
+import pro.deta.orion.internal.OrionExecutor;
+import pro.deta.orion.internal.OrionThreadFactory;
 
 /** Owns the event dispatcher used by one test and drains it before teardown. */
 public final class TestEvents implements AutoCloseable {
     private OrionEventManager manager;
+    private OrionExecutor executor;
     private final List<AutoCloseable> resources = new ArrayList<>();
 
     public void own(AutoCloseable resource) {
@@ -23,6 +26,14 @@ public final class TestEvents implements AutoCloseable {
     public OrionEventManager rawManager() {
         if (manager == null) manager = new OrionEventManager();
         return manager;
+    }
+
+    public OrionExecutor executor() {
+        if (executor == null) {
+            executor = new OrionExecutor(2, new OrionThreadFactory());
+            own(executor);
+        }
+        return executor;
     }
 
     public void await() {
@@ -47,6 +58,7 @@ public final class TestEvents implements AutoCloseable {
             }
         } finally {
             resources.clear();
+            executor = null;
             if (manager != null) {
                 manager.onStop();
                 manager = null;

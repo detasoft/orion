@@ -14,7 +14,6 @@ import pro.deta.orion.schema.orion.v2.ScopedRole;
 import pro.deta.orion.schema.orion.v2.GrantId;
 import pro.deta.orion.schema.orion.v2.ScopedGrant;
 import pro.deta.orion.schema.orion.v2.TeamId;
-import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
 import pro.deta.orion.decision.Decision;
 import pro.deta.orion.decision.DecisionAction;
@@ -247,7 +246,7 @@ class OrionRuntimeModuleTest {
         User user = new User("reviewer", null, null, null,
                 List.of(), List.of(), grants);
         OrionDocument.Repository repository = new OrionDocument.Repository("api", "API",
-                OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
+                OrionDocument.Repository.DEFAULT_BRANCH,
                         List.of(),
                         List.of(),
                         List.of(),
@@ -273,7 +272,8 @@ class OrionRuntimeModuleTest {
                 "configuration",
                 "access-control",
                 "agent-session-server",
-                "transports");
+                "transports",
+                "acme");
     }
 
     @Test

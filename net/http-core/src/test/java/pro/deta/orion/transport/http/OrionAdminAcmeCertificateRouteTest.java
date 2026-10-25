@@ -171,7 +171,7 @@ class OrionAdminAcmeCertificateRouteTest {
             super(
                     new TestConfiguration(EVENTS).editor(),
                     OrionKeyMaterial.unavailable(),
-                    new AcmeCertificateIssuer(null), null);
+                    new AcmeCertificateIssuer(null), null, EVENTS.executor());
             this.issued = issued;
             this.saved = saved;
         }
@@ -192,7 +192,7 @@ class OrionAdminAcmeCertificateRouteTest {
             super(
                     new TestConfiguration(EVENTS).editor(),
                     OrionKeyMaterial.unavailable(),
-                    new AcmeCertificateIssuer(null), null);
+                    new AcmeCertificateIssuer(null), null, EVENTS.executor());
         }
 
         @Override

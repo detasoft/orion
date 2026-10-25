@@ -15,6 +15,7 @@ import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.lifecycle.state.StateTransitionResult;
 import pro.deta.orion.transport.TransportLifecycleStateMachine;
+import pro.deta.orion.transport.http.AcmeCertificateServiceStateMachine;
 
 import java.util.List;
 import java.util.function.Supplier;
@@ -29,12 +30,14 @@ import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
  * Root lifecycle state machine for the Orion process.
  *
  * <p>@AiRule Keep startup order explicit: executor, event manager, configuration editor, ACL,
- * Agent session server, then transports. The executor is needed for lifecycle work. The event manager must be
+ * Agent session server, transports, then ACME renewal. The executor is needed for lifecycle work.
+ * The event manager must be
  * running before the editor subscribes to storage events. The editor observes configuration before ACL
  * bootstraps its credentials. After ACL loads, adopt and activate bootstrap proxies before Agent authentication
  * or public transports start. Failure in either phase must stop startup, except for registered connection
  * decisions on persistent proxies: these proxies stay unavailable while management starts to resolve them. Transports are
- * the final externally visible services. Shutdown must use the reverse order so transports close before Agent
+ * the final externally visible services. ACME starts afterward so HTTP-01 challenges have a ready listener.
+ * Shutdown must use the reverse order so ACME stops before transports, and transports close before Agent
  * authentication and durable registries, and the executor stops last. Cancel pending decisions before
  * stopping children so shutdown does not wait for human input and continuations can still use the executor.</p>
  */
@@ -49,10 +52,11 @@ public final class OrionRuntimeStateMachine extends AggregateLifecycleStateMachi
             OrionAccessControlStateMachine accessControl,
             AgentSessionServerStateMachine agentSessionServer,
             TransportLifecycleStateMachine transports,
+            AcmeCertificateServiceStateMachine acme,
             @Named("bootstrap-proxies") Runnable bootstrapProxies,
             DecisionRegistry decisions) {
-        super(rootStateMachine(executor, eventManager, configuration, accessControl, agentSessionServer, transports,
-                bootstrapProxies, decisions));
+        super(rootStateMachine(executor, eventManager, configuration, accessControl, agentSessionServer,
+                transports, acme, bootstrapProxies, decisions));
     }
 
     private static AggregateStateMachine rootStateMachine(
@@ -62,6 +66,7 @@ public final class OrionRuntimeStateMachine extends AggregateLifecycleStateMachi
             OrionAccessControlStateMachine accessControl,
             AgentSessionServerStateMachine agentSessionServer,
             TransportLifecycleStateMachine transports,
+            AcmeCertificateServiceStateMachine acme,
             Runnable bootstrapProxies,
             DecisionRegistry decisions) {
         List<RuntimeChild> startOrder = List.of(
@@ -77,7 +82,8 @@ public final class OrionRuntimeStateMachine extends AggregateLifecycleStateMachi
                 }, accessControl::stop, accessControl::currentState),
                 child("agent-session-server", agentSessionServer::start, agentSessionServer::stop,
                         agentSessionServer::currentState),
-                child("transports", transports::start, transports::stop, transports::currentState));
+                child("transports", transports::start, transports::stop, transports::currentState),
+                child("acme", acme::start, acme::stop, acme::currentState));
         ActionBinding<pro.deta.orion.lifecycle.state.Void> start =
                 ActionId.START.bind(ignored -> startChildren(startOrder));
         ActionBinding<pro.deta.orion.lifecycle.state.Void> stop =
@@ -94,6 +100,7 @@ public final class OrionRuntimeStateMachine extends AggregateLifecycleStateMachi
                 .child("access-control", accessControl.stateMachine())
                 .child("agent-session-server", agentSessionServer.stateMachine())
                 .child("transports", transports.stateMachine())
+                .child("acme", acme.stateMachine())
                 .from(NEW, DISABLED).on(start).to(DISABLED, RUNNING, ERR).post(result ->
                         resolveStartState(result, startOrder))
                 .from(NEW, DISABLED).on(stop).to(FIN, ERR)

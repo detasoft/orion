@@ -275,7 +275,7 @@ class OrionHttpRouteServletRoutingTest {
                         desired.editor(),
                         OrionKeyMaterial.unavailable(),
                         new AcmeCertificateIssuer(null),
-                        null),
+                        null, EVENTS.executor()),
                 OBJECT_MAPPER);
     }
 

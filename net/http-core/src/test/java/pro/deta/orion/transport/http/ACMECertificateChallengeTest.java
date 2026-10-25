@@ -65,7 +65,7 @@ public class ACMECertificateChallengeTest {
             AcmeCertificateService service = new AcmeCertificateService(
                     desiredStateWithAcme().editor(),
                     material,
-                    issuer, null);
+                    issuer, null, EVENTS.executor());
             try (AcmeHttpTestServer server = startHttp(
                     challengeService,
                     new TestAdminAcmeCertificateRoute(service));

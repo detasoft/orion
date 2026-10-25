@@ -75,7 +75,8 @@ class AcmeCertificateSettingsTest {
                     }
                 }
             };
-            AcmeCertificateService service = new AcmeCertificateService(desired.editor(), owner, issuer, secrets);
+            AcmeCertificateService service = new AcmeCertificateService(
+                    desired.editor(), owner, issuer, secrets, EVENTS.executor());
             AcmeCertificateService.View view = service.save(new AcmeCertificateService.Settings("r1",
                     "letsencrypt", "", "admin@example.test", List.of("example.test"), "", null, reference), "root");
             assertThat(view.accountMaterial()).isEqualTo(reference);
@@ -143,7 +144,8 @@ class AcmeCertificateSettingsTest {
             ConfigurationSecrets secrets = new ConfigurationSecrets(
                     () -> desired.editor().current().result()
                             .valueOrFailure("Cannot read configuration document"), owner);
-            AcmeCertificateService service = new AcmeCertificateService(desired.editor(), owner, null, secrets);
+            AcmeCertificateService service = new AcmeCertificateService(
+                    desired.editor(), owner, null, secrets, EVENTS.executor());
             OrionDocument saved = service.updated(initial, settings("zerossl", "key-id", EAB_KEY));
             desired.publish(saved, Optional.of("r2"));
             assertThatThrownBy(() -> service.updated(saved, new AcmeCertificateService.Settings("r2",
@@ -169,7 +171,7 @@ class AcmeCertificateSettingsTest {
                 List.of(), List.of()), List.of());
         desired.publish(initial, Optional.of("r1"));
         AcmeCertificateService service = new AcmeCertificateService(desired.editor(),
-                        OrionKeyMaterial.unavailable(), null, null);
+                        OrionKeyMaterial.unavailable(), null, null, EVENTS.executor());
         AcmeCertificateService.View view = service.view();
         assertThat(view.enabled()).isFalse();
         assertThat(view.directoryUrl()).isEqualTo("https://acme-staging-v02.api.letsencrypt.org/directory");
@@ -209,7 +211,8 @@ class AcmeCertificateSettingsTest {
                     }
                 }
             };
-            AcmeCertificateService service = new AcmeCertificateService(desired.editor(), owner, issuer, secrets);
+            AcmeCertificateService service = new AcmeCertificateService(
+                    desired.editor(), owner, issuer, secrets, EVENTS.executor());
 
             AcmeCertificateService.Settings input = settings("zerossl", "key-id", EAB_KEY);
             AcmeCertificateService.View result = service.save(input, "root");
@@ -244,7 +247,8 @@ class AcmeCertificateSettingsTest {
             assertThat(dispatcher.dispatch(AcmeAdministrationTest.request("/acme issue",
                     AcmeAdministrationTest.admin())))
                     .isEqualTo(new CommandResult.Message("Certificate issued and saved."));
-            AcmeCertificateService restarted = new AcmeCertificateService(desired.editor(), owner, issuer, secrets);
+            AcmeCertificateService restarted = new AcmeCertificateService(
+                    desired.editor(), owner, issuer, secrets, EVENTS.executor());
             assertThat(new OrionAdminAcmeCertificateRoute(restarted, new ObjectMapper())
                     .doPost(AcmeAdministrationTest.httpRequest("POST", "/api/admin/acme/certificate", "",
                             AcmeAdministrationTest.admin())).status()).isEqualTo(200);
@@ -279,7 +283,8 @@ class AcmeCertificateSettingsTest {
             ConfigurationSecrets secrets = new ConfigurationSecrets(
                     () -> desired.editor().current().result()
                             .valueOrFailure("Cannot read configuration document"), owner);
-            AcmeCertificateService service = new AcmeCertificateService(desired.editor(), owner, null, secrets);
+            AcmeCertificateService service = new AcmeCertificateService(
+                    desired.editor(), owner, null, secrets, EVENTS.executor());
             saved = service.updated(initial, settings("zerossl", "key-id", EAB_KEY));
             service.prepareMaterial(saved.system().https().orElseThrow());
             desired.publish(saved, Optional.of("r2"));
@@ -313,7 +318,8 @@ class AcmeCertificateSettingsTest {
             ConfigurationSecrets secrets = new ConfigurationSecrets(
                     () -> desired.editor().current().result()
                             .valueOrFailure("Cannot read configuration document"), owner);
-            AcmeCertificateService service = new AcmeCertificateService(desired.editor(), owner, null, secrets);
+            AcmeCertificateService service = new AcmeCertificateService(
+                    desired.editor(), owner, null, secrets, EVENTS.executor());
             OrionDocument saved = service.updated(initial, settings("zerossl", "key-id", EAB_KEY));
             String original = saved.system().https().orElseThrow().acme().orElseThrow().eabSecret().orElseThrow();
             Connection.S3 connection = new Connection.S3("archive", Optional.empty(), "us-east-1",
@@ -338,7 +344,7 @@ class AcmeCertificateSettingsTest {
         OrionDocument initial = OrionDocument.withAccessControl(new AccessControl());
         desired.publish(initial, Optional.of("r1"));
         AcmeCertificateService service = new AcmeCertificateService(desired.editor(),
-                        OrionKeyMaterial.unavailable(), null, null);
+                        OrionKeyMaterial.unavailable(), null, null, EVENTS.executor());
         assertThatThrownBy(() -> service.updated(initial, settings("zerossl", "", "")))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> service.updated(initial, settings("custom", "id", "")))
