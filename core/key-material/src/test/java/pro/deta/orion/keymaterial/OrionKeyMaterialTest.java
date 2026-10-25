@@ -53,9 +53,14 @@ class OrionKeyMaterialTest {
         byte[] payload = "retained-jwt".getBytes(StandardCharsets.UTF_8);
         byte[] oldSignature;
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            service.generateKeyIfMissing(old, 2048);
-            service.generateKeyIfMissing(active, 2048);
-            service.save();
+            KeyMaterialModification modification = service.modify();
+            try {
+                modification.generateKey(old, 2048);
+                modification.generateKey(active, 2048);
+                modification.apply();
+            } finally {
+                modification.discard();
+            }
         }
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options())) {
             oldSignature = material.sign(old, payload);
@@ -90,8 +95,13 @@ class OrionKeyMaterialTest {
             oldSignature = material.signingIdentity().sign(payload);
         }
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            service.generateKeyIfMissing(next, 2048);
-            service.save();
+            KeyMaterialModification modification = service.modify();
+            try {
+                modification.generateKey(next, 2048);
+                modification.apply();
+            } finally {
+                modification.discard();
+            }
         }
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), initial, 2048)) {
             assertThat(material.signingIdentity().activeKeyId()).isEqualTo(old.alias());
@@ -126,8 +136,13 @@ class OrionKeyMaterialTest {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialDescriptor existing = rsa("other-signing", 1);
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            service.generateKeyIfMissing(existing, 2048);
-            service.save();
+            KeyMaterialModification modification = service.modify();
+            try {
+                modification.generateKey(existing, 2048);
+                modification.apply();
+            } finally {
+                modification.discard();
+            }
         }
         String before = store.read().orElseThrow().version();
         SigningMaterialSet missing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());

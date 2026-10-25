@@ -107,13 +107,6 @@ class OrionKeyMaterialApiTest {
                 modification.apply();
             });
         }
-        try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password());
-                KeyMaterialService service = KeyMaterialService.open(store, options)) {
-            service.setTrustedCertificate(ROOT, root.certificate());
-            service.setPrivateKey(IDENTITY, service.getKeyPair(IDENTITY.alias()),
-                    List.of(service.getCertificateChain(IDENTITY.alias())));
-            service.save();
-        }
         try (OrionKeyMaterial material = open(store)) {
             assertThat(material.inventory(identityPurposes)).extracting(KeyMaterialInventoryEntry::purposes)
                     .containsExactly(identityPurposes);

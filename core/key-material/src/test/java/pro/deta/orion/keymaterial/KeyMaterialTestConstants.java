@@ -14,12 +14,6 @@ final class KeyMaterialTestConstants {
     static final String PKCS12_EXTENSION = ".p12";
     static final String ORION_KEYSTORE_LOCATION_ENV = "ORION_KEYSTORE_LOCATION";
     static final String ORION_KEYSTORE_PASSWORD_ENV = "ORION_KEYSTORE_PASSWORD";
-    static final String SERVER_SIGNING_PURPOSE = "server-signing";
-    static final String SSH_HOST_PURPOSE = "ssh-host";
-    static final String HTTPS_PURPOSE = "https";
-    static final String CA_ISSUER_PURPOSE = "ca-issuer";
-    static final String ACME_ACCOUNT_PURPOSE = "acme-account";
-    static final String TOOL_COMPATIBILITY_PURPOSE = "tool-compatibility";
     static final String SERVER_SIGNING_2026_04_ALIAS = "server-signing-2026-04";
     static final String SERVER_SIGNING_2026_05_ALIAS = "server-signing-2026-05";
     static final String SERVER_SIGNING_2026_06_ALIAS = "server-signing-2026-06";

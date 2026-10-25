@@ -1,13 +1,14 @@
 package pro.deta.orion;
 
+import java.security.KeyStore;
+import java.io.ByteArrayOutputStream;
+
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
-import pro.deta.orion.keymaterial.KeyMaterialOptions;
-import pro.deta.orion.keymaterial.KeyMaterialService;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.SigningKeyReferenceConfig;
@@ -121,9 +122,12 @@ class OrionKeyMaterialFactoryTest {
                 .hasMessageContaining("creation was not requested");
         assertThat(store.read()).isEmpty();
 
-        try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray());
-                KeyMaterialService service = KeyMaterialService.open(store, options)) {
-            service.save();
+        KeyStore emptyStore = KeyStore.getInstance("PKCS12");
+        char[] password = "test-password".toCharArray();
+        emptyStore.load(null, password);
+        try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            emptyStore.store(output, password);
+            store.write(output.toByteArray(), null);
         }
         byte[] before = store.read().orElseThrow().bytes();
         assertThatThrownBy(() -> OrionKeyMaterialFactory.open(configuration,

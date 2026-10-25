@@ -13,6 +13,7 @@ import java.security.KeyStore;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -26,10 +27,10 @@ class KeyMaterialServiceTest {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
 
         KeyMaterialService service = KeyMaterialService.open(store, options());
-        KeyPair generated = service.generateKeyIfMissing(
+        KeyPair generated = generateKey(service, descriptor(
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
-                KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE));
-        String savedVersion = service.save();
+                KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA), 2048);
+        String savedVersion = store.read().orElseThrow().version();
 
         KeyMaterialService reloaded = KeyMaterialService.open(store, options());
         KeyPair loaded = reloaded.getKeyPair(KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS);
@@ -56,10 +57,9 @@ class KeyMaterialServiceTest {
         LocalKeyMaterialContentStore store = new LocalKeyMaterialContentStore(keyStorePath);
 
         KeyMaterialService service = KeyMaterialService.open(store, options());
-        service.generateKeyIfMissing(
+        generateKey(service, descriptor(
                 KeyMaterialTestConstants.SSH_HOST_RSA_2026_05_ALIAS,
-                KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.SSH_HOST_PURPOSE));
-        service.save();
+                KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.RSA), 2048);
 
         KeyStore keyStore = KeyStore.getInstance(KeyMaterialConstants.DEFAULT_KEY_STORE_TYPE);
         try (InputStream input = Files.newInputStream(keyStorePath)) {
@@ -76,9 +76,9 @@ class KeyMaterialServiceTest {
     void trustedCertificatesRoundTripSeparatelyFromPrivateKeyEntries() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialService service = KeyMaterialService.open(store, options());
-        service.generateKeyIfMissing(
+        generateKey(service, descriptor(
                 KeyMaterialTestConstants.ORION_CA_2026_05_ALIAS,
-                KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.CA_ISSUER_PURPOSE));
+                KeyMaterialPurpose.CERTIFICATE_AUTHORITY, KeyMaterialAlgorithm.RSA), 2048);
         X509Certificate storageCertificate = (X509Certificate) service.getCertificateChain(
                 KeyMaterialTestConstants.ORION_CA_2026_05_ALIAS)[0];
         X509Certificate issuerCertificate = TestCertificateChain.root("Public Root").certificate();
@@ -86,10 +86,9 @@ class KeyMaterialServiceTest {
                 KeyMaterialTestConstants.ORION_CA_CERT_2026_05_ALIAS,
                 1);
 
-        assertThatThrownBy(() -> service.setTrustedCertificate(descriptor, storageCertificate))
+        assertThatThrownBy(() -> trustCertificate(service, descriptor, storageCertificate))
                 .hasMessageContaining("certificate authority");
-        service.setTrustedCertificate(descriptor, issuerCertificate);
-        service.save();
+        trustCertificate(service, descriptor, issuerCertificate);
 
         KeyMaterialService reloaded = KeyMaterialService.open(store, options());
         X509Certificate trustedCertificate = reloaded.getTrustedCertificate(descriptor);
@@ -112,9 +111,8 @@ class KeyMaterialServiceTest {
                 1);
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            service.setTrustedCertificate(original, root.certificate());
-            service.generateKeyIfMissing(privateEntry, 2048);
-            service.save();
+            trustCertificate(service, original, root.certificate());
+            generateKey(service, privateEntry, 2048);
         }
 
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
@@ -149,10 +147,9 @@ class KeyMaterialServiceTest {
                 KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.RSA);
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            service.generateKeyIfMissing(rsa, 2048);
-            service.generateKeyIfMissing(ec, 256);
-            service.generateKeyIfMissing(signing, 2048);
-            service.save();
+            generateKey(service, rsa, 2048);
+            generateKey(service, ec, 256);
+            generateKey(service, signing, 2048);
         }
 
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
@@ -172,12 +169,17 @@ class KeyMaterialServiceTest {
         TrustedCertificateDescriptor trust = trustedCertificate("issuer-v1", 1);
         TestCertificateChain.Authority issuer = TestCertificateChain.root("Public Root");
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            KeyPair keyPair = service.generateKeyIfMissing(identity, 2048);
-            service.setPrivateKey(identity, keyPair,
-                    List.of(TestCertificateChain.leaf("orion.test", keyPair, issuer), issuer.certificate()));
-            service.generateSecretKeyIfMissing(cipher, 256);
-            service.setTrustedCertificate(trust, issuer.certificate());
-            service.save();
+            KeyPair keyPair = generateKey(service, identity, 2048);
+            KeyMaterialModification modification = service.modify();
+            try {
+                modification.generateKey(cipher, 256);
+                modification.setTrustedCertificate(trust, issuer.certificate());
+                modification.installCertificateChain(identity,
+                        List.of(TestCertificateChain.leaf("orion.test", keyPair, issuer)), Optional.of(trust));
+                modification.apply();
+            } finally {
+                modification.discard();
+            }
         }
 
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
@@ -200,26 +202,30 @@ class KeyMaterialServiceTest {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialService service = KeyMaterialService.open(store, options());
 
-        KeyPair signingKey = service.generateKeyIfMissing(
+        KeyPair signingKey = generateKey(service, descriptor(
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
-                KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE));
-        service.generateKeyIfMissing(
+                KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA), 2048);
+        generateKey(service, descriptor(
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_06_ALIAS,
-                KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE));
+                KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA), 2048);
         Certificate[] mismatchedChain = service.getCertificateChain(
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_06_ALIAS);
         KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(
                 KeyMaterialTestConstants.BAD_SERVER_SIGNING_ALIAS,
-                Set.of(KeyMaterialPurpose.SERVER_SIGNING),
+                Set.of(KeyMaterialPurpose.TLS_IDENTITY),
                 KeyMaterialAlgorithm.RSA,
                 1);
 
-        assertThatThrownBy(() -> service.setPrivateKey(
-                descriptor,
-                signingKey,
-                List.of(mismatchedChain)))
-                .isInstanceOf(Exception.class)
-                .hasMessageContaining("Certificate public key does not match");
+        KeyMaterialModification modification = service.modify();
+        try {
+            modification.importKey(descriptor, signingKey);
+            assertThatThrownBy(() -> modification.installCertificateChain(
+                    descriptor, List.of(mismatchedChain), Optional.empty()))
+                    .isInstanceOf(Exception.class)
+                    .hasMessageContaining("public key does not match");
+        } finally {
+            modification.discard();
+        }
     }
 
     @Test
@@ -227,35 +233,36 @@ class KeyMaterialServiceTest {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
 
         KeyMaterialService initial = KeyMaterialService.open(store, options());
-        initial.generateKeyIfMissing(
+        generateKey(initial, descriptor(
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
-                KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE));
-        initial.save();
+                KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA), 2048);
 
         KeyMaterialService first = KeyMaterialService.open(store, options());
         KeyMaterialService second = KeyMaterialService.open(store, options());
 
-        second.generateKeyIfMissing(
+        generateKey(second, descriptor(
                 KeyMaterialTestConstants.SSH_HOST_RSA_2026_05_ALIAS,
-                KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.SSH_HOST_PURPOSE));
-        second.save();
+                KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.RSA), 2048);
 
-        first.generateKeyIfMissing(
-                KeyMaterialTestConstants.ACME_ACCOUNT_PURPOSE,
-                KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.ACME_ACCOUNT_PURPOSE));
-        assertThatThrownBy(first::save)
-                .isInstanceOf(KeyMaterialStoreConflictException.class)
-                .hasMessageContaining("changed before save");
+        KeyMaterialModification modification = first.modify();
+        try {
+            modification.generateKey(descriptor("acme-account",
+                    KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA), 2048);
+            assertThatThrownBy(modification::apply)
+                    .isInstanceOf(KeyMaterialStoreConflictException.class)
+                    .hasMessageContaining("changed before save");
+        } finally {
+            modification.discard();
+        }
     }
 
     @Test
     void loadsInlinePkcs12BytesFromContentBase64ResourceStore() throws Exception {
         InMemoryKeyMaterialContentStore writableStore = new InMemoryKeyMaterialContentStore();
         KeyMaterialService writable = KeyMaterialService.open(writableStore, options());
-        writable.generateKeyIfMissing(
+        generateKey(writable, descriptor(
                 KeyMaterialTestConstants.HTTPS_2026_05_ALIAS,
-                KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.HTTPS_PURPOSE));
-        writable.save();
+                KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA), 2048);
 
         byte[] pkcs12Bytes = writableStore.read().orElseThrow().bytes();
         String reference = KeyMaterialTestConstants.contentBase64Reference(pkcs12Bytes);
@@ -274,10 +281,10 @@ class KeyMaterialServiceTest {
 
         try {
             callerOptions.close();
-            service.generateKeyIfMissing(
+            generateKey(service, descriptor(
                     KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
-                    KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE));
-            service.save();
+                    KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA), 2048);
+
             service.close();
 
             assertThatThrownBy(callerOptions::password)
@@ -308,6 +315,29 @@ class KeyMaterialServiceTest {
         KeyMaterialSnapshot afterFailure = store.read().orElseThrow();
         assertThat(afterFailure.version()).isEqualTo(corruptVersion);
         assertThat(afterFailure.bytes()).isEqualTo(corruptBytes);
+    }
+
+    private static KeyPair generateKey(KeyMaterialService service, KeyMaterialDescriptor descriptor,
+            int keySize) throws Exception {
+        KeyMaterialModification modification = service.modify();
+        try {
+            modification.generateKey(descriptor, keySize);
+            modification.apply();
+            return service.getKeyPair(descriptor.alias());
+        } finally {
+            modification.discard();
+        }
+    }
+
+    private static void trustCertificate(KeyMaterialService service, TrustedCertificateDescriptor descriptor,
+            X509Certificate certificate) throws Exception {
+        KeyMaterialModification modification = service.modify();
+        try {
+            modification.setTrustedCertificate(descriptor, certificate);
+            modification.apply();
+        } finally {
+            modification.discard();
+        }
     }
 
     private static KeyMaterialOptions options() {

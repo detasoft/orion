@@ -45,7 +45,6 @@ import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialService;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.User;
@@ -410,11 +409,13 @@ class BootstrapContextTest {
                         KeyMaterialAlgorithm.RSA,
                         2);
                 try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("correct-password".toCharArray());
-                     KeyMaterialService material = KeyMaterialService.open(
+                     OrionKeyMaterial material = OrionKeyMaterial.open(
                              new NativeGitKeyMaterialContentStore(
                                      backend, "orion", "refs/heads/main", "material.p12"), options)) {
-                    material.generateKeyIfMissing(staged, 2048);
-                    material.save();
+                    material.withModification(modification -> {
+                        modification.generateKey(staged, 2048);
+                        modification.apply();
+                    });
                 }
 
                 try (BootstrapContext activated = openContext(next, ENVIRONMENT, borrow(backend))) {
