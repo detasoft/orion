@@ -404,7 +404,6 @@ class OrionXmlTest {
         assertThat(schema).contains("name=\"team\"");
         assertThat(schema).contains("name=\"repository\"");
         assertThat(schema).contains("name=\"defaultBranch\"");
-        assertThat(schema).contains("name=\"policy\"");
         assertThat(schema).contains("name=\"remotes\"");
         assertThat(schema).contains("name=\"remote\"");
         assertThat(schema).contains("name=\"refMappings\"");
@@ -457,8 +456,48 @@ class OrionXmlTest {
                 .teams().getFirst().repositories().getFirst();
 
         assertThat(repository.defaultBranch()).isEqualTo(OrionDocument.Repository.DEFAULT_BRANCH);
-        assertThat(repository.policy()).isEqualTo(RepositoryPolicy.safeDefaults());
         assertThat(repository.remotes()).isEmpty();
+    }
+
+    @Test
+    void rejectsUnsupportedRepositorySafetySwitches() {
+        for (String value : List.of("false", "true")) {
+            String xml = minimalV2("""
+                    <organization id="acme">
+                      <teams>
+                        <team id="platform">
+                          <repositories>
+                            <repository id="api">
+                              <policy>
+                                <allowForcePushes>%s</allowForcePushes>
+                                <allowBranchDeletes>%s</allowBranchDeletes>
+                                <allowTagRewrites>%s</allowTagRewrites>
+                              </policy>
+                            </repository>
+                          </repositories>
+                        </team>
+                      </teams>
+                    </organization>
+                    """.formatted(value, value, value), "");
+
+            assertThatThrownBy(() -> read(xml))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("schema")
+                    .hasMessageContaining("policy");
+        }
+    }
+
+    @Test
+    void roundTripsRemoteUpdateRestrictions() throws Exception {
+        String remote = wireRemote("upstream", "PRIMARY", "https://github.com/acme/api.git")
+                .replace("<allowForceUpdates>false", "<allowForceUpdates>true")
+                .replace("<allowTagRewrites>false", "<allowTagRewrites>true");
+        OrionDocument document = read(documentWithWireRemotes(remote));
+        RepositoryRemote upstream = document.organizations().getFirst().teams().getFirst()
+                .repositories().getFirst().remotes().getFirst();
+
+        assertThat(upstream.updatePolicy()).isEqualTo(new RemoteUpdatePolicy(true, false, true));
+        assertThat(read(write(document))).isEqualTo(document);
     }
 
     @Test
@@ -744,7 +783,6 @@ class OrionXmlTest {
                         "repository",
                         null,
                         "refs/heads/main",
-                        RepositoryPolicy.safeDefaults(),
                         List.of(),
                         List.of(),
                         List.of(),
@@ -761,7 +799,6 @@ class OrionXmlTest {
                 "repository",
                 null,
                 OrionDocument.Repository.DEFAULT_BRANCH,
-                RepositoryPolicy.safeDefaults(),
                 remotes,
                 List.of(),
                 List.of(),

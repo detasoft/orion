@@ -26,7 +26,6 @@ import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.schema.orion.v2.RemoteAlias;
 import pro.deta.orion.schema.orion.v2.RepositoryAddress;
-import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 import pro.deta.orion.schema.orion.v2.TeamId;
 
 import java.io.ByteArrayInputStream;
@@ -346,7 +345,7 @@ class ConfigurationSecretsTest {
     private void replaceStoredSecret(ConfigurationSecret secret) {
         OrionDocument.Repository repository = repository(current.get());
         OrionDocument.Repository changed = new OrionDocument.Repository(
-                repository.id(), repository.displayName(), repository.defaultBranch(), repository.policy(),
+                repository.id(), repository.displayName(), repository.defaultBranch(),
                 repository.remotes(), repository.grants(), repository.roles(), List.of(secret), repository.storage());
         OrionDocument.Organization organization = current.get().organizations().getFirst();
         OrionDocument.Team team = organization.teams().getFirst();
@@ -363,7 +362,7 @@ class ConfigurationSecretsTest {
 
     private static OrionDocument document() {
         OrionDocument.Repository repository = new OrionDocument.Repository(
-                "api", "API", "refs/heads/main", RepositoryPolicy.safeDefaults(),
+                "api", "API", "refs/heads/main",
                 List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()),
                 List.of(new OrionDocument.Organization(new OrganizationId("acme"), "Acme", List.of(),

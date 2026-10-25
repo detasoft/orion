@@ -27,7 +27,6 @@ import pro.deta.orion.schema.orion.v2.RemoteTrigger;
 import pro.deta.orion.schema.orion.v2.RemoteUpdatePolicy;
 import pro.deta.orion.schema.orion.v2.RepositoryRemote;
 import pro.deta.orion.schema.orion.v2.RepositoryAddress;
-import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 import pro.deta.orion.schema.orion.v2.TeamId;
 
 import java.net.URI;
@@ -55,7 +54,7 @@ class GitHubRemoteProfileTest {
             return current.get();
         }, material);
         OrionDocument.Repository repository = new OrionDocument.Repository("api", null,
-                "refs/heads/main", RepositoryPolicy.safeDefaults(), List.of(), List.of(), List.of(), List.of(),
+                "refs/heads/main", List.of(), List.of(), List.of(), List.of(),
                         java.util.Optional.empty());
         OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()),
                 List.of(new OrionDocument.Organization(new OrganizationId("acme"), null, List.of(), List.of(),

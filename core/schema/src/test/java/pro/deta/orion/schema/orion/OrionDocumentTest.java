@@ -164,7 +164,6 @@ class OrionDocumentTest {
                 id,
                 displayName,
                 "refs/heads/main",
-                RepositoryPolicy.safeDefaults(),
                 List.of(),
                 List.of(),
                 List.of(),

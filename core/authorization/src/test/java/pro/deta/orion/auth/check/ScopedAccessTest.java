@@ -16,7 +16,6 @@ import pro.deta.orion.schema.orion.v2.ScopedGrant;
 import pro.deta.orion.schema.orion.v2.ScopedRole;
 import pro.deta.orion.schema.orion.v2.TeamId;
 import pro.deta.orion.schema.orion.v2.UserId;
-import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 
 import java.util.List;
 
@@ -73,7 +72,7 @@ class ScopedAccessTest {
             ScopedGrant allow = new ScopedGrant(new GrantId("allow"), ScopedGrant.Effect.ALLOW,
                     base.grants().getFirst().expressions());
             OrionDocument.Repository repository = new OrionDocument.Repository("repo", "",
-                    OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(), List.of(),
+                    OrionDocument.Repository.DEFAULT_BRANCH, List.of(),
                     List.of(allow), List.of(role), List.of(), java.util.Optional.empty());
             User user = new User("alice", null, null, null, List.of(),
                     List.of("acme/team/repo/local"), List.of());

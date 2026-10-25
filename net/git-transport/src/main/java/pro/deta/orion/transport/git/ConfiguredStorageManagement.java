@@ -257,7 +257,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
             }
             if (repositories.exists(address.toString())) throw new Conflict();
             entries.add(new OrionDocument.Repository(address.repositoryId(), "",
-                    OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(), List.of(), List.of(),
+                    OrionDocument.Repository.DEFAULT_BRANCH, List.of(), List.of(),
                     List.of(), List.of(), Optional.of(storage)));
             teams.add(new OrionDocument.Team(team.id(), team.displayName(), team.grants(), team.roles(), entries));
         }

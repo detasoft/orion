@@ -1207,7 +1207,6 @@ class OrionOidcOnboardingTest {
                                                         repository.id(),
                                                         repository.displayName(),
                                                         repository.defaultBranch(),
-                                                        repository.policy(),
                                                         repository.remotes(),
                                                         repository.grants(),
                                                         repository.roles(),
@@ -1401,7 +1400,7 @@ class OrionOidcOnboardingTest {
                     URI.create("https://orion.test"), Optional.empty(), Optional.empty(),
                     OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), Optional.empty());
             OrionDocument.Repository repository = new OrionDocument.Repository("repository", "",
-                    OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
+                    OrionDocument.Repository.DEFAULT_BRANCH,
                             List.of(),
                             List.of(),
                             List.of(),

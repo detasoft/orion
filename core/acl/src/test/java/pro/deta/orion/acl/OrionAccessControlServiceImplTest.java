@@ -14,7 +14,6 @@ import pro.deta.orion.schema.orion.v2.RoleId;
 import pro.deta.orion.schema.orion.v2.ScopedGrant;
 import pro.deta.orion.schema.orion.v2.ScopedRole;
 import pro.deta.orion.schema.orion.v2.TeamId;
-import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -603,7 +602,7 @@ class OrionAccessControlServiceImplTest {
         ScopedRole role = new ScopedRole(new RoleId("reader"), List.of(),
                 List.of(GrantAddress.parse("acme/read")));
         OrionDocument.Repository repository = new OrionDocument.Repository("repo", "",
-                OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
+                OrionDocument.Repository.DEFAULT_BRANCH,
                 List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
                 List.of(repository));

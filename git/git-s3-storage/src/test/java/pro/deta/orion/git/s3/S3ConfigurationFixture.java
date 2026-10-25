@@ -13,7 +13,6 @@ import pro.deta.orion.schema.orion.v2.Connection;
 import pro.deta.orion.schema.orion.v2.ConnectionReference;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
-import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 import pro.deta.orion.schema.orion.v2.S3StorageBinding;
 import pro.deta.orion.schema.orion.v2.TeamId;
 
@@ -91,7 +90,7 @@ final class S3ConfigurationFixture implements AutoCloseable {
         List<OrionDocument.Repository> repositories = new ArrayList<>(team.repositories());
         repositories.removeIf(value -> value.id().equals(repository));
         repositories.add(new OrionDocument.Repository(repository, "", "refs/heads/main",
-                RepositoryPolicy.safeDefaults(), List.of(), List.of(), List.of(), List.of(),
+                List.of(), List.of(), List.of(), List.of(),
                 Optional.of(new S3StorageBinding(new ConnectionReference(system ? ConnectionReference.Scope.SYSTEM
                         : ConnectionReference.Scope.ORGANIZATION, connection), URI.create(location)))));
         current.set(new OrionDocument(document.system(), List.of(new OrionDocument.Organization(organization.id(),

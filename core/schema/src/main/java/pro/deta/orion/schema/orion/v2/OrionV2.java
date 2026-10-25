@@ -381,13 +381,12 @@ public class OrionV2 {
     @NoArgsConstructor
     @AllArgsConstructor
     @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"displayName", "defaultBranch", "policy", "remotes", "grants", "roles", "secrets", "storage"})
+    @XmlType(propOrder = {"displayName", "defaultBranch", "remotes", "grants", "roles", "secrets", "storage"})
     public static final class Repository {
         @XmlAttribute(name = "id", required = true)
         private String id;
         private String displayName;
         private String defaultBranch;
-        private RepositoryPolicy policy;
         @XmlElementWrapper(name = "remotes")
         @XmlElement(name = "remote")
         private List<Remote> remotes;
@@ -444,17 +443,6 @@ public class OrionV2 {
         private GrantKey key;
         @XmlElement(required = true)
         private String value;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"allowForcePushes", "allowBranchDeletes", "allowTagRewrites"})
-    public static final class RepositoryPolicy {
-        private boolean allowForcePushes;
-        private boolean allowBranchDeletes;
-        private boolean allowTagRewrites;
     }
 
     @Data

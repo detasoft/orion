@@ -388,7 +388,6 @@ class OrionAuthorizationModelTest {
                 id,
                 null,
                 OrionDocument.Repository.DEFAULT_BRANCH,
-                RepositoryPolicy.safeDefaults(),
                 List.of(),
                 grants,
                 roles,

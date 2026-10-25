@@ -20,7 +20,6 @@ import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
-import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 import pro.deta.orion.schema.orion.v2.TeamId;
 import pro.deta.orion.test.integration.OrionTestRootAccess;
 import pro.deta.orion.util.KeyUtils;
@@ -217,7 +216,6 @@ class PlaywrightExternalServicesIT {
                                         "repository",
                                         "Browser test",
                                         OrionDocument.Repository.DEFAULT_BRANCH,
-                                        RepositoryPolicy.safeDefaults(),
                                         List.of(),
                                         List.of(),
                                         List.of(),

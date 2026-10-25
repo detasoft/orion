@@ -418,7 +418,6 @@
     <xs:sequence>
       <xs:element name="displayName" type="xs:string" minOccurs="0"/>
       <xs:element name="defaultBranch" type="xs:string" minOccurs="0"/>
-      <xs:element name="policy" type="repositoryPolicy" minOccurs="0"/>
       <xs:element name="remotes" minOccurs="0">
         <xs:complexType>
           <xs:sequence>
@@ -450,14 +449,6 @@
       <xs:element name="storage" type="storage" minOccurs="0"/>
     </xs:sequence>
     <xs:attribute name="id" type="xs:string" use="required"/>
-  </xs:complexType>
-
-  <xs:complexType name="repositoryPolicy" final="extension restriction">
-    <xs:sequence>
-      <xs:element name="allowForcePushes" type="xs:boolean"/>
-      <xs:element name="allowBranchDeletes" type="xs:boolean"/>
-      <xs:element name="allowTagRewrites" type="xs:boolean"/>
-    </xs:sequence>
   </xs:complexType>
 
   <xs:complexType name="remote" final="extension restriction">

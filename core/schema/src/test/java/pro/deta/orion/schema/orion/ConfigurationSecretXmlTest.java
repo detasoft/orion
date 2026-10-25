@@ -63,7 +63,7 @@ class ConfigurationSecretXmlTest {
         OrionDocument.Organization organization = new OrionDocument.Organization(
                 new OrganizationId("acme"), null, List.of(), List.of(), List.of(), List.of(), source, List.of(), List.of(), List.of());
         OrionDocument.Repository repository = new OrionDocument.Repository(
-                "api", null, "refs/heads/main", RepositoryPolicy.safeDefaults(),
+                "api", null, "refs/heads/main",
                 List.of(), List.of(), List.of(), source, java.util.Optional.empty());
 
         source.clear();

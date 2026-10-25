@@ -32,7 +32,6 @@ import pro.deta.orion.schema.orion.v2.GrantId;
 import pro.deta.orion.schema.orion.v2.OidcProvider;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
-import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 import pro.deta.orion.schema.orion.v2.RoleId;
 import pro.deta.orion.schema.orion.v2.ScopedGrant;
 import pro.deta.orion.schema.orion.v2.ScopedRole;
@@ -168,7 +167,7 @@ class RuntimeHttpGitRouteIT {
                 List.of(GrantAddress.parse(id + "/write")));
         OrionDocument.Repository repository = new OrionDocument.Repository("repo", "",
                 "refs/heads/" + BRANCH,
-                RepositoryPolicy.safeDefaults(), List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
+                List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
                 List.of(repository));
         OidcProvider provider = new OidcProvider("oidc", URI.create(issuer), "client", "oidc",

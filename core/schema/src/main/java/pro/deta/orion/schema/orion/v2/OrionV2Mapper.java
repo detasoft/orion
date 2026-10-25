@@ -201,7 +201,6 @@ public final class OrionV2Mapper {
                     repository.getDefaultBranch() == null
                             ? OrionDocument.Repository.DEFAULT_BRANCH
                             : repository.getDefaultBranch(),
-                    toCurrent(repository.getPolicy()),
                     toCurrentRemotes(repository.getRemotes()),
                     toCurrentScopedGrants(repository.getGrants()),
                     toCurrentScopedRoles(repository.getRoles()),
@@ -354,16 +353,6 @@ public final class OrionV2Mapper {
                     expression.getValue()));
         }
         return expressions;
-    }
-
-    private static RepositoryPolicy toCurrent(OrionV2.RepositoryPolicy source) {
-        if (source == null) {
-            return RepositoryPolicy.safeDefaults();
-        }
-        return new RepositoryPolicy(
-                source.isAllowForcePushes(),
-                source.isAllowBranchDeletes(),
-                source.isAllowTagRewrites());
     }
 
     private static List<RepositoryRemote> toCurrentRemotes(List<OrionV2.Remote> source) {
@@ -671,7 +660,6 @@ public final class OrionV2Mapper {
                     repository.id(),
                     repository.displayName(),
                     repository.defaultBranch(),
-                    fromCurrent(repository.policy()),
                     fromCurrentRemotes(repository.remotes()),
                     fromCurrentScopedGrants(repository.grants()),
                     fromCurrentScopedRoles(repository.roles()),
@@ -750,13 +738,6 @@ public final class OrionV2Mapper {
                     expression.value()));
         }
         return expressions;
-    }
-
-    private static OrionV2.RepositoryPolicy fromCurrent(RepositoryPolicy source) {
-        return new OrionV2.RepositoryPolicy(
-                source.allowForcePushes(),
-                source.allowBranchDeletes(),
-                source.allowTagRewrites());
     }
 
     private static List<OrionV2.Remote> fromCurrentRemotes(List<RepositoryRemote> source) {

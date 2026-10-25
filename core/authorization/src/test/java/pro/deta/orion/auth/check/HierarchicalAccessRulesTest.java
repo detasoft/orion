@@ -17,7 +17,6 @@ import pro.deta.orion.schema.orion.v2.GrantAddress;
 import pro.deta.orion.schema.orion.v2.GrantId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
-import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 import pro.deta.orion.schema.orion.v2.RoleId;
 import pro.deta.orion.schema.orion.v2.RoleAddress;
 import pro.deta.orion.schema.orion.v2.ScopedGrant;
@@ -236,10 +235,10 @@ class HierarchicalAccessRulesTest {
         ScopedRole local = new ScopedRole(new RoleId("local"), List.of(RoleAddress.parse("acme/developer")),
                 List.of(GrantAddress.parse("acme/team/repo/force")));
         OrionDocument.Repository repository = new OrionDocument.Repository("repo", "",
-                OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
+                OrionDocument.Repository.DEFAULT_BRANCH,
                 List.of(), List.of(force), List.of(local), List.of(), java.util.Optional.empty());
         OrionDocument.Repository sibling = new OrionDocument.Repository("sibling", "",
-                OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
+                OrionDocument.Repository.DEFAULT_BRANCH,
                 List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         User user = new User("alice", null, null, null, List.of(),
                 List.of("acme/team/repo/local"), List.of());
@@ -323,7 +322,7 @@ class HierarchicalAccessRulesTest {
         }
         ScopedRole role = new ScopedRole(new RoleId("developer"), List.of(), references);
         OrionDocument.Repository repository = new OrionDocument.Repository("repo", "",
-                OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
+                OrionDocument.Repository.DEFAULT_BRANCH,
                 List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
                 List.of(repository));

@@ -243,7 +243,7 @@ public final class ConfigurationSecrets {
                 for (OrionDocument.Repository repository : team.repositories()) {
                     repositories.add(repository.id().equals(scope.repositoryId().orElseThrow())
                             ? new OrionDocument.Repository(repository.id(), repository.displayName(),
-                            repository.defaultBranch(), repository.policy(), repository.remotes(),
+                            repository.defaultBranch(), repository.remotes(),
                             repository.grants(), repository.roles(), secrets, repository.storage())
                             : repository);
                 }

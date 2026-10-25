@@ -4,7 +4,6 @@ import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.TeamId;
-import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
@@ -61,7 +60,7 @@ class ReadOnlyDomainCommandCatalogTest {
         User user = new User("operator", null, null, null, List.of(), List.of(),
                 DefaultAccessControl.create("unused").grants());
         OrionDocument.Repository repository = new OrionDocument.Repository("repo", "",
-                OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
+                OrionDocument.Repository.DEFAULT_BRANCH,
                 List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
                 List.of(repository));

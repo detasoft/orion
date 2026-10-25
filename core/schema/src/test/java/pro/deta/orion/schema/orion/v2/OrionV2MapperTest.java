@@ -92,7 +92,7 @@ class OrionV2MapperTest {
         assertThat(propOrder(OrionV2.Team.class))
                 .containsExactly("displayName", "grants", "roles", "repositories");
         assertThat(propOrder(OrionV2.Repository.class))
-                .containsExactly("displayName", "defaultBranch", "policy", "remotes", "grants", "roles", "secrets", "storage");
+                .containsExactly("displayName", "defaultBranch", "remotes", "grants", "roles", "secrets", "storage");
         assertThat(propOrder(OrionV2.User.class))
                 .containsExactly("first", "last", "email", "credentials", "roles", "grants");
         assertThat(propOrder(OrionV2.ScopedRole.class))
@@ -283,7 +283,7 @@ class OrionV2MapperTest {
     }
 
     @Test
-    void mapsRepositoryPolicyAndPrimaryRemoteBothWays() {
+    void mapsRepositoryAndPrimaryRemoteBothWays() {
         RepositoryRemote upstream = remote(
                 "upstream",
                 RemoteRole.PRIMARY,
@@ -293,7 +293,6 @@ class OrionV2MapperTest {
                 "api",
                 "API",
                 "refs/heads/trunk",
-                new RepositoryPolicy(true, false, true),
                 List.of(upstream),
                 List.of(),
                 List.of(),
@@ -309,7 +308,6 @@ class OrionV2MapperTest {
                 .getTeams().getFirst().getRepositories().getFirst();
         OrionV2.Remote remote = wireRepository.getRemotes().getFirst();
         assertThat(wireRepository.getDefaultBranch()).isEqualTo("refs/heads/trunk");
-        assertThat(wireRepository.getPolicy().isAllowForcePushes()).isTrue();
         assertThat(remote.getAlias()).isEqualTo("upstream");
         assertThat(remote.getRole()).isEqualTo(OrionV2.RemoteRole.PRIMARY);
         assertThat(remote.getCredential().getReference()).isEqualTo("github-token");
@@ -330,7 +328,6 @@ class OrionV2MapperTest {
         OrionDocument.Repository repository = mappedTeam.repositories().getFirst();
 
         assertThat(repository.defaultBranch()).isEqualTo("refs/heads/main");
-        assertThat(repository.policy()).isEqualTo(RepositoryPolicy.safeDefaults());
         assertThat(repository.remotes()).isEmpty();
         assertThat(mappedOrganization.users()).isEmpty();
         assertThat(mappedOrganization.grants()).isEmpty();
@@ -352,7 +349,6 @@ class OrionV2MapperTest {
                 "api",
                 null,
                 "refs/heads/main",
-                RepositoryPolicy.safeDefaults(),
                 List.of(zeta, alpha),
                 List.of(),
                 List.of(),
@@ -383,7 +379,6 @@ class OrionV2MapperTest {
                 "api",
                 null,
                 OrionDocument.Repository.DEFAULT_BRANCH,
-                RepositoryPolicy.safeDefaults(),
                 List.of(zeta, alpha),
                 List.of(),
                 List.of(),
@@ -734,7 +729,7 @@ class OrionV2MapperTest {
             List<ScopedRole> roles) {
         return new OrionDocument.Repository(
                 id, id + " name", OrionDocument.Repository.DEFAULT_BRANCH,
-                RepositoryPolicy.safeDefaults(), List.of(), grants, roles,
+                List.of(), grants, roles,
                 List.of(), java.util.Optional.empty());
     }
 
@@ -789,7 +784,6 @@ class OrionV2MapperTest {
                 id,
                 id + " name",
                 "refs/heads/main",
-                RepositoryPolicy.safeDefaults(),
                 List.of(),
                 List.of(),
                 List.of(),

@@ -140,11 +140,6 @@
             <repository id="api">
               <displayName>API</displayName>
               <defaultBranch>refs/heads/main</defaultBranch>
-              <policy>
-                <allowForcePushes>false</allowForcePushes>
-                <allowBranchDeletes>false</allowBranchDeletes>
-                <allowTagRewrites>false</allowTagRewrites>
-              </policy>
               <remotes>
                 <remote alias="upstream">
                   <role>PRIMARY</role>

@@ -12,7 +12,6 @@ import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.TeamId;
-import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletInputStream;
@@ -50,7 +49,7 @@ class OrionAdminCreateRepositoryRouteTest {
         User user = new User("root", null, null, null, List.of(), List.of(),
                 DefaultAccessControl.create("unused").grants());
         OrionDocument.Repository repository = new OrionDocument.Repository("visible", "",
-                OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
+                OrionDocument.Repository.DEFAULT_BRANCH,
                 List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
                 List.of(repository));

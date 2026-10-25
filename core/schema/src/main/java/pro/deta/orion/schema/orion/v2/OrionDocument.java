@@ -197,7 +197,6 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
             String id,
             String displayName,
             String defaultBranch,
-            RepositoryPolicy policy,
             List<RepositoryRemote> remotes,
             List<ScopedGrant> grants,
             List<ScopedRole> roles,
@@ -208,7 +207,6 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
         public Repository {
             id = IdentifierRules.requireCanonical(id, "repository id");
             defaultBranch = RemoteRefMapping.requireConcreteBranch(defaultBranch, "default branch");
-            Objects.requireNonNull(policy, "repository policy");
             storage = Objects.requireNonNull(storage, "repository storage");
             remotes = copyRemotes(remotes);
             secrets = copyUnique(secrets, ConfigurationSecret::id, "secret");

@@ -34,7 +34,6 @@ import pro.deta.orion.schema.orion.v2.GrantAddress;
 import pro.deta.orion.schema.orion.v2.GrantId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
-import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 import pro.deta.orion.schema.orion.v2.RoleId;
 import pro.deta.orion.schema.orion.v2.ScopedGrant;
 import pro.deta.orion.schema.orion.v2.ScopedRole;
@@ -123,7 +122,7 @@ class GitBlockingWireSessionTest {
                 List.of(GrantAddress.parse("acme/read"), GrantAddress.parse("acme/deny")));
         User user = new User("reader", null, null, null, List.of(), List.of("acme/reader"), List.of());
         OrionDocument.Repository configured = new OrionDocument.Repository("project", "", "refs/heads/main",
-                RepositoryPolicy.safeDefaults(), List.of(), List.of(), List.of(), List.of(), Optional.empty());
+                List.of(), List.of(), List.of(), List.of(), Optional.empty());
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
                 List.of(configured));
         OrionDocument.Organization organization = new OrionDocument.Organization(new OrganizationId("acme"), "",
