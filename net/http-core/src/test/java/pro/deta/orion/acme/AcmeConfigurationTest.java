@@ -27,12 +27,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AcmeConfigurationTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+    private final pro.deta.orion.test.util.TestEvents events =
             new pro.deta.orion.test.util.TestEvents();
 
     @org.junit.jupiter.api.AfterEach
     void stopTestEvents() {
-        EVENTS.close();
+        events.close();
     }
 
     private static final String EAB_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
@@ -47,14 +47,14 @@ class AcmeConfigurationTest {
                 modification.apply();
             });
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
-            TestConfiguration desired = new TestConfiguration(EVENTS, bootstrap,
+            TestConfiguration desired = new TestConfiguration(events, bootstrap,
                     owner);
             desired.publish(initial, Optional.of("r1"));
             ConfigurationSecrets secrets = new ConfigurationSecrets(
                     () -> desired.editor().current().result()
                             .valueOrFailure("Cannot read configuration document"), owner);
             AcmeCertificateService service = new AcmeCertificateService(
-                    desired.editor(), owner, null, secrets, EVENTS.executor());
+                    desired.editor(), owner, null, secrets, events.executor());
             OrionDocument saved = save(service, desired, "zerossl", "key-id", EAB_KEY);
             assertThatThrownBy(() -> service.save(new AcmeCertificateService.Settings(service.view().revision(),
                     "zerossl", "", "admin@example.test", List.of("example.test"), "key-id", null,
@@ -67,7 +67,7 @@ class AcmeConfigurationTest {
     @Test
     void enablesExistingShorthandDirectoryWithoutReplacingItsAccountKeyReference() throws Exception {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
-            TestConfiguration desired = new TestConfiguration(EVENTS, new BootstrapConfiguration(), owner);
+            TestConfiguration desired = new TestConfiguration(events, new BootstrapConfiguration(), owner);
             OrionAcmeConfiguration acme = new OrionAcmeConfiguration(false,
                     URI.create("acme://letsencrypt.org/staging"), "admin@example.test", List.of("example.test"),
                     null, Optional.of(new OrionMaterialReference("account", 1)),
@@ -90,14 +90,14 @@ class AcmeConfigurationTest {
             byte[] accountKey = owner.keyPair(account).getPublic().getEncoded();
             desired.publish(initial, Optional.of("r1"));
             AcmeCertificateService service = new AcmeCertificateService(desired.editor(),
-                    owner, null, null, EVENTS.executor());
+                    owner, null, null, events.executor());
             AcmeCertificateService.View view = service.view();
             assertThat(view.enabled()).isFalse();
             assertThat(view.directoryUrl()).isEqualTo("https://acme-staging-v02.api.letsencrypt.org/directory");
             service.save(new AcmeCertificateService.Settings(
                     "r1", view.provider(), view.directoryUrl(), view.accountEmail(), view.domains(),
                     "", null, null), "root");
-            EVENTS.await();
+            events.await();
             OrionDocument updated = desired.stored().result().valueOrFailure("configuration");
             OrionAcmeConfiguration enabled = updated.system().https().orElseThrow().acme().orElseThrow();
             assertThat(enabled.enabled()).isTrue();
@@ -113,13 +113,13 @@ class AcmeConfigurationTest {
         OrionDocument saved;
         try (OrionKeyMaterial owner = owner(store)) {
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
-            TestConfiguration desired = new TestConfiguration(EVENTS, bootstrap, owner);
+            TestConfiguration desired = new TestConfiguration(events, bootstrap, owner);
             desired.publish(initial, Optional.of("r1"));
             ConfigurationSecrets secrets = new ConfigurationSecrets(
                     () -> desired.editor().current().result()
                             .valueOrFailure("Cannot read configuration document"), owner);
             AcmeCertificateService service = new AcmeCertificateService(
-                    desired.editor(), owner, null, secrets, EVENTS.executor());
+                    desired.editor(), owner, null, secrets, events.executor());
             saved = save(service, desired, "zerossl", "key-id", EAB_KEY);
             OrionAcmeConfiguration acme = saved.system().https().orElseThrow().acme().orElseThrow();
             assertThat(acme.directoryUrl().toString()).isEqualTo("https://acme.zerossl.com/v2/DV90");
@@ -145,13 +145,13 @@ class AcmeConfigurationTest {
     @Test
     void replacingEabDoesNotOverwriteACredentialsSecretUsedByAnS3Connection() throws Exception {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
-            TestConfiguration desired = new TestConfiguration(EVENTS, new BootstrapConfiguration(), owner);
+            TestConfiguration desired = new TestConfiguration(events, new BootstrapConfiguration(), owner);
             desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("r1"));
             ConfigurationSecrets secrets = new ConfigurationSecrets(
                     () -> desired.editor().current().result()
                             .valueOrFailure("Cannot read configuration document"), owner);
             AcmeCertificateService service = new AcmeCertificateService(
-                    desired.editor(), owner, null, secrets, EVENTS.executor());
+                    desired.editor(), owner, null, secrets, events.executor());
             OrionDocument saved = save(service, desired, "zerossl", "key-id", EAB_KEY);
             String original = saved.system().https().orElseThrow().acme().orElseThrow().eabSecret().orElseThrow();
             Connection.S3 connection = new Connection.S3("archive", Optional.empty(), "us-east-1",
@@ -174,11 +174,11 @@ class AcmeConfigurationTest {
     @Test
     void rejectsIncompleteEabAndAllowsLetsEncryptWithoutIt() throws Exception {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
-            TestConfiguration desired = new TestConfiguration(EVENTS, new BootstrapConfiguration(), owner);
+            TestConfiguration desired = new TestConfiguration(events, new BootstrapConfiguration(), owner);
             OrionDocument initial = OrionDocument.withAccessControl(new AccessControl());
             desired.publish(initial, Optional.of("r1"));
             AcmeCertificateService service = new AcmeCertificateService(desired.editor(),
-                    owner, null, null, EVENTS.executor());
+                    owner, null, null, events.executor());
             assertThatThrownBy(() -> save(service, desired, "zerossl", "", ""))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> save(service, desired, "custom", "id", ""))
@@ -197,12 +197,12 @@ class AcmeConfigurationTest {
         return OrionKeyMaterial.open(store, KeyMaterialOptions.pkcs12("password".toCharArray()));
     }
 
-    private static OrionDocument save(AcmeCertificateService service, TestConfiguration desired,
+    private OrionDocument save(AcmeCertificateService service, TestConfiguration desired,
             String provider, String kid, String key) {
         AcmeCertificateService.View saved = service.save(new AcmeCertificateService.Settings(
                 service.view().revision(), provider, "https://ca.example/directory", "admin@example.test",
                 List.of("example.test"), kid, key.toCharArray(), null), "root");
-        EVENTS.await();
+        events.await();
         assertThat(desired.stored().revision())
                 .isEqualTo(new pro.deta.orion.config.OrionRevision.Stored(saved.revision()));
         return desired.stored().result().valueOrFailure("configuration");

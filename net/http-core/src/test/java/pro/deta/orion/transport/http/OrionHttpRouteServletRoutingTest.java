@@ -44,18 +44,18 @@ import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Authorizati
 import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.GET;
 
 class OrionHttpRouteServletRoutingTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+    private final pro.deta.orion.test.util.TestEvents events =
             new pro.deta.orion.test.util.TestEvents();
 
     @org.junit.jupiter.api.AfterEach
     void stopTestEvents() {
-        EVENTS.close();
+        events.close();
     }
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-    private static OrionConfigurationEditor configurationEditor() {
-        return new TestConfiguration(EVENTS).editor();
+    private OrionConfigurationEditor configurationEditor() {
+        return new TestConfiguration(events).editor();
     }
 
     @Test
@@ -193,7 +193,7 @@ class OrionHttpRouteServletRoutingTest {
 
     @Test
     void missingAcmeConfigurationRemainsClientErrorForReadAndIssue() throws Exception {
-        TestConfiguration desired = new TestConfiguration(EVENTS);
+        TestConfiguration desired = new TestConfiguration(events);
         desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.empty());
         OrionHttpRoute route = acmeRoute(desired);
         for (String method : List.of("GET", "POST")) {
@@ -207,14 +207,14 @@ class OrionHttpRouteServletRoutingTest {
     @Test
     void repositoryValidationIs400ButProviderArgumentFailureIs500() throws Exception {
         NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider(
-                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.manager())) {
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(events.manager())) {
             @Override
             public Result<NativeGitRepository> create(String repositoryName) {
                 throw new IllegalArgumentException("private provider details");
             }
         };
         OrionHttpRoute route = new OrionAdminCreateRepositoryRoute(provider,
-                StorageManagementFixture.create(EVENTS, provider, List.of()), OBJECT_MAPPER);
+                StorageManagementFixture.create(events, provider, List.of()), OBJECT_MAPPER);
         for (String json : List.of("{\"name\":\"../repo\"}", "null", "{}")) {
             ResponseRecorder response = new ResponseRecorder();
             servlet(route).service(request("POST", OrionAdminPaths.REPOSITORIES, admin(), json), response.proxy());
@@ -272,13 +272,13 @@ class OrionHttpRouteServletRoutingTest {
         assertThat(response.errorMessage).isEqualTo("Invalid request parameter");
     }
 
-    private static OrionHttpRoute acmeRoute(TestConfiguration desired) {
+    private OrionHttpRoute acmeRoute(TestConfiguration desired) {
         return new OrionAdminAcmeCertificateRoute(
                 new AcmeCertificateService(
                         desired.editor(),
                         OrionKeyMaterial.unavailable(),
                         new AcmeCertificateIssuer(null),
-                        null, EVENTS.executor()),
+                        null, events.executor()),
                 OBJECT_MAPPER);
     }
 

@@ -23,17 +23,17 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class JettyHTTPServerStateMachineTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+    private final pro.deta.orion.test.util.TestEvents events =
             new pro.deta.orion.test.util.TestEvents();
 
     @org.junit.jupiter.api.AfterEach
     void stopTestEvents() {
-        EVENTS.close();
+        events.close();
     }
 
     @Test
     void stateMachineDefinitionComesFromGenericServiceAdapter() {
-        TestConfiguration desiredState = new TestConfiguration(EVENTS);
+        TestConfiguration desiredState = new TestConfiguration(events);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of(), List.of(),
                 List.of(), List.of()),
@@ -47,7 +47,7 @@ class JettyHTTPServerStateMachineTest {
                         null,
                         null);
         JettyHTTPServerStateMachine machine = new JettyHTTPServerStateMachine(() -> server,
-                () -> { throw new AssertionError(); }, EVENTS.rawManager(), EVENTS.executor());
+                () -> { throw new AssertionError(); }, events.rawManager(), events.executor());
 
         assertEquals("http", machine.stateMachine().name());
         assertEquals(Set.of(machine.startAction().id(), machine.stopAction().id()), machine.stateMachine().availableActions());
@@ -57,7 +57,7 @@ class JettyHTTPServerStateMachineTest {
     void retriesActivationAndCancelsOnlyItsOwnFutureOnStop() throws Exception {
         try (RecordingScheduler scheduler = new RecordingScheduler();
                 NativeGitRepositoryProvider repositories =
-                        NativeGitRepositoryProvider.inMemory(EVENTS.manager())) {
+                        NativeGitRepositoryProvider.inMemory(events.manager())) {
             AtomicInteger attempts = new AtomicInteger();
             JettyHTTPServer server = new JettyHTTPServer(
                     new BootstrapConfiguration(), null, OrionKeyMaterial.unavailable(), null, null, null) {
@@ -76,13 +76,13 @@ class JettyHTTPServerStateMachineTest {
             };
             GitPackCleanupTask cleanup = new GitPackCleanupTask(repositories);
             JettyHTTPServerStateMachine machine = new JettyHTTPServerStateMachine(
-                    () -> server, () -> cleanup, EVENTS.manager(), scheduler);
+                    () -> server, () -> cleanup, events.manager(), scheduler);
             assertThat(machine.start().failed()).isFalse();
             try {
-                EVENTS.manager().publishAndWait(new KeyMaterialChanged(Set.of("acme-account")));
+                events.manager().publishAndWait(new KeyMaterialChanged(Set.of("acme-account")));
                 assertThat(scheduler.tasks).isEmpty();
                 assertThat(attempts).hasValue(0);
-                EVENTS.manager().publishAndWait(new KeyMaterialChanged(Set.of("https")));
+                events.manager().publishAndWait(new KeyMaterialChanged(Set.of("https")));
                 assertThat(scheduler.tasks).hasSize(1);
                 assertThat(scheduler.tasks.getFirst().delay()).isZero();
                 scheduler.tasks.getFirst().command().run();
@@ -90,7 +90,7 @@ class JettyHTTPServerStateMachineTest {
                 Scheduled retry = scheduler.tasks.getLast();
                 assertThat(retry.delay()).isEqualTo(60);
                 assertThat(retry.unit()).isEqualTo(TimeUnit.SECONDS);
-                EVENTS.manager().publishAndWait(new KeyMaterialChanged(Set.of("acme-account")));
+                events.manager().publishAndWait(new KeyMaterialChanged(Set.of("acme-account")));
                 assertThat(scheduler.tasks).hasSize(2);
                 assertThat(retry.future().isCancelled()).isFalse();
                 retry.command().run();
@@ -99,7 +99,7 @@ class JettyHTTPServerStateMachineTest {
                 assertThat(machine.stop().failed()).isFalse();
             }
             assertThat(scheduler.tasks.getLast().future().isCancelled()).isTrue();
-            EVENTS.manager().publishAndWait(new KeyMaterialChanged(Set.of("https")));
+            events.manager().publishAndWait(new KeyMaterialChanged(Set.of("https")));
             assertThat(scheduler.tasks).hasSize(2);
             assertThat(scheduler.submit(() -> "still running").get(5, TimeUnit.SECONDS))
                     .isEqualTo("still running");

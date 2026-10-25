@@ -29,12 +29,12 @@ import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionAdminAcmeCertificateRouteTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+    private final pro.deta.orion.test.util.TestEvents events =
             new pro.deta.orion.test.util.TestEvents();
 
     @org.junit.jupiter.api.AfterEach
     void stopTestEvents() {
-        EVENTS.close();
+        events.close();
     }
 
     @Test
@@ -85,7 +85,7 @@ class OrionAdminAcmeCertificateRouteTest {
                 "message", "ACME certificate issuance is already in progress"));
     }
 
-    private static OrionAdminAcmeCertificateRoute route(
+    private OrionAdminAcmeCertificateRoute route(
             IssuedAcmeCertificate issued,
             Optional<IssuedAcmeCertificate> saved) {
         return new OrionAdminAcmeCertificateRoute(
@@ -166,7 +166,7 @@ class OrionAdminAcmeCertificateRouteTest {
         }
     }
 
-    private static final class StubAcmeCertificateService extends AcmeCertificateService {
+    private final class StubAcmeCertificateService extends AcmeCertificateService {
         private final IssuedAcmeCertificate issued;
         private final Optional<IssuedAcmeCertificate> saved;
 
@@ -174,9 +174,9 @@ class OrionAdminAcmeCertificateRouteTest {
                 IssuedAcmeCertificate issued,
                 Optional<IssuedAcmeCertificate> saved) {
             super(
-                    new TestConfiguration(EVENTS).editor(),
+                    new TestConfiguration(events).editor(),
                     OrionKeyMaterial.unavailable(),
-                    new AcmeCertificateIssuer(null), null, EVENTS.executor());
+                    new AcmeCertificateIssuer(null), null, events.executor());
             this.issued = issued;
             this.saved = saved;
         }
@@ -192,12 +192,12 @@ class OrionAdminAcmeCertificateRouteTest {
         }
     }
 
-    private static final class BusyAcmeCertificateService extends AcmeCertificateService {
+    private final class BusyAcmeCertificateService extends AcmeCertificateService {
         private BusyAcmeCertificateService() {
             super(
-                    new TestConfiguration(EVENTS).editor(),
+                    new TestConfiguration(events).editor(),
                     OrionKeyMaterial.unavailable(),
-                    new AcmeCertificateIssuer(null), null, EVENTS.executor());
+                    new AcmeCertificateIssuer(null), null, events.executor());
         }
 
         @Override

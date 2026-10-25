@@ -42,12 +42,12 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class AcmeAdministrationTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+    private final pro.deta.orion.test.util.TestEvents events =
             new pro.deta.orion.test.util.TestEvents();
 
     @org.junit.jupiter.api.AfterEach
     void stopTestEvents() {
-        EVENTS.close();
+        events.close();
     }
 
     @Test
@@ -81,10 +81,10 @@ class AcmeAdministrationTest {
 
     @Test
     void listsPresetsAndSettingsThroughUiApiAndSsh() throws Exception {
-        TestConfiguration desired = new TestConfiguration(EVENTS);
+        TestConfiguration desired = new TestConfiguration(events);
         desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("revision"));
         AcmeCertificateService configuration = new AcmeCertificateService(desired.editor(),
-                OrionKeyMaterial.unavailable(), null, null, EVENTS.executor());
+                OrionKeyMaterial.unavailable(), null, null, events.executor());
         ObjectMapper mapper = new ObjectMapper();
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of(
                 new OrionAdminAcmeConfigurationRoute(configuration, mapper, null))), new OrionHttpResponseWriter(mapper));

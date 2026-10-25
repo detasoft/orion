@@ -40,12 +40,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AcmeCertificateSettingsTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+    private final pro.deta.orion.test.util.TestEvents events =
             new pro.deta.orion.test.util.TestEvents();
 
     @org.junit.jupiter.api.AfterEach
     void stopTestEvents() {
-        EVENTS.close();
+        events.close();
     }
 
     private static final String EAB_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
@@ -60,7 +60,7 @@ class AcmeCertificateSettingsTest {
             });
             OrionMaterialReference reference = new OrionMaterialReference("existing-account", 1);
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
-            TestConfiguration desired = new TestConfiguration(EVENTS, bootstrap,
+            TestConfiguration desired = new TestConfiguration(events, bootstrap,
                     owner);
             desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("r1"));
             ConfigurationSecrets secrets = new ConfigurationSecrets(
@@ -80,13 +80,13 @@ class AcmeCertificateSettingsTest {
                 }
             };
             AcmeCertificateService service = new AcmeCertificateService(
-                    desired.editor(), owner, issuer, secrets, EVENTS.executor());
+                    desired.editor(), owner, issuer, secrets, events.executor());
             AcmeCertificateService.View view = service.save(new AcmeCertificateService.Settings("r1",
                     "letsencrypt", "", "admin@example.test", List.of("example.test"), "", null, reference), "root");
             assertThat(view.accountMaterial()).isEqualTo(reference);
             assertThat(desired.stored().result().valueOrFailure("Cannot read configuration document")
                     .system().https().orElseThrow().acme().orElseThrow().accountMaterial()).contains(reference);
-            EVENTS.await();
+            events.await();
             assertThat(service.view().accountMaterial()).isEqualTo(reference);
             DefaultCommandDispatcher dispatcher = AcmeAdministrationTest.dispatcher(
                     new AcmeCommandCatalog(service, null));
@@ -136,7 +136,7 @@ class AcmeCertificateSettingsTest {
     void savesThroughTheConfigurationRepositoryAndRejectsStaleRevisions() throws Exception {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
-            TestConfiguration desired = new TestConfiguration(EVENTS, bootstrap,
+            TestConfiguration desired = new TestConfiguration(events, bootstrap,
                     owner);
             desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("r1"));
             ConfigurationSecrets secrets = new ConfigurationSecrets(
@@ -164,7 +164,7 @@ class AcmeCertificateSettingsTest {
                 }
             };
             AcmeCertificateService service = new AcmeCertificateService(
-                    desired.editor(), owner, issuer, secrets, EVENTS.executor());
+                    desired.editor(), owner, issuer, secrets, events.executor());
 
             AcmeCertificateService.Settings input = settings("zerossl", "key-id", EAB_KEY);
             AcmeCertificateService.View result = service.save(input, "root");
@@ -177,7 +177,7 @@ class AcmeCertificateSettingsTest {
                     .system().secrets())
                     .extracting(pro.deta.orion.schema.orion.v2.ConfigurationSecret::envelope)
                     .allSatisfy(value -> assertThat(value).doesNotContain(EAB_KEY));
-            EVENTS.await();
+            events.await();
             assertThat(service.view()).usingRecursiveComparison().ignoringFields("renewal").isEqualTo(result);
             AcmeCertificateService.Settings stale = settings("zerossl", "key-id", EAB_KEY);
             assertThatThrownBy(() -> service.save(stale, "root"))
@@ -200,12 +200,12 @@ class AcmeCertificateSettingsTest {
                     AcmeAdministrationTest.admin())))
                     .isEqualTo(new CommandResult.Message("Certificate issued and saved."));
             AcmeCertificateService restarted = new AcmeCertificateService(
-                    desired.editor(), owner, issuer, secrets, EVENTS.executor());
+                    desired.editor(), owner, issuer, secrets, events.executor());
             assertThat(new OrionAdminAcmeCertificateRoute(restarted, new ObjectMapper())
                     .doPost(AcmeAdministrationTest.httpRequest("POST", "/api/admin/acme/certificate", "",
                             AcmeAdministrationTest.admin())).status()).isEqualTo(200);
             AcmeCertificateService renewal = new AcmeCertificateService(
-                    desired.editor(), owner, issuer, secrets, EVENTS.executor());
+                    desired.editor(), owner, issuer, secrets, events.executor());
             renewal.onStart();
             try {
                 assertThat(OrionUtils.waitForCondition(() -> accountKeys.size() == 3

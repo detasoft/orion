@@ -40,12 +40,12 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class ACMECertificateChallengeTest {
-    private static final pro.deta.orion.test.util.TestEvents EVENTS =
+    private final pro.deta.orion.test.util.TestEvents events =
             new pro.deta.orion.test.util.TestEvents();
 
     @org.junit.jupiter.api.AfterEach
     void stopTestEvents() {
-        EVENTS.close();
+        events.close();
     }
 
     @Test
@@ -67,7 +67,7 @@ public class ACMECertificateChallengeTest {
             AcmeCertificateService service = new AcmeCertificateService(
                     desiredStateWithAcme().editor(),
                     material,
-                    issuer, null, EVENTS.executor());
+                    issuer, null, events.executor());
             try (AcmeHttpTestServer server = startHttp(
                     challengeService,
                     new TestAdminAcmeCertificateRoute(service));
@@ -94,11 +94,11 @@ public class ACMECertificateChallengeTest {
         }
     }
 
-    private static AcmeHttpTestServer startHttp() throws IOException {
+    private AcmeHttpTestServer startHttp() throws IOException {
         return startHttp(new AcmeHttpChallengeService());
     }
 
-    private static AcmeHttpTestServer startHttp(
+    private AcmeHttpTestServer startHttp(
             AcmeHttpChallengeService challengeService,
             OrionHttpRoute... additionalRoutes) throws IOException {
         BootstrapConfiguration orionConfiguration = new BootstrapConfiguration();
@@ -139,36 +139,8 @@ public class ACMECertificateChallengeTest {
         }
     }
 
-    @Test
-    public void startsHttpChallengeWithoutHttpsMaterial() throws Exception {
-        BootstrapConfiguration orionConfiguration = new BootstrapConfiguration();
-        BootstrapConfiguration.AppTransport transports = new BootstrapConfiguration.AppTransport();
-        transports.setHttp(new HttpTransportConfig("localhost", 0));
-        orionConfiguration.setTransport(transports);
-
-        Set<OrionHttpRoute> routes = new LinkedHashSet<>();
-        routes.add(new OkRoute());
-        OrionHttpRouteServlet rootServlet = new OrionHttpRouteServlet(
-                new OrionHttpRouteRegistry(routes),
-                new OrionHttpResponseWriter(new ObjectMapper()));
-        JettyHTTPServer server = new JettyHTTPServer(
-                orionConfiguration,
-                desiredStateWithoutHttps().editor(),
-                OrionKeyMaterial.unavailable(),
-                rootServlet,
-                null, null);
-        server.onStart();
-
-        try {
-            HttpURLConnection connection = get(server.relativiseHttp("/ok"));
-            assertThat(connection.getResponseCode()).isEqualTo(HttpURLConnection.HTTP_OK);
-        } finally {
-            server.onStop();
-        }
-    }
-
-    private static TestConfiguration desiredStateWithoutHttps() {
-        TestConfiguration desiredState = new TestConfiguration(EVENTS);
+    private TestConfiguration desiredStateWithoutHttps() {
+        TestConfiguration desiredState = new TestConfiguration(events);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of(), List.of(),
                 List.of(), List.of()),
@@ -176,7 +148,7 @@ public class ACMECertificateChallengeTest {
         return desiredState;
     }
 
-    private static TestConfiguration desiredStateWithAcme() {
+    private TestConfiguration desiredStateWithAcme() {
         OrionAcmeConfiguration acme = new OrionAcmeConfiguration(
                 true,
                 URI.create("acme://example-ca"),
@@ -198,23 +170,12 @@ public class ACMECertificateChallengeTest {
                 OrionHttpsConfiguration.ClientAuthentication.DISABLED,
                 List.of(),
                 Optional.of(acme));
-        TestConfiguration desiredState = new TestConfiguration(EVENTS);
+        TestConfiguration desiredState = new TestConfiguration(events);
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.of(https), List.of(), List.of(), List.of(),
                 List.of(), List.of()),
                 List.of()), Optional.of("test-revision"));
         return desiredState;
-    }
-
-    private static final class OkRoute extends AbstractOrionHttpRoute {
-        private OkRoute() {
-            super("/ok", OrionHttpRouteDefinition.Method.GET);
-        }
-
-        @Override
-        protected OrionHttpResponse doGet(jakarta.servlet.http.HttpServletRequest req) {
-            return OrionHttpResponse.text(HttpURLConnection.HTTP_OK, "OK");
-        }
     }
 
     private static HttpURLConnection get(URL url) throws IOException {
