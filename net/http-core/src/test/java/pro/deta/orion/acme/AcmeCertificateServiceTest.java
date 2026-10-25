@@ -34,7 +34,6 @@ import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
-import pro.deta.orion.keymaterial.KeyMaterialChanged;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -584,8 +583,6 @@ class AcmeCertificateServiceTest {
             assertThat(machine.start().failed()).isFalse();
             try {
                 int port = server.boundHttpsPort();
-                assertThat(servedCertificate(port)).isEqualTo(initial);
-                EVENTS.manager().publishAndWait(new KeyMaterialChanged(Set.of("acme-account")));
                 assertThat(servedCertificate(port)).isEqualTo(initial);
                 Instant due = Instant.parse(service.renewalStatus().nextAttempt());
                 service.maintainCertificate(due);

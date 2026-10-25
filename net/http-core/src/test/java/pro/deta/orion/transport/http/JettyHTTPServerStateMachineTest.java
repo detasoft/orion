@@ -79,6 +79,9 @@ class JettyHTTPServerStateMachineTest {
                     () -> server, () -> cleanup, EVENTS.manager(), scheduler);
             assertThat(machine.start().failed()).isFalse();
             try {
+                EVENTS.manager().publishAndWait(new KeyMaterialChanged(Set.of("acme-account")));
+                assertThat(scheduler.tasks).isEmpty();
+                assertThat(attempts).hasValue(0);
                 EVENTS.manager().publishAndWait(new KeyMaterialChanged(Set.of("https")));
                 assertThat(scheduler.tasks).hasSize(1);
                 assertThat(scheduler.tasks.getFirst().delay()).isZero();
@@ -87,6 +90,9 @@ class JettyHTTPServerStateMachineTest {
                 Scheduled retry = scheduler.tasks.getLast();
                 assertThat(retry.delay()).isEqualTo(60);
                 assertThat(retry.unit()).isEqualTo(TimeUnit.SECONDS);
+                EVENTS.manager().publishAndWait(new KeyMaterialChanged(Set.of("acme-account")));
+                assertThat(scheduler.tasks).hasSize(2);
+                assertThat(retry.future().isCancelled()).isFalse();
                 retry.command().run();
                 assertThat(attempts).hasValue(2);
             } finally {
