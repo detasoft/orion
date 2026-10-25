@@ -32,12 +32,15 @@ class KeyMaterialContentStoreTest {
 
         assertThat(firstSnapshot.version()).isEqualTo(firstVersion);
         assertThat(firstSnapshot.bytes()).isEqualTo(bytes("first"));
+        assertThat(store.read(firstVersion).orElseThrow().bytes()).isEqualTo(bytes("first"));
         assertThatThrownBy(() -> store.write(bytes("stale"), "missing"))
                 .isInstanceOf(KeyMaterialStoreConflictException.class);
 
         String secondVersion = store.write(bytes("second"), firstVersion);
 
         assertThat(secondVersion).isNotEqualTo(firstVersion);
+        assertThatThrownBy(() -> store.read(firstVersion)).isInstanceOf(KeyMaterialStoreConflictException.class);
+        assertThat(store.read(secondVersion).orElseThrow().bytes()).isEqualTo(bytes("second"));
         assertThat(store.read().orElseThrow().bytes()).isEqualTo(bytes("second"));
     }
 
@@ -55,6 +58,8 @@ class KeyMaterialContentStoreTest {
         assertThat(firstSnapshot.version()).isEqualTo(firstVersion);
         assertThat(changedSnapshot.version()).isNotEqualTo(firstSnapshot.version());
         assertThat(changedSnapshot.bytes()).isEqualTo(bytes("bbbb"));
+        assertThatThrownBy(() -> store.read(firstVersion)).isInstanceOf(KeyMaterialStoreConflictException.class);
+        assertThat(store.read(changedSnapshot.version()).orElseThrow().bytes()).isEqualTo(bytes("bbbb"));
         assertThatThrownBy(() -> store.write(bytes("cccc"), firstSnapshot.version()))
                 .isInstanceOf(KeyMaterialStoreConflictException.class)
                 .hasMessageContaining("changed before save");

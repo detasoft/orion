@@ -29,6 +29,10 @@ import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.Objects;
+import java.security.Key;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
@@ -38,6 +42,7 @@ import java.util.StringJoiner;
  * @AiRule All public methods in this class must be synchronized.
  */
 final class KeyMaterialService implements AutoCloseable {
+    private static final String LOCAL_KEY_ID_ATTRIBUTE_OID = "1.2.840.113549.1.9.21";
     private static final String DESCRIPTOR_ATTRIBUTE_OID =
             "2.25.260349814076539099691640886169327825428";
     private static final String ADDITION_ATTRIBUTE_OID =
@@ -137,6 +142,11 @@ final class KeyMaterialService implements AutoCloseable {
             }
         } catch (IOException | GeneralSecurityException | RuntimeException e) {
             ownedOptions.close();
+            try {
+                store.close();
+            } catch (RuntimeException cleanup) {
+                e.addSuppressed(cleanup);
+            }
             throw e;
         }
     }
@@ -494,16 +504,8 @@ final class KeyMaterialService implements AutoCloseable {
         requireAlias(alias);
         EntryVersion latest = findVersion(alias);
         if (latest == null) return null;
-        char[] password = options.password();
-        try {
-            KeyStore.ProtectionParameter protection =
-                    keyStore.entryInstanceOf(latest.physicalAlias(), KeyStore.TrustedCertificateEntry.class)
-                            ? null : new KeyStore.PasswordProtection(password);
-            return new Addition(latest.alias(), keyStore.getEntry(latest.physicalAlias(), protection),
-                    latest.version(), latest.deleted());
-        } finally {
-            clear(password);
-        }
+        return new Addition(latest.alias(), readEntry(keyStore, latest.physicalAlias()),
+                latest.version(), latest.deleted());
     }
 
     private void append(KeyStore target, Addition addition, long kmsVersion) throws GeneralSecurityException {
@@ -542,8 +544,12 @@ final class KeyMaterialService implements AutoCloseable {
     }
 
     private List<String> physicalAliases() throws GeneralSecurityException {
+        return physicalAliases(keyStore);
+    }
+
+    private static List<String> physicalAliases(KeyStore source) throws GeneralSecurityException {
         List<String> aliases = new ArrayList<>();
-        keyStore.aliases().asIterator().forEachRemaining(aliases::add);
+        source.aliases().asIterator().forEachRemaining(aliases::add);
         return aliases;
     }
 
@@ -576,7 +582,11 @@ final class KeyMaterialService implements AutoCloseable {
     }
 
     private EntryVersion entryVersion(String physical) throws GeneralSecurityException {
-        String metadata = attribute(keyStore.getAttributes(physical), ADDITION_ATTRIBUTE_OID);
+        return entryVersion(keyStore, physical);
+    }
+
+    private static EntryVersion entryVersion(KeyStore source, String physical) throws GeneralSecurityException {
+        String metadata = attribute(source.getAttributes(physical), ADDITION_ATTRIBUTE_OID);
         if (metadata == null) return new EntryVersion(physical, physical, 1, 0, false);
         try {
             String[] fields = metadata.split(";", -1);
@@ -644,20 +654,128 @@ final class KeyMaterialService implements AutoCloseable {
             }
             for (Addition addition : additions) append(keyStore, addition, nextVersion);
             revision = nextVersion;
-            try {
-                Set<String> resources = new HashSet<>();
-                for (Addition addition : additions) resources.add(addition.alias());
-                eventPublisher.publishIfRunning(new KeyMaterialChanged(Set.copyOf(resources)));
-            } catch (RuntimeException failure) {
-                System.getLogger(KeyMaterialService.class.getName()).log(System.Logger.Level.WARNING,
-                        "Could not publish key material change event", failure);
-            }
+            Set<String> resources = new HashSet<>();
+            for (Addition addition : additions) resources.add(addition.alias());
+            publishChanged(resources);
         } catch (GeneralSecurityException failure) {
             close();
             throw new IOException("Cannot save key material", failure);
         } catch (IOException | RuntimeException failure) {
             close();
             throw failure;
+        }
+    }
+
+    synchronized void reload(String requestedRevision) throws IOException, GeneralSecurityException {
+        requireOpen();
+        Objects.requireNonNull(requestedRevision, "revision");
+        if (Objects.equals(version, requestedRevision)) return;
+        KeyMaterialSnapshot snapshot = store.read(requestedRevision)
+                .orElseThrow(() -> new IOException("Key material is missing at " + requestedRevision));
+        if (Objects.equals(version, snapshot.version())) return;
+        KeyStore incoming = KeyStore.getInstance(options.type());
+        byte[] bytes = snapshot.bytes();
+        char[] password = options.password();
+        try {
+            incoming.load(new ByteArrayInputStream(bytes), password);
+        } finally {
+            Arrays.fill(bytes, (byte) 0);
+            clear(password);
+        }
+        for (String physical : physicalAliases()) {
+            if (!incoming.containsAlias(physical)
+                    || !sameEntry(readEntry(keyStore, physical), readEntry(incoming, physical))) {
+                throw new GeneralSecurityException("Key material history was replaced or removed: " + physical);
+            }
+        }
+        Map<String, KeyStore.Entry> additions = new LinkedHashMap<>();
+        Set<String> resources = new HashSet<>();
+        Set<String> entryVersions = new HashSet<>();
+        long nextRevision = revision;
+        for (String physical : physicalAliases(incoming)) {
+            EntryVersion entry = entryVersion(incoming, physical);
+            if (!entryVersions.add(entry.alias() + ":" + entry.version())) {
+                throw new GeneralSecurityException("Duplicate key material version: " + entry.alias());
+            }
+            if (keyStore.containsAlias(physical)) continue;
+            EntryVersion previous = findVersion(entry.alias());
+            if (entry.kmsVersion() <= revision
+                    || (previous != null && entry.version() <= previous.version())) {
+                throw new GeneralSecurityException("Key material revision does not extend active history");
+            }
+            additions.put(physical, readEntry(incoming, physical));
+            resources.add(entry.alias());
+            nextRevision = Math.max(nextRevision, entry.kmsVersion());
+        }
+        password = options.password();
+        try {
+            for (Map.Entry<String, KeyStore.Entry> addition : additions.entrySet()) {
+                KeyStore.ProtectionParameter protection = addition.getValue() instanceof KeyStore.TrustedCertificateEntry
+                        ? null : new KeyStore.PasswordProtection(password);
+                keyStore.setEntry(addition.getKey(), addition.getValue(), protection);
+            }
+        } catch (GeneralSecurityException failure) {
+            close();
+            throw failure;
+        } finally {
+            clear(password);
+        }
+        version = snapshot.version();
+        revision = nextRevision;
+        if (!resources.isEmpty()) publishChanged(resources);
+    }
+
+    private KeyStore.Entry readEntry(KeyStore source, String physical) throws GeneralSecurityException {
+        char[] password = options.password();
+        try {
+            boolean trusted = source.entryInstanceOf(physical, KeyStore.TrustedCertificateEntry.class);
+            KeyStore.ProtectionParameter protection = trusted ? null : new KeyStore.PasswordProtection(password);
+            return source.getEntry(physical, protection);
+        } finally {
+            clear(password);
+        }
+    }
+
+    private static boolean sameEntry(KeyStore.Entry first, KeyStore.Entry second) {
+        if (!stableAttributes(first).equals(stableAttributes(second))) return false;
+        return switch (first) {
+            case KeyStore.PrivateKeyEntry key -> second instanceof KeyStore.PrivateKeyEntry other
+                    && sameKey(key.getPrivateKey(), other.getPrivateKey())
+                    && Arrays.equals(key.getCertificateChain(), other.getCertificateChain());
+            case KeyStore.SecretKeyEntry key -> second instanceof KeyStore.SecretKeyEntry other
+                    && sameKey(key.getSecretKey(), other.getSecretKey());
+            case KeyStore.TrustedCertificateEntry trusted -> second instanceof KeyStore.TrustedCertificateEntry other
+                    && trusted.getTrustedCertificate().equals(other.getTrustedCertificate());
+            default -> false;
+        };
+    }
+
+    private static Set<KeyStore.Entry.Attribute> stableAttributes(KeyStore.Entry entry) {
+        Set<KeyStore.Entry.Attribute> attributes = new HashSet<>();
+        for (KeyStore.Entry.Attribute attribute : entry.getAttributes()) {
+            if (!LOCAL_KEY_ID_ATTRIBUTE_OID.equals(attribute.getName())) attributes.add(attribute);
+        }
+        return attributes;
+    }
+
+    private static boolean sameKey(Key first, Key second) {
+        byte[] firstEncoded = first.getEncoded();
+        byte[] secondEncoded = second.getEncoded();
+        try {
+            return firstEncoded != null && secondEncoded != null
+                    && MessageDigest.isEqual(firstEncoded, secondEncoded);
+        } finally {
+            if (firstEncoded != null) Arrays.fill(firstEncoded, (byte) 0);
+            if (secondEncoded != null) Arrays.fill(secondEncoded, (byte) 0);
+        }
+    }
+
+    private void publishChanged(Set<String> resources) {
+        try {
+            eventPublisher.publishIfRunning(new KeyMaterialChanged(Set.copyOf(resources)));
+        } catch (RuntimeException failure) {
+            System.getLogger(KeyMaterialService.class.getName()).log(System.Logger.Level.WARNING,
+                    "Could not publish key material change event", failure);
         }
     }
 
@@ -689,8 +807,12 @@ final class KeyMaterialService implements AutoCloseable {
         if (closed) {
             return;
         }
-        options.close();
         closed = true;
+        try {
+            options.close();
+        } finally {
+            store.close();
+        }
     }
 
     private static void requireAlias(String alias) {

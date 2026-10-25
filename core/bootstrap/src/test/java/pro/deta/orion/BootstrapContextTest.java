@@ -44,6 +44,11 @@ import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
+import pro.deta.orion.keymaterial.KeyMaterialUpdated;
+import pro.deta.orion.event.type.OrionEvent;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CopyOnWriteArrayList;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -215,6 +220,84 @@ class BootstrapContextTest {
         }
         assertThatThrownBy(() -> backend.find("orion")).hasMessageContaining("closed");
     }
+
+    @Test
+    void reloadsEachMaterialRevisionFromGitEvenWhenTheBranchHasAlreadyAdvanced() throws Exception {
+        BootstrapConfiguration configuration = configuration();
+        byte[] initial = materialBytes(configuration);
+        InMemoryKeyMaterialContentStore external = new InMemoryKeyMaterialContentStore();
+        external.write(initial, null);
+        KeyMaterialDescriptor addedKey = sshHostKey("external-host", 1);
+        byte[] added;
+        byte[] deleted;
+        try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("correct-password".toCharArray());
+             OrionKeyMaterial writer = OrionKeyMaterial.open(external, options)) {
+            writer.withModification(modification -> {
+                modification.generateKey(addedKey, 2048);
+                modification.apply();
+            });
+            added = external.read().orElseThrow().bytes();
+            writer.withModification(modification -> {
+                modification.delete(addedKey);
+                modification.apply();
+            });
+            deleted = external.read().orElseThrow().bytes();
+        }
+        NativeGitRepositoryProvider backend = repositoryWith(configuration,
+                Map.of("orion.xml", xml(), "material.p12", initial));
+        try (BootstrapContext context = openContext(configuration, ENVIRONMENT, backend)) {
+            NativeGitRepository repository = context.repositoryProvider().openForWrite("orion")
+                    .valueOrFailure("configured material repository");
+            List<Boolean> available = new CopyOnWriteArrayList<>();
+            List<String> revisions = new CopyOnWriteArrayList<>();
+            testRuntime.events().subscribe(KeyMaterialUpdated.class, event -> {
+                try {
+                    revisions.add(event.revision());
+                    available.add(context.keyMaterial().contains(addedKey));
+                } catch (java.security.GeneralSecurityException failure) {
+                    throw new IllegalStateException(failure);
+                }
+            });
+            CountDownLatch paused = new CountDownLatch(1);
+            CountDownLatch resume = new CountDownLatch(1);
+            testRuntime.events().subscribe(PauseMaterialEvents.class, event -> {
+                paused.countDown();
+                try {
+                    resume.await(10, TimeUnit.SECONDS);
+                } catch (InterruptedException failure) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(failure);
+                }
+            });
+            testRuntime.events().publish(new PauseMaterialEvents());
+            String first;
+            String second;
+            try {
+                assertThat(paused.await(10, TimeUnit.SECONDS)).isTrue();
+                first = commitMaterial(repository, added);
+                second = commitMaterial(repository, deleted);
+            } finally {
+                resume.countDown();
+            }
+            testRuntime.awaitEvents();
+            assertThat(revisions).containsExactly(first, second);
+            assertThat(available).containsExactly(true, false);
+            assertThat(context.keyMaterial().version()).isEqualTo(3);
+            assertThat(context.keyMaterial().contains(context.signingMaterial().active())).isTrue();
+        }
+    }
+
+    private static String commitMaterial(NativeGitRepository repository, byte[] bytes) throws Exception {
+        return repository.files().withAccess("refs/heads/main",
+                new GitCommitMetadata(GitCommitAuthor.EMPTY, "external material update"), access -> {
+                    access.write("material.p12", bytes);
+                    String revision = access.refUpdates().getFirst().newId().orElseThrow().toHex();
+                    access.apply();
+                    return revision;
+                });
+    }
+
+    private static final class PauseMaterialEvents extends OrionEvent {}
 
     @ParameterizedTest
     @ValueSource(strings = {"configuration", "material"})
@@ -1707,7 +1790,7 @@ class BootstrapContextTest {
                 ENVIRONMENT,
                 store,
                 new KeyMaterialCreation(true),
-                event -> {})) {
+                new pro.deta.orion.event.OrionEventManager())) {
             if (!descriptors.isEmpty()) {
                 material.withModification(modification -> {
                     for (KeyMaterialDescriptor descriptor : descriptors) {

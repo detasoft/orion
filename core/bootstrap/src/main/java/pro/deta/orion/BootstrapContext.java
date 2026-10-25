@@ -272,10 +272,10 @@ public final class BootstrapContext implements AutoCloseable {
     private static void closeResources(S3Transport transport, NativeGitRepositoryProvider provider,
             OrionKeyMaterial material) {
         try {
+            if (material != null) material.close();
+        } finally {
             if (provider != null) provider.close();
             else if (transport != null) transport.close();
-        } finally {
-            if (material != null) material.close();
         }
     }
 

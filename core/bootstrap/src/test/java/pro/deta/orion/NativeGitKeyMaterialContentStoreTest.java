@@ -11,6 +11,9 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
+import pro.deta.orion.keymaterial.KeyMaterialUpdated;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import pro.deta.orion.keymaterial.KeyMaterialStoreConflictException;
 import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
 import pro.deta.orion.util.Result;
@@ -181,6 +184,62 @@ class NativeGitKeyMaterialContentStoreTest {
         } finally {
             git.close();
         }
+    }
+
+    @Test
+    void reportsOnlyFileChangesAndReadsTheirExactCommits() throws Exception {
+        Fixture fixture = fixture(Map.of(MATERIAL_PATH, bytes("initial")));
+        try (NativeGitKeyMaterialContentStore store = fixture.store()) {
+            testRuntime.awaitEvents();
+            List<String> revisions = new CopyOnWriteArrayList<>();
+            testRuntime.events().subscribe(KeyMaterialUpdated.class, event -> revisions.add(event.revision()));
+            fixture.repository().files().withAccess(REF,
+                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "unrelated file"), access -> {
+                        access.write("orion.xml", bytes("updated configuration"));
+                        access.apply();
+                        return null;
+                    });
+            fixture.repository().files().withAccess("refs/heads/other",
+                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "other branch"), access -> {
+                        access.write(MATERIAL_PATH, bytes("other branch"));
+                        access.apply();
+                        return null;
+                    });
+            testRuntime.awaitEvents();
+            assertThat(revisions).isEmpty();
+            String first = store.write(bytes("first"), store.read().orElseThrow().version());
+            String second = store.write(bytes("second"), first);
+            testRuntime.awaitEvents();
+            assertThat(revisions).containsExactly(first, second);
+            assertThat(store.read(first).orElseThrow().bytes()).isEqualTo(bytes("first"));
+            assertThat(store.read(second).orElseThrow().bytes()).isEqualTo(bytes("second"));
+        }
+    }
+
+    @Test
+    void skipsAMissingFileAndStopsObservingWhenClosed() throws Exception {
+        Fixture fixture = fixture(Map.of(MATERIAL_PATH, bytes("initial")));
+        NativeGitKeyMaterialContentStore store = fixture.store();
+        testRuntime.awaitEvents();
+        List<String> revisions = new CopyOnWriteArrayList<>();
+        testRuntime.events().subscribe(KeyMaterialUpdated.class, event -> revisions.add(event.revision()));
+        fixture.repository().files().withAccess(REF,
+                new GitCommitMetadata(GitCommitAuthor.EMPTY, "remove material"), access -> {
+                    access.delete(MATERIAL_PATH);
+                    access.apply();
+                    return null;
+                });
+        testRuntime.awaitEvents();
+        assertThat(revisions).isEmpty();
+        store.close();
+        fixture.repository().files().withAccess(REF,
+                new GitCommitMetadata(GitCommitAuthor.EMPTY, "restore material"), access -> {
+                    access.write(MATERIAL_PATH, bytes("restored"));
+                    access.apply();
+                    return null;
+                });
+        testRuntime.awaitEvents();
+        assertThat(revisions).isEmpty();
     }
 
     private Fixture fixture(Map<String, byte[]> initialFiles) throws Exception {

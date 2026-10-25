@@ -27,11 +27,6 @@
             <artifactId>common-runtime</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.lmax</groupId>
-            <artifactId>disruptor</artifactId>
-            <version>4.0.0</version>
-        </dependency>
-        <dependency>
             <groupId>pro.deta.orion.core</groupId>
             <artifactId>bootstrap-configuration</artifactId>
         </dependency>

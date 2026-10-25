@@ -9,11 +9,12 @@ import pro.deta.orion.event.disruptor.OrionDisruptor;
 import pro.deta.orion.event.type.OrionEvent;
 import pro.deta.orion.event.type.OrionEventPublisher;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
-import pro.deta.orion.util.OrionUtils;
 import pro.deta.orion.util.Subscription;
 
 import java.util.ArrayDeque;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -140,8 +141,12 @@ public class OrionEventManager implements ServiceLifecycleStateMachineAdapter.Se
             throw new IllegalStateException("Cannot wait for an event on the dispatcher thread");
         }
         publish(event);
-        if (!OrionUtils.waitForCondition(event::isProcessed)) {
-            throw new IllegalStateException("Timed out waiting for event: " + event);
+        long started = System.nanoTime();
+        while (!event.isProcessed()) {
+            if (System.nanoTime() - started >= TimeUnit.SECONDS.toNanos(5)) {
+                throw new IllegalStateException("Timed out waiting for event: " + event);
+            }
+            LockSupport.parkNanos(100_000);
         }
     }
 

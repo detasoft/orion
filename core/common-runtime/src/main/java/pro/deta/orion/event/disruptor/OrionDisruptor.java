@@ -26,6 +26,7 @@ public class OrionDisruptor {
     private final Disruptor<EventHolder> eventHolderDisruptor;
     private final BlockingQueue<Publication> publications = new LinkedBlockingQueue<>();
     private final AtomicLong unprocessed = new AtomicLong();
+    // AI_TODO - remove - no need to have a dedicated thread to copy published events, it should directly publish to the disruptor
     private final Thread publisher;
     private volatile boolean started;
 
@@ -102,5 +103,6 @@ public class OrionDisruptor {
         return unprocessed.get();
     }
 
+    // AI_TODO - remove, unnecessary
     private record Publication(OrionEvent event) {}
 }

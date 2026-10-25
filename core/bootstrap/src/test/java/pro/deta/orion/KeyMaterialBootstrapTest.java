@@ -4,6 +4,7 @@ import java.security.KeyStore;
 import java.io.ByteArrayOutputStream;
 
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
+import pro.deta.orion.event.OrionEventManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
@@ -23,12 +24,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class KeyMaterialBootstrapTest {
     private static final String PASSWORD_ENV = "ORION_TEST_KEY_MATERIAL_PASSWORD";
+    private final OrionEventManager events = new OrionEventManager();
 
     @TempDir
     private Path tempDir;
@@ -115,7 +118,7 @@ class KeyMaterialBootstrapTest {
                 Map.of(PASSWORD_ENV, "test-password"),
                 store,
                 new KeyMaterialCreation(true),
-                event -> {})) {
+                events)) {
             assertThat(material.contains(signing(configuration).active())).isTrue();
         }
 
@@ -131,7 +134,7 @@ class KeyMaterialBootstrapTest {
                 Map.of(PASSWORD_ENV, "test-password"),
                 store,
                 new KeyMaterialCreation(false),
-                event -> {}))
+                events))
                 .isInstanceOf(GeneralSecurityException.class)
                 .hasMessageContaining("creation was not requested");
         assertThat(store.read()).isEmpty();
@@ -149,7 +152,7 @@ class KeyMaterialBootstrapTest {
                 Map.of(PASSWORD_ENV, "test-password"),
                 store,
                 new KeyMaterialCreation(true),
-                event -> {}))
+                events))
                 .isInstanceOf(GeneralSecurityException.class)
                 .hasMessageContaining("cluster-signing-v2");
         assertThat(store.read().orElseThrow().bytes()).isEqualTo(before);
@@ -170,7 +173,7 @@ class KeyMaterialBootstrapTest {
         byte[] before = store.read().orElseThrow().bytes();
         assertThatThrownBy(() -> KeyMaterialBootstrap.open(
                 configuration, Map.of(PASSWORD_ENV, "test-password"), store,
-                new KeyMaterialCreation(true), event -> {}))
+                new KeyMaterialCreation(true), events))
                 .isInstanceOf(GeneralSecurityException.class)
                 .hasMessageContaining("cluster-signing-v2");
         assertThat(store.read().orElseThrow().bytes()).isEqualTo(before);
@@ -187,7 +190,7 @@ class KeyMaterialBootstrapTest {
                 Map.of(PASSWORD_ENV, "test-password"),
                 store,
                 new KeyMaterialCreation(true),
-                event -> {}))
+                events))
                 .isInstanceOf(GeneralSecurityException.class)
                 .hasMessageContaining("retained");
         assertThat(store.read()).isEmpty();
@@ -197,24 +200,31 @@ class KeyMaterialBootstrapTest {
     void rejectsNonRsaSigningConfigurationBeforeCreatingTheStore() {
         BootstrapConfiguration configuration = configuration();
         configuration.getBootstrap().getKeyMaterial().getServerSigning().setAlgorithm("ED25519");
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        AtomicInteger closes = new AtomicInteger();
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore() {
+            @Override
+            public void close() {
+                closes.incrementAndGet();
+            }
+        };
         assertThatThrownBy(() -> KeyMaterialBootstrap.open(
                 configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
                 store,
                 new KeyMaterialCreation(true),
-                event -> {}))
+                events))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("RSA");
         assertThat(store.read()).isEmpty();
+        assertThat(closes).hasValue(1);
     }
 
-    private static OrionKeyMaterial openLocal(
+    private OrionKeyMaterial openLocal(
             BootstrapConfiguration configuration,
             Map<String, String> environment,
             KeyMaterialCreation creation) throws Exception {
         return KeyMaterialBootstrap.open(configuration, environment,
-                KeyMaterialBootstrap.localStore(configuration, environment), creation, event -> {});
+                KeyMaterialBootstrap.localStore(configuration, environment), creation, events);
     }
 
     private static SigningMaterialSet signing(BootstrapConfiguration configuration) {

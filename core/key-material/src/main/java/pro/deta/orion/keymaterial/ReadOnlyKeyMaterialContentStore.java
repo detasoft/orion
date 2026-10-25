@@ -1,13 +1,11 @@
 package pro.deta.orion.keymaterial;
 
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.Optional;
 
 public class ReadOnlyKeyMaterialContentStore implements KeyMaterialContentStore {
-    private final byte[] bytes;
+    private final KeyMaterialSnapshot snapshot;
     private final String sourceName;
-    private final String version;
 
     public ReadOnlyKeyMaterialContentStore(byte[] bytes, String sourceName) {
         if (bytes == null) {
@@ -16,14 +14,13 @@ public class ReadOnlyKeyMaterialContentStore implements KeyMaterialContentStore 
         if (sourceName == null || sourceName.isBlank()) {
             throw new IllegalArgumentException("Key material source name must not be empty");
         }
-        this.bytes = Arrays.copyOf(bytes, bytes.length);
+        this.snapshot = new KeyMaterialSnapshot(bytes, KeyMaterialVersions.sha256(bytes));
         this.sourceName = sourceName;
-        this.version = KeyMaterialVersions.sha256(bytes);
     }
 
     @Override
     public Optional<KeyMaterialSnapshot> read() {
-        return Optional.of(new KeyMaterialSnapshot(bytes, version));
+        return Optional.of(snapshot);
     }
 
     @Override

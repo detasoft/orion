@@ -1,6 +1,11 @@
 package pro.deta.orion.keymaterial;
 
 import pro.deta.orion.event.type.OrionEventPublisher;
+import pro.deta.orion.event.type.OrionEvent;
+import pro.deta.orion.event.OrionEventManager;
+import pro.deta.orion.util.Subscription;
+import java.util.function.Consumer;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -18,6 +23,8 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CyclicBarrier;
@@ -510,6 +517,169 @@ class OrionKeyMaterialApiTest {
         }
     }
 
+    @Test
+    void reloadsTheRequestedRevisionAndInvalidatesPreparedModifications() throws Exception {
+        VersionedStore store = new VersionedStore();
+        KeyMaterialDescriptor secret = new KeyMaterialDescriptor("wrapping",
+                Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES, 1);
+        X509Certificate root = TestCertificateChain.root("Reload root").certificate();
+        List<KeyMaterialChanged> changes = new ArrayList<>();
+        try (OrionKeyMaterial reader = open(store, event -> changes.add((KeyMaterialChanged) event));
+             OrionKeyMaterial writer = open(store)) {
+            writer.withModification(modification -> {
+                modification.generateKey(SIGNING, 2048);
+                modification.generateKey(secret, 256);
+                modification.setTrustedCertificate(ROOT, root);
+                modification.apply();
+            });
+            reader.reload(store.read().orElseThrow().version());
+            KeyMaterialModification stale = reader.modify();
+            stale.generateKey(descriptor("stale", KeyMaterialPurpose.SERVER_SIGNING), 2048);
+            try {
+                writer.withModification(modification -> {
+                    modification.generateKey(OTHER, 2048);
+                    modification.apply();
+                });
+                String added = store.read().orElseThrow().version();
+                writer.withModification(modification -> {
+                    modification.delete(OTHER);
+                    modification.apply();
+                });
+                String deleted = store.read().orElseThrow().version();
+                reader.reload(added);
+                assertThat(reader.contains(OTHER)).isTrue();
+                assertThat(reader.version()).isEqualTo(2);
+                assertThatThrownBy(stale::apply).isInstanceOf(KeyMaterialStoreConflictException.class);
+                reader.reload(deleted);
+                assertThat(reader.contains(OTHER)).isFalse();
+                assertThat(reader.contains(SIGNING)).isTrue();
+                assertThat(reader.contains(secret)).isTrue();
+                assertThat(reader.contains(ROOT)).isTrue();
+                assertThat(reader.version()).isEqualTo(3);
+                reader.reload(deleted);
+                assertThat(changes).extracting(KeyMaterialChanged::resources)
+                        .containsExactly(Set.of("signing", "wrapping", "root"), Set.of("other"), Set.of("other"));
+                assertThatThrownBy(() -> reader.reload(added)).isInstanceOf(GeneralSecurityException.class);
+                assertThat(reader.version()).isEqualTo(3);
+                reader.withModification(modification -> {
+                    modification.generateKey(descriptor("after-reload", KeyMaterialPurpose.SERVER_SIGNING), 2048);
+                    modification.apply();
+                });
+                assertThat(reader.version()).isEqualTo(4);
+            } finally {
+                stale.discard();
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void retainsWorkingKeysWhenAnExternalRevisionIsCorruptOrReplacesHistory(boolean corrupt) throws Exception {
+        VersionedStore store = new VersionedStore();
+        try (OrionKeyMaterial reader = open(store)) {
+            reader.withModification(modification -> {
+                modification.generateKey(SIGNING, 2048);
+                modification.apply();
+            });
+            byte[] payload = new byte[]{1, 2, 3};
+            byte[] signature = reader.sign(SIGNING, payload);
+            byte[] replacement;
+            InMemoryKeyMaterialContentStore otherStore = new InMemoryKeyMaterialContentStore();
+            try (OrionKeyMaterial other = open(otherStore)) {
+                other.withModification(modification -> {
+                    modification.generateKey(SIGNING, 2048);
+                    modification.apply();
+                });
+                replacement = otherStore.read().orElseThrow().bytes();
+            }
+            String revision = store.write(corrupt ? new byte[]{1, 2, 3} : replacement,
+                    store.read().orElseThrow().version());
+            assertThatThrownBy(() -> reader.reload(revision)).isInstanceOfAny(
+                    IOException.class, GeneralSecurityException.class);
+            assertThat(reader.version()).isEqualTo(1);
+            assertThat(reader.verify(SIGNING, payload, signature)).isTrue();
+        }
+    }
+
+    @Test
+    void ownsItsUpdateSubscriptionAndRetainsWorkingKeysAfterAReloadFailure() throws Exception {
+        VersionedStore store = new VersionedStore();
+        AtomicInteger deliveries = new AtomicInteger();
+        OrionEventManager events = new OrionEventManager() {
+            @Override
+            public <T extends OrionEvent> Subscription subscribe(Class<T> type, Consumer<T> handler) {
+                return super.subscribe(type, event -> {
+                    deliveries.incrementAndGet();
+                    handler.accept(event);
+                });
+            }
+        };
+        events.onStart();
+        try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password());
+             OrionKeyMaterial reader = OrionKeyMaterial.open(store, options, events);
+             OrionKeyMaterial writer = open(store)) {
+            writer.withModification(modification -> {
+                modification.generateKey(SIGNING, 2048);
+                modification.apply();
+            });
+            String revision = store.read().orElseThrow().version();
+            events.publishAndWait(new KeyMaterialUpdated(revision));
+            assertThat(reader.contains(SIGNING)).isTrue();
+            byte[] payload = new byte[]{1, 2, 3};
+            byte[] signature = reader.sign(SIGNING, payload);
+            String corrupt = store.write(new byte[]{1, 2, 3}, revision);
+            events.publishAndWait(new KeyMaterialUpdated(corrupt));
+            assertThat(reader.version()).isEqualTo(1);
+            assertThat(reader.verify(SIGNING, payload, signature)).isTrue();
+            assertThat(deliveries).hasValue(2);
+            reader.close();
+            events.publishAndWait(new KeyMaterialUpdated(corrupt));
+            assertThat(deliveries).hasValue(2);
+        } finally {
+            events.onStop();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void closesItsStoreOnCloseOrWhenLoadingFails(boolean invalidMaterial) throws Exception {
+        AtomicInteger closes = new AtomicInteger();
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore() {
+            @Override
+            public void close() {
+                closes.incrementAndGet();
+            }
+        };
+        if (invalidMaterial) store.write(new byte[]{1, 2, 3}, null);
+        try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password())) {
+            if (invalidMaterial) {
+                assertThatThrownBy(() -> OrionKeyMaterial.open(store, options, new OrionEventManager()))
+                        .isInstanceOfAny(IOException.class, GeneralSecurityException.class);
+            } else {
+                OrionKeyMaterial material = OrionKeyMaterial.open(store, options, new OrionEventManager());
+                material.close();
+                material.close();
+            }
+        }
+        assertThat(closes).hasValue(1);
+    }
+
+    private static final class VersionedStore extends InMemoryKeyMaterialContentStore {
+        private final Map<String, KeyMaterialSnapshot> history = new HashMap<>();
+
+        @Override
+        public synchronized String write(byte[] bytes, String expectedVersion) throws IOException {
+            String revision = super.write(bytes, expectedVersion);
+            history.put(revision, super.read().orElseThrow());
+            return revision;
+        }
+
+        @Override
+        public synchronized Optional<KeyMaterialSnapshot> read(String revision) {
+            return Optional.ofNullable(history.get(revision));
+        }
+    }
+
     private static boolean applyTogether(KeyMaterialModification modification, CyclicBarrier start)
             throws Exception {
         start.await(10, TimeUnit.SECONDS);
@@ -535,7 +705,13 @@ class OrionKeyMaterialApiTest {
     private static OrionKeyMaterial open(KeyMaterialContentStore store, OrionEventPublisher eventPublisher)
             throws Exception {
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password())) {
-            return OrionKeyMaterial.open(store, options, eventPublisher);
+            OrionEventManager events = new OrionEventManager() {
+                @Override
+                public void publishIfRunning(OrionEvent event) {
+                    eventPublisher.publishIfRunning(event);
+                }
+            };
+            return OrionKeyMaterial.open(store, options, events);
         }
     }
 

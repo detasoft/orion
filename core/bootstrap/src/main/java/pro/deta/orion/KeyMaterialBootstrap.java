@@ -4,7 +4,7 @@ import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.KeyMaterialConfig;
 import pro.deta.orion.bootstrap.config.ServerSigningConfig;
 import pro.deta.orion.bootstrap.config.SigningKeyReferenceConfig;
-import pro.deta.orion.event.type.OrionEventPublisher;
+import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
 import pro.deta.orion.keymaterial.KeyMaterialContentStore;
@@ -52,18 +52,30 @@ public final class KeyMaterialBootstrap {
             Map<String, String> environment,
             KeyMaterialContentStore store,
             KeyMaterialCreation creation,
-            OrionEventPublisher eventPublisher) throws IOException, GeneralSecurityException {
-        if (configuration == null) {
-            throw new IllegalArgumentException("Orion configuration must not be null");
+            OrionEventManager events) throws IOException, GeneralSecurityException {
+        SigningMaterialSet signingMaterial;
+        KeyMaterialOptions options;
+        try {
+            if (configuration == null) {
+                throw new IllegalArgumentException("Orion configuration must not be null");
+            }
+            KeyMaterialConfig material = configuration.getBootstrap().getKeyMaterial();
+            requireMaterialConfig(material);
+            Path baseDirectory = ConfigurationContext.baseDirectory(configuration, environment);
+            KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard(environment);
+            String password = resolveAgainstBaseDirectory(material.getPassword(), baseDirectory, "password");
+            signingMaterial = signingMaterial(material);
+            options = resolver.pkcs12Options(password);
+        } catch (IOException | RuntimeException failure) {
+            try {
+                store.close();
+            } catch (RuntimeException cleanup) {
+                failure.addSuppressed(cleanup);
+            }
+            throw failure;
         }
-        KeyMaterialConfig material = configuration.getBootstrap().getKeyMaterial();
-        requireMaterialConfig(material);
-        Path baseDirectory = ConfigurationContext.baseDirectory(configuration, environment);
-        KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard(environment);
-        String password = resolveAgainstBaseDirectory(material.getPassword(), baseDirectory, "password");
-        SigningMaterialSet signingMaterial = signingMaterial(material);
-        try (KeyMaterialOptions options = resolver.pkcs12Options(password)) {
-            OrionKeyMaterial keys = OrionKeyMaterial.open(store, options, eventPublisher);
+        try (options) {
+            OrionKeyMaterial keys = OrionKeyMaterial.open(store, options, events);
             try {
                 if (!keys.hasDurableSnapshot()) {
                     if (!creation.allowed()) {

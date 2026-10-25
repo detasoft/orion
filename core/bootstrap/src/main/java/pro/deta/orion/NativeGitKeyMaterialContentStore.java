@@ -1,6 +1,9 @@
 package pro.deta.orion;
 
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.git.nativestorage.RepositoryRefChanged;
+import pro.deta.orion.keymaterial.KeyMaterialUpdated;
+import pro.deta.orion.util.Subscription;
 
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.GitOperationException;
@@ -20,6 +23,7 @@ import java.io.IOException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.Arrays;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -30,7 +34,9 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
     private final String repositoryName;
     private final String refName;
     private final String path;
-    private Observation observation;
+    private final NativeGitRepository revisionRepository;
+    private final Subscription repositorySubscription;
+    private boolean closed;
 
     NativeGitKeyMaterialContentStore(
             NativeGitRepositoryProvider repositoryProvider,
@@ -41,42 +47,48 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
         this.repositoryName = required(repositoryName, "repository name");
         this.refName = required(refName, "ref name");
         this.path = required(path, "path");
+        NativeGitRepository repository = repositoryProvider.openForRead(repositoryName)
+                .valueOrFailure("Cannot open key material repository");
+        revisionRepository = repository.eventSource();
+        repositorySubscription = revisionRepository.events()
+                .subscribe(RepositoryRefChanged.class, this::onRefChanged);
     }
 
     @Override
     public synchronized Optional<KeyMaterialSnapshot> read() throws IOException {
-        NativeGitRepository repository = openForRead();
-        String refRevision = repository.refs().get(refName);
-        if (refRevision == null) {
-            observation = new Observation(null, null);
-            return Optional.empty();
-        }
+        String revision = openForRead().refs().get(refName);
+        return revision == null ? Optional.empty() : read(revision);
+    }
+
+    @Override
+    public synchronized Optional<KeyMaterialSnapshot> read(String revision) throws IOException {
+        Objects.requireNonNull(revision, "revision");
         try {
-            byte[] bytes = repository.files().readFile(new ObjectId(refRevision), path,
-                    (type, size, base, input) -> input.readBytes(Math.toIntExact(size)));
-            String version = materialVersion(bytes);
-            observation = new Observation(version, refRevision);
-            return Optional.of(new KeyMaterialSnapshot(bytes, version));
+            byte[] bytes = revisionRepository.files().readBytes(new ObjectId(revision), path);
+            try {
+                return Optional.of(new KeyMaterialSnapshot(bytes, revision));
+            } finally {
+                Arrays.fill(bytes, (byte) 0);
+            }
         } catch (GitRepositoryFileNotFoundException missing) {
-            observation = new Observation(null, refRevision);
             return Optional.empty();
         } catch (GitOperationException | RuntimeException failure) {
-            throw new IOException("Cannot read key material store", failure);
+            throw new IOException("Cannot read key material store at " + revision, failure);
         }
     }
 
     @Override
     public synchronized String write(byte[] bytes, String expectedVersion) throws IOException {
         Objects.requireNonNull(bytes, "bytes");
-        read();
-        if (!Objects.equals(observation.materialVersion(), expectedVersion)) {
-            throw conflict();
-        }
+        String observedRef = openForRead().refs().get(refName);
+        Optional<KeyMaterialSnapshot> current = observedRef == null ? Optional.empty() : read(observedRef);
+        Optional<KeyMaterialSnapshot> expected = expectedVersion == null ? Optional.empty() : read(expectedVersion);
+        if (!Objects.equals(contentVersion(current), contentVersion(expected))) throw conflict();
 
         try {
             NativeGitRepository repository = repositoryProvider.openForWrite(repositoryName)
                     .valueOrFailure("Cannot open key material repository");
-            String revision = repository.files().withAccess(refName, observation.refRevision(),
+            return repository.files().withAccess(refName, observedRef,
                     new GitCommitMetadata(GitCommitAuthor.EMPTY, SAVE_MESSAGE), access -> {
                         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
                             access.write(path, FileMode.REGULAR_FILE, bytes.length, input);
@@ -85,9 +97,6 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
                         access.apply();
                         return next;
                     });
-            String version = materialVersion(bytes);
-            observation = new Observation(version, revision);
-            return version;
         } catch (GitRefConflictException failure) {
             throw conflict();
         } catch (Exception failure) {
@@ -123,6 +132,49 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
         return value;
     }
 
-    private record Observation(String materialVersion, String refRevision) {
+    private synchronized void onRefChanged(RepositoryRefChanged event) {
+        if (closed || event.repository() != revisionRepository || !refName.equals(event.update().ref().value())) {
+            return;
+        }
+        if (event.update().newId().isEmpty()) {
+            warn("Key material ref was deleted; retaining active material", null);
+            return;
+        }
+        String revision = event.update().newId().orElseThrow().toHex();
+        try {
+            Optional<KeyMaterialSnapshot> current = read(revision);
+            if (current.isEmpty()) {
+                warn("Key material file is missing at " + revision + "; retaining active material", null);
+                return;
+            }
+            Optional<KeyMaterialSnapshot> previous = event.update().expectedOld().isEmpty()
+                    ? Optional.empty() : read(event.update().expectedOld().orElseThrow().toHex());
+            if (!Objects.equals(contentVersion(previous), contentVersion(current))) {
+                revisionRepository.events().publish(new KeyMaterialUpdated(revision));
+            }
+        } catch (IOException | RuntimeException failure) {
+            warn("Cannot inspect key material change at " + revision, failure);
+        }
+    }
+
+    private static String contentVersion(Optional<KeyMaterialSnapshot> snapshot) {
+        if (snapshot.isEmpty()) return null;
+        byte[] bytes = snapshot.orElseThrow().bytes();
+        try {
+            return materialVersion(bytes);
+        } finally {
+            Arrays.fill(bytes, (byte) 0);
+        }
+    }
+
+    private void warn(String message, Exception failure) {
+        System.getLogger(getClass().getName()).log(System.Logger.Level.WARNING,
+                repositoryName + ":" + refName + "/" + path + ": " + message, failure);
+    }
+
+    @Override
+    public synchronized void close() {
+        closed = true;
+        repositorySubscription.close();
     }
 }

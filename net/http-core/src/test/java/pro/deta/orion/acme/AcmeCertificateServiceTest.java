@@ -1,6 +1,7 @@
 package pro.deta.orion.acme;
 
 import pro.deta.orion.test.certificates.TestCertificateChain;
+import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.transport.http.JettyHTTPServer;
 import pro.deta.orion.transport.http.OrionHttpRouteServlet;
 import pro.deta.orion.transport.http.OrionHttpRouteRegistry;
@@ -840,13 +841,13 @@ class AcmeCertificateServiceTest {
     }
 
     private static OrionKeyMaterial owner(InMemoryKeyMaterialContentStore store) throws Exception {
-        return owner(store, event -> {});
+        return owner(store, new OrionEventManager());
     }
 
     private static OrionKeyMaterial owner(InMemoryKeyMaterialContentStore store,
-            pro.deta.orion.event.type.OrionEventPublisher eventPublisher) throws Exception {
+            OrionEventManager eventManager) throws Exception {
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray())) {
-            return OrionKeyMaterial.open(store, options, eventPublisher);
+            return OrionKeyMaterial.open(store, options, eventManager);
         }
     }
 
