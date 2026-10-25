@@ -8,7 +8,7 @@ import { followSessionTerminal } from './session-terminal.js'
 
 function fixture(name) {
   const path = resolve(dirname(fileURLToPath(import.meta.url)),
-    '../../../../../agent-protocol/protocol/fixtures', `${name}.hex`)
+    '../../../../../agent/agent-protocol/protocol/fixtures', `${name}.hex`)
   return Uint8Array.from(Buffer.from(readFileSync(path, 'utf8').replace(/\s/g, ''), 'hex'))
 }
 
