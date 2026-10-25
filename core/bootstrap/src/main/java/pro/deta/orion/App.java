@@ -4,8 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.event.OrionEventManager;
-import pro.deta.orion.keymaterial.SshHostKeyCapability;
-import pro.deta.orion.keymaterial.SshHostKeyReference;
+import org.apache.sshd.common.keyprovider.KeyPairProvider;
 import pro.deta.orion.bootstrap.config.SshHostKeyReferenceConfig;
 import pro.deta.orion.bootstrap.config.location.BootstrapConfigurationReader;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
@@ -85,13 +84,13 @@ public class App {
             OrionEventManager events = new OrionEventManager();
             try (BootstrapContext bootstrap = BootstrapContext.open(
                     configuration, Map.copyOf(System.getenv()), options.keyMaterialCreation(), events)) {
-                SshHostKeyCapability sshHostKeys = bootstrap.sshHostKeys(sshHostKeyReferences(configuration));
+                KeyPairProvider sshHostKeys = bootstrap.sshHostKeys(sshHostKeyAliases(configuration));
                 OrionComponent orionComponent = DaggerOrionComponent.builder()
                         .bootstrapConfiguration(configuration)
                         .rootPasswordReset(options.rootPasswordReset())
                         .signingMaterial(bootstrap.signingMaterial())
                         .keyMaterial(bootstrap.keyMaterial())
-                        .sshHostKeyCapability(sshHostKeys)
+                        .sshHostKeyProvider(sshHostKeys)
                         .nativeGitRepositoryProvider(bootstrap.repositoryFactory())
                         .configuredRepositoryFactory(bootstrap.storageFactory())
                         .s3Transport(bootstrap.s3Transport())
@@ -105,16 +104,19 @@ public class App {
         }
     }
 
-    private static List<SshHostKeyReference> sshHostKeyReferences(BootstrapConfiguration configuration) {
+    private static List<String> sshHostKeyAliases(BootstrapConfiguration configuration) {
         if (configuration.getTransport().getSsh().getHostKeys() == null) {
             throw new IllegalArgumentException("SSH host key references must not be null");
         }
-        List<SshHostKeyReference> references = new ArrayList<>();
+        List<String> references = new ArrayList<>();
         for (SshHostKeyReferenceConfig configured : configuration.getTransport().getSsh().getHostKeys()) {
             if (configured == null) {
                 throw new IllegalArgumentException("SSH host key reference must not be null");
             }
-            references.add(new SshHostKeyReference(configured.getAlias()));
+            if (configured.getAlias() == null || configured.getAlias().isBlank()) {
+                throw new IllegalArgumentException("SSH host key alias must not be empty");
+            }
+            references.add(configured.getAlias());
         }
         return List.copyOf(references);
     }

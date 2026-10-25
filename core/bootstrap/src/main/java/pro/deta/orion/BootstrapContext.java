@@ -18,8 +18,6 @@ import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
-import pro.deta.orion.keymaterial.SshHostKeyCapability;
-import pro.deta.orion.keymaterial.SshHostKeyReference;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.bootstrap.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.bootstrap.config.KeyMaterialConfig;
@@ -32,6 +30,12 @@ import pro.deta.orion.util.Result;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.security.GeneralSecurityException;
+import org.apache.sshd.common.keyprovider.KeyPairProvider;
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
+import pro.deta.orion.keymaterial.KeyMaterialPurpose;
+import pro.deta.orion.keymaterial.KeyMaterialConstants;
+import java.util.Set;
 import java.util.Map;
 import java.util.List;
 import java.util.Objects;
@@ -222,9 +226,40 @@ public final class BootstrapContext implements AutoCloseable {
         return signingMaterial;
     }
 
-    public SshHostKeyCapability sshHostKeys(List<SshHostKeyReference> references)
+    public synchronized KeyPairProvider sshHostKeys(List<String> references)
             throws IOException, GeneralSecurityException {
-        return keyMaterial.sshHostKeys(references);
+        if (references == null) {
+            throw new IllegalArgumentException("SSH host key references must not be null");
+        }
+        for (String reference : references) {
+            if (reference == null || reference.isBlank()) {
+                throw new IllegalArgumentException("SSH host key alias must not be empty");
+            }
+        }
+        List<String> selected = List.copyOf(references);
+        if (selected.isEmpty()
+                && keyMaterial.privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST)).isEmpty()) {
+            KeyMaterialDescriptor rsa = defaultSshHostKey("ssh-host-rsa", KeyMaterialAlgorithm.RSA);
+            KeyMaterialDescriptor ec = defaultSshHostKey("ssh-host-ec", KeyMaterialAlgorithm.EC);
+            for (KeyMaterialDescriptor descriptor : List.of(rsa, ec)) {
+                if (keyMaterial.contains(descriptor.alias(), Set.of())) {
+                    keyMaterial.require(descriptor);
+                }
+            }
+            keyMaterial.withModification(modification -> {
+                modification.generateKey(rsa, KeyMaterialConstants.RSA_KEY_SIZE_BITS);
+                modification.generateKey(ec, KeyMaterialConstants.EC_KEY_SIZE_BITS);
+                modification.apply();
+            });
+        }
+        keyMaterial.sshHostKeyPairs(selected);
+        return session -> keyMaterial.sshHostKeyPairs(selected);
+    }
+
+    private KeyMaterialDescriptor defaultSshHostKey(String logicalAlias, KeyMaterialAlgorithm algorithm) {
+        long version = 1;
+        return new KeyMaterialDescriptor(logicalAlias + "-v" + version,
+                Set.of(KeyMaterialPurpose.SSH_HOST), algorithm, version);
     }
 
     @Override

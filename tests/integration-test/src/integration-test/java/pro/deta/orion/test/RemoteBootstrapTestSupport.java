@@ -1,5 +1,6 @@
 package pro.deta.orion.test;
 
+import java.security.KeyPair;
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.internal.UserEmail;
 
@@ -42,7 +43,7 @@ final class RemoteBootstrapTestSupport {
                 .signingMaterial(context.signingMaterial())
                 .keyMaterial(context.keyMaterial())
                 .eventManager(events)
-                .sshHostKeyCapability(context.sshHostKeys(List.of()))
+                .sshHostKeyProvider(context.sshHostKeys(List.of()))
                 .nativeGitRepositoryProvider(context.repositoryFactory())
                 .configuredRepositoryFactory(context.storageFactory())
                 .s3Transport(context.s3Transport())
@@ -87,7 +88,7 @@ final class RemoteBootstrapTestSupport {
                     + "\n-----END PRIVATE KEY-----\n";
             int port = upstream.sshPort();
             StringBuilder hosts = new StringBuilder();
-            for (var hostKey : upstream.identity().sshHostKeys().keyPairs()) {
+            for (KeyPair hostKey : upstream.identity().sshHostKeys().loadKeys(null)) {
                 hosts.append(PublicKeyEntry.toString(hostKey.getPublic())).append('\n');
             }
             location = "git+ssh://root@localhost:" + port + "/bootstrap-inputs.git";
@@ -111,7 +112,7 @@ final class RemoteBootstrapTestSupport {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         try (var material = OrionKeyMaterialFactory.open(configuration, environment, store,
                 new KeyMaterialCreation(true))) {
-            material.sshHostKeys(List.of());
+            TestServerIdentityMaterial.hostKeys(material);
         }
         return store.read().orElseThrow().bytes();
     }

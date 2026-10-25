@@ -27,7 +27,6 @@ import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.OrionKeyMaterialFactory;
-import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -986,7 +985,9 @@ class InternalConfigurationRepositoryLifecycleIT {
                         configuration.getBootstrap().getKeyMaterial()))
                 .keyMaterial(serverIdentity)
                 .eventManager(events)
-                .sshHostKeyCapability(SshHostKeyCapability.unavailable())
+                .sshHostKeyProvider(session -> {
+                    throw new IllegalStateException("SSH host key material is not available");
+                })
                 .nativeGitRepositoryProvider(provider)
                 .configuredRepositoryFactory(configured)
                 .s3Transport(transport)

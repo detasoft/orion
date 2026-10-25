@@ -35,8 +35,7 @@ import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.command.render.PlainCommandRenderer;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
-import pro.deta.orion.keymaterial.SshHostKeyCapability;
+import org.apache.sshd.common.keyprovider.KeyPairProvider;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
@@ -59,6 +58,7 @@ import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -120,7 +120,7 @@ class GitSshTransportStateMachineTest {
     }
 
     @Test
-    void servesTheHostKeyProvidedByTheMaterialCapability() throws Exception {
+    void servesTheHostKeyProvidedByKmsProvider() throws Exception {
         KeyPair hostKey = keyPair();
         KeyPair clientKey = keyPair();
         service = service(0, new RecordingAccessControlService(clientKey), hostKey);
@@ -131,6 +131,27 @@ class GitSshTransportStateMachineTest {
             session.addPublicKeyIdentity(clientKey);
             session.auth().verify(5, TimeUnit.SECONDS);
             assertArrayEquals(hostKey.getPublic().getEncoded(), session.getServerKey().getEncoded());
+        }
+    }
+
+    @Test
+    void readsHostKeysForEachConnectionAndAcceptsSeveralKeysOfTheSameType() throws Exception {
+        KeyPair first = keyPair();
+        KeyPair second = keyPair();
+        KeyPair clientKey = keyPair();
+        AtomicReference<List<KeyPair>> selected =
+                new AtomicReference<>(List.of(first, second));
+        KeyPairProvider provider = session -> selected.get();
+        service = service(0, new RecordingAccessControlService(clientKey), provider);
+        service.onStart();
+        for (KeyPair expected : List.of(first, second)) {
+            selected.set(expected == first ? List.of(first, second) : List.of(second, first));
+            try (SshClient client = client(List.of(UserAuthPublicKeyFactory.INSTANCE));
+                 ClientSession session = connect(client, service.boundPort(), "alice")) {
+                session.addPublicKeyIdentity(clientKey);
+                session.auth().verify(5, TimeUnit.SECONDS);
+                assertArrayEquals(expected.getPublic().getEncoded(), session.getServerKey().getEncoded());
+            }
         }
     }
 
@@ -254,22 +275,18 @@ class GitSshTransportStateMachineTest {
             int port,
             OrionAccessControlService accessControlService,
             KeyPair hostKey) {
+        return service(port, accessControlService, KeyPairProvider.wrap(hostKey));
+    }
+
+    private GitSshTransportService service(
+            int port,
+            OrionAccessControlService accessControlService,
+            KeyPairProvider hostKeys) {
         BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getBootstrap().setBaseDir(tempDir.toString());
         configuration.getTransport().getSsh().setEnabled(true);
         configuration.getTransport().getSsh().setAddress("127.0.0.1");
         configuration.getTransport().getSsh().setPort(port);
-        SshHostKeyCapability hostKeys = new SshHostKeyCapability() {
-            @Override
-            public List<KeyMaterialDescriptor> descriptors() {
-                return List.of();
-            }
-
-            @Override
-            public List<KeyPair> keyPairs() {
-                return List.of(hostKey);
-            }
-        };
         OrionConfigurationEditor editor =
                 new TestConfiguration(events).editor();
         CommandDispatcher dispatcher = new DefaultCommandDispatcher(

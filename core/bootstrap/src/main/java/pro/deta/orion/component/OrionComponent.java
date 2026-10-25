@@ -20,7 +20,7 @@ import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.OrionKeyMaterialFactory;
-import pro.deta.orion.keymaterial.SshHostKeyCapability;
+import org.apache.sshd.common.keyprovider.KeyPairProvider;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.transport.OrionTransportModule;
@@ -66,7 +66,7 @@ public interface OrionComponent {
         @BindsInstance Builder rootPasswordReset(RootPasswordReset rootPasswordReset);
         @BindsInstance Builder signingMaterial(SigningMaterialSet material);
         @BindsInstance Builder keyMaterial(OrionKeyMaterial material);
-        @BindsInstance Builder sshHostKeyCapability(SshHostKeyCapability capability);
+        @BindsInstance Builder sshHostKeyProvider(KeyPairProvider provider);
         @BindsInstance Builder nativeGitRepositoryProvider(NativeGitRepositoryFactory repositoryProvider);
         @BindsInstance Builder s3Transport(S3Transport transport);
         @BindsInstance Builder eventManager(OrionEventManager events);
@@ -90,7 +90,9 @@ public interface OrionComponent {
                     .signingMaterial(OrionKeyMaterialFactory.signingMaterial(
                             configuration.getBootstrap().getKeyMaterial()))
                     .keyMaterial(OrionKeyMaterial.unavailable())
-                    .sshHostKeyCapability(SshHostKeyCapability.unavailable())
+                    .sshHostKeyProvider(session -> {
+                        throw new IllegalStateException("SSH host key material is not available");
+                    })
                     .nativeGitRepositoryProvider(repositoryProvider)
                     .configuredRepositoryFactory(configured)
                     .s3Transport(transport)

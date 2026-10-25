@@ -275,7 +275,7 @@ public class OrionKeyMaterial implements AutoCloseable {
         }
     }
 
-    public List<KeyPair> sshHostKeyPairs(List<SshHostKeyReference> references) throws GeneralSecurityException {
+    public List<KeyPair> sshHostKeyPairs(List<String> references) throws GeneralSecurityException {
         requireAvailable();
         if (references == null) throw new IllegalArgumentException("SSH host key references must not be null");
         synchronized (owner) {
@@ -418,56 +418,22 @@ public class OrionKeyMaterial implements AutoCloseable {
         }
     }
 
-    public SshHostKeyCapability sshHostKeys(List<SshHostKeyReference> references)
-            throws IOException, GeneralSecurityException {
-        requireAvailable();
-        if (references == null) {
-            throw new IllegalArgumentException("SSH host key references must not be null");
-        }
-        synchronized (owner) {
-            List<KeyMaterialDescriptor> available = owner.privateKeyDescriptors(
-                    Set.of(KeyMaterialPurpose.SSH_HOST));
-            if (references.isEmpty() && available.isEmpty()) {
-                KeyMaterialDescriptor rsa = defaultSshHostKey("ssh-host-rsa", KeyMaterialAlgorithm.RSA);
-                KeyMaterialDescriptor ec = defaultSshHostKey("ssh-host-ec", KeyMaterialAlgorithm.EC);
-                for (KeyMaterialDescriptor descriptor : List.of(rsa, ec)) {
-                    if (owner.containsAlias(descriptor.alias(), Set.of())) {
-                        owner.validateExisting(descriptor);
-                    }
-                }
-                owner.generateKeyIfMissing(rsa, KeyMaterialConstants.RSA_KEY_SIZE_BITS);
-                owner.generateKeyIfMissing(ec, KeyMaterialConstants.EC_KEY_SIZE_BITS);
-                owner.save();
-                available = owner.privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST));
-            }
-            List<KeyMaterialDescriptor> selected = references.isEmpty()
-                    ? available : selectSshHostKeys(available, references);
-            return KeyMaterialCapabilities.open(owner, selected).sshHostKeys(selected);
-        }
-    }
-
-    private KeyMaterialDescriptor defaultSshHostKey(String logicalAlias, KeyMaterialAlgorithm algorithm) {
-        long version = 1;
-        return new KeyMaterialDescriptor(logicalAlias + "-v" + version,
-                Set.of(KeyMaterialPurpose.SSH_HOST), algorithm, version);
-    }
-
     private List<KeyMaterialDescriptor> selectSshHostKeys(List<KeyMaterialDescriptor> available,
-            List<SshHostKeyReference> references) throws GeneralSecurityException {
+            List<String> references) throws GeneralSecurityException {
         List<KeyMaterialDescriptor> selected = new ArrayList<>();
-        for (SshHostKeyReference reference : references) {
-            if (reference == null) {
-                throw new IllegalArgumentException("SSH host key reference must not be null");
+        for (String reference : references) {
+            if (reference == null || reference.isBlank()) {
+                throw new IllegalArgumentException("SSH host key alias must not be empty");
             }
-            KeyMaterialDescriptor match = findExactSshHostKey(available, reference.alias());
-            if (match == null && !isConcreteSshHostKeyAlias(reference.alias())) {
-                match = findLatestSshHostKey(available, reference.alias());
+            KeyMaterialDescriptor match = findExactSshHostKey(available, reference);
+            if (match == null && !isConcreteSshHostKeyAlias(reference)) {
+                match = findLatestSshHostKey(available, reference);
             }
             if (match == null) {
-                throw new GeneralSecurityException("SSH host key reference not found: " + reference.alias());
+                throw new GeneralSecurityException("SSH host key reference not found: " + reference);
             }
             if (selected.contains(match)) {
-                throw new IllegalArgumentException("Duplicate SSH host key reference: " + reference.alias());
+                throw new IllegalArgumentException("Duplicate SSH host key reference: " + reference);
             }
             selected.add(match);
         }

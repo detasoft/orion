@@ -48,8 +48,7 @@ class KeyMaterialCapabilitiesTest {
             byte[] payload = new byte[]{1, 2, 3};
             byte[] signature = capabilities.signing(signing).sign(payload);
             assertThat(capabilities.verification(List.of(signing)).verify(payload, signature)).isTrue();
-            assertThat(capabilities.sshHostKeys(List.of(host)).keyPairs().getFirst().getPublic())
-                    .isEqualTo(service.getKeyPair("shared").getPublic());
+            service.validateExisting(host);
             KeyMaterialDescriptor missingRole = new KeyMaterialDescriptor("shared",
                     Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 1);
             assertThatThrownBy(() -> KeyMaterialCapabilities.open(service, List.of(missingRole)))
@@ -244,7 +243,7 @@ class KeyMaterialCapabilitiesTest {
                     Optional.empty(),
                     List.of(),
                     TlsClientAuthentication.DISABLED).createContext();
-            KeyPair sshHostKey = capabilities.sshHostKeys(List.of(ssh)).keyPairs().getFirst();
+            KeyPair sshHostKey = service.getKeyPair(ssh.alias());
             byte[] payload = "certificate-body".getBytes(StandardCharsets.UTF_8);
             byte[] signature = capabilities.certificateAuthority(ca).sign(payload);
 

@@ -158,25 +158,6 @@ public final class KeyMaterialCapabilities {
         return new CertificateIdentity(owner, this, registered, issuer, clientTrust, clientAuthentication);
     }
 
-    public SshHostKeyCapability sshHostKeys(List<KeyMaterialDescriptor> requested) {
-        List<KeyMaterialDescriptor> registered = requireRegistered(requested, KeyMaterialPurpose.SSH_HOST);
-        return new SshHostKeyCapability() {
-            @Override
-            public List<KeyMaterialDescriptor> descriptors() {
-                return registered;
-            }
-
-            @Override
-            public List<KeyPair> keyPairs() throws GeneralSecurityException {
-                List<KeyPair> keys = new ArrayList<>();
-                for (KeyMaterialDescriptor descriptor : registered) {
-                    keys.add(owner.getKeyPair(descriptor.alias()));
-                }
-                return List.copyOf(keys);
-            }
-        };
-    }
-
     public SshClientKeyCapability sshClientKey(KeyMaterialDescriptor descriptor) {
         KeyMaterialDescriptor registered = requireRegistered(descriptor, KeyMaterialPurpose.SSH_CLIENT);
         return new SshClientKeyCapability() {

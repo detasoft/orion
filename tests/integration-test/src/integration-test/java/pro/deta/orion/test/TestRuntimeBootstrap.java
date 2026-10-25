@@ -8,7 +8,7 @@ import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.OrionKeyMaterialFactory;
-import pro.deta.orion.keymaterial.SshHostKeyCapability;
+import org.apache.sshd.common.keyprovider.KeyPairProvider;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.util.ConfigurationContext;
@@ -67,14 +67,14 @@ final class TestRuntimeBootstrap {
     static OrionComponent.Builder componentBuilder(
             BootstrapConfiguration configuration,
             OrionKeyMaterial material,
-            SshHostKeyCapability sshHostKeys) {
+            KeyPairProvider sshHostKeys) {
         return componentBuilder(configuration, material, sshHostKeys, new RootPasswordReset(false));
     }
 
     static OrionComponent.Builder componentBuilder(
             BootstrapConfiguration configuration,
             OrionKeyMaterial material,
-            SshHostKeyCapability sshHostKeys,
+            KeyPairProvider sshHostKeys,
             RootPasswordReset rootPasswordReset) {
         pro.deta.orion.event.OrionEventManager events = new pro.deta.orion.event.OrionEventManager();
         NativeGitRepositoryBackend backend = NativeGitRepositoryBackend.file(
@@ -95,7 +95,7 @@ final class TestRuntimeBootstrap {
                         configuration.getBootstrap().getKeyMaterial()))
                 .keyMaterial(material)
                 .eventManager(events)
-                .sshHostKeyCapability(sshHostKeys)
+                .sshHostKeyProvider(sshHostKeys)
                 .nativeGitRepositoryProvider(provider)
                 .configuredRepositoryFactory(configured)
                 .s3Transport(transport);

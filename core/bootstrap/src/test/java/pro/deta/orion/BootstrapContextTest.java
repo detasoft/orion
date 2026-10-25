@@ -1,5 +1,9 @@
 package pro.deta.orion;
 
+import org.apache.sshd.common.keyprovider.KeyPairProvider;
+import java.util.ArrayList;
+import java.security.KeyPair;
+import java.security.GeneralSecurityException;
 import java.util.Set;
 
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
@@ -42,7 +46,6 @@ import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialService;
-import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.User;
@@ -210,7 +213,8 @@ class BootstrapContextTest {
                     .isEqualTo(initialRevision);
             assertThat(context.signingMaterial().active().alias()).isNotBlank();
             assertThat(context.keyMaterial().contains(context.signingMaterial().active())).isTrue();
-            assertThat(context.sshHostKeys(List.of()).descriptors())
+            context.sshHostKeys(List.of());
+            assertThat(context.keyMaterial().privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST)))
                     .extracting(descriptor -> descriptor.alias())
                     .containsExactly("ssh-host-ec-v1", "ssh-host-rsa-v1");
         }
@@ -265,6 +269,96 @@ class BootstrapContextTest {
     }
 
     @Test
+    void reloadsDefaultSshHostKeysWithoutReplacingThem() throws Exception {
+        BootstrapConfiguration configuration = configuration();
+        List<byte[]> publicKeys = new ArrayList<>();
+        try (BootstrapContext context = openContext(configuration, ENVIRONMENT, true)) {
+            for (KeyPair pair : context.sshHostKeys(List.of()).loadKeys(null)) {
+                publicKeys.add(pair.getPublic().getEncoded());
+            }
+        }
+        try (BootstrapContext context = openContext(configuration, ENVIRONMENT)) {
+            assertThat(context.sshHostKeys(List.of()).loadKeys(null))
+                    .extracting(pair -> pair.getPublic().getEncoded()).containsExactlyElementsOf(publicKeys);
+        }
+    }
+
+    @Test
+    void selectsExactOrLatestSshAliasAndAllowsSeveralKeysOfTheSameType() throws Exception {
+        BootstrapConfiguration configuration = configuration();
+        KeyMaterialDescriptor first = sshHostKey("node-a-rsa-v1", 1);
+        KeyMaterialDescriptor latest = sshHostKey("node-a-rsa-v3", 3);
+        KeyMaterialDescriptor other = sshHostKey("node-b-rsa-v4", 4);
+        List<KeyMaterialDescriptor> stored = List.of(first, latest, other);
+        NativeGitRepositoryProvider backend = repositoryWith(configuration,
+                Map.of("orion.xml", xml(), "material.p12", materialBytes(configuration, stored)));
+        try (BootstrapContext context = openContext(configuration, ENVIRONMENT, borrow(backend))) {
+            byte[] latestPublic = context.keyMaterial().publicKey(latest).getEncoded();
+            byte[] firstPublic = context.keyMaterial().publicKey(first).getEncoded();
+            assertThat(context.sshHostKeys(List.of("node-a-rsa")).loadKeys(null))
+                    .extracting(pair -> pair.getPublic().getEncoded()).containsExactly(latestPublic);
+            assertThat(context.sshHostKeys(List.of("node-a-rsa-v1")).loadKeys(null))
+                    .extracting(pair -> pair.getPublic().getEncoded()).containsExactly(firstPublic);
+            KeyPairProvider provider = context.sshHostKeys(
+                    List.of(latest.alias(), first.alias()));
+            assertThat(provider.loadKey(null, KeyPairProvider.SSH_RSA)
+                    .getPublic().getEncoded()).isEqualTo(latestPublic);
+            assertThat(context.sshHostKeys(List.of()).loadKeys(null)).hasSize(3);
+            assertThat(context.keyMaterial().privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST)))
+                    .containsExactlyElementsOf(stored);
+            assertThatThrownBy(() -> context.sshHostKeys(List.of("missing")))
+                    .isInstanceOf(GeneralSecurityException.class).hasMessageContaining("missing");
+        }
+        try (BootstrapContext context = openContext(configuration, ENVIRONMENT, backend)) {
+            assertThat(context.keyMaterial().privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST)))
+                    .containsExactlyElementsOf(stored);
+        }
+    }
+
+    @Test
+    void doesNotResolveAMissingConcreteSshAliasAsALogicalAlias() throws Exception {
+        BootstrapConfiguration configuration = configuration();
+        NativeGitRepositoryProvider backend = repositoryWith(configuration,
+                Map.of("orion.xml", xml(), "material.p12",
+                        materialBytes(configuration, List.of(sshHostKey("node-a-rsa-v1-v3", 3)))));
+        try (BootstrapContext context = openContext(configuration, ENVIRONMENT, backend)) {
+            assertThatThrownBy(() -> context.sshHostKeys(List.of("node-a-rsa-v1")))
+                    .isInstanceOf(GeneralSecurityException.class).hasMessageContaining("node-a-rsa-v1");
+        }
+    }
+
+    @Test
+    void existingSshProviderStopsReturningDeletedMaterial() throws Exception {
+        BootstrapConfiguration configuration = configuration();
+        try (BootstrapContext context = openContext(configuration, ENVIRONMENT, true)) {
+            context.sshHostKeys(List.of());
+            KeyPairProvider provider = context.sshHostKeys(List.of("ssh-host-ec-v1"));
+            assertThat(provider.loadKeys(null)).hasSize(1);
+            KeyMaterialDescriptor removed = context.keyMaterial()
+                    .privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST)).getFirst();
+            context.keyMaterial().withModification(modification -> {
+                modification.delete(removed);
+                modification.apply();
+            });
+            assertThatThrownBy(() -> provider.loadKeys(null)).isInstanceOf(GeneralSecurityException.class);
+        }
+    }
+
+    @Test
+    void publishesDefaultSshHostKeysAsOneMaterialRevision() throws Exception {
+        BootstrapConfiguration configuration = configuration();
+        NativeGitRepositoryProvider backend = repositoryWith(configuration,
+                Map.of("orion.xml", xml(), "material.p12", materialBytes(configuration)));
+        try (BootstrapContext context = openContext(configuration, ENVIRONMENT, backend)) {
+            long before = context.keyMaterial().version();
+            context.sshHostKeys(List.of());
+            assertThat(context.keyMaterial().version()).isEqualTo(before + 1);
+            context.sshHostKeys(List.of());
+            assertThat(context.keyMaterial().version()).isEqualTo(before + 1);
+        }
+    }
+
+    @Test
     void rejectsAnUnresolvedExplicitSshHostKeyWhenSelectingHostKeys() throws Exception {
         BootstrapConfiguration configuration = configuration();
         SshHostKeyReferenceConfig reference = new SshHostKeyReferenceConfig();
@@ -278,8 +372,8 @@ class BootstrapContextTest {
 
         try (BootstrapContext context = openContext(configuration, ENVIRONMENT, backend)) {
             assertThatThrownBy(() -> context.sshHostKeys(List.of(
-                    new pro.deta.orion.keymaterial.SshHostKeyReference(reference.getAlias()))))
-                    .isInstanceOf(java.security.GeneralSecurityException.class)
+                    reference.getAlias())))
+                    .isInstanceOf(GeneralSecurityException.class)
                     .hasMessageContaining("missing-ssh-host-key");
         }
         assertThatThrownBy(() -> backend.find("orion")).hasMessageContaining("closed");
@@ -1561,7 +1655,7 @@ class BootstrapContextTest {
                 .signingMaterial(context.signingMaterial())
                 .keyMaterial(context.keyMaterial())
                 .eventManager(EVENTS.rawManager())
-                .sshHostKeyCapability(context.sshHostKeys(List.of()))
+                .sshHostKeyProvider(context.sshHostKeys(List.of()))
                 .nativeGitRepositoryProvider(context.repositoryFactory())
                 .configuredRepositoryFactory(context.storageFactory())
                 .s3Transport(context.s3Transport())
@@ -1599,17 +1693,30 @@ class BootstrapContextTest {
         return backend;
     }
 
+    private static KeyMaterialDescriptor sshHostKey(String alias, long version) {
+        return new KeyMaterialDescriptor(alias, Set.of(KeyMaterialPurpose.SSH_HOST),
+                KeyMaterialAlgorithm.RSA, version);
+    }
+
     private static byte[] materialBytes(BootstrapConfiguration configuration) throws Exception {
+        return materialBytes(configuration, List.of());
+    }
+
+    private static byte[] materialBytes(BootstrapConfiguration configuration,
+            List<KeyMaterialDescriptor> descriptors) throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        try (OrionKeyMaterial ignored = OrionKeyMaterialFactory.open(
-                configuration,
-                ENVIRONMENT,
-                store,
-                new KeyMaterialCreation(true))) {
-            // Generate the typed server identity in the test content store.
+        try (OrionKeyMaterial material = OrionKeyMaterialFactory.open(
+                configuration, ENVIRONMENT, store, new KeyMaterialCreation(true))) {
+            if (!descriptors.isEmpty()) {
+                material.withModification(modification -> {
+                    for (KeyMaterialDescriptor descriptor : descriptors) {
+                        modification.generateKey(descriptor, 2048);
+                    }
+                    modification.apply();
+                });
+            }
         }
-        KeyMaterialSnapshot snapshot = store.read().orElseThrow();
-        return snapshot.bytes();
+        return store.read().orElseThrow().bytes();
     }
 
     private static byte[] bytes(String value) {

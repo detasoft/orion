@@ -21,7 +21,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.KeyPair;
 import java.util.EnumSet;
-import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -93,7 +92,7 @@ class PlaywrightTransportTest {
     }
 
     private static SshClient sshClient(RuntimeHttpTestSupport.StartedOrion orion) throws Exception {
-        List<KeyPair> hostKeys = orion.identity().sshHostKeys().keyPairs();
+        Iterable<KeyPair> hostKeys = orion.identity().sshHostKeys().loadKeys(null);
         SshClient client = SshClient.setUpDefaultClient();
         client.setServerKeyVerifier((session, address, serverKey) -> {
             for (KeyPair expected : hostKeys) {

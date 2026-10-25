@@ -302,7 +302,7 @@ class BootstrapProxyEndpointIT {
         Path home = Files.createDirectories(tempDir.resolve("ssh-" + username));
         Path sshDirectory = Files.createDirectories(home.resolve(".ssh"));
         List<PublicKey> hostKeys = new ArrayList<>();
-        for (var hostKey : bootstrap.sshHostKeys(List.of()).keyPairs()) {
+        for (KeyPair hostKey : bootstrap.sshHostKeys(List.of()).loadKeys(null)) {
             hostKeys.add(hostKey.getPublic());
         }
         var factory = new SshdSessionFactoryBuilder().setHomeDirectory(home.toFile())

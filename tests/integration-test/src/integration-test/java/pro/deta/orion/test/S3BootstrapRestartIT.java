@@ -204,7 +204,7 @@ class S3BootstrapRestartIT {
                     assertThat(savedRefs).containsKeys(CONFIGURATION_REF, MATERIAL_REF);
                     signingKeyId = bootstrap.signingMaterial().active().alias();
                     signature = bootstrap.keyMaterial().sign(bootstrap.signingMaterial().active(), payload);
-                    for (KeyPair pair : bootstrap.sshHostKeys(List.of()).keyPairs()) {
+                    for (KeyPair pair : bootstrap.sshHostKeys(List.of()).loadKeys(null)) {
                         hostKeys.add(PublicKeyEntry.toString(pair.getPublic()));
                     }
                     assertThat(hostKeys).isNotEmpty();
@@ -232,7 +232,7 @@ class S3BootstrapRestartIT {
                 assertThat(bootstrap.signingMaterial().active().alias()).isEqualTo(signingKeyId);
                 assertThat(bootstrap.keyMaterial().verify(bootstrap.signingMaterial().active(),
                         payload, signature)).isTrue();
-                assertThat(bootstrap.sshHostKeys(List.of()).keyPairs())
+                assertThat(bootstrap.sshHostKeys(List.of()).loadKeys(null))
                         .extracting(pair -> PublicKeyEntry.toString(pair.getPublic()))
                         .containsExactlyElementsOf(hostKeys);
 
