@@ -41,16 +41,18 @@ import java.util.StringJoiner;
 /**
  * Serializes local saves separately from state access so persistence and event publication can wait
  * without holding the state monitor needed by reload handlers.
+ *
+ * <p>PKCS12 attributes under {@code DESCRIPTOR_ATTRIBUTE_OID} store purposes, algorithm and descriptor version.
+ * Attributes under {@code ADDITION_ATTRIBUTE_OID} store logical alias, entry version, KMS revision and deletion
+ * status. Both OIDs identify persisted metadata and must remain stable across saves and reopenings.</p>
  * @AiRule All public methods in this class must be synchronized.
  */
 final class KeyMaterialService implements AutoCloseable {
     private static final String LOCAL_KEY_ID_ATTRIBUTE_OID = "1.2.840.113549.1.9.21";
 
-    // AI_TODO зачем?
     private static final String DESCRIPTOR_ATTRIBUTE_OID =
             "2.25.260349814076539099691640886169327825428";
 
-    // AI_TODO зачем?
     private static final String ADDITION_ATTRIBUTE_OID =
             "2.25.260349814076539099691640886169327826429";
     private final Object writes = new Object();
