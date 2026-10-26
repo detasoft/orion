@@ -8,7 +8,6 @@ import pro.deta.orion.event.type.OrionEvent;
 
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 
@@ -20,7 +19,6 @@ import java.util.function.Supplier;
 public class OrionDisruptor {
     private final Disruptor<EventHolder> eventHolderDisruptor;
     private final ReentrantReadWriteLock lifecycle = new ReentrantReadWriteLock();
-    private final AtomicLong unprocessed = new AtomicLong();
     private volatile boolean started;
 
     public OrionDisruptor(int size) {
@@ -44,7 +42,6 @@ public class OrionDisruptor {
             if (!started) {
                 throw new IllegalStateException("Cannot publish Orion event while event disruptor is stopped");
             }
-            unprocessed.incrementAndGet();
             eventHolderDisruptor.getRingBuffer().publishEvent(
                     (holder, sequence, published) -> holder.setOrionEvent(published), event);
         } finally {
@@ -68,17 +65,6 @@ public class OrionDisruptor {
     }
 
     public void handleEventsWith(EventHandler<EventHolder> eventHandler) {
-        eventHolderDisruptor.handleEventsWith((holder, sequence, endOfBatch) -> {
-            try {
-                eventHandler.onEvent(holder, sequence, endOfBatch);
-            } finally {
-                unprocessed.decrementAndGet();
-            }
-        });
+        eventHolderDisruptor.handleEventsWith(eventHandler);
     }
-
-    public long getUnprocessedLength() {
-        return unprocessed.get();
-    }
-
 }

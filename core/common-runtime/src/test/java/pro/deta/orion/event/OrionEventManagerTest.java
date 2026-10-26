@@ -45,7 +45,6 @@ class OrionEventManagerTest {
         assertThat(handlerThreads).hasSize(2).doesNotContain(publisher);
         assertThat(handlerThreads.get(0)).isSameAs(handlerThreads.get(1));
         assertThat(nested.isProcessed()).isTrue();
-        assertThat(events.getUnprocessedLength()).isZero();
     }
 
     @Test

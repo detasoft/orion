@@ -65,7 +65,6 @@ class OrionDisruptorTest {
             disruptor.stop();
         }
         assertThat(handled).hasSize(256).doesNotHaveDuplicates();
-        assertThat(disruptor.getUnprocessedLength()).isZero();
         assertThatThrownBy(() -> disruptor.publish(new ApplicationShutdownRequestedEvent("after stop")))
                 .isInstanceOf(IllegalStateException.class);
     }
@@ -110,6 +109,5 @@ class OrionDisruptorTest {
         }
 
         assertThat(handled).containsExactly("0", "1", "2", "3", "4", "5", "6", "7", "8");
-        assertThat(disruptor.getUnprocessedLength()).isZero();
     }
 }

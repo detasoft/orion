@@ -5,6 +5,7 @@ import jakarta.inject.Named;
 import jakarta.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.event.type.ApplicationShutdownRequestedEvent;
+import pro.deta.orion.event.type.OrionEvent;
 import pro.deta.orion.lifecycle.state.ActionId;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
@@ -12,7 +13,6 @@ import pro.deta.orion.lifecycle.state.StateMachineEventType;
 import pro.deta.orion.util.Subscription;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.util.OrionProvider;
-import pro.deta.orion.util.OrionUtils;
 
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
@@ -87,7 +87,7 @@ public class OrionApplicationLifecycle {
 
     public void waitForStarting() {
         waitForState(RUNNING);
-        OrionUtils.waitForCondition(() -> orionProvider.getEventManager().getUnprocessedLength() == 0);
+        orionProvider.getEventManager().publishAndWait(new OrionEvent() {});
     }
 
     public void waitForShutdown() {

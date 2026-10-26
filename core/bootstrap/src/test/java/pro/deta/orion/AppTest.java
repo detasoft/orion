@@ -126,6 +126,7 @@ class AppTest {
         }
 
         private TestLifecycleContext(boolean failStart) {
+            eventManager.onStart();
             service = new RecordingServiceLifecycle(failStart);
             ServiceLifecycleStateMachineAdapter serviceMachine =
                     new ServiceLifecycleStateMachineAdapter("service", service);
@@ -149,6 +150,7 @@ class AppTest {
 
         @Override
         public void close() {
+            eventManager.onStop();
             executor.shutdownNow();
         }
     }

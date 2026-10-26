@@ -2,6 +2,7 @@ package pro.deta.orion.lifecycle;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.event.OrionEventManager;
+import pro.deta.orion.event.type.OrionEvent;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.lifecycle.state.AggregateLifecycleStateMachineAdapter;
@@ -83,6 +84,57 @@ class OrionApplicationLifecycleTest {
     }
 
     @Test
+    void startupWaitsForEarlierAndNestedEventsWithoutWaitingForLaterEvents() throws Exception {
+        OrionEvent earlier = new OrionEvent() {};
+        OrionEvent nested = new OrionEvent() {};
+        OrionEvent later = new OrionEvent() {};
+        CountDownLatch enteredEarlier = new CountDownLatch(1);
+        CountDownLatch releaseEarlier = new CountDownLatch(1);
+        CountDownLatch barrierQueued = new CountDownLatch(1);
+        CountDownLatch enteredLater = new CountDownLatch(1);
+        CountDownLatch releaseLater = new CountDownLatch(1);
+        OrionEventManager events = new OrionEventManager() {
+            @Override
+            public void publish(OrionEvent event) {
+                super.publish(event);
+                if (event != earlier && event != nested && event != later) {
+                    super.publish(later);
+                    barrierQueued.countDown();
+                }
+            }
+        };
+        events.subscribe(earlier.getClass(), event -> {
+            enteredEarlier.countDown();
+            await(releaseEarlier);
+            events.publish(nested);
+        });
+        events.subscribe(later.getClass(), event -> {
+            enteredLater.countDown();
+            await(releaseLater);
+        });
+        try (TestLifecycleContext context = new TestLifecycleContext(new RecordingServiceLifecycle(), events)) {
+            context.lifecycle().runApplication();
+            try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+                try {
+                    events.publish(earlier);
+                    assertThat(enteredEarlier.await(1, TimeUnit.SECONDS)).isTrue();
+                    Future<?> waiter = executor.submit(() -> context.lifecycle().waitForStarting());
+                    assertThat(barrierQueued.await(1, TimeUnit.SECONDS)).isTrue();
+                    assertThat(waiter).isNotDone();
+                    releaseEarlier.countDown();
+                    assertThat(enteredLater.await(1, TimeUnit.SECONDS)).isTrue();
+                    waiter.get(1, TimeUnit.SECONDS);
+                    assertThat(nested.isProcessed()).isTrue();
+                    assertThat(later.isProcessed()).isFalse();
+                } finally {
+                    releaseEarlier.countDown();
+                    releaseLater.countDown();
+                }
+            }
+        }
+    }
+
+    @Test
     void waitForShutdownReturnsAfterShutdownMovesMachineToFin() throws Exception {
         RecordingServiceLifecycle service = new RecordingServiceLifecycle();
         try (TestLifecycleContext context = new TestLifecycleContext(service)) {
@@ -151,11 +203,17 @@ class OrionApplicationLifecycleTest {
 
     private static final class TestLifecycleContext implements AutoCloseable {
         private final OrionExecutor executor = new OrionExecutor(4, new OrionThreadFactory());
-        private final OrionEventManager eventManager = new OrionEventManager();
+        private final OrionEventManager eventManager;
         private final AggregateStateMachine runtime;
         private final OrionApplicationLifecycle lifecycle;
 
         private TestLifecycleContext(RecordingServiceLifecycle service) {
+            this(service, new OrionEventManager());
+        }
+
+        private TestLifecycleContext(RecordingServiceLifecycle service, OrionEventManager eventManager) {
+            this.eventManager = eventManager;
+            eventManager.onStart();
             ServiceLifecycleStateMachineAdapter serviceMachine =
                     new ServiceLifecycleStateMachineAdapter("service", service);
             runtime = AggregateLifecycleStateMachineAdapter.define("runtime")
@@ -182,6 +240,7 @@ class OrionApplicationLifecycleTest {
 
         @Override
         public void close() {
+            eventManager.onStop();
             executor.shutdownNow();
         }
     }

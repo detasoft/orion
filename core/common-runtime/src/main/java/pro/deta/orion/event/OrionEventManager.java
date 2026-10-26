@@ -70,10 +70,6 @@ public class OrionEventManager implements ServiceLifecycleStateMachineAdapter.Se
         running = true;
     }
 
-    public long getUnprocessedLength() {
-        return rootDisruptor.getUnprocessedLength();
-    }
-
     public void onStop() {
         running = false;
         try {
