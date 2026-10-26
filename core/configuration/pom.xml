@@ -18,5 +18,10 @@
             <groupId>pro.deta.orion.core</groupId>
             <artifactId>common</artifactId>
         </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.tests</groupId>
+            <artifactId>test-support</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>

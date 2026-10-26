@@ -55,7 +55,7 @@ import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.util.Result;
-import pro.deta.orion.event.type.OrionEvent;
+import pro.deta.orion.test.util.OrionTestRuntime;
 import pro.deta.orion.util.Subscription;
 import pro.deta.orion.config.ConfigurationChanged;
 import pro.deta.orion.config.OrionConfigurationModification;
@@ -423,7 +423,7 @@ class OrionAccessControlServiceImplTest {
                 modification.discard();
             }
         } finally {
-            storage.events.onStop();
+            storage.runtime.close();
         }
     }
 
@@ -488,7 +488,7 @@ class OrionAccessControlServiceImplTest {
         } finally {
             service.onStop();
             editor.onStop();
-            storage.events.onStop();
+            storage.runtime.close();
         }
     }
 
@@ -1425,7 +1425,7 @@ class OrionAccessControlServiceImplTest {
             System.setOut(originalOut);
             service.onStop();
             editor.onStop();
-            storage.events.onStop();
+            storage.runtime.close();
         }
     }
 
@@ -1461,7 +1461,7 @@ class OrionAccessControlServiceImplTest {
             System.setOut(originalOut);
             service.onStop();
             editor.onStop();
-            storage.events.onStop();
+            storage.runtime.close();
         }
     }
 
@@ -1490,8 +1490,8 @@ class OrionAccessControlServiceImplTest {
         storage.failSave = true;
         BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getBootstrap().getConfiguration().setCreateDefaultIfMissing(true);
-        OrionEventManager events = new OrionEventManager();
-        events.onStart();
+        OrionTestRuntime runtime = new OrionTestRuntime();
+        OrionEventManager events = runtime.events();
         OrionConfigurationEditor editor = new OrionConfigurationEditor(
                 storage, testMaterial(), events);
         OrionAccessControlServiceImpl service =
@@ -1512,7 +1512,7 @@ class OrionAccessControlServiceImplTest {
             System.setOut(originalOut);
             service.onStop();
             editor.onStop();
-            events.onStop();
+            runtime.close();
         }
         assertThat(storage.saved).isTrue();
         assertThat(processOutput.toString(StandardCharsets.UTF_8)).doesNotContain("---ROOT PASSWORD: ");
@@ -1587,14 +1587,14 @@ class OrionAccessControlServiceImplTest {
                 new OrionConfigurationEditor(storage, material, storage.events);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(hashing,
                 new RootPasswordReset(false), identity, SIGNING, configuration, editor);
+        storage.runtime.own(editor::onStop);
+        storage.runtime.own(service::onStop);
         try {
             editor.onStart();
             service.onStart();
             return new ServiceFixture(service, storage, editor);
         } catch (RuntimeException failure) {
-            service.onStop();
-            editor.onStop();
-            storage.events.onStop();
+            storage.runtime.close();
             throw failure;
         }
     }
@@ -1935,14 +1935,13 @@ class OrionAccessControlServiceImplTest {
 
         @Override
         public void close() {
-            service.onStop();
-            editor.onStop();
-            storage.events.onStop();
+            storage.runtime.close();
         }
     }
 
     private static final class InMemoryStorage implements OrionVersionedConfigurationStorage {
-        private final OrionEventManager events = new OrionEventManager();
+        private final OrionTestRuntime runtime = new OrionTestRuntime();
+        private final OrionEventManager events = runtime.events();
         private OrionDocumentRevision concurrentReplacement;
         private volatile OrionDocumentRevision snapshot;
         private int saveCount;
@@ -1953,7 +1952,6 @@ class OrionAccessControlServiceImplTest {
 
         private InMemoryStorage(OrionDocumentRevision snapshot) {
             this.snapshot = snapshot;
-            events.onStart();
         }
 
         @Override
@@ -2001,7 +1999,7 @@ class OrionAccessControlServiceImplTest {
         }
 
         private void awaitEvents() {
-            events.publishAndWait(new OrionEvent() {});
+            runtime.awaitEvents();
         }
     }
 

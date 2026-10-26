@@ -2,7 +2,7 @@ package pro.deta.orion.config;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.event.OrionEventManager;
-import pro.deta.orion.event.type.OrionEvent;
+import pro.deta.orion.test.util.OrionTestRuntime;
 import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -38,7 +38,7 @@ class OrionConfigurationEditorTest {
                 fixture.events.publish(new ConfigurationChanged(fixture.storage, updated));
             };
             fixture.editor.onStart();
-            fixture.events.publishAndWait(new OrionEvent() {});
+            fixture.runtime.awaitEvents();
             assertThat(fixture.editor.current()).isSameAs(updated);
         }
     }
@@ -92,7 +92,7 @@ class OrionConfigurationEditorTest {
             OrionConfigurationModification edit = fixture.editor.edit(initial, ChangeMetadata.EMPTY);
             assertThat(fixture.editor.isInitialized()).isFalse();
             edit.apply();
-            fixture.events.publishAndWait(new OrionEvent() {});
+            fixture.runtime.awaitEvents();
             assertThat(fixture.storage.expected).isEqualTo(new OrionRevision.Stored("existing-branch"));
             assertThat(fixture.editor.current().revision()).isEqualTo(edit.revision());
         }
@@ -137,19 +137,19 @@ class OrionConfigurationEditorTest {
     }
 
     private static final class Fixture implements AutoCloseable {
-        private final OrionEventManager events = new OrionEventManager();
+        private final OrionTestRuntime runtime = new OrionTestRuntime();
+        private final OrionEventManager events = runtime.events();
         private final MemoryStorage storage = new MemoryStorage(events);
         private final OrionConfigurationEditor editor =
                 new OrionConfigurationEditor(storage, OrionKeyMaterial.unavailable(), events);
 
         private Fixture() {
-            events.onStart();
+            runtime.own(editor::onStop);
         }
 
         @Override
         public void close() {
-            editor.onStop();
-            events.onStop();
+            runtime.close();
         }
     }
 
