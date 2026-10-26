@@ -39,6 +39,41 @@ class NativeGitKeyMaterialContentStoreTest {
     private Path tempDir;
 
     @Test
+    void allowsReadingMaterialWhileARefChangeIsBeingPublished() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<NativeGitKeyMaterialContentStore> activeStore =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        try (java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+            pro.deta.orion.event.OrionEventManager events = new pro.deta.orion.event.OrionEventManager() {
+                @Override
+                public void publish(pro.deta.orion.event.type.OrionEvent event) {
+                    if (event instanceof pro.deta.orion.git.nativestorage.RepositoryRefChanged
+                            && activeStore.get() != null) {
+                        try {
+                            executor.submit(() -> activeStore.get().read()).get(2,
+                                    java.util.concurrent.TimeUnit.SECONDS);
+                        } catch (Exception failure) {
+                            throw new AssertionError("Store read is blocked by ref event publication", failure);
+                        }
+                    }
+                    super.publish(event);
+                }
+            };
+            events.onStart();
+            try (NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(events)) {
+                provider.create(REPOSITORY).valueOrFailure("create repository");
+                try (NativeGitKeyMaterialContentStore store =
+                        new NativeGitKeyMaterialContentStore(provider, REPOSITORY, REF, MATERIAL_PATH)) {
+                    activeStore.set(store);
+                    String saved = store.write(bytes("material"), null);
+                    assertThat(store.read().orElseThrow().version()).isEqualTo(saved);
+                }
+            } finally {
+                events.onStop();
+            }
+        }
+    }
+
+    @Test
     void createsMissingMaterialOnExistingBranchWithoutReplacingConfiguration() throws Exception {
         Fixture fixture = fixture(Map.of("orion.xml", bytes("configuration")));
         NativeGitKeyMaterialContentStore store = fixture.store();

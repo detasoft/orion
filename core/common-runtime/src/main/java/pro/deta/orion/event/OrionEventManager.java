@@ -33,7 +33,7 @@ import java.util.function.Supplier;
  * <p>Handlers run on the Disruptor daemon thread, so they should be quick and should not rely on request-thread
  * ThreadLocals. If a handler needs request context, the publisher must copy the required data into the event object.</p>
  *
- * <p>External publishers append to the ingress queue without waiting for ring-buffer capacity. Events published
+ * <p>External publishers write directly to the ring buffer and wait when it is full. Events published
  * by a handler enter a dispatcher-local queue, drained before the next ring-buffer event.</p>
  */
 @Singleton

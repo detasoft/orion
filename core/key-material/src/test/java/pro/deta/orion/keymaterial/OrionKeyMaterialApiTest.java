@@ -6,6 +6,7 @@ import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.util.Subscription;
 import java.util.function.Consumer;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -44,6 +45,85 @@ class OrionKeyMaterialApiTest {
     private static final KeyMaterialDescriptor IDENTITY = descriptor("https", KeyMaterialPurpose.TLS_IDENTITY);
     private static final TrustedCertificateDescriptor ROOT = new TrustedCertificateDescriptor(
             "root", Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, 1);
+
+    @Test
+    void releasesStateMonitorDuringStoreWriteAndChangePublication() throws Exception {
+        AtomicReference<OrionKeyMaterial> materialRef =
+                new AtomicReference<>();
+        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore() {
+                @Override
+                public synchronized String write(byte[] bytes, String expectedRevision) throws IOException {
+                    assertReadable(executor, materialRef.get());
+                    return super.write(bytes, expectedRevision);
+                }
+            };
+            try (OrionKeyMaterial material = open(store, event -> assertReadable(executor, materialRef.get()))) {
+                materialRef.set(material);
+                material.withModification(modification -> {
+                    modification.generateKey(SIGNING, 2048);
+                    modification.apply();
+                });
+                assertThat(material.version()).isEqualTo(1);
+                assertThat(material.contains(SIGNING)).isTrue();
+            }
+        }
+    }
+
+    @Test
+    void releasesStateMonitorBeforePublishingReloadChanges() throws Exception {
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        AtomicReference<OrionKeyMaterial> readerRef =
+                new AtomicReference<>();
+        try (ExecutorService executor = Executors.newSingleThreadExecutor();
+                OrionKeyMaterial reader = open(store, event -> assertReadable(executor, readerRef.get()));
+                OrionKeyMaterial writer = open(store)) {
+            readerRef.set(reader);
+            writer.withModification(modification -> {
+                modification.generateKey(SIGNING, 2048);
+                modification.apply();
+            });
+            reader.reload(store.read().orElseThrow().version());
+            assertThat(reader.contains(SIGNING)).isTrue();
+        }
+    }
+
+    @Test
+    void acceptsItsOwnReloadWhileStoreWriteIsCompleting() throws Exception {
+        AtomicReference<OrionKeyMaterial> materialRef =
+                new AtomicReference<>();
+        AtomicInteger changes = new AtomicInteger();
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore() {
+            @Override
+            public synchronized String write(byte[] bytes, String expectedRevision) throws IOException {
+                String saved = super.write(bytes, expectedRevision);
+                try {
+                    materialRef.get().reload(saved);
+                } catch (GeneralSecurityException failure) {
+                    throw new IOException(failure);
+                }
+                return saved;
+            }
+        };
+        try (OrionKeyMaterial material = open(store, event -> changes.incrementAndGet())) {
+            materialRef.set(material);
+            material.withModification(modification -> {
+                modification.generateKey(SIGNING, 2048);
+                modification.apply();
+            });
+            assertThat(material.version()).isEqualTo(1);
+            assertThat(material.contains(SIGNING)).isTrue();
+            assertThat(changes).hasValue(1);
+        }
+    }
+
+    private static void assertReadable(ExecutorService executor, OrionKeyMaterial material) {
+        try {
+            executor.submit(material::version).get(2, TimeUnit.SECONDS);
+        } catch (Exception failure) {
+            throw new AssertionError("KMS state monitor is held during publication or persistence", failure);
+        }
+    }
 
     @Test
     void persistsPurposeSetsAndSearchesForAllRequestedFlagsAfterReload() throws Exception {

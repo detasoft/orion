@@ -39,6 +39,8 @@ import java.util.Set;
 import java.util.StringJoiner;
 
 /**
+ * Serializes local saves separately from state access so persistence and event publication can wait
+ * without holding the state monitor needed by reload handlers.
  * @AiRule All public methods in this class must be synchronized.
  */
 final class KeyMaterialService implements AutoCloseable {
@@ -47,6 +49,7 @@ final class KeyMaterialService implements AutoCloseable {
             "2.25.260349814076539099691640886169327825428";
     private static final String ADDITION_ATTRIBUTE_OID =
             "2.25.260349814076539099691640886169327826429";
+    private final Object writes = new Object();
     private final KeyMaterialContentStore store;
     private final KeyMaterialOptions options;
     private final KeyMaterialStorageCertificateFactory storageCertificateFactory;
@@ -637,42 +640,98 @@ final class KeyMaterialService implements AutoCloseable {
         return new KeyMaterialModification(this, Math.incrementExact(revision));
     }
 
-    synchronized void apply(List<Addition> additions, long nextVersion) throws IOException {
-        requireOpen();
-        if (revision != nextVersion - 1) {
-            throw new KeyMaterialStoreConflictException("Key material changed before apply");
-        }
-        if (additions.isEmpty()) return;
-        try {
-            KeyStore publication = copyForPublication();
-            for (Addition addition : additions) append(publication, addition, nextVersion);
-            byte[] serialized = serialize(publication);
-            try {
-                version = store.write(serialized, version);
-            } finally {
-                Arrays.fill(serialized, (byte) 0);
+    void apply(List<Addition> additions, long nextVersion) throws IOException {
+        Set<String> resources = new HashSet<>();
+        synchronized (writes) {
+            byte[] serialized;
+            String expected;
+            KeyStore publication;
+            synchronized (this) {
+                requireOpen();
+                if (revision != nextVersion - 1) {
+                    throw new KeyMaterialStoreConflictException("Key material changed before apply");
+                }
+                if (additions.isEmpty()) return;
+                try {
+                    publication = copyForPublication();
+                    for (Addition addition : additions) append(publication, addition, nextVersion);
+                    serialized = serialize(publication);
+                    expected = version;
+                } catch (GeneralSecurityException failure) {
+                    close();
+                    throw new IOException("Cannot prepare key material", failure);
+                } catch (IOException | RuntimeException failure) {
+                    close();
+                    throw failure;
+                }
             }
-            for (Addition addition : additions) append(keyStore, addition, nextVersion);
-            revision = nextVersion;
-            Set<String> resources = new HashSet<>();
-            for (Addition addition : additions) resources.add(addition.alias());
-            publishChanged(resources);
-        } catch (GeneralSecurityException failure) {
-            close();
-            throw new IOException("Cannot save key material", failure);
-        } catch (IOException | RuntimeException failure) {
-            close();
-            throw failure;
+            try {
+                String saved;
+                try {
+                    saved = store.write(serialized, expected);
+                } finally {
+                    Arrays.fill(serialized, (byte) 0);
+                }
+                synchronized (this) {
+                    requireOpen();
+                    if (revision < nextVersion) {
+                        for (Addition addition : additions) {
+                            append(keyStore, addition, nextVersion);
+                            resources.add(addition.alias());
+                        }
+                        version = saved;
+                        revision = nextVersion;
+                    } else {
+                        for (String physical : physicalAliases(publication)) {
+                            if (!keyStore.containsAlias(physical)
+                                    || !sameEntry(readEntry(keyStore, physical), readEntry(publication, physical))) {
+                                throw new GeneralSecurityException("Reloaded material does not contain saved history");
+                            }
+                        }
+                    }
+                }
+            } catch (GeneralSecurityException failure) {
+                close();
+                throw new IOException("Cannot save key material", failure);
+            } catch (IOException | RuntimeException failure) {
+                close();
+                throw failure;
+            }
+        }
+        if (!resources.isEmpty()) publishChanged(resources);
+    }
+
+    void prepareConfigurationCipher(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
+        synchronized (writes) {
+            if (containsAlias(descriptor.alias(), Set.of())) return;
+            try {
+                KeyMaterialModification modification = modify();
+                try {
+                    modification.generateKey(descriptor, 256);
+                    modification.apply();
+                } finally {
+                    modification.discard();
+                }
+            } catch (IOException | GeneralSecurityException | RuntimeException failure) {
+                close();
+                throw new GeneralSecurityException("Cannot persist configuration cipher", failure);
+            }
         }
     }
 
-    synchronized void reload(String requestedRevision) throws IOException, GeneralSecurityException {
+    void reload(String requestedRevision) throws IOException, GeneralSecurityException {
+        Set<String> resources = reloadState(requestedRevision);
+        if (!resources.isEmpty()) publishChanged(resources);
+    }
+
+    private synchronized Set<String> reloadState(String requestedRevision)
+            throws IOException, GeneralSecurityException {
         requireOpen();
         Objects.requireNonNull(requestedRevision, "revision");
-        if (Objects.equals(version, requestedRevision)) return;
+        if (Objects.equals(version, requestedRevision)) return Set.of();
         KeyMaterialSnapshot snapshot = store.read(requestedRevision)
                 .orElseThrow(() -> new IOException("Key material is missing at " + requestedRevision));
-        if (Objects.equals(version, snapshot.version())) return;
+        if (Objects.equals(version, snapshot.version())) return Set.of();
         KeyStore incoming = KeyStore.getInstance(options.type());
         byte[] bytes = snapshot.bytes();
         char[] password = options.password();
@@ -722,7 +781,7 @@ final class KeyMaterialService implements AutoCloseable {
         }
         version = snapshot.version();
         revision = nextRevision;
-        if (!resources.isEmpty()) publishChanged(resources);
+        return Set.copyOf(resources);
     }
 
     private KeyStore.Entry readEntry(KeyStore source, String physical) throws GeneralSecurityException {

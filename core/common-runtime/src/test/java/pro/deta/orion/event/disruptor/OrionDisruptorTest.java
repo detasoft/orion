@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.event.type.ApplicationShutdownRequestedEvent;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
@@ -41,7 +42,36 @@ class OrionDisruptorTest {
     }
 
     @Test
-    void publishesBeyondRingCapacityWhileAHandlerIsBlockedAndDrainsOnStop() throws Exception {
+    void drainsConcurrentPublishersAndRejectsEventsAfterStop() throws Exception {
+        OrionDisruptor disruptor = new OrionDisruptor(2);
+        List<String> handled = new CopyOnWriteArrayList<>();
+        disruptor.handleEventsWith((holder, sequence, endOfBatch) ->
+                handled.add(((ApplicationShutdownRequestedEvent) holder.getOrionEvent()).getSource()));
+        disruptor.start();
+        try {
+            try (ExecutorService executor = Executors.newFixedThreadPool(4)) {
+                List<Future<?>> publications = new ArrayList<>();
+                for (int publisher = 0; publisher < 4; publisher++) {
+                    String prefix = publisher + ":";
+                    publications.add(executor.submit(() -> {
+                        for (int number = 0; number < 64; number++) {
+                            disruptor.publish(new ApplicationShutdownRequestedEvent(prefix + number));
+                        }
+                    }));
+                }
+                for (Future<?> publication : publications) publication.get(5, TimeUnit.SECONDS);
+            }
+        } finally {
+            disruptor.stop();
+        }
+        assertThat(handled).hasSize(256).doesNotHaveDuplicates();
+        assertThat(disruptor.getUnprocessedLength()).isZero();
+        assertThatThrownBy(() -> disruptor.publish(new ApplicationShutdownRequestedEvent("after stop")))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void waitsForRingCapacityAndDrainsAcceptedEventsOnStop() throws Exception {
         OrionDisruptor disruptor = new OrionDisruptor(2);
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
@@ -67,8 +97,10 @@ class OrionDisruptorTest {
                         }
                     });
 
+                    assertThatThrownBy(() -> publication.get(200, TimeUnit.MILLISECONDS))
+                            .isInstanceOf(java.util.concurrent.TimeoutException.class);
+                    release.countDown();
                     publication.get(5, TimeUnit.SECONDS);
-                    assertThat(disruptor.getUnprocessedLength()).isEqualTo(9);
                 } finally {
                     release.countDown();
                 }

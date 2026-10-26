@@ -78,7 +78,7 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
     }
 
     @Override
-    public synchronized String write(byte[] bytes, String expectedVersion) throws IOException {
+    public String write(byte[] bytes, String expectedVersion) throws IOException {
         Objects.requireNonNull(bytes, "bytes");
         String observedRef = openForRead().refs().get(refName);
         Optional<KeyMaterialSnapshot> current = observedRef == null ? Optional.empty() : read(observedRef);

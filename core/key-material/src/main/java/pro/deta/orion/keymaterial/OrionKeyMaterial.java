@@ -228,9 +228,9 @@ public class OrionKeyMaterial implements AutoCloseable {
         if (plaintext == null || plaintext.length == 0 || context == null) {
             throw new IllegalArgumentException("Configuration secret and context must not be empty");
         }
+        requireCipher(descriptor);
+        owner.prepareConfigurationCipher(descriptor);
         synchronized (owner) {
-            requireCipher(descriptor);
-            prepareConfigurationCipher(descriptor);
             require(descriptor);
             return sealConfigurationSecret(descriptor, plaintext, context);
         }
@@ -429,20 +429,6 @@ public class OrionKeyMaterial implements AutoCloseable {
         return new KeyMaterialDescriptor("configuration-v1",
                 Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES,
                 1);
-    }
-
-    private void prepareConfigurationCipher(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
-        if (!owner.containsAlias(descriptor.alias(), Set.of())) {
-            try {
-                withModification(modification -> {
-                    modification.generateKey(descriptor, 256);
-                    modification.apply();
-                });
-            } catch (IOException | GeneralSecurityException | RuntimeException failure) {
-                owner.close();
-                throw new GeneralSecurityException("Cannot persist configuration cipher", failure);
-            }
-        }
     }
 
     private List<KeyMaterialDescriptor> selectSshHostKeys(List<KeyMaterialDescriptor> available,
