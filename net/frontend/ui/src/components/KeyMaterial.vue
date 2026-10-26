@@ -17,8 +17,8 @@ const renewal = ref(null)
 const form = reactive({ revision: '', enabled: false, provider: 'letsencrypt', directoryUrl: '',
   accountEmail: '', domains: '', accountMaterial: null, eabKeyId: '', eabHmacKey: '', eabConfigured: false })
 const presets = ref([])
-const accountKeys = computed(() => entries.value.filter(entry =>
-  entry.purposes.includes('ACME_ACCOUNT') && entry.algorithm === 'RSA'))
+const accountKeys = computed(() => entries.value.map(entry => entry.descriptor).filter(descriptor =>
+  descriptor.purposes.includes('ACME_ACCOUNT') && descriptor.algorithm === 'RSA'))
 const accountAlias = computed({
   get: () => form.accountMaterial?.alias ?? '',
   set: alias => {
@@ -290,12 +290,12 @@ onBeforeUnmount(() => { attempt += 1 })
     <div v-if="loading && !entries.length" class="empty-state" role="status">Loading key material…</div>
     <div v-else-if="!entries.length && !error" class="empty-state">The material store is empty.</div>
     <div v-else class="material-list">
-      <article v-for="entry in entries" :key="entry.alias" class="material-entry">
+      <article v-for="entry in entries" :key="entry.descriptor.alias" class="material-entry">
         <div class="material-entry-heading">
-          <h3>{{ entry.alias }}</h3>
-          <span>{{ entry.purposes.map(purpose => purpose.replaceAll('_', ' ')).sort().join(', ') }}</span>
+          <h3>{{ entry.descriptor.alias }}</h3>
+          <span>{{ entry.descriptor.purposes.map(purpose => purpose.replaceAll('_', ' ')).sort().join(', ') }}</span>
         </div>
-        <p>{{ entry.algorithm }} · version {{ entry.version }}</p>
+        <p>{{ entry.descriptor.algorithm }} · version {{ entry.descriptor.version }}</p>
         <p v-if="entry.publicKeySha256Fingerprint">Public key SHA-256:
           <code>{{ entry.publicKeySha256Fingerprint }}</code></p>
         <p v-if="!entry.certificates.length">No issued certificate</p>

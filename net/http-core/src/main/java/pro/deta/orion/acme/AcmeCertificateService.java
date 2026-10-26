@@ -39,7 +39,6 @@ import pro.deta.orion.keymaterial.KeyMaterialConstants;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter.ServiceLifecycle;
 import pro.deta.orion.schema.orion.v2.Connection;
 import pro.deta.orion.schema.orion.v2.GitProxyBinding;
@@ -510,7 +509,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
             throws IOException, GeneralSecurityException {
         keyMaterial.withModification(modification -> {
             if (configuration.issuerTrustAnchor().isPresent()) {
-                TrustedCertificateDescriptor issuer = configuration.issuerTrustAnchor().orElseThrow();
+                KeyMaterialDescriptor issuer = configuration.issuerTrustAnchor().orElseThrow();
                 String alias = issuer.alias();
                 if (alias.equalsIgnoreCase(configuration.account().alias())
                         || alias.equalsIgnoreCase(configuration.identity().alias())) {
@@ -534,7 +533,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
                 https.identity().orElseThrow(
                         () -> new ConfigurationUnavailableException("ACME TLS identity material is not configured")),
                 KeyMaterialPurpose.TLS_IDENTITY);
-        Optional<TrustedCertificateDescriptor> issuer = https.serverIssuerTrustAnchor()
+        Optional<KeyMaterialDescriptor> issuer = https.serverIssuerTrustAnchor()
                 .map(AcmeCertificateService::trustedCertificate);
         return new Material(account, identity, issuer);
     }
@@ -549,9 +548,9 @@ public class AcmeCertificateService implements ServiceLifecycle {
                 reference.version());
     }
 
-    private static TrustedCertificateDescriptor trustedCertificate(
+    private static KeyMaterialDescriptor trustedCertificate(
             OrionMaterialReference reference) {
-        return new TrustedCertificateDescriptor(
+        return new KeyMaterialDescriptor(
                 reference.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
                 KeyMaterialAlgorithm.RSA,
                 reference.version());
@@ -694,7 +693,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
     private record Material(
             KeyMaterialDescriptor account,
             KeyMaterialDescriptor identity,
-            Optional<TrustedCertificateDescriptor> issuerTrustAnchor) {
+            Optional<KeyMaterialDescriptor> issuerTrustAnchor) {
     }
 
     public static final class ConfigurationUnavailableException extends RuntimeException {

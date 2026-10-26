@@ -201,7 +201,7 @@ public final class OrionConfigurationEditor implements ServiceLifecycleStateMach
     }
 
     private void requireTrust(OrionMaterialReference reference) throws GeneralSecurityException {
-        configurationMaterial.require(new TrustedCertificateDescriptor(reference.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
+        configurationMaterial.require(new KeyMaterialDescriptor(reference.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
                 KeyMaterialAlgorithm.RSA, reference.version()));
     }
 

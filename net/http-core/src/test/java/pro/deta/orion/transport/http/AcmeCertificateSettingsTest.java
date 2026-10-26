@@ -123,7 +123,7 @@ class AcmeCertificateSettingsTest {
                                                 "root"))
                         .isInstanceOf(IllegalArgumentException.class);
             }
-            assertThat(owner.inventory(Set.of())).noneMatch(entry -> entry.alias().equals("missing"));
+            assertThat(owner.inventory(Set.of())).noneMatch(entry -> entry.descriptor().alias().equals("missing"));
             assertThat(service.view().accountMaterial()).isEqualTo(reference);
         }
     }

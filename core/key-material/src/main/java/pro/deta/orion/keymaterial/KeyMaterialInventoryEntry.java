@@ -1,19 +1,16 @@
 package pro.deta.orion.keymaterial;
 
 import java.util.List;
-import java.util.Set;
+import java.util.Objects;
 
 /** Public metadata for one physical key-material entry. */
 public record KeyMaterialInventoryEntry(
-        String alias,
-        Set<KeyMaterialPurpose> purposes,
-        String algorithm,
-        long version,
+        KeyMaterialDescriptor descriptor,
         String publicKeyPem,
         String publicKeySha256Fingerprint,
         List<CertificateDetails> certificates) {
     public KeyMaterialInventoryEntry {
-        purposes = Set.copyOf(purposes);
+        Objects.requireNonNull(descriptor, "descriptor");
         certificates = List.copyOf(certificates);
     }
 

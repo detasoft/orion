@@ -24,7 +24,6 @@ import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.TlsClientAuthentication;
 import pro.deta.orion.keymaterial.TlsMaterialConfiguration;
-import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.bootstrap.config.HttpTransportConfig;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
@@ -339,9 +338,9 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
                 https.identity().orElseThrow(
                         () -> new IllegalStateException("Enabled HTTPS requires identity material")),
                 KeyMaterialPurpose.TLS_IDENTITY);
-        Optional<TrustedCertificateDescriptor> issuer = https.serverIssuerTrustAnchor()
+        Optional<KeyMaterialDescriptor> issuer = https.serverIssuerTrustAnchor()
                 .map(this::trustedCertificate);
-        List<TrustedCertificateDescriptor> clientRoots = new ArrayList<>();
+        List<KeyMaterialDescriptor> clientRoots = new ArrayList<>();
         for (OrionMaterialReference root : https.clientTrustAnchors()) {
             clientRoots.add(trustedCertificate(root));
         }
@@ -362,8 +361,8 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
                 reference.version());
     }
 
-    private TrustedCertificateDescriptor trustedCertificate(OrionMaterialReference reference) {
-        return new TrustedCertificateDescriptor(
+    private KeyMaterialDescriptor trustedCertificate(OrionMaterialReference reference) {
+        return new KeyMaterialDescriptor(
                 reference.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
                 KeyMaterialAlgorithm.RSA,
                 reference.version());

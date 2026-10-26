@@ -2,6 +2,7 @@ package pro.deta.orion.keymaterial;
 
 import java.util.Set;
 
+/** Describes the identity and intended uses of key material or a trusted certificate. */
 public record KeyMaterialDescriptor(
         String alias,
         Set<KeyMaterialPurpose> purposes,
@@ -23,9 +24,6 @@ public record KeyMaterialDescriptor(
         }
         if (version < 1) {
             throw new IllegalArgumentException("Key material version must be positive");
-        }
-        if (purposes.contains(KeyMaterialPurpose.TRUST_ANCHOR)) {
-            throw new IllegalArgumentException("Trust anchors require a trusted certificate descriptor");
         }
         if (purposes.contains(KeyMaterialPurpose.CONFIGURATION_CIPHER) && algorithm != KeyMaterialAlgorithm.AES) {
             throw new IllegalArgumentException("Configuration cipher material must use AES");

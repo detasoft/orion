@@ -34,7 +34,9 @@ class OrionAdminKeyMaterialRouteTest {
     @Test
     void exposesOnlyPublicInventoryToApplicationAdmins() throws Exception {
         KeyMaterialInventoryEntry entry = new KeyMaterialInventoryEntry(
-                "acme-identity", Set.of(KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialPurpose.SERVER_SIGNING), "RSA", 1,
+                new KeyMaterialDescriptor("acme-identity",
+                        Set.of(KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialPurpose.SERVER_SIGNING),
+                        KeyMaterialAlgorithm.RSA, 1),
                 "-----BEGIN PUBLIC KEY-----\npublic\n-----END PUBLIC KEY-----", "fingerprint", List.of());
         OrionKeyMaterial material = new OrionKeyMaterial() {
             @Override
@@ -46,8 +48,12 @@ class OrionAdminKeyMaterialRouteTest {
 
         assertThat(route.definition().authorization()).isEqualTo(APPLICATION_ADMIN);
         assertThat(route.doGet(null).body()).isEqualTo(Map.of("entries", List.of(entry)));
-        assertThat(new ObjectMapper().writeValueAsString(route.doGet(null).body()))
-                .contains("\"purposes\":", "TLS_IDENTITY", "SERVER_SIGNING");
+        com.fasterxml.jackson.databind.JsonNode descriptor = new ObjectMapper()
+                .valueToTree(route.doGet(null).body()).path("entries").get(0).path("descriptor");
+        assertThat(descriptor.path("alias").asText()).isEqualTo("acme-identity");
+        assertThat(descriptor.path("algorithm").asText()).isEqualTo("RSA");
+        assertThat(descriptor.path("version").asLong()).isEqualTo(1);
+        assertThat(descriptor.path("purposes").toString()).contains("TLS_IDENTITY", "SERVER_SIGNING");
     }
 
     @Test

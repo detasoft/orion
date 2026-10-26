@@ -308,7 +308,7 @@ class KeyMaterialOperationsTest {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialDescriptor identity = descriptor(
                 "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
-        TrustedCertificateDescriptor rootDescriptor = trustedCertificate("public-root-v1");
+        KeyMaterialDescriptor rootDescriptor = trustedCertificate("public-root-v1");
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
         TestCertificateChain.Authority intermediate = TestCertificateChain.intermediate("Intermediate", root);
 
@@ -343,7 +343,7 @@ class KeyMaterialOperationsTest {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialDescriptor identity = descriptor(
                 "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
-        TrustedCertificateDescriptor rootDescriptor = trustedCertificate("public-root-v1");
+        KeyMaterialDescriptor rootDescriptor = trustedCertificate("public-root-v1");
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
         TestCertificateChain.Authority otherRoot = TestCertificateChain.root("Other Root");
         TestCertificateChain.Authority intermediate = TestCertificateChain.intermediate("Intermediate", root);
@@ -387,8 +387,8 @@ class KeyMaterialOperationsTest {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialDescriptor identity = descriptor(
                 "https-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
-        TrustedCertificateDescriptor serverRoot = trustedCertificate("server-root-v1");
-        TrustedCertificateDescriptor clientRoot = trustedCertificate("client-root-v1");
+        KeyMaterialDescriptor serverRoot = trustedCertificate("server-root-v1");
+        KeyMaterialDescriptor clientRoot = trustedCertificate("client-root-v1");
         TestCertificateChain.Authority serverAuthority = TestCertificateChain.root("Server Root");
         TestCertificateChain.Authority clientAuthority = TestCertificateChain.root("Client Root");
         KeyPair trustedClientKey = TestCertificateChain.keyPair();
@@ -578,7 +578,7 @@ class KeyMaterialOperationsTest {
         return material.keyPair(descriptor);
     }
 
-    private static void setTrustedCertificate(OrionKeyMaterial material, TrustedCertificateDescriptor descriptor,
+    private static void setTrustedCertificate(OrionKeyMaterial material, KeyMaterialDescriptor descriptor,
             X509Certificate certificate) throws Exception {
         material.withModification(modification -> {
             modification.setTrustedCertificate(descriptor, certificate);
@@ -587,7 +587,7 @@ class KeyMaterialOperationsTest {
     }
 
     private static void installCertificateChain(OrionKeyMaterial material, KeyMaterialDescriptor identity,
-            List<X509Certificate> chain, Optional<TrustedCertificateDescriptor> issuer,
+            List<X509Certificate> chain, Optional<KeyMaterialDescriptor> issuer,
             Optional<X509Certificate> root) throws Exception {
         material.withModification(modification -> {
             if (root.isPresent()) {
@@ -702,8 +702,8 @@ class KeyMaterialOperationsTest {
                 alias, Set.of(purpose), algorithm, version);
     }
 
-    private static TrustedCertificateDescriptor trustedCertificate(String alias) {
-        return new TrustedCertificateDescriptor(
+    private static KeyMaterialDescriptor trustedCertificate(String alias) {
+        return new KeyMaterialDescriptor(
                 alias, Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, 1);
     }
 

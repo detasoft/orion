@@ -36,7 +36,6 @@ import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
@@ -76,7 +75,7 @@ class AcmeCertificateServiceTest {
             "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT);
     private static final KeyMaterialDescriptor IDENTITY = descriptor(
             "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY);
-    private static final TrustedCertificateDescriptor ROOT = new TrustedCertificateDescriptor(
+    private static final KeyMaterialDescriptor ROOT = new KeyMaterialDescriptor(
             "issuer-root-v1", Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, 1);
 
     @TempDir
@@ -276,7 +275,7 @@ class AcmeCertificateServiceTest {
         issuer.root = TestCertificateChain.root("Root");
         try (OrionKeyMaterial material = owner(store)) {
             material.withModification(modification -> {
-                TrustedCertificateDescriptor mismatched = new TrustedCertificateDescriptor(
+                KeyMaterialDescriptor mismatched = new KeyMaterialDescriptor(
                         ROOT.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR), ROOT.algorithm(), 2);
                 modification.setTrustedCertificate(mismatched, issuer.root.certificate());
                 modification.apply();

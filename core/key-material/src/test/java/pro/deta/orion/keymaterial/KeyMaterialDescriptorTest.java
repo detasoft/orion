@@ -24,6 +24,19 @@ class KeyMaterialDescriptorTest {
     }
 
     @Test
+    void describesTrustedCertificateMaterial() {
+        KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor("root",
+                Set.of(KeyMaterialPurpose.TRUST_ANCHOR, KeyMaterialPurpose.CERTIFICATE_AUTHORITY),
+                KeyMaterialAlgorithm.RSA, 2);
+
+        assertThat(descriptor.alias()).isEqualTo("root");
+        assertThat(descriptor.purposes()).containsExactlyInAnyOrder(
+                KeyMaterialPurpose.TRUST_ANCHOR, KeyMaterialPurpose.CERTIFICATE_AUTHORITY);
+        assertThat(descriptor.algorithm()).isEqualTo(KeyMaterialAlgorithm.RSA);
+        assertThat(descriptor.version()).isEqualTo(2);
+    }
+
+    @Test
     void rejectsActiveAliasWithDifferentVerificationVersion() {
         assertThatThrownBy(() -> new SigningMaterialSet(
                 signing("server-signing", 2),
@@ -59,7 +72,7 @@ class KeyMaterialDescriptorTest {
         assertThatThrownBy(() -> new KeyMaterialDescriptor(alias,
                 Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new TrustedCertificateDescriptor(alias,
+        assertThatThrownBy(() -> new KeyMaterialDescriptor(alias,
                 Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, 1))
                 .isInstanceOf(IllegalArgumentException.class);
     }
@@ -70,7 +83,7 @@ class KeyMaterialDescriptorTest {
         assertThatThrownBy(() -> new KeyMaterialDescriptor("signing",
                 Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, version))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new TrustedCertificateDescriptor("root",
+        assertThatThrownBy(() -> new KeyMaterialDescriptor("root",
                 Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, version))
                 .isInstanceOf(IllegalArgumentException.class);
     }

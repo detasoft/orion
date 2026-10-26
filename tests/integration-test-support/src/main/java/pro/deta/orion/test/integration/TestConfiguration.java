@@ -25,7 +25,6 @@ import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
-import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.test.util.OrionTestRuntime;
@@ -82,9 +81,6 @@ public final class TestConfiguration implements AutoCloseable {
             return new OrionKeyMaterial() {
                 @Override
                 public void require(KeyMaterialDescriptor descriptor) {}
-
-                @Override
-                public void require(TrustedCertificateDescriptor descriptor) {}
 
                 @Override
                 public ConfigurationSecretEnvelope seal(

@@ -82,7 +82,7 @@ class KeyMaterialServiceTest {
         X509Certificate storageCertificate = (X509Certificate) service.getCertificateChain(
                 KeyMaterialTestConstants.ORION_CA_2026_05_ALIAS)[0];
         X509Certificate issuerCertificate = TestCertificateChain.root("Public Root").certificate();
-        TrustedCertificateDescriptor descriptor = trustedCertificate(
+        KeyMaterialDescriptor descriptor = trustedCertificate(
                 KeyMaterialTestConstants.ORION_CA_CERT_2026_05_ALIAS,
                 1);
 
@@ -102,7 +102,7 @@ class KeyMaterialServiceTest {
     @Test
     void validatesTypedTrustedCertificateMetadataAndEntryType() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        TrustedCertificateDescriptor original = trustedCertificate(
+        KeyMaterialDescriptor original = trustedCertificate(
                 "public-root-v1", 1);
         KeyMaterialDescriptor privateEntry = new KeyMaterialDescriptor(
                 "private-entry-v1",
@@ -116,13 +116,13 @@ class KeyMaterialServiceTest {
         }
 
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
-            TrustedCertificateDescriptor wrongVersion = trustedCertificate(
+            KeyMaterialDescriptor wrongVersion = trustedCertificate(
                     original.alias(), 2);
-            TrustedCertificateDescriptor wrongAlgorithm = new TrustedCertificateDescriptor(
+            KeyMaterialDescriptor wrongAlgorithm = new KeyMaterialDescriptor(
                     original.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
                     KeyMaterialAlgorithm.EC,
                     original.version());
-            TrustedCertificateDescriptor wrongEntryType = trustedCertificate(
+            KeyMaterialDescriptor wrongEntryType = trustedCertificate(
                     privateEntry.alias(), 1);
 
             assertThatThrownBy(() -> service.validateExisting(wrongVersion))
@@ -166,7 +166,7 @@ class KeyMaterialServiceTest {
                 "tls-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA);
         KeyMaterialDescriptor cipher = descriptor(
                 "configuration-v1", KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES);
-        TrustedCertificateDescriptor trust = trustedCertificate("issuer-v1", 1);
+        KeyMaterialDescriptor trust = trustedCertificate("issuer-v1", 1);
         TestCertificateChain.Authority issuer = TestCertificateChain.root("Public Root");
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
             KeyPair keyPair = generateKey(service, identity, 2048);
@@ -184,7 +184,7 @@ class KeyMaterialServiceTest {
 
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
             List<KeyMaterialInventoryEntry> entries = service.inventory(Set.of());
-            assertThat(entries).extracting(KeyMaterialInventoryEntry::alias)
+            assertThat(entries).extracting(entry -> entry.descriptor().alias())
                     .containsExactly("configuration-v1", "issuer-v1", "tls-identity-v1");
             assertThat(entries.get(0).publicKeyPem()).isNull();
             assertThat(entries.get(0).certificates()).isEmpty();
@@ -331,7 +331,7 @@ class KeyMaterialServiceTest {
         }
     }
 
-    private static void trustCertificate(KeyMaterialService service, TrustedCertificateDescriptor descriptor,
+    private static void trustCertificate(KeyMaterialService service, KeyMaterialDescriptor descriptor,
             X509Certificate certificate) throws Exception {
         KeyMaterialModification modification = service.modify();
         try {
@@ -346,10 +346,10 @@ class KeyMaterialServiceTest {
         return KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password());
     }
 
-    private static TrustedCertificateDescriptor trustedCertificate(
+    private static KeyMaterialDescriptor trustedCertificate(
             String alias,
             long version) {
-        return new TrustedCertificateDescriptor(
+        return new KeyMaterialDescriptor(
                 alias, Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
                 KeyMaterialAlgorithm.RSA,
                 version);

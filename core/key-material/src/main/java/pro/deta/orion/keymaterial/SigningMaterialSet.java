@@ -11,7 +11,8 @@ public record SigningMaterialSet(KeyMaterialDescriptor active, List<KeyMaterialD
         if (active == null) {
             throw new IllegalArgumentException("Active signing material must not be null");
         }
-        if (!active.purposes().contains(KeyMaterialPurpose.SERVER_SIGNING)) {
+        if (!active.purposes().contains(KeyMaterialPurpose.SERVER_SIGNING)
+                || active.purposes().contains(KeyMaterialPurpose.TRUST_ANCHOR)) {
             throw new IllegalArgumentException("Active material must have SERVER_SIGNING purpose");
         }
         if (verification == null) {
@@ -50,7 +51,8 @@ public record SigningMaterialSet(KeyMaterialDescriptor active, List<KeyMaterialD
         if (candidate == null) {
             throw new IllegalArgumentException("Signing material must not be null");
         }
-        if (!candidate.purposes().contains(KeyMaterialPurpose.SERVER_SIGNING)) {
+        if (!candidate.purposes().contains(KeyMaterialPurpose.SERVER_SIGNING)
+                || candidate.purposes().contains(KeyMaterialPurpose.TRUST_ANCHOR)) {
             throw new IllegalArgumentException("Signing material purpose does not match active material");
         }
         if (candidate.algorithm() != expected.algorithm()) {

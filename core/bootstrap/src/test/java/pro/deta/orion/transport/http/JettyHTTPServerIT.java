@@ -65,7 +65,6 @@ import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.TlsMaterialConfiguration;
 import pro.deta.orion.keymaterial.TlsClientAuthentication;
-import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.HttpTransportConfig;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -141,8 +140,8 @@ class JettyHTTPServerIT {
             "server-signing-v1", KeyMaterialPurpose.SERVER_SIGNING);
     private static final KeyMaterialDescriptor IDENTITY = descriptor(
             "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY);
-    private static final TrustedCertificateDescriptor SERVER_ROOT = trusted("server-root-v1");
-    private static final TrustedCertificateDescriptor CLIENT_ROOT = trusted("client-root-v1");
+    private static final KeyMaterialDescriptor SERVER_ROOT = trusted("server-root-v1");
+    private static final KeyMaterialDescriptor CLIENT_ROOT = trusted("client-root-v1");
     private static final SharedMaterial SHARED_MATERIAL = sharedMaterial();
 
     @TempDir
@@ -913,7 +912,7 @@ class JettyHTTPServerIT {
     private void assertHttpsSucceeds(
             MaterialFixture material,
             OrionHttpsConfiguration.ClientAuthentication mode,
-            List<TrustedCertificateDescriptor> clientRoots,
+            List<KeyMaterialDescriptor> clientRoots,
             SSLContext clientContext) throws Exception {
         JettyHTTPServer server = startHttps(material, mode, clientRoots);
         try {
@@ -928,7 +927,7 @@ class JettyHTTPServerIT {
     private void assertHttpsFails(
             MaterialFixture material,
             OrionHttpsConfiguration.ClientAuthentication mode,
-            List<TrustedCertificateDescriptor> clientRoots,
+            List<KeyMaterialDescriptor> clientRoots,
             SSLContext clientContext) throws Exception {
         JettyHTTPServer server = startHttps(material, mode, clientRoots);
         try {
@@ -944,7 +943,7 @@ class JettyHTTPServerIT {
     private JettyHTTPServer startHttps(
             MaterialFixture material,
             OrionHttpsConfiguration.ClientAuthentication mode,
-            List<TrustedCertificateDescriptor> clientRoots) throws IOException {
+            List<KeyMaterialDescriptor> clientRoots) throws IOException {
         return startHttps(material, false, mode, clientRoots, new OkRoute());
     }
 
@@ -952,7 +951,7 @@ class JettyHTTPServerIT {
             MaterialFixture material,
             boolean httpEnabled,
             OrionHttpsConfiguration.ClientAuthentication mode,
-            List<TrustedCertificateDescriptor> clientRoots,
+            List<KeyMaterialDescriptor> clientRoots,
             OrionHttpRoute... routes) throws IOException {
         return startHttps(
                 material,
@@ -967,7 +966,7 @@ class JettyHTTPServerIT {
             MaterialFixture material,
             boolean httpEnabled,
             OrionHttpsConfiguration.ClientAuthentication mode,
-            List<TrustedCertificateDescriptor> clientRoots,
+            List<KeyMaterialDescriptor> clientRoots,
             HttpsPortSupplier portSupplier,
             OrionHttpRoute... routes) throws IOException {
         int attempts = 0;
@@ -1105,17 +1104,17 @@ class JettyHTTPServerIT {
     static TestConfiguration desiredState(
             pro.deta.orion.test.util.OrionTestRuntime testRuntime,
             OrionHttpsConfiguration.ClientAuthentication mode,
-            List<TrustedCertificateDescriptor> clientRoots) throws IOException {
+            List<KeyMaterialDescriptor> clientRoots) throws IOException {
         return desiredState(testRuntime, mode, clientRoots, NetworkUtils.findAvailablePort());
     }
 
     static TestConfiguration desiredState(
             pro.deta.orion.test.util.OrionTestRuntime testRuntime,
             OrionHttpsConfiguration.ClientAuthentication mode,
-            List<TrustedCertificateDescriptor> clientRoots,
+            List<KeyMaterialDescriptor> clientRoots,
             int port) {
         List<OrionMaterialReference> references = new java.util.ArrayList<>();
-        for (TrustedCertificateDescriptor root : clientRoots) {
+        for (KeyMaterialDescriptor root : clientRoots) {
             references.add(new OrionMaterialReference(root.alias(), root.version()));
         }
         OrionHttpsConfiguration https = new OrionHttpsConfiguration(
@@ -1177,18 +1176,14 @@ class JettyHTTPServerIT {
                 1);
     }
 
-    private static TrustedCertificateDescriptor trusted(String alias) {
-        return new TrustedCertificateDescriptor(
+    private static KeyMaterialDescriptor trusted(String alias) {
+        return new KeyMaterialDescriptor(
                 alias, Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
                 KeyMaterialAlgorithm.RSA,
                 1);
     }
 
     private static OrionMaterialReference reference(KeyMaterialDescriptor descriptor) {
-        return new OrionMaterialReference(descriptor.alias(), descriptor.version());
-    }
-
-    private static OrionMaterialReference reference(TrustedCertificateDescriptor descriptor) {
         return new OrionMaterialReference(descriptor.alias(), descriptor.version());
     }
 

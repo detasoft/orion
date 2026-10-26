@@ -76,7 +76,7 @@ public final class KeyMaterialModification implements Modification {
         add(descriptor.alias(), owner.prepareSecretKey(descriptor, key), false);
     }
 
-    public synchronized void setTrustedCertificate(TrustedCertificateDescriptor descriptor,
+    public synchronized void setTrustedCertificate(KeyMaterialDescriptor descriptor,
             X509Certificate certificate) throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(descriptor);
@@ -93,12 +93,13 @@ public final class KeyMaterialModification implements Modification {
     }
 
     public synchronized void installCertificateChain(KeyMaterialDescriptor identity,
-            List<? extends Certificate> chain, Optional<TrustedCertificateDescriptor> issuer)
+            List<? extends Certificate> chain, Optional<KeyMaterialDescriptor> issuer)
             throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(identity);
-        if (!identity.purposes().contains(KeyMaterialPurpose.TLS_IDENTITY)
-                && !identity.purposes().contains(KeyMaterialPurpose.CERTIFICATE_AUTHORITY)) {
+        if (identity.purposes().contains(KeyMaterialPurpose.TRUST_ANCHOR)
+                || (!identity.purposes().contains(KeyMaterialPurpose.TLS_IDENTITY)
+                        && !identity.purposes().contains(KeyMaterialPurpose.CERTIFICATE_AUTHORITY))) {
             throw new IllegalArgumentException("Certificate chains require TLS identity or CA material");
         }
         if (issuer == null) throw new IllegalArgumentException("Issuer optional must not be null");
@@ -107,8 +108,11 @@ public final class KeyMaterialModification implements Modification {
         KeyStore.PrivateKeyEntry entry = (KeyStore.PrivateKeyEntry) existing.entry();
         Optional<X509Certificate> root = Optional.empty();
         if (issuer.isPresent()) {
-            TrustedCertificateDescriptor descriptor = issuer.orElseThrow();
+            KeyMaterialDescriptor descriptor = issuer.orElseThrow();
             requireDescriptor(descriptor);
+            if (!descriptor.purposes().contains(KeyMaterialPurpose.TRUST_ANCHOR)) {
+                throw new IllegalArgumentException("Issuer must have TRUST_ANCHOR purpose");
+            }
             Addition trusted = requireEntry(descriptor.alias());
             owner.validatePrepared(trusted.entry(), descriptor);
             root = Optional.of((X509Certificate) ((KeyStore.TrustedCertificateEntry) trusted.entry())
@@ -123,14 +127,6 @@ public final class KeyMaterialModification implements Modification {
     }
 
     public synchronized void delete(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
-        requireOpen();
-        requireDescriptor(descriptor);
-        Addition existing = requireEntry(descriptor.alias());
-        owner.validatePrepared(existing.entry(), descriptor);
-        add(existing.alias(), existing.entry(), true);
-    }
-
-    public synchronized void delete(TrustedCertificateDescriptor descriptor) throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(descriptor);
         Addition existing = requireEntry(descriptor.alias());
@@ -190,10 +186,6 @@ public final class KeyMaterialModification implements Modification {
 
     private void requireDescriptor(KeyMaterialDescriptor descriptor) {
         if (descriptor == null) throw new IllegalArgumentException("Key material descriptor must not be null");
-    }
-
-    private void requireDescriptor(TrustedCertificateDescriptor descriptor) {
-        if (descriptor == null) throw new IllegalArgumentException("Trusted certificate descriptor must not be null");
     }
 
     record Addition(String alias, KeyStore.Entry entry, long version, boolean deleted) {}

@@ -43,7 +43,6 @@ import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
-import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
@@ -1832,10 +1831,6 @@ class OrionAccessControlServiceImplTest {
 
             @Override
             public void require(KeyMaterialDescriptor descriptor) {
-            }
-
-            @Override
-            public void require(TrustedCertificateDescriptor descriptor) {
             }
         };
     }

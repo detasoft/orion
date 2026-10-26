@@ -80,7 +80,7 @@ public final class CertificateIdentity {
     }
 
     static Optional<X509Certificate> requireIssuerCertificate(
-            Optional<TrustedCertificateDescriptor> descriptor,
+            Optional<KeyMaterialDescriptor> descriptor,
             Optional<X509Certificate> certificate) throws GeneralSecurityException {
         if (certificate == null) {
             throw new IllegalArgumentException("Issuer trust anchor optional must not be null");
@@ -88,6 +88,10 @@ public final class CertificateIdentity {
         if (descriptor.isPresent() != certificate.isPresent()) {
             throw new IllegalArgumentException(
                     "Issuer trust anchor descriptor and certificate must be configured together");
+        }
+        if (descriptor.isPresent()
+                && !descriptor.orElseThrow().purposes().contains(KeyMaterialPurpose.TRUST_ANCHOR)) {
+            throw new IllegalArgumentException("Issuer must have TRUST_ANCHOR purpose");
         }
         if (descriptor.isPresent()
                 && !descriptor.orElseThrow().algorithm().acceptsKeyAlgorithm(
