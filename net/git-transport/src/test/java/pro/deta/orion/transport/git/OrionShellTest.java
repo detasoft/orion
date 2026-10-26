@@ -19,7 +19,6 @@ import org.apache.sshd.server.channel.ChannelSession;
 import org.apache.sshd.server.command.AsyncCommandStreamsAware;
 import org.apache.sshd.server.command.Command;
 import org.apache.sshd.server.session.ServerSession;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import pro.deta.orion.auth.InternalUserImpl;
@@ -37,8 +36,6 @@ import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.CommandValue;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.internal.OrionExecutor;
-import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.transport.git.auth.RootSshKeyEnrollmentSession;
 import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
@@ -83,11 +80,8 @@ class OrionShellTest {
     final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
             new pro.deta.orion.test.util.OrionTestRuntime();
 
-    private final OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
-
-    @AfterEach
-    void stopExecutor() {
-        executor.shutdownNow();
+    OrionShellTest() {
+        testRuntime.own(testRuntime.executor()::shutdownNow);
     }
 
     @Test
@@ -402,7 +396,7 @@ class OrionShellTest {
         return new OrionShell(
                 dispatcher,
                 navigator,
-                executor);
+                testRuntime.executor());
     }
 
     private static Command configuredAsync(

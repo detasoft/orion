@@ -20,7 +20,6 @@ import org.apache.sshd.server.Environment;
 import org.apache.sshd.server.channel.ChannelSession;
 import org.apache.sshd.server.command.Command;
 import org.apache.sshd.server.session.ServerSession;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import pro.deta.orion.auth.InternalUserImpl;
@@ -46,7 +45,6 @@ import pro.deta.orion.command.CommandValue;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.command.render.PlainCommandRenderer;
 import pro.deta.orion.internal.OrionExecutor;
-import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.transport.git.command.ReadOnlyDomainCommandCatalog;
@@ -90,7 +88,9 @@ class SshCommandFactoryTest {
     final OrionTestRuntime testRuntime =
             new OrionTestRuntime();
 
-    private final List<OrionExecutor> executors = new java.util.ArrayList<>();
+    SshCommandFactoryTest() {
+        testRuntime.own(testRuntime.executor()::shutdownNow);
+    }
 
     @Test
     void firstPushPreparesRegistrationBeforeCreatingStorage() throws Exception {
@@ -109,8 +109,7 @@ class SshCommandFactoryTest {
                 new GrantExpression(GrantKey.CREATE, "true"), new GrantExpression(GrantKey.READ_WRITE, "true")));
         TestChannelSession channel = channel(true);
         channel.getSession().setAttribute(SSH_AUTHENTICATED_USER, new InternalUserImpl("operator", List.of(grant)));
-        OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
-        executors.add(executor);
+        OrionExecutor executor = testRuntime.executor();
         SshCommandFactory factory = new SshCommandFactory(executor, null, new PlainCommandRenderer(),
                 new DefaultGitNativeRepositoryService(provider), null, null, new TestConfiguration(testRuntime).editor(),
                 management);
@@ -171,13 +170,6 @@ class SshCommandFactoryTest {
         assertNotEquals(0, denied.code());
         assertEquals(0, deniedOutput.size());
         assertEquals(2, resolutions.get());
-    }
-
-    @AfterEach
-    void stopExecutor() {
-        for (OrionExecutor executor : executors) {
-            executor.shutdownNow();
-        }
     }
 
     @Test
@@ -352,7 +344,7 @@ class SshCommandFactoryTest {
         assertEquals(1, outputExit.code());
 
         SshCommandFactory rejectedFactory = factory(request -> new CommandResult.Message("unreachable"));
-        executors.getLast().shutdownNow();
+        testRuntime.executor().shutdownNow();
         ByteArrayOutputStream rejectionError = new ByteArrayOutputStream();
         ExitOutcome rejected = run(
                 rejectedFactory,
@@ -702,7 +694,7 @@ class SshCommandFactoryTest {
         assertEquals("", output.toString(StandardCharsets.UTF_8));
         assertEquals("ACCESS_DENIED\n", error.toString(StandardCharsets.UTF_8));
 
-        executors.getLast().shutdownNow();
+        testRuntime.executor().shutdownNow();
         error.reset();
         ExitOutcome rejected = run(factory, channel(true), "git-receive-pack '/demo.git'", output, error);
         assertEquals(1, rejected.code());
@@ -761,8 +753,7 @@ class SshCommandFactoryTest {
     }
 
     private SshCommandFactory gitFactory(NativeGitRepositoryProvider provider) {
-        OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
-        executors.add(executor);
+        OrionExecutor executor = testRuntime.executor();
         return new SshCommandFactory(executor,
                 null,
                 new PlainCommandRenderer(),
@@ -792,8 +783,7 @@ class SshCommandFactoryTest {
     private SshCommandFactory factory(
             CommandDispatcher dispatcher,
             OrionAccessControlService accessControlService) {
-        OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
-        executors.add(executor);
+        OrionExecutor executor = testRuntime.executor();
         return new SshCommandFactory(executor,
                 dispatcher,
                 new PlainCommandRenderer(),

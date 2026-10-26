@@ -16,7 +16,6 @@ import org.apache.sshd.client.config.hosts.HostConfigEntry;
 import org.apache.sshd.client.keyverifier.AcceptAllServerKeyVerifier;
 import org.apache.sshd.client.session.ClientSession;
 import org.apache.sshd.common.keyprovider.KeyIdentityProvider;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.OrionAccessControlService;
@@ -36,7 +35,6 @@ import pro.deta.orion.command.CommandNode;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.command.render.PlainCommandRenderer;
 import pro.deta.orion.internal.OrionExecutor;
-import pro.deta.orion.internal.OrionThreadFactory;
 import org.apache.sshd.common.keyprovider.KeyPairProvider;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
@@ -74,23 +72,10 @@ class GitSshTransportStateMachineTest {
     @TempDir
     private Path tempDir;
 
-    private GitSshTransportService service;
-    private OrionExecutor executor;
-
-    @AfterEach
-    void stopService() {
-        if (service != null) {
-            service.onStop();
-        }
-        if (executor != null) {
-            executor.shutdownNow();
-        }
-    }
-
     @Test
     void bindFailureMovesStateMachineToError() throws Exception {
         try (ServerSocket occupied = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
-            service = service(occupied.getLocalPort());
+            GitSshTransportService service = service(occupied.getLocalPort());
             GitSshTransportStateMachine machine = new GitSshTransportStateMachine(() -> service);
 
             assertThrows(StateTransitionFailedException.class, machine::start);
@@ -102,19 +87,18 @@ class GitSshTransportStateMachineTest {
 
     @Test
     void reportsTheDynamicallyBoundPortOnlyWhileRunning() throws Exception {
-        service = service(0);
+        GitSshTransportService service = service(0);
         service.onStart();
 
         assertTrue(service.boundPort() > 0);
 
         service.onStop();
         assertEquals(0, service.boundPort());
-        service = null;
     }
 
     @Test
     void doesNotCreateALegacyHostKeyDirectory() throws Exception {
-        service = service(0);
+        GitSshTransportService service = service(0);
 
         service.onStart();
 
@@ -125,7 +109,7 @@ class GitSshTransportStateMachineTest {
     void servesTheHostKeyProvidedByKmsProvider() throws Exception {
         KeyPair hostKey = keyPair();
         KeyPair clientKey = keyPair();
-        service = service(0, new RecordingAccessControlService(clientKey), hostKey);
+        GitSshTransportService service = service(0, new RecordingAccessControlService(clientKey), hostKey);
         service.onStart();
 
         try (SshClient client = client(List.of(UserAuthPublicKeyFactory.INSTANCE));
@@ -144,7 +128,7 @@ class GitSshTransportStateMachineTest {
         AtomicReference<List<KeyPair>> selected =
                 new AtomicReference<>(List.of(first, second));
         KeyPairProvider provider = session -> selected.get();
-        service = service(0, new RecordingAccessControlService(clientKey), provider);
+        GitSshTransportService service = service(0, new RecordingAccessControlService(clientKey), provider);
         service.onStart();
         for (KeyPair expected : List.of(first, second)) {
             selected.set(expected == first ? List.of(first, second) : List.of(second, first));
@@ -161,7 +145,7 @@ class GitSshTransportStateMachineTest {
     void disablesPasswordAuthenticationAndAcceptsNamedAndGitPublicKeys() throws Exception {
         KeyPair keyPair = keyPair();
         RecordingAccessControlService accessControl = new RecordingAccessControlService(keyPair);
-        service = service(0, accessControl);
+        GitSshTransportService service = service(0, accessControl);
         service.onStart();
 
         assertPasswordAuthenticationFails(service.boundPort(), "alice", "accepted-by-legacy-authenticator");
@@ -173,7 +157,7 @@ class GitSshTransportStateMachineTest {
     void namedUserShellCannotStartAnOperatingSystemProcess() throws Exception {
         KeyPair keyPair = keyPair();
         Path marker = tempDir.resolve("os-shell-marker");
-        service = service(0, new RecordingAccessControlService(keyPair));
+        GitSshTransportService service = service(0, new RecordingAccessControlService(keyPair));
         service.onStart();
 
         try (SshClient client = client(List.of(UserAuthPublicKeyFactory.INSTANCE));
@@ -216,7 +200,7 @@ class GitSshTransportStateMachineTest {
     void realExecAndInteractiveShellObserveAccountRemovalOnAnOpenConnection() throws Exception {
         KeyPair keyPair = keyPair();
         RecordingAccessControlService accessControl = new RecordingAccessControlService(keyPair);
-        service = service(0, accessControl);
+        GitSshTransportService service = service(0, accessControl);
         service.onStart();
 
         try (SshClient client = client(List.of(UserAuthPublicKeyFactory.INSTANCE));
@@ -311,7 +295,8 @@ class GitSshTransportStateMachineTest {
                 new CommandLineParser(),
                 new SshCredentialCommandCatalog(accessControlService, editor).commandTree(),
                 new pro.deta.orion.command.CommandRowQuery());
-        executor = new OrionExecutor(2, new OrionThreadFactory());
+        OrionExecutor executor = events.executor();
+        events.own(executor::shutdownNow);
         SshCommandFactory commandFactory = new SshCommandFactory(executor,
                 dispatcher,
                 new PlainCommandRenderer(),
@@ -323,12 +308,14 @@ class GitSshTransportStateMachineTest {
                 new CommandNavigator(CommandNode.builder().build()),
                 executor);
         OrionSshAuthenticator authenticator = new OrionSshAuthenticator(accessControlService, editor);
-        return new GitSshTransportService(
+        GitSshTransportService service = new GitSshTransportService(
                 configuration,
                 commandFactory,
                 shell,
                 hostKeys,
                 authenticator);
+        events.own(service::onStop);
+        return service;
     }
 
     private static void assertPasswordAuthenticationFails(int port, String username, String password)
