@@ -5,6 +5,7 @@ import pro.deta.orion.bootstrap.config.KeyMaterialConfig;
 import pro.deta.orion.bootstrap.config.ServerSigningConfig;
 import pro.deta.orion.bootstrap.config.SigningKeyReferenceConfig;
 import pro.deta.orion.event.type.OrionEventPublisher;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
 import pro.deta.orion.keymaterial.KeyMaterialContentStore;
@@ -33,9 +34,12 @@ public final class KeyMaterialBootstrap {
     private KeyMaterialBootstrap() {
     }
 
-    static KeyMaterialContentStore localStore(
+    static OrionKeyMaterial open(
             BootstrapConfiguration configuration,
-            Map<String, String> environment) {
+            Map<String, String> environment,
+            NativeGitRepositoryFactory repositories,
+            KeyMaterialCreation creation,
+            OrionEventPublisher events) throws IOException, GeneralSecurityException {
         if (configuration == null) {
             throw new IllegalArgumentException("Orion configuration must not be null");
         }
@@ -43,38 +47,16 @@ public final class KeyMaterialBootstrap {
         requireMaterialConfig(material);
         Path baseDirectory = ConfigurationContext.baseDirectory(configuration, environment);
         KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard(environment);
-        String location = resolveAgainstBaseDirectory(material.getLocation(), baseDirectory, "location");
-        return resolver.resolveStore(location);
-    }
-
-    static OrionKeyMaterial open(
-            BootstrapConfiguration configuration,
-            Map<String, String> environment,
-            KeyMaterialContentStore store,
-            KeyMaterialCreation creation,
-            OrionEventPublisher events) throws IOException, GeneralSecurityException {
-        SigningMaterialSet signingMaterial;
-        KeyMaterialOptions options;
-        try {
-            if (configuration == null) {
-                throw new IllegalArgumentException("Orion configuration must not be null");
-            }
-            KeyMaterialConfig material = configuration.getBootstrap().getKeyMaterial();
-            requireMaterialConfig(material);
-            Path baseDirectory = ConfigurationContext.baseDirectory(configuration, environment);
-            KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard(environment);
-            String password = resolveAgainstBaseDirectory(material.getPassword(), baseDirectory, "password");
-            signingMaterial = signingMaterial(material);
-            options = resolver.pkcs12Options(password);
-        } catch (IOException | RuntimeException failure) {
-            try {
-                store.close();
-            } catch (RuntimeException cleanup) {
-                failure.addSuppressed(cleanup);
-            }
-            throw failure;
-        }
-        try (options) {
+        String password = resolveAgainstBaseDirectory(material.getPassword(), baseDirectory, "password");
+        SigningMaterialSet signingMaterial = signingMaterial(material);
+        try (KeyMaterialOptions options = resolver.pkcs12Options(password)) {
+            boolean gitSource = repositories.resolveProvisional(
+                    NativeGitRepositoryFactory.MATERIAL_SOURCE, material, creation.allowed()).isPresent();
+            KeyMaterialContentStore store = gitSource
+                    ? new NativeGitKeyMaterialContentStore(
+                            repositories.fileEvents(NativeGitRepositoryFactory.MATERIAL_SOURCE, material))
+                    : resolver.resolveStore(resolveAgainstBaseDirectory(
+                            material.getLocation(), baseDirectory, "location"));
             OrionKeyMaterial keys = OrionKeyMaterial.open(store, options, events);
             try {
                 if (!keys.hasDurableSnapshot()) {

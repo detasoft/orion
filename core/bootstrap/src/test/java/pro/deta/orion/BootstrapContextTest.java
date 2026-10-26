@@ -1721,20 +1721,17 @@ class BootstrapContextTest {
     private static byte[] materialBytes(BootstrapConfiguration configuration,
             List<KeyMaterialDescriptor> descriptors) throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        try (OrionKeyMaterial material = KeyMaterialBootstrap.open(
-                configuration,
-                ENVIRONMENT,
-                store,
-                new KeyMaterialCreation(true),
-                new pro.deta.orion.event.OrionEventManager())) {
-            if (!descriptors.isEmpty()) {
-                material.withModification(modification -> {
-                    for (KeyMaterialDescriptor descriptor : descriptors) {
-                        modification.generateKey(descriptor, 2048);
-                    }
-                    modification.apply();
-                });
-            }
+        try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(
+                ENVIRONMENT.get(PASSWORD_ENV).toCharArray());
+             OrionKeyMaterial material = OrionKeyMaterial.open(store, options)) {
+            material.withModification(modification -> {
+                modification.generateKey(KeyMaterialBootstrap.signingMaterial(
+                        configuration.getBootstrap().getKeyMaterial()).active(), 2048);
+                for (KeyMaterialDescriptor descriptor : descriptors) {
+                    modification.generateKey(descriptor, 2048);
+                }
+                modification.apply();
+            });
         }
         return store.read(store.revision().orElseThrow());
     }

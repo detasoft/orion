@@ -7,7 +7,10 @@ import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.event.OrionEventManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.LocalKeyMaterialContentStore;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
+import org.junit.jupiter.api.AfterEach;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
@@ -24,7 +27,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -32,6 +34,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class KeyMaterialBootstrapTest {
     private static final String PASSWORD_ENV = "ORION_TEST_KEY_MATERIAL_PASSWORD";
     private final OrionEventManager events = new OrionEventManager();
+
+    private final NativeGitRepositoryFactory repositories = new NativeGitRepositoryFactory(
+            NativeGitRepositoryBackend.inMemory(events));
+
+    @AfterEach
+    void closeRepositories() {
+        repositories.provider().close();
+    }
 
     @TempDir
     private Path tempDir;
@@ -108,31 +118,38 @@ class KeyMaterialBootstrapTest {
     }
 
     @Test
-    void opensIdentityFromAlreadyResolvedContentStore() throws Exception {
+    void createsAndReopensIdentityInConfiguredGitFile() throws Exception {
         BootstrapConfiguration configuration = configuration();
-        configuration.getBootstrap().getKeyMaterial().setLocation("git+https://example.test/private.git");
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        configuration.getBootstrap().getKeyMaterial().setLocation("local:material");
+        configuration.getBootstrap().getKeyMaterial().setPath("security/material.p12");
+        repositories.provider().create("material").valueOrFailure("create material repository");
 
         try (OrionKeyMaterial material = KeyMaterialBootstrap.open(
                 configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
-                store,
+                repositories,
                 new KeyMaterialCreation(true),
                 events)) {
             assertThat(material.contains(signing(configuration).active())).isTrue();
         }
 
-        assertThat(store.revision()).isPresent();
+        try (OrionKeyMaterial material = KeyMaterialBootstrap.open(
+                configuration, Map.of(PASSWORD_ENV, "test-password"), repositories,
+                new KeyMaterialCreation(false), events)) {
+            assertThat(material.contains(signing(configuration).active())).isTrue();
+        }
+        assertThat(Files.exists(tempDir.resolve("security/orion.p12"))).isFalse();
     }
 
     @Test
     void requiresExplicitCreationAndDoesNotPopulateAnExistingEmptyStore() throws Exception {
         BootstrapConfiguration configuration = configuration();
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        LocalKeyMaterialContentStore store = new LocalKeyMaterialContentStore(
+                tempDir.resolve("security/orion.p12"));
         assertThatThrownBy(() -> KeyMaterialBootstrap.open(
                 configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
-                store,
+                repositories,
                 new KeyMaterialCreation(false),
                 events))
                 .isInstanceOf(GeneralSecurityException.class)
@@ -150,7 +167,7 @@ class KeyMaterialBootstrapTest {
         assertThatThrownBy(() -> KeyMaterialBootstrap.open(
                 configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
-                store,
+                repositories,
                 new KeyMaterialCreation(true),
                 events))
                 .isInstanceOf(GeneralSecurityException.class)
@@ -161,7 +178,8 @@ class KeyMaterialBootstrapTest {
     @Test
     void doesNotAddTheConfiguredSigningKeyToAnExistingStore() throws Exception {
         BootstrapConfiguration configuration = configuration();
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        LocalKeyMaterialContentStore store = new LocalKeyMaterialContentStore(
+                tempDir.resolve("security/orion.p12"));
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray());
              OrionKeyMaterial material = OrionKeyMaterial.open(store, options)) {
             material.withModification(modification -> {
@@ -172,7 +190,7 @@ class KeyMaterialBootstrapTest {
         }
         byte[] before = store.read(store.revision().orElseThrow());
         assertThatThrownBy(() -> KeyMaterialBootstrap.open(
-                configuration, Map.of(PASSWORD_ENV, "test-password"), store,
+                configuration, Map.of(PASSWORD_ENV, "test-password"), repositories,
                 new KeyMaterialCreation(true), events))
                 .isInstanceOf(GeneralSecurityException.class)
                 .hasMessageContaining("cluster-signing-v2");
@@ -180,15 +198,16 @@ class KeyMaterialBootstrapTest {
     }
 
     @Test
-    void rejectsRetainedKeysOnCreationWithoutWritingTheStore() {
+    void rejectsRetainedKeysOnCreationWithoutWritingTheStore() throws Exception {
         BootstrapConfiguration configuration = configuration();
         configuration.getBootstrap().getKeyMaterial().getServerSigning()
                 .setVerification(List.of(new SigningKeyReferenceConfig("previous-signing", 1)));
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        LocalKeyMaterialContentStore store = new LocalKeyMaterialContentStore(
+                tempDir.resolve("security/orion.p12"));
         assertThatThrownBy(() -> KeyMaterialBootstrap.open(
                 configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
-                store,
+                repositories,
                 new KeyMaterialCreation(true),
                 events))
                 .isInstanceOf(GeneralSecurityException.class)
@@ -200,23 +219,15 @@ class KeyMaterialBootstrapTest {
     void rejectsNonRsaSigningConfigurationBeforeCreatingTheStore() {
         BootstrapConfiguration configuration = configuration();
         configuration.getBootstrap().getKeyMaterial().getServerSigning().setAlgorithm("ED25519");
-        AtomicInteger closes = new AtomicInteger();
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore() {
-            @Override
-            public void close() {
-                closes.incrementAndGet();
-            }
-        };
         assertThatThrownBy(() -> KeyMaterialBootstrap.open(
                 configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
-                store,
+                repositories,
                 new KeyMaterialCreation(true),
                 events))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("RSA");
-        assertThat(store.revision()).isEmpty();
-        assertThat(closes).hasValue(1);
+        assertThat(Files.exists(tempDir.resolve("security/orion.p12"))).isFalse();
     }
 
     private OrionKeyMaterial openLocal(
@@ -224,7 +235,7 @@ class KeyMaterialBootstrapTest {
             Map<String, String> environment,
             KeyMaterialCreation creation) throws Exception {
         return KeyMaterialBootstrap.open(configuration, environment,
-                KeyMaterialBootstrap.localStore(configuration, environment), creation, events);
+                repositories, creation, events);
     }
 
     private static SigningMaterialSet signing(BootstrapConfiguration configuration) {

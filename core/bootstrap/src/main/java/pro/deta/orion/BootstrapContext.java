@@ -44,7 +44,6 @@ import java.util.Map;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import pro.deta.orion.keymaterial.KeyMaterialContentStore;
 
 public final class BootstrapContext implements AutoCloseable {
     private static final String FAILURE_MESSAGE = "Bootstrap inputs are unavailable or invalid";
@@ -125,13 +124,7 @@ public final class BootstrapContext implements AutoCloseable {
                     configuredConfiguration.isCreateDefaultIfMissing());
 
             KeyMaterialConfig configuredMaterial = configuration.getBootstrap().getKeyMaterial();
-            Optional<String> materialRepository = provider.resolveProvisional(
-                    NativeGitRepositoryFactory.MATERIAL_SOURCE,
-                    configuredMaterial,
-                    creation.allowed());
-            KeyMaterialContentStore materialStore = keyMaterialStore(
-                    configuration, environment, provider, materialRepository, configuredMaterial);
-            keyMaterial = KeyMaterialBootstrap.open(configuration, environment, materialStore, creation, events);
+            keyMaterial = KeyMaterialBootstrap.open(configuration, environment, provider, creation, events);
             return new BootstrapContext(provider, keyMaterial,
                     KeyMaterialBootstrap.signingMaterial(configuredMaterial));
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {
@@ -304,19 +297,6 @@ public final class BootstrapContext implements AutoCloseable {
         source.setAuth(configured.getAuth());
         source.setCreateDefaultIfMissing(configured.isCreateDefaultIfMissing());
         return source;
-    }
-
-    private static KeyMaterialContentStore keyMaterialStore(
-            BootstrapConfiguration configuration,
-            Map<String, String> environment,
-            NativeGitRepositoryFactory provider,
-            Optional<String> repositoryName,
-            KeyMaterialConfig source) {
-        if (repositoryName.isPresent()) {
-            return new NativeGitKeyMaterialContentStore(
-                    provider.fileEvents(NativeGitRepositoryFactory.MATERIAL_SOURCE, source));
-        }
-        return KeyMaterialBootstrap.localStore(configuration, environment);
     }
 
     private static Path directFileRoot(
