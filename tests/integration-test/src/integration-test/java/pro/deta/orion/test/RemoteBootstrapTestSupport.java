@@ -101,7 +101,7 @@ final class RemoteBootstrapTestSupport {
         if (Files.getFileStore(credentialFile).supportsFileAttributeView("posix")) {
             Files.setPosixFilePermissions(credentialFile, PosixFilePermissions.fromString("rw-------"));
         }
-        for (BootstrapSourceConfig source : List.of(configuration.getBootstrap().getAccessControl(),
+        for (BootstrapSourceConfig source : List.of(configuration.getBootstrap().getConfiguration(),
                 configuration.getBootstrap().getKeyMaterial())) {
             source.setLocation(location);
             source.setAuth(authentication);

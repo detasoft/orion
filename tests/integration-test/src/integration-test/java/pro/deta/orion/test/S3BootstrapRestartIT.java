@@ -68,7 +68,7 @@ class S3BootstrapRestartIT {
             Map<String, String> environment = Map.of(
                     PASSWORD_ENV, "bootstrap-test-password", "S3_BOOTSTRAP_SECRET", s3.secretAccessKey());
             BootstrapConfiguration configuration = configuration(s3, tempDir);
-            configuration.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
+            configuration.getBootstrap().getConfiguration().setCreateDefaultIfMissing(false);
             InMemoryKeyMaterialContentStore materialStore = new InMemoryKeyMaterialContentStore();
             materialStore.write(materialBytes(configuration, environment), null);
             byte[] payload = "preseeded S3 server identity".getBytes(StandardCharsets.UTF_8);
@@ -167,7 +167,7 @@ class S3BootstrapRestartIT {
 
             Path firstRoot = Files.createDirectory(tempDir.resolve("first"));
             BootstrapConfiguration first = configuration(s3, firstRoot);
-            first.getBootstrap().getAccessControl().setCreateDefaultIfMissing(true);
+            first.getBootstrap().getConfiguration().setCreateDefaultIfMissing(true);
             pro.deta.orion.event.OrionEventManager bootstrapEvents2 =
                     new pro.deta.orion.event.OrionEventManager();
             try (BootstrapContext bootstrap = BootstrapContext.open(first, environment,
@@ -220,7 +220,7 @@ class S3BootstrapRestartIT {
             Path freshRoot = Files.createDirectory(tempDir.resolve("restarted"));
             assertThat(freshRoot).isEmptyDirectory();
             BootstrapConfiguration restarted = configuration(s3, freshRoot);
-            restarted.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
+            restarted.getBootstrap().getConfiguration().setCreateDefaultIfMissing(false);
             pro.deta.orion.event.OrionEventManager bootstrapEvents3 =
                     new pro.deta.orion.event.OrionEventManager();
             try (BootstrapContext bootstrap = BootstrapContext.open(restarted, environment,
@@ -265,8 +265,8 @@ class S3BootstrapRestartIT {
         configuration.getStorage().setEndpoint(s3.endpoint());
         configuration.getStorage().setAuth(Map.of("accessKeyId", s3.accessKeyId(),
                 "secretAccessKey", "env:S3_BOOTSTRAP_SECRET"));
-        configuration.getBootstrap().getAccessControl().setRef(CONFIGURATION_REF);
-        configuration.getBootstrap().getAccessControl().setPath(CONFIGURATION_PATH);
+        configuration.getBootstrap().getConfiguration().setRef(CONFIGURATION_REF);
+        configuration.getBootstrap().getConfiguration().setPath(CONFIGURATION_PATH);
         configuration.getBootstrap().getKeyMaterial().setRef(MATERIAL_REF);
         configuration.getBootstrap().getKeyMaterial().setPath(MATERIAL_PATH);
         configuration.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);

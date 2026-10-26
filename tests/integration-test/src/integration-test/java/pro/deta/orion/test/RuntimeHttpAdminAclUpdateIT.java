@@ -177,7 +177,7 @@ class RuntimeHttpAdminAclUpdateIT {
         NativeGitRepository repository = orion.repositoryProvider().openForRead("orion")
                 .valueOrFailure("configuration repository");
         String revision = repository.refs().get(
-                orion.configuration().getBootstrap().getAccessControl().selectedRef());
+                orion.configuration().getBootstrap().getConfiguration().selectedRef());
         RevCommit commit = RevCommit.parse(repository.readObject(new ObjectId(revision)).orElseThrow().data());
         assertThat(commit.getAuthorIdent().getName()).isEqualTo(expectedAuthor);
     }
@@ -395,7 +395,7 @@ class RuntimeHttpAdminAclUpdateIT {
         return orion.repositoryProvider()
                 .openForRead("orion")
                 .valueOrFailure("ACL repository should exist")
-                .files().readBytes(orion.configuration().getBootstrap().getAccessControl().selectedRef(),
+                .files().readBytes(orion.configuration().getBootstrap().getConfiguration().selectedRef(),
                         ACL_FILE);
     }
 }

@@ -1390,8 +1390,8 @@ class GitSshTransportEndToEndIT {
         configuration.getBootstrap().setThreadPoolSize(8);
         configuration.getStorage().setLocation(orionRoot.resolve("repos").toUri().toString());
 
-        configuration.getBootstrap().getAccessControl().setLocation("local:orion");
-        configuration.getBootstrap().getAccessControl().setRef("refs/heads/" + BRANCH);
+        configuration.getBootstrap().getConfiguration().setLocation("local:orion");
+        configuration.getBootstrap().getConfiguration().setRef("refs/heads/" + BRANCH);
 
         TestPorts.configure(configuration);
         configuration.getTransport().getGit().setEnabled(false);

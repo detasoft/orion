@@ -17,7 +17,7 @@ public class BootstrapConfiguration {
         private String workDir = "work";
         private String logDir = "logs";
         private int threadPoolSize = 10;
-        private BootstrapConfigurationSourceConfig accessControl = new BootstrapConfigurationSourceConfig();
+        private BootstrapConfigurationSourceConfig configuration = new BootstrapConfigurationSourceConfig();
         private KeyMaterialConfig keyMaterial = new KeyMaterialConfig();
     }
 

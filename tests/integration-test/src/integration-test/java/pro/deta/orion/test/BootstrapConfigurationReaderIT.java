@@ -44,25 +44,25 @@ class BootstrapConfigurationReaderIT {
         }
     }
 
-    private static byte[] yamlConfiguration(String baseDir, String accessControlPath, int httpPort) {
+    private static byte[] yamlConfiguration(String baseDir, String configurationPath, int httpPort) {
         return """
                 bootstrap:
                   baseDir: %s
-                  accessControl:
+                  configuration:
                     path: %s
                 transport:
                   http:
                     port: %d
-                """.formatted(baseDir, accessControlPath, httpPort).getBytes(StandardCharsets.UTF_8);
+                """.formatted(baseDir, configurationPath, httpPort).getBytes(StandardCharsets.UTF_8);
     }
 
     private static void assertConfiguration(
             BootstrapConfiguration configuration,
             String baseDir,
-            String accessControlPath,
+            String configurationPath,
             int httpPort) {
         assertThat(configuration.getBootstrap().getBaseDir()).isEqualTo(baseDir);
-        assertThat(configuration.getBootstrap().getAccessControl().getPath()).isEqualTo(accessControlPath);
+        assertThat(configuration.getBootstrap().getConfiguration().getPath()).isEqualTo(configurationPath);
         assertThat(configuration.getTransport().getHttp().getPort()).isEqualTo(httpPort);
     }
 

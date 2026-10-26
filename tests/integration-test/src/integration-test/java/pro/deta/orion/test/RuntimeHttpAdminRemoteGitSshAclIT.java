@@ -59,7 +59,7 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
     @Test
     void postAccessControlUpdatesRemoteGitSshStorageAndSurvivesRestart() throws Exception {
         var configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("target"));
-        configuration.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
+        configuration.getBootstrap().getConfiguration().setCreateDefaultIfMissing(false);
         configuration.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);
         var environment = Map.of(PASSWORD_ENV, "bootstrap-test-password");
         byte[] material = materialBytes(configuration, environment);
@@ -82,7 +82,7 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
             var authentication = Map.of("credentialKind", "private-key",
                     "credential", privateKey.toRealPath().toUri().toString(),
                     "knownHosts", org.apache.sshd.common.config.keys.PublicKeyEntry.toString(hostKey.getPublic()));
-            for (BootstrapSourceConfig source : List.of(configuration.getBootstrap().getAccessControl(),
+            for (BootstrapSourceConfig source : List.of(configuration.getBootstrap().getConfiguration(),
                     configuration.getBootstrap().getKeyMaterial())) {
                 source.setLocation("git+" + gitServer.repositoryUrl("orion-acl.git"));
                 source.setRef(REF);

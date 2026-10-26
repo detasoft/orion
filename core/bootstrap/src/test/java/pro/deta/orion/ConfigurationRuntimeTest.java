@@ -23,9 +23,9 @@ public class ConfigurationRuntimeTest {
         assertEquals("orion_root", oc.getBootstrap().getBaseDir());
         assertEquals(Path.of("orion_root", "logs").toAbsolutePath().normalize(),
                 new ConfigurationContext(oc).getLogDir());
-        assertEquals("local:orion", oc.getBootstrap().getAccessControl().getLocation());
-        assertEquals("refs/heads/main", oc.getBootstrap().getAccessControl().selectedRef());
-        assertEquals("orion.xml", oc.getBootstrap().getAccessControl().getPath());
+        assertEquals("local:orion", oc.getBootstrap().getConfiguration().getLocation());
+        assertEquals("refs/heads/main", oc.getBootstrap().getConfiguration().selectedRef());
+        assertEquals("orion.xml", oc.getBootstrap().getConfiguration().getPath());
         assertEquals("local:orion", oc.getBootstrap().getKeyMaterial().getLocation());
         assertEquals("refs/heads/main", oc.getBootstrap().getKeyMaterial().selectedRef());
         assertEquals("material.p12", oc.getBootstrap().getKeyMaterial().getPath());

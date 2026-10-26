@@ -1381,7 +1381,7 @@ class OrionAccessControlServiceImplTest {
             throws Exception {
         InMemoryStorage storage = new InMemoryStorage(null);
         BootstrapConfiguration configuration = new BootstrapConfiguration();
-        configuration.getBootstrap().getAccessControl().setCreateDefaultIfMissing(true);
+        configuration.getBootstrap().getConfiguration().setCreateDefaultIfMissing(true);
         OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, testMaterial(), storage.events);
         OrionAccessControlServiceImpl service =
                 new OrionAccessControlServiceImpl(
@@ -1433,7 +1433,7 @@ class OrionAccessControlServiceImplTest {
     void rootResetAcceptsANewerActivatedRevisionThatPreservesTheGeneratedPassword() {
         InMemoryStorage storage = new InMemoryStorage(null);
         BootstrapConfiguration configuration = new BootstrapConfiguration();
-        configuration.getBootstrap().getAccessControl().setCreateDefaultIfMissing(true);
+        configuration.getBootstrap().getConfiguration().setCreateDefaultIfMissing(true);
         OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, testMaterial(), storage.events);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
                 new OrionPasswordHashingService(), new RootPasswordReset(false),
@@ -1489,7 +1489,7 @@ class OrionAccessControlServiceImplTest {
         FailingReloadStorage storage = new FailingReloadStorage(initial);
         storage.failSave = true;
         BootstrapConfiguration configuration = new BootstrapConfiguration();
-        configuration.getBootstrap().getAccessControl().setCreateDefaultIfMissing(true);
+        configuration.getBootstrap().getConfiguration().setCreateDefaultIfMissing(true);
         OrionEventManager events = new OrionEventManager();
         events.onStart();
         OrionConfigurationEditor editor = new OrionConfigurationEditor(

@@ -39,7 +39,7 @@ import static pro.deta.orion.test.RemoteBootstrapTestSupport.materialBytes;
 import static pro.deta.orion.test.RemoteBootstrapTestSupport.runtimeComponent;
 
 /**
- * Process YAML stays local; bootstrap.accessControl and bootstrap.keyMaterial select remote Git inputs.
+ * Process YAML stays local; bootstrap.configuration and bootstrap.keyMaterial select remote Git inputs.
  * Their auth maps reference external credential files, independently of the material password reference.
  */
 class RemoteBootstrapConfigurationIT {
@@ -55,7 +55,7 @@ class RemoteBootstrapConfigurationIT {
             config.getTransport().getSsh().setEnabled(true);
             config.getTransport().getGit().setEnabled(true);
         });
-        target.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
+        target.getBootstrap().getConfiguration().setCreateDefaultIfMissing(false);
         target.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);
 
         try (var upstream = RuntimeHttpTestSupport.start(upstreamConfiguration)) {
@@ -75,8 +75,8 @@ class RemoteBootstrapConfigurationIT {
                                 fileAccess.apply();
                                 return null;
                             });
-            target.getBootstrap().getAccessControl().setRef("refs/heads/bootstrap");
-            target.getBootstrap().getAccessControl().setPath("config/acl.xml");
+            target.getBootstrap().getConfiguration().setRef("refs/heads/bootstrap");
+            target.getBootstrap().getConfiguration().setPath("config/acl.xml");
             target.getBootstrap().getKeyMaterial().setRef("refs/heads/bootstrap");
             target.getBootstrap().getKeyMaterial().setPath("keys/server.p12");
 
@@ -86,12 +86,12 @@ class RemoteBootstrapConfigurationIT {
                     .readConfiguration();
             assertThat(configuration.getBootstrap().getBaseDir()).isEqualTo(target.getBootstrap().getBaseDir());
             assertThat(configuration.getTransport()).usingRecursiveComparison().isEqualTo(target.getTransport());
-            assertThat(configuration.getBootstrap().getAccessControl()).usingRecursiveComparison()
-                    .isEqualTo(target.getBootstrap().getAccessControl());
+            assertThat(configuration.getBootstrap().getConfiguration()).usingRecursiveComparison()
+                    .isEqualTo(target.getBootstrap().getConfiguration());
             assertThat(configuration.getBootstrap().getKeyMaterial()).usingRecursiveComparison()
                     .isEqualTo(target.getBootstrap().getKeyMaterial());
 
-            Path credential = Path.of(URI.create(configuration.getBootstrap().getAccessControl()
+            Path credential = Path.of(URI.create(configuration.getBootstrap().getConfiguration()
                     .getAuth().get("credential")));
             String authorized = Files.readString(credential);
             Files.writeString(credential, unauthorizedCredential(transport));
@@ -146,7 +146,7 @@ class RemoteBootstrapConfigurationIT {
             }
 
             var refsBeforeFailures = repository.refs();
-            for (var source : List.of(configuration.getBootstrap().getAccessControl(),
+            for (var source : List.of(configuration.getBootstrap().getConfiguration(),
                     configuration.getBootstrap().getKeyMaterial())) {
                 String ref = source.getRef();
                 source.setRef("refs/heads/missing");
@@ -189,7 +189,7 @@ class RemoteBootstrapConfigurationIT {
         var materialUpstream = RuntimeHttpTestSupport.httpOnlyConfiguration(
                 tempDir.resolve("material-upstream"), config -> config.getTransport().getSsh().setEnabled(true));
         var target = RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("target"));
-        target.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
+        target.getBootstrap().getConfiguration().setCreateDefaultIfMissing(false);
         target.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);
         try (var configurationServer = RuntimeHttpTestSupport.start(configurationUpstream);
              var materialServer = RuntimeHttpTestSupport.start(materialUpstream)) {
@@ -198,7 +198,7 @@ class RemoteBootstrapConfigurationIT {
             var materialSource = new BootstrapConfiguration();
             configureSources(Files.createDirectory(tempDir.resolve("material-auth")), materialSource,
                     materialServer, "http".equals(configurationTransport) ? "ssh" : "http");
-            var acl = target.getBootstrap().getAccessControl();
+            var acl = target.getBootstrap().getConfiguration();
             var material = target.getBootstrap().getKeyMaterial();
             material.setLocation(materialSource.getBootstrap().getKeyMaterial().getLocation());
             material.setAuth(materialSource.getBootstrap().getKeyMaterial().getAuth());
@@ -356,13 +356,13 @@ class RemoteBootstrapConfigurationIT {
 
     private static void writeProcessYaml(Path path, BootstrapConfiguration configuration) throws Exception {
         var bootstrap = configuration.getBootstrap();
-        var acl = bootstrap.getAccessControl();
+        var acl = bootstrap.getConfiguration();
         var material = bootstrap.getKeyMaterial();
         var transport = configuration.getTransport();
         new ObjectMapper(new YAMLFactory()).writeValue(path.toFile(), Map.of(
                 "bootstrap", Map.of(
                         "baseDir", bootstrap.getBaseDir(),
-                        "accessControl", Map.of(
+                        "configuration", Map.of(
                                 "location", acl.getLocation(), "ref", acl.getRef(), "path", acl.getPath(),
                                 "auth", acl.getAuth(), "createDefaultIfMissing", false),
                         "keyMaterial", Map.of(

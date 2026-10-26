@@ -33,7 +33,7 @@ final class RuntimeHttpTestSupport {
         BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getBootstrap().setBaseDir(orionRoot.toString());
         configuration.getStorage().setLocation(orionRoot.resolve("repos").toUri().toString());
-        configuration.getBootstrap().getAccessControl().setLocation("local:orion");
+        configuration.getBootstrap().getConfiguration().setLocation("local:orion");
 
         TestPorts.configure(configuration);
         configuration.getTransport().getGit().setEnabled(false);

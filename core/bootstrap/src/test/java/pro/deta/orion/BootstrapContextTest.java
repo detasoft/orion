@@ -257,7 +257,7 @@ class BootstrapContextTest {
                             });
             try (NativeGitOrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(
                     context.repositoryFactory().fileEvents(NativeGitRepositoryFactory.CONFIGURATION_SOURCE,
-                            configuration.getBootstrap().getAccessControl()))) {
+                            configuration.getBootstrap().getConfiguration()))) {
                 assertThat(
                                 storage.load(new OrionRevision.Stored(firstCommit))
                                         .result()
@@ -515,7 +515,7 @@ class BootstrapContextTest {
                 "orion.xml", bytes("configuration"),
                 "material.p12", materialBytes(configuration)));
         String location = "git+" + upstream.bare().toUri();
-        configuration.getBootstrap().getAccessControl().setLocation(location);
+        configuration.getBootstrap().getConfiguration().setLocation(location);
         configuration.getBootstrap().getKeyMaterial().setLocation(location);
         NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(testRuntime.unstartedEvents());
         try {
@@ -545,7 +545,7 @@ class BootstrapContextTest {
         Upstream materialUpstream = upstream(
                 "material",
                 Map.of("material.p12", materialBytes(configuration)));
-        configuration.getBootstrap().getAccessControl().setLocation(
+        configuration.getBootstrap().getConfiguration().setLocation(
                 "git+" + configurationUpstream.bare().toUri());
         configuration.getBootstrap().getKeyMaterial().setLocation(
                 "git+" + materialUpstream.bare().toUri());
@@ -669,7 +669,7 @@ class BootstrapContextTest {
     @Test
     void closesOwnedS3BackendWhenBootstrapFails() {
         BootstrapConfiguration configuration = configuration();
-        configuration.getBootstrap().getAccessControl().setPath("");
+        configuration.getBootstrap().getConfiguration().setPath("");
         NativeGitRepositoryProvider backend =
                 S3NativeGitRepositoryFactory.repositories("s3://bucket/repositories", null,
                         Map.of("accessKeyId", "test", "secretAccessKey", "env:S3_SECRET"),
@@ -809,7 +809,7 @@ class BootstrapContextTest {
     void initializesExternalLocalConfigurationAndKeepsCommitHistory(boolean fileUri) throws Exception {
         BootstrapConfiguration configuration = configuration();
         Path directory = tempDir.resolve("external-acl.git");
-        configuration.getBootstrap().getAccessControl().setLocation(
+        configuration.getBootstrap().getConfiguration().setLocation(
                 fileUri ? directory.toUri().toString() : directory.toString());
         try (NativeGitRepositoryProvider backend = repositoryWith(configuration,
                 Map.of("material.p12", materialBytes(configuration)))) {
@@ -819,7 +819,7 @@ class BootstrapContextTest {
                         .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE)).isPresent();
                 OrionVersionedConfigurationStorage storage =
                         new NativeGitOrionConfigurationStorage(context.repositoryFactory().fileEvents(
-                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getAccessControl()));
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getConfiguration()));
                 storage.save(
                         new OrionRevision.Absent(),
                         OrionXml.read(new ByteArrayInputStream(xml())),
@@ -865,7 +865,7 @@ class BootstrapContextTest {
             try (BootstrapContext reopened = openContext(configuration, ENVIRONMENT, borrow(backend))) {
                 OrionVersionedConfigurationStorage storage =
                         new NativeGitOrionConfigurationStorage(reopened.repositoryFactory().fileEvents(
-                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getAccessControl()));
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getConfiguration()));
                 assertThat(
                                 storage.load()
                                         .revision())
@@ -878,7 +878,7 @@ class BootstrapContextTest {
     @ValueSource(strings = {"file://other-host/acl.git", "file:/acl.git?ref=main", "file:/acl.git#main"})
     void rejectsAmbiguousExternalFileLocationsBeforeOpeningTheRepository(String location) {
         BootstrapConfiguration configuration = configuration();
-        configuration.getBootstrap().getAccessControl().setLocation(location);
+        configuration.getBootstrap().getConfiguration().setLocation(location);
         assertBootstrapFailure(() -> openContext(configuration, ENVIRONMENT,
                 NativeGitRepositoryProvider.inMemory(testRuntime.unstartedEvents())));
     }
@@ -886,9 +886,9 @@ class BootstrapContextTest {
     @Test
     void rejectsMissingDirectConfigurationBeforeRuntimeConstruction() {
         BootstrapConfiguration configuration = configuration();
-        configuration.getBootstrap().getAccessControl().setLocation(
+        configuration.getBootstrap().getConfiguration().setLocation(
                 tempDir.resolve("configuration-root").toUri().toString());
-        configuration.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
+        configuration.getBootstrap().getConfiguration().setCreateDefaultIfMissing(false);
 
         assertBootstrapFailure(() -> openContext(
                 configuration,
@@ -904,9 +904,9 @@ class BootstrapContextTest {
         Files.createDirectories(configurationRoot);
         seedExternalConfiguration(configurationRoot, bytes("configuration"));
         configuration.getBootstrap().setBaseDir(baseDirectory.toString());
-        configuration.getBootstrap().getAccessControl().setLocation("configuration");
-        configuration.getBootstrap().getAccessControl().setPath("./orion.xml");
-        configuration.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
+        configuration.getBootstrap().getConfiguration().setLocation("configuration");
+        configuration.getBootstrap().getConfiguration().setPath("./orion.xml");
+        configuration.getBootstrap().getConfiguration().setCreateDefaultIfMissing(false);
         NativeGitRepositoryProvider backend = repositoryWith(
                 configuration,
                 Map.of("material.p12", materialBytes(configuration)));
@@ -917,7 +917,7 @@ class BootstrapContextTest {
 
             assertThat(source).isPresent();
             assertThat(NativeGitRepositoryFactory.repositoryPath(
-                    configuration.getBootstrap().getAccessControl().getPath())).isEqualTo("orion.xml");
+                    configuration.getBootstrap().getConfiguration().getPath())).isEqualTo("orion.xml");
         }
     }
 
@@ -941,9 +941,9 @@ class BootstrapContextTest {
             Files.createDirectory(root.resolve("config"));
             Files.createSymbolicLink(root.resolve("config/orion.xml"), outside.resolve("orion.xml"));
         }
-        configuration.getBootstrap().getAccessControl().setLocation(root.toString());
-        configuration.getBootstrap().getAccessControl().setPath("config/orion.xml");
-        configuration.getBootstrap().getAccessControl().setCreateDefaultIfMissing(true);
+        configuration.getBootstrap().getConfiguration().setLocation(root.toString());
+        configuration.getBootstrap().getConfiguration().setPath("config/orion.xml");
+        configuration.getBootstrap().getConfiguration().setCreateDefaultIfMissing(true);
         NativeGitRepositoryProvider backend = repositoryWith(
                 configuration, Map.of("material.p12", materialBytes(configuration)));
         assertBootstrapFailure(() -> {
@@ -956,7 +956,7 @@ class BootstrapContextTest {
     @Test
     void rejectsUnsupportedDirectConfigurationBackendBeforeRuntimeConstruction() {
         BootstrapConfiguration configuration = configuration();
-        configuration.getBootstrap().getAccessControl().setLocation("https://config.example/orion");
+        configuration.getBootstrap().getConfiguration().setLocation("https://config.example/orion");
 
         assertBootstrapFailure(() -> openContext(
                 configuration,
@@ -1032,7 +1032,7 @@ class BootstrapContextTest {
         BootstrapConfiguration configuration = configuration();
         Upstream upstream = upstream("adoption", Map.of("orion.xml", xml(),
                 "material.p12", materialBytes(configuration)));
-        configuration.getBootstrap().getAccessControl().setLocation("git+" + upstream.bare().toUri());
+        configuration.getBootstrap().getConfiguration().setLocation("git+" + upstream.bare().toUri());
         configuration.getBootstrap().getKeyMaterial().setLocation("git+" + upstream.bare().toUri());
         AdoptionStorage storage = new AdoptionStorage(xml());
         try (var ignored = upstream.git();
@@ -1060,7 +1060,7 @@ class BootstrapContextTest {
         BootstrapConfiguration configuration = configuration();
         Upstream upstream = upstream("durable-adoption", Map.of("orion.xml", xml(),
                 "material.p12", materialBytes(configuration)));
-        configuration.getBootstrap().getAccessControl().setLocation("git+" + upstream.bare().toUri());
+        configuration.getBootstrap().getConfiguration().setLocation("git+" + upstream.bare().toUri());
         configuration.getBootstrap().getKeyMaterial().setLocation("git+" + upstream.bare().toUri());
         try (var ignored = upstream.git()) {
             OrionDocument adopted;
@@ -1069,7 +1069,7 @@ class BootstrapContextTest {
                     NativeGitRepositoryProvider.inMemory(testRuntime.unstartedEvents()))) {
                 OrionVersionedConfigurationStorage storage =
                         new NativeGitOrionConfigurationStorage(first.repositoryFactory().fileEvents(
-                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getAccessControl()));
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getConfiguration()));
                 OrionRevision initialRevision =
                         storage.load().revision();
                 adopted = adopt(first, storage);
@@ -1082,7 +1082,7 @@ class BootstrapContextTest {
                     NativeGitRepositoryProvider.inMemory(testRuntime.unstartedEvents()))) {
                 OrionVersionedConfigurationStorage storage =
                         new NativeGitOrionConfigurationStorage(restarted.repositoryFactory().fileEvents(
-                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getAccessControl()));
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getConfiguration()));
                 assertThat(adopt(restarted, storage)).isEqualTo(adopted);
                 assertThat(storage.load().revision())
                         .isEqualTo(adoptedRevision);
@@ -1103,7 +1103,7 @@ class BootstrapContextTest {
     void rechecksConfigurationWhenTheRepositoryAdvancesBeforeAdoptionSave(String changedFile) throws Exception {
         BootstrapConfiguration configuration = configuration();
         Upstream upstream = upstream("revision-before-save", Map.of("orion.xml", xml()));
-        configuration.getBootstrap().getAccessControl().setLocation("git+" + upstream.bare().toUri());
+        configuration.getBootstrap().getConfiguration().setLocation("git+" + upstream.bare().toUri());
         NativeGitRepositoryProvider backend = repositoryWith(configuration,
                 Map.of("material.p12", materialBytes(configuration)));
         Upstream materialUpstream = upstream("material-to-adopt", Map.of("material.p12", materialBytes(configuration)));
@@ -1180,7 +1180,7 @@ class BootstrapContextTest {
     private void exerciseAdoptionSave(AdoptionStorage.Mode mode, boolean success) throws Exception {
         BootstrapConfiguration configuration = configuration();
         Upstream upstream = upstream("transaction", Map.of("orion.xml", xml()));
-        configuration.getBootstrap().getAccessControl().setLocation("git+" + upstream.bare().toUri());
+        configuration.getBootstrap().getConfiguration().setLocation("git+" + upstream.bare().toUri());
         var backend = repositoryWith(configuration,
                 Map.of("material.p12", materialBytes(configuration)));
         Upstream materialUpstream = upstream("material-to-adopt", Map.of("material.p12", materialBytes(configuration)));
@@ -1365,7 +1365,7 @@ class BootstrapContextTest {
         BootstrapConfiguration configuration = configuration();
         Upstream upstream = upstream("runtime-adoption", Map.of("orion.xml", xml(),
                 "material.p12", materialBytes(configuration)));
-        configuration.getBootstrap().getAccessControl().setLocation("git+" + upstream.bare().toUri());
+        configuration.getBootstrap().getConfiguration().setLocation("git+" + upstream.bare().toUri());
         configuration.getBootstrap().getKeyMaterial().setLocation("git+" + upstream.bare().toUri());
         try (var ignored = upstream.git();
              BootstrapContext context = openContext(configuration, ENVIRONMENT)) {
@@ -1375,7 +1375,7 @@ class BootstrapContextTest {
                 assertThat(lifecycle.runApplication())
                         .isEqualTo(RUNNING);
                 var storage = new NativeGitOrionConfigurationStorage(context.repositoryFactory().fileEvents(
-                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getAccessControl()));
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getConfiguration()));
                 var snapshot = storage.load();
                 assertThat(snapshot.result().valueOrFailure("Cannot read configuration document")
                         .system().proxies()).isEmpty();
@@ -1401,7 +1401,7 @@ class BootstrapContextTest {
         try (BootstrapContext context = openContext(configuration, ENVIRONMENT, backend)) {
             OrionComponent component = runtimeComponent(configuration, context);
             String approvedCommit = repository.refs().get("refs/heads/main");
-            configuration.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
+            configuration.getBootstrap().getConfiguration().setCreateDefaultIfMissing(false);
             switch (change) {
                 case "invalid-xml" ->
                         repository
@@ -1500,7 +1500,7 @@ class BootstrapContextTest {
         Upstream upstream = upstream("deferred-bootstrap", Map.of(
                 "orion.xml", firstXml.toByteArray(), "material.p12", materialBytes(configuration)));
         String location = "git+" + upstream.bare().toUri();
-        configuration.getBootstrap().getAccessControl().setLocation(location);
+        configuration.getBootstrap().getConfiguration().setLocation(location);
         configuration.getBootstrap().getKeyMaterial().setLocation(location);
         NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(testRuntime.unstartedEvents());
 
@@ -1570,7 +1570,7 @@ class BootstrapContextTest {
         Path directory = tempDir.resolve("plain-configuration");
         Files.createDirectories(directory);
         seedExternalConfiguration(directory, xml());
-        configuration.getBootstrap().getAccessControl().setLocation(directory.toString());
+        configuration.getBootstrap().getConfiguration().setLocation(directory.toString());
         Upstream upstream = remoteMaterial
                 ? upstream("remote-material", Map.of("material.p12", materialBytes(configuration))) : null;
         if (upstream != null) {
@@ -1585,7 +1585,7 @@ class BootstrapContextTest {
                         .isEqualTo(RUNNING);
                 OrionVersionedConfigurationStorage local =
                         new NativeGitOrionConfigurationStorage(context.repositoryFactory().fileEvents(
-                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getAccessControl()));
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getConfiguration()));
                 assertThat(
                                 local.load()
                                         .result().valueOrFailure("Cannot read configuration document")
@@ -1612,7 +1612,7 @@ class BootstrapContextTest {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         OrionXml.write(invalid, output);
         seedExternalConfiguration(directory, output.toByteArray());
-        configuration.getBootstrap().getAccessControl().setLocation(directory.toString());
+        configuration.getBootstrap().getConfiguration().setLocation(directory.toString());
         try (BootstrapContext context = openContext(configuration, ENVIRONMENT, true)) {
             var component = runtimeComponent(configuration, context);
             var lifecycle = component.orionApplicationLifecycle();
@@ -1697,7 +1697,7 @@ class BootstrapContextTest {
         repository
                 .files()
                 .withAccess(
-                        configuration.getBootstrap().getAccessControl().selectedRef(),
+                        configuration.getBootstrap().getConfiguration().selectedRef(),
                         new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed bootstrap inputs"),
                         fileAccess -> {
                             for (Map.Entry<String, byte[]> fileEntry : files.entrySet()) {

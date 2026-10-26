@@ -49,7 +49,7 @@ class OrionConfigurationBootstrapShapeTest {
                   baseDir: /tmp/orion
                   workDir: work
                   threadPoolSize: 7
-                  accessControl:
+                  configuration:
                     location: git+https://config.example/orion.git
                     ref: refs/heads/configuration
                     path: acl/orion.xml
@@ -104,15 +104,15 @@ class OrionConfigurationBootstrapShapeTest {
         assertEquals(7, configuration.getBootstrap().getThreadPoolSize());
         assertEquals(
                 "git+https://config.example/orion.git",
-                configuration.getBootstrap().getAccessControl().getLocation());
+                configuration.getBootstrap().getConfiguration().getLocation());
         assertEquals(
                 "refs/heads/configuration",
-                configuration.getBootstrap().getAccessControl().selectedRef());
-        assertEquals("acl/orion.xml", configuration.getBootstrap().getAccessControl().getPath());
-        assertFalse(configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing());
+                configuration.getBootstrap().getConfiguration().selectedRef());
+        assertEquals("acl/orion.xml", configuration.getBootstrap().getConfiguration().getPath());
+        assertFalse(configuration.getBootstrap().getConfiguration().isCreateDefaultIfMissing());
         assertEquals(
                 "env:ORION_CONFIG_TOKEN",
-                configuration.getBootstrap().getAccessControl().getAuth().get("credential"));
+                configuration.getBootstrap().getConfiguration().getAuth().get("credential"));
         assertEquals(
                 "git+ssh://material.example/orion.git",
                 configuration.getBootstrap().getKeyMaterial().getLocation());

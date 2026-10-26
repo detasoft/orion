@@ -3,7 +3,7 @@ bootstrap:
   workDir: work
   logDir: logs
   threadPoolSize: 10
-  accessControl:
+  configuration:
     location: local:orion
     ref: refs/heads/main
     path: orion.xml

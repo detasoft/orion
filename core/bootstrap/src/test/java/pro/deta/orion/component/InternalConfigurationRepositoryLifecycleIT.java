@@ -605,7 +605,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         Files.createDirectories(aclFile.getParent());
         Files.write(aclFile, defaultAclBytes("old-root-password"));
         BootstrapConfiguration configuration = configuration();
-        configuration.getBootstrap().getAccessControl().setLocation(aclDirectory.toUri().toString());
+        configuration.getBootstrap().getConfiguration().setLocation(aclDirectory.toUri().toString());
         OrionComponent reset = component(configuration, new RootPasswordReset(true));
         OrionApplicationLifecycle resetLifecycle = reset.orionApplicationLifecycle();
         String newPassword;
@@ -934,9 +934,9 @@ class InternalConfigurationRepositoryLifecycleIT {
         BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getBootstrap().setBaseDir(tempDir.resolve("runtime").toString());
         configuration.getStorage().setLocation(tempDir.resolve("repositories").toUri().toString());
-        configuration.getBootstrap().getAccessControl().setLocation("local:" + REPOSITORY_NAME);
-        configuration.getBootstrap().getAccessControl().setRef(CONFIGURATION_REF);
-        configuration.getBootstrap().getAccessControl().setPath(ACL_PATH);
+        configuration.getBootstrap().getConfiguration().setLocation("local:" + REPOSITORY_NAME);
+        configuration.getBootstrap().getConfiguration().setRef(CONFIGURATION_REF);
+        configuration.getBootstrap().getConfiguration().setPath(ACL_PATH);
         configuration.getTransport().getGit().setEnabled(false);
         configuration.getTransport().getSsh().setEnabled(false);
         configuration.getTransport().getHttp().setEnabled(false);
@@ -973,8 +973,8 @@ class InternalConfigurationRepositoryLifecycleIT {
         NativeGitRepositoryFactory provider = new NativeGitRepositoryFactory(configured);
         provider.resolveProvisional(
                 NativeGitRepositoryFactory.CONFIGURATION_SOURCE,
-                configuration.getBootstrap().getAccessControl(),
-                configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing());
+                configuration.getBootstrap().getConfiguration(),
+                configuration.getBootstrap().getConfiguration().isCreateDefaultIfMissing());
         return DaggerOrionComponent.builder()
                 .bootstrapConfiguration(configuration)
                 .rootPasswordReset(rootPasswordReset)

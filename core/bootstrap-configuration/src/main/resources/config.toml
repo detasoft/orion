@@ -4,7 +4,7 @@ workDir = "work"
 logDir = "logs"
 threadPoolSize = 10
 
-[bootstrap.accessControl]
+[bootstrap.configuration]
 location = "local:orion"
 ref = "refs/heads/main"
 path = "orion.xml"

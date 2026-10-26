@@ -53,7 +53,7 @@ class BootstrapConfigurationReaderTest {
                 bootstrap:
                   baseDir: /tmp/orion-file-yaml
                   logDir: /tmp/orion-file-logs
-                  accessControl:
+                  configuration:
                     path: file-yaml.xml
                 transport:
                   http:
@@ -73,7 +73,7 @@ class BootstrapConfigurationReaderTest {
         Files.writeString(configFile, """
                 bootstrap:
                   baseDir: /tmp/orion-file-uri
-                  accessControl:
+                  configuration:
                     path: file-uri.xml
                 transport:
                   http:
@@ -93,7 +93,7 @@ class BootstrapConfigurationReaderTest {
                 [bootstrap]
                 baseDir = "/tmp/orion-file-toml"
 
-                [bootstrap.accessControl]
+                [bootstrap.configuration]
                 path = "file-toml.xml"
 
                 [transport.http]
@@ -132,38 +132,38 @@ class BootstrapConfigurationReaderTest {
         return new BootstrapConfigurationReader(new String[]{location}, true, List.of(reader));
     }
 
-    private static byte[] yamlConfiguration(String baseDir, String accessControlPath, int httpPort) {
+    private static byte[] yamlConfiguration(String baseDir, String configurationPath, int httpPort) {
         return """
                 bootstrap:
                   baseDir: %s
-                  accessControl:
+                  configuration:
                     path: %s
                 transport:
                   http:
                     port: %d
-                """.formatted(baseDir, accessControlPath, httpPort).getBytes(StandardCharsets.UTF_8);
+                """.formatted(baseDir, configurationPath, httpPort).getBytes(StandardCharsets.UTF_8);
     }
 
-    private static byte[] tomlConfiguration(String baseDir, String accessControlPath, int httpPort) {
+    private static byte[] tomlConfiguration(String baseDir, String configurationPath, int httpPort) {
         return """
                 [bootstrap]
                 baseDir = "%s"
 
-                [bootstrap.accessControl]
+                [bootstrap.configuration]
                 path = "%s"
 
                 [transport.http]
                 port = %d
-                """.formatted(baseDir, accessControlPath, httpPort).getBytes(StandardCharsets.UTF_8);
+                """.formatted(baseDir, configurationPath, httpPort).getBytes(StandardCharsets.UTF_8);
     }
 
     private static void assertConfiguration(
             BootstrapConfiguration configuration,
             String baseDir,
-            String accessControlPath,
+            String configurationPath,
             int httpPort) {
         assertEquals(baseDir, configuration.getBootstrap().getBaseDir());
-        assertEquals(accessControlPath, configuration.getBootstrap().getAccessControl().getPath());
+        assertEquals(configurationPath, configuration.getBootstrap().getConfiguration().getPath());
         assertEquals(httpPort, configuration.getTransport().getHttp().getPort());
     }
 

@@ -84,7 +84,7 @@ public interface OrionComponent {
                     new NativeGitRepositoryFactory(configured);
             repositoryProvider.resolveProvisional(
                     NativeGitRepositoryFactory.CONFIGURATION_SOURCE,
-                    configuration.getBootstrap().getAccessControl(),
+                    configuration.getBootstrap().getConfiguration(),
                     true);
             return bootstrapConfiguration(configuration)
                     .rootPasswordReset(new RootPasswordReset(false))

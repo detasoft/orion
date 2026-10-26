@@ -144,8 +144,8 @@ class OrionStartupIT {
         Path remoteAclRepository = tempDir.resolve("remote-acl.git");
         seedRemoteAclRepository(remoteAclRepository, accessControlWithUsers("root", "remote-user"));
         BootstrapConfiguration configuration = serverConfiguration(orionRoot);
-        configuration.getBootstrap().getAccessControl().setLocation("git+" + remoteAclRepository.toUri());
-        configuration.getBootstrap().getAccessControl().setPath(ACL_FILE);
+        configuration.getBootstrap().getConfiguration().setLocation("git+" + remoteAclRepository.toUri());
+        configuration.getBootstrap().getConfiguration().setPath(ACL_FILE);
 
         OrionDocument loadedDocument;
 
@@ -190,8 +190,8 @@ class OrionStartupIT {
         Path configuredAclRepository = tempDir.resolve("configured-acl.git");
         seedRemoteAclRepository(configuredAclRepository, accessControlWithUsers("root", "configured-user"));
         BootstrapConfiguration configuration = serverConfiguration(orionRoot);
-        configuration.getBootstrap().getAccessControl().setLocation(configuredAclRepository.toUri().toString());
-        configuration.getBootstrap().getAccessControl().setPath(ACL_FILE);
+        configuration.getBootstrap().getConfiguration().setLocation(configuredAclRepository.toUri().toString());
+        configuration.getBootstrap().getConfiguration().setPath(ACL_FILE);
 
         try (StartedOrion orion = startServerWithConfig(configuration)) {
             assertThat(orion.accessControlService().userExists("configured-user")).isTrue();
@@ -295,9 +295,9 @@ class OrionStartupIT {
         Path orionRoot = tempDir.resolve("orion-acl-failure");
         Path missingRemoteAclRepository = tempDir.resolve("missing-acl.git");
         BootstrapConfiguration configuration = serverConfiguration(orionRoot);
-        configuration.getBootstrap().getAccessControl()
+        configuration.getBootstrap().getConfiguration()
                 .setLocation("git+" + missingRemoteAclRepository.toUri());
-        configuration.getBootstrap().getAccessControl().setPath(ACL_FILE);
+        configuration.getBootstrap().getConfiguration().setPath(ACL_FILE);
         configuration.getTransport().getGit().setEnabled(false);
         configuration.getTransport().getSsh().setEnabled(false);
 
@@ -537,8 +537,8 @@ class OrionStartupIT {
         BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getBootstrap().setBaseDir(orionRoot.toString());
         configuration.getStorage().setLocation(orionRoot.resolve("repos").toUri().toString());
-        configuration.getBootstrap().getAccessControl().setLocation("local:orion");
-        configuration.getBootstrap().getAccessControl().setRef("refs/heads/" + BRANCH);
+        configuration.getBootstrap().getConfiguration().setLocation("local:orion");
+        configuration.getBootstrap().getConfiguration().setRef("refs/heads/" + BRANCH);
 
         TestPorts.configure(configuration);
         return configuration;

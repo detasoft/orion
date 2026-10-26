@@ -603,7 +603,7 @@ public final class NativeGitRepositoryFactory implements NativeGitRepositoryBack
 
     private static String bootstrapSection(String sourceId) {
         return switch (sourceId) {
-            case CONFIGURATION_SOURCE -> "accessControl";
+            case CONFIGURATION_SOURCE -> "configuration";
             case MATERIAL_SOURCE -> "keyMaterial";
             default -> null;
         };

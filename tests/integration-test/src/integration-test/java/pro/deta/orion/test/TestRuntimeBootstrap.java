@@ -86,7 +86,7 @@ final class TestRuntimeBootstrap {
                 NativeGitRepositoryFactory.bootstrap(configured, Map.copyOf(System.getenv()));
         provider.resolveProvisional(
                 NativeGitRepositoryFactory.CONFIGURATION_SOURCE,
-                configuration.getBootstrap().getAccessControl(),
+                configuration.getBootstrap().getConfiguration(),
                 true);
         return DaggerOrionComponent.builder()
                 .bootstrapConfiguration(configuration)

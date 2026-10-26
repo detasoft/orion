@@ -76,7 +76,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             OrionConfigurationEditor editor) {
         this.orionPasswordHashingService = orionPasswordHashingService;
         this.rootPasswordReset = rootPasswordReset;
-        this.createDefaultIfMissing = bootstrapConfiguration.getBootstrap().getAccessControl()
+        this.createDefaultIfMissing = bootstrapConfiguration.getBootstrap().getConfiguration()
                 .isCreateDefaultIfMissing();
         this.editor = editor;
         this.jwtAccessTokenService = new JwtAccessTokenService(keyMaterial, signingMaterial);

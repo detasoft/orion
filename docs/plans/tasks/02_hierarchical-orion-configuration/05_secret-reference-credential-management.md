@@ -1425,7 +1425,7 @@ Orion currently has three separate resolution layers:
 1. application configuration resolution from application parameters;
 2. Git repository storage resolution from `storage.location` in bootstrap
    configuration;
-3. ACL bootstrap storage resolution from `bootstrap.accessControl.location`.
+3. ACL bootstrap storage resolution from `bootstrap.configuration.location`.
 
 These layers all parse locations and select implementations, but they do it with
 different switch statements and different helper APIs. The target design should

@@ -69,9 +69,9 @@ class S3BootstrapProxyColdStartIT {
             configuration.getStorage().setEndpoint(s3.endpoint());
             configuration.getStorage().setAuth(Map.of("accessKeyId", s3.accessKeyId(),
                     "secretAccessKey", "env:S3_BOOTSTRAP_SECRET"));
-            configuration.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
-            configuration.getBootstrap().getAccessControl().setRef(REF);
-            configuration.getBootstrap().getAccessControl().setPath(CONFIGURATION_PATH);
+            configuration.getBootstrap().getConfiguration().setCreateDefaultIfMissing(false);
+            configuration.getBootstrap().getConfiguration().setRef(REF);
+            configuration.getBootstrap().getConfiguration().setPath(CONFIGURATION_PATH);
             configuration.getBootstrap().getKeyMaterial().setRef(REF);
             configuration.getBootstrap().getKeyMaterial().setPath(MATERIAL_PATH);
             configuration.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);

@@ -31,12 +31,12 @@ public final class ConfigurationBootstrap {
             BootstrapConfiguration configuration,
             NativeGitRepositoryFactory repositoryFactory) {
         return new NativeGitOrionConfigurationStorage(repositoryFactory.fileEvents(
-                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getAccessControl()));
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getConfiguration()));
     }
 
     private static BootstrapConfigurationSourceConfig repositoryConfiguration(
             BootstrapConfiguration configuration, Map<String, String> environment) throws IOException {
-        BootstrapConfigurationSourceConfig configured = configuration.getBootstrap().getAccessControl();
+        BootstrapConfigurationSourceConfig configured = configuration.getBootstrap().getConfiguration();
         ResourceLocation location = ResourceLocation.parse(configured.getLocation(), "ACL repository");
         if (!(location.scheme() instanceof ResourceScheme.File)
                 && !(location.scheme() instanceof ResourceScheme.Empty)) {

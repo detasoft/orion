@@ -80,7 +80,7 @@ class BootstrapProxyEndpointIT {
                 config -> config.getTransport().getSsh().setEnabled(true));
         var target = RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("target"),
                 config -> config.getTransport().getSsh().setEnabled(true));
-        target.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
+        target.getBootstrap().getConfiguration().setCreateDefaultIfMissing(false);
         target.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);
         var generator = KeyPairGenerator.getInstance("RSA");
         generator.initialize(2048);
@@ -154,7 +154,7 @@ class BootstrapProxyEndpointIT {
                             var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
                             var before = mapper.readTree(RuntimeHttpTestSupport.request(
                                     "GET", proxyApi, TestBearerTokens.bearer(token)).body());
-                            var source = target.getBootstrap().getAccessControl();
+                            var source = target.getBootstrap().getConfiguration();
                             Map<String, Object> command = new java.util.LinkedHashMap<>();
                             command.put("action", "create");
                             command.put("scope", "system");

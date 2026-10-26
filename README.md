@@ -448,7 +448,7 @@ bootstrap:
   baseDir: orion_root
   workDir: work
   threadPoolSize: 10
-  accessControl:
+  configuration:
     location: local:orion
     ref: refs/heads/main
     path: orion.xml
@@ -937,7 +937,7 @@ holds its process lock and local session journals. Remote host provisioning,
 SSH credential resolution, and packaged deployment are administered separately.
 
 `storage.location` defaults to local filesystem storage with `file:` locations.
-`bootstrap.accessControl.location` can point to a local ACL directory with
+`bootstrap.configuration.location` can point to a local ACL directory with
 `file:` or to a repository in Orion's configured storage with
 `local:<repository>`. The [S3 Git backend](git/git-s3-storage/README.md)
 supports repository metadata, refs and pack storage with `s3://bucket/prefix` locations. Runtime repositories
@@ -949,7 +949,7 @@ bootstrap configuration, key material and proxy caches must remain file-backed.
 
 ACL loading does not depend on Orion network transports. Startup first reads
 configuration, initializes repository storage, resolves
-`bootstrap.accessControl`, and loads the ACL directly from the configured
+`bootstrap.configuration`, and loads the ACL directly from the configured
 storage backend. Only after the ACL is available does Orion start external
 transports.
 

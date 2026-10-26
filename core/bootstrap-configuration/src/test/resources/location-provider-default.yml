@@ -1,6 +1,6 @@
 bootstrap:
   baseDir: /tmp/orion-default-location
-  accessControl:
+  configuration:
     path: default-location.xml
 transport:
   http:

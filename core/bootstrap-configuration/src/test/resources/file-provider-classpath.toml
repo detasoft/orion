@@ -1,7 +1,7 @@
 [bootstrap]
 baseDir = "/tmp/orion-classpath-toml"
 
-[bootstrap.accessControl]
+[bootstrap.configuration]
 path = "classpath-toml.xml"
 
 [transport.http]

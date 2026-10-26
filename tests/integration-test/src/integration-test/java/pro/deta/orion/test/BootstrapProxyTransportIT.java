@@ -52,7 +52,7 @@ class BootstrapProxyTransportIT {
         BootstrapConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(
                 tempDir.resolve("proxy"));
         configuration.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);
-        configuration.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
+        configuration.getBootstrap().getConfiguration().setCreateDefaultIfMissing(false);
 
         var upstream = RuntimeHttpTestSupport.start(upstreamConfiguration);
         boolean stopped = false;
@@ -81,7 +81,7 @@ class BootstrapProxyTransportIT {
                             new pro.deta.orion.event.OrionEventManager()),
                     environment);
             String upstreamCache = upstreamProvider.prepareProvisional(
-                    "cache-isolation-probe", configuration.getBootstrap().getAccessControl());
+                    "cache-isolation-probe", configuration.getBootstrap().getConfiguration());
             assertCacheIsNotRoutable(configuration, environment, upstreamCache);
             try (var probeMaterial = TestServerIdentityMaterial.openMaterial(
                     configuration, environment, new InMemoryKeyMaterialContentStore())) {
@@ -109,7 +109,7 @@ class BootstrapProxyTransportIT {
                     NativeGitRepository retained = provider.openForRead(cache).valueOrFailure("provisional handle");
 
                     var storage = new NativeGitOrionConfigurationStorage(bootstrap.repositoryFactory().fileEvents(
-                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getAccessControl()));
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getConfiguration()));
                     var component = runtimeComponent(configuration, bootstrap, bootstrapEvents1);
                     var lifecycle = component.orionApplicationLifecycle();
                     try {
@@ -143,7 +143,7 @@ class BootstrapProxyTransportIT {
                                 .isEqualTo(updatedConfiguration);
 
                         Path credentialFile = Path.of(URI.create(configuration.getBootstrap()
-                                .getAccessControl().getAuth().get("credential")));
+                                .getConfiguration().getAuth().get("credential")));
                         String external = Files.readString(credentialFile);
                         Files.writeString(credentialFile, "invalid-external-credential");
                         try {
@@ -217,7 +217,7 @@ class BootstrapProxyTransportIT {
                             .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE).orElseThrow();
                     var provider = restarted.repositoryProvider();
                     var storage = new NativeGitOrionConfigurationStorage(restarted.repositoryFactory().fileEvents(
-                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getAccessControl()));
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getConfiguration()));
                     var before =
                             storage.load()
                                     .revision();
@@ -261,9 +261,9 @@ class BootstrapProxyTransportIT {
             Map<String, String> environment,
             String cache) {
         BootstrapSourceConfig source = new BootstrapSourceConfig();
-        source.setLocation(configuration.getBootstrap().getAccessControl().getLocation()
+        source.setLocation(configuration.getBootstrap().getConfiguration().getLocation()
                 .replace("bootstrap-inputs.git", cache + ".git"));
-        source.setAuth(configuration.getBootstrap().getAccessControl().getAuth());
+        source.setAuth(configuration.getBootstrap().getConfiguration().getAuth());
         source.setPath("orion.xml");
         var client = NativeGitRepositoryFactory.bootstrap(
                 NativeGitRepositoryBackend.inMemory(new pro.deta.orion.event.OrionEventManager()), environment);

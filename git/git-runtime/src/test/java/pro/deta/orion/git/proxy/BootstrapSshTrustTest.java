@@ -46,7 +46,7 @@ class BootstrapSshTrustTest {
             new pro.deta.orion.test.util.OrionTestRuntime();
 
     @ParameterizedTest
-    @CsvSource({"configuration,accessControl", "material,keyMaterial"})
+    @CsvSource({"configuration,configuration", "material,keyMaterial"})
     void acceptsUnconfiguredKeyAndPrintsYamlForItsSource(String sourceId, String section) throws Exception {
         try (Fixture fixture = new Fixture()) {
             BootstrapSourceConfig source = fixture.source("");
@@ -67,7 +67,7 @@ class BootstrapSshTrustTest {
             assertThatThrownBy(() -> fixture.provider.prepareProvisional("configuration", fixture.source(previous)))
                     .isInstanceOf(BootstrapGitProxyException.class);
             assertThat(fixture.authentications).hasValue(0);
-            assertThat(fixture.messages()).contains("rejected", "accessControl:", previous, fixture.key(),
+            assertThat(fixture.messages()).contains("rejected", "configuration:", previous, fixture.key(),
                     "Verify", "SHA256:").doesNotContain("secret-password");
         }
     }

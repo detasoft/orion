@@ -1,6 +1,6 @@
 bootstrap:
   baseDir: /tmp/orion-classpath-yaml
-  accessControl:
+  configuration:
     path: classpath-yaml.xml
 transport:
   http:

@@ -358,10 +358,10 @@ class OrionRuntimeModuleTest {
             NativeGitRepositoryFactory provider) {
         provider.resolveProvisional(
                 NativeGitRepositoryFactory.CONFIGURATION_SOURCE,
-                configuration.getBootstrap().getAccessControl(),
-                configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing());
+                configuration.getBootstrap().getConfiguration(),
+                configuration.getBootstrap().getConfiguration().isCreateDefaultIfMissing());
         return new NativeGitOrionConfigurationStorage(provider.fileEvents(
-                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getAccessControl()));
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getConfiguration()));
     }
 
     private byte[] aclBytes(String userId) throws Exception {
@@ -390,9 +390,9 @@ class OrionRuntimeModuleTest {
         BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getBootstrap().setBaseDir(tempDir.toString());
         configuration.getStorage().setLocation(tempDir.resolve("repos").toUri().toString());
-        configuration.getBootstrap().getAccessControl().setLocation(location);
-        configuration.getBootstrap().getAccessControl().setRef(BRANCH);
-        configuration.getBootstrap().getAccessControl().setPath(ACL_FILE);
+        configuration.getBootstrap().getConfiguration().setLocation(location);
+        configuration.getBootstrap().getConfiguration().setRef(BRANCH);
+        configuration.getBootstrap().getConfiguration().setPath(ACL_FILE);
         return configuration;
     }
 }

@@ -75,7 +75,7 @@ an endpoint for ordinary Git clients. Bootstrap hashes are not user-facing ids.
 
 ## Configuration and credential boundary
 
-Process TOML/YAML retains the supported `bootstrap.accessControl` locator and
+Process TOML/YAML retains the supported `bootstrap.configuration` locator and
 independent `bootstrap.keyMaterial` locator. The former selects `orion.xml`;
 it does not make ACL responsible for upstream transport. Do not rename these
 persisted fields or add an alias solely to match obsolete plan text.
