@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -54,6 +55,45 @@ class OrionTestRuntimeTest {
         assertThat(operations).containsExactly("third", "second", "first");
         assertThat(manager.isRunning()).isFalse();
         events.close();
+    }
+
+    @Test
+    void closesResourcesWhenDrainingEventsTimesOutAndPreservesResourceFailures() {
+        List<String> operations = new ArrayList<>();
+        OrionTestRuntime runtime = new OrionTestRuntime();
+        OrionEventManager manager = runtime.events();
+        OrionExecutor executor = runtime.executor();
+        CountDownLatch release = new CountDownLatch(1);
+        IOException resourceFailure = new IOException("resource failure");
+        runtime.own(() -> operations.add("first"));
+        runtime.own(() -> {
+            operations.add("second");
+            release.countDown();
+            throw resourceFailure;
+        });
+        manager.subscribe(Message.class, ignored -> {
+            try {
+                release.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException failure) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        manager.publish(new Message());
+
+        try {
+            assertThatThrownBy(runtime::close).isInstanceOf(IllegalStateException.class)
+                    .hasMessageStartingWith("Timed out waiting for event:")
+                    .hasSuppressedException(resourceFailure);
+
+            assertThat(operations).containsExactly("second", "first");
+            assertThat(executor.isShutdown()).isTrue();
+            assertThat(manager.isRunning()).isFalse();
+            runtime.close();
+        } finally {
+            release.countDown();
+            executor.close();
+            runtime.close();
+        }
     }
 
     @Test

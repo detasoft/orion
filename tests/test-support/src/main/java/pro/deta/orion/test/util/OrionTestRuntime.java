@@ -49,9 +49,13 @@ public final class OrionTestRuntime implements AfterEachCallback, AutoCloseable 
 
     @Override
     public void close() {
-        IllegalStateException failures = null;
+        RuntimeException failures = null;
         try {
-            awaitEvents();
+            try {
+                awaitEvents();
+            } catch (RuntimeException failure) {
+                failures = failure;
+            }
             for (AutoCloseable resource : resources.reversed()) {
                 try {
                     resource.close();
