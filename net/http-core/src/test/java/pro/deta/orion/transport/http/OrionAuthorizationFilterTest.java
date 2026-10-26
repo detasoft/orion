@@ -212,7 +212,7 @@ class OrionAuthorizationFilterTest {
 
     private OrionAuthorizationFilter filter(OrionAccessControlService accessControlService) {
         OrionOidcRoute oidc = new OrionOidcRoute(null, null, null, null, new ObjectMapper(),
-                Clock.systemUTC(), sessionDirectory, null);
+                Clock.systemUTC(), sessionDirectory, null, null);
         return new OrionAuthorizationFilter(accessControlService, oidc);
     }
 

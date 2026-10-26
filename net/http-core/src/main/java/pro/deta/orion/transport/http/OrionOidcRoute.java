@@ -73,12 +73,13 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
             ConfigurationSecrets secrets, ObjectMapper mapper,
             ConfigurationContext configuration, OrionKeyMaterial keyMaterial) {
         this(accounts, acl, editor, secrets, mapper, Clock.systemUTC(),
-                configuration.getBaseDir().resolve("oidc-sessions"), keyMaterial);
+                configuration.getBaseDir().resolve("oidc-sessions"), keyMaterial,
+                new OidcClient(mapper, javax.net.ssl.HttpsURLConnection.getDefaultSSLSocketFactory()));
     }
 
     OrionOidcRoute(OrganizationAccounts accounts, OrionAccessControlServiceImpl acl, OrionConfigurationEditor editor,
             ConfigurationSecrets secrets, ObjectMapper mapper, Clock clock,
-            Path sessionDirectory, OrionKeyMaterial keyMaterial) {
+            Path sessionDirectory, OrionKeyMaterial keyMaterial, OidcClient client) {
         super("/api/auth/**", OrionHttpRouteDefinition.Method.GET, OrionHttpRouteDefinition.Method.POST);
         this.clock = clock;
         this.sessionDirectory = sessionDirectory;
@@ -88,7 +89,7 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
         this.editor = editor;
         this.secrets = secrets;
         this.mapper = mapper;
-        this.client = new OidcClient(mapper);
+        this.client = client;
     }
 
     @Override

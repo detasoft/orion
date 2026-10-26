@@ -67,12 +67,30 @@ import java.util.concurrent.TimeoutException;
 import static org.assertj.core.api.Assertions.*;
 
 class OrionOidcOnboardingTest {
-    private static final pro.deta.orion.test.util.OrionTestRuntime EVENTS =
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
             new pro.deta.orion.test.util.OrionTestRuntime();
 
-    @org.junit.jupiter.api.AfterEach
-    void stopOrionTestRuntime() {
-        EVENTS.close();
+    @Test
+    void clientsTrustOnlyTheirOwnProviderWithoutChangingTheGlobalTlsFactory() throws Exception {
+        SSLSocketFactory original = HttpsURLConnection.getDefaultSSLSocketFactory();
+        try (Fixture first = new Fixture(); Fixture second = new Fixture()) {
+            OidcProvider firstProvider = new OidcProvider("corporate", first.issuer, "client", "oidc",
+                    OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0);
+            OidcProvider secondProvider = new OidcProvider("corporate", second.issuer, "client", "oidc",
+                    OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0);
+            OidcClient firstClient = new OidcClient(first.mapper, first.tlsFactory);
+            OidcClient secondClient = new OidcClient(second.mapper, second.tlsFactory);
+
+            assertThat(firstClient.discover(firstProvider).token()).isEqualTo(first.issuer.resolve("/token"));
+            assertThat(secondClient.discover(secondProvider).token()).isEqualTo(second.issuer.resolve("/token"));
+            assertThatThrownBy(() -> firstClient.discover(secondProvider))
+                    .isInstanceOf(SSLHandshakeException.class);
+            assertThatThrownBy(() -> secondClient.discover(firstProvider))
+                    .isInstanceOf(SSLHandshakeException.class);
+            assertThat(HttpsURLConnection.getDefaultSSLSocketFactory()).isSameAs(original);
+        }
+        assertThat(HttpsURLConnection.getDefaultSSLSocketFactory()).isSameAs(original);
     }
 
     @Test
@@ -89,7 +107,7 @@ class OrionOidcOnboardingTest {
                 assertThatThrownBy(() -> saving.get(200, TimeUnit.MILLISECONDS))
                         .isInstanceOf(TimeoutException.class);
             } finally {
-                EVENTS.events().publish(new ConfigurationChanged(f.storage, f.storage.snapshot));
+                testRuntime.events().publish(new ConfigurationChanged(f.storage, f.storage.snapshot));
             }
             assertThat(saving.get(5, TimeUnit.SECONDS).status).isEqualTo(200);
             Reply invitations = f.request("GET", "/api/admin/invitations", Map.of(), Map.of(), null, f.admin);
@@ -111,7 +129,7 @@ class OrionOidcOnboardingTest {
                 assertThatThrownBy(() -> saving.get(200, TimeUnit.MILLISECONDS))
                         .isInstanceOf(TimeoutException.class);
             } finally {
-                EVENTS.events().publish(new ConfigurationChanged(f.storage, f.storage.snapshot));
+                testRuntime.events().publish(new ConfigurationChanged(f.storage, f.storage.snapshot));
             }
             Reply response = saving.get(5, TimeUnit.SECONDS);
             assertThat(response.status).isEqualTo(201);
@@ -262,7 +280,7 @@ class OrionOidcOnboardingTest {
                                         invitation.email(), 1, invitation.provider(), invitation.repositories()))),
                                 document.organizations());
                     }).apply();
-            EVENTS.awaitEvents();
+            testRuntime.awaitEvents();
             assertThatThrownBy(() -> f.accounts.acceptSystem(token, "alice@example.test", provider,
                     "external-alice", "Alice", "")).isInstanceOf(IllegalArgumentException.class);
             assertThat(f.document().system().accessControl().users()).isEmpty();
@@ -301,7 +319,7 @@ class OrionOidcOnboardingTest {
                                         provider.secret(), provider.idleTimeoutSeconds(), 0)), system.invitations()),
                                 document.organizations());
                     }).apply();
-            EVENTS.awaitEvents();
+            testRuntime.awaitEvents();
             String invitation = f.inviteSystem(List.of());
             Reply providers = f.request("GET", "/api/auth/providers", Map.of(),
                     Map.of("scope", "system", "invitation", invitation), null, null);
@@ -434,7 +452,7 @@ class OrionOidcOnboardingTest {
                                 return new OrionDocument(document.system(), organizations);
                             })
                     .apply();
-            EVENTS.awaitEvents();
+            testRuntime.awaitEvents();
             Reply system = f.request("GET", "/api/auth/providers", Map.of(), Map.of("scope", "system"), null, null);
             assertThat(system.status).isEqualTo(200);
             assertThat(system.json.path("providers").get(0).asText()).isEqualTo("corporate");
@@ -543,7 +561,7 @@ class OrionOidcOnboardingTest {
                             new ChangeMetadata(UserEmail.EMPTY, "remove fixture binding"))
                     .update(document -> document.replaceAccessControl(new AccessControl()))
                     .apply();
-            EVENTS.awaitEvents();
+            testRuntime.awaitEvents();
             assertThat(f.acl.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Failure.class);
             assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
         }
@@ -568,7 +586,7 @@ class OrionOidcOnboardingTest {
                                     f.secrets.replaceSystem(
                                             document, "oidc", "rotated".toCharArray()))
                     .apply();
-            EVENTS.awaitEvents();
+            testRuntime.awaitEvents();
             assertThat(f.callbackReply(pending).status).isEqualTo(400);
             assertThat(f.acl.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Failure.class);
             assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
@@ -608,7 +626,7 @@ class OrionOidcOnboardingTest {
                                         document.organizations());
                             })
                     .apply();
-            EVENTS.awaitEvents();
+            testRuntime.awaitEvents();
             assertThat(f.acl.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Failure.class);
             assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
             assertThat(f.post("start", Map.of("scope", "system", "provider", "corporate"), null).status)
@@ -942,7 +960,7 @@ class OrionOidcOnboardingTest {
                                 return new OrionDocument(document.system(), organizations);
                             })
                     .apply();
-            EVENTS.awaitEvents();
+            testRuntime.awaitEvents();
             assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
         }
     }
@@ -957,7 +975,7 @@ class OrionOidcOnboardingTest {
                     .valueOrFailure("Cannot read configuration document")
                     .toString())
                     .doesNotContain(invitation);
-            EVENTS.awaitEvents();
+            testRuntime.awaitEvents();
             Login login = f.start("acme", invitation);
             String ticket = f.callback(login);
             Reply profile = f.post("profile", Map.of("ticket", ticket), login.cookie);
@@ -994,7 +1012,7 @@ class OrionOidcOnboardingTest {
                     .isEqualTo(400);
             assertThatThrownBy(() -> f.accounts.invitation(new OrganizationId("acme"), invitation))
                     .isInstanceOf(IllegalArgumentException.class);
-            EVENTS.awaitEvents();
+            testRuntime.awaitEvents();
             assertThat(f.acl.verifyToken(token.getBytes(StandardCharsets.UTF_8)))
                     .isInstanceOf(TokenAuthenticationResult.Success.class);
             Login returning = f.start("acme", "");
@@ -1014,7 +1032,7 @@ class OrionOidcOnboardingTest {
                                                     f.accounts.organization(
                                                             new OrganizationId("default")))))
                     .apply();
-            EVENTS.awaitEvents();
+            testRuntime.awaitEvents();
             assertThat(f.acl.verifyToken(token.getBytes(StandardCharsets.UTF_8)))
                     .isInstanceOf(TokenAuthenticationResult.Failure.class);
         }
@@ -1096,7 +1114,7 @@ class OrionOidcOnboardingTest {
                                 return new OrionDocument(document.system(), organizations);
                             })
                     .apply();
-            EVENTS.awaitEvents();
+            testRuntime.awaitEvents();
             assertThatThrownBy(() -> f.accounts.accept(id, token, "alice@example.test", provider, "subject", "A", ""))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThat(f.accounts.organization(id).users()).isEmpty();
@@ -1166,7 +1184,7 @@ class OrionOidcOnboardingTest {
             input.put("issuer", "https://accounts.google.com");
             input.put("clientSecret", "rotated-secret");
             assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null, f.admin).status).isEqualTo(200);
-            EVENTS.awaitEvents();
+            testRuntime.awaitEvents();
             assertThat(secrets.resolveOrganization(f.editor.current().result()
                     .valueOrFailure("Cannot read configuration document"), id, provider.secret()))
                     .isEqualTo("rotated-secret".toCharArray());
@@ -1255,7 +1273,7 @@ class OrionOidcOnboardingTest {
                                 return new OrionDocument(document.system(), organizations);
                             })
                     .apply();
-            EVENTS.awaitEvents();
+            testRuntime.awaitEvents();
             Map<String, Object> input = Map.of("organization", "acme", "id", "corporate",
                     "issuer", f.issuer.toString(), "clientId", "client", "clientSecret", "new-secret",
                     "revision", f.revision());
@@ -1296,10 +1314,10 @@ class OrionOidcOnboardingTest {
         }
     }
 
-    private static final class Fixture implements AutoCloseable {
+    private final class Fixture implements AutoCloseable {
         final pro.deta.orion.git.proxy.NativeGitRepositoryFactory repositories =
                 new pro.deta.orion.git.proxy.NativeGitRepositoryFactory(
-                        pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(EVENTS.events()));
+                        pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(testRuntime.events()));
         final ObjectMapper mapper = new ObjectMapper();
         final MemoryStorage storage = new MemoryStorage();
         final OrionKeyMaterial material;
@@ -1307,7 +1325,7 @@ class OrionOidcOnboardingTest {
         final OrionAccessControlServiceImpl acl;
         final OrganizationAccounts accounts;
         final HttpsServer provider;
-        final SSLSocketFactory originalTls = HttpsURLConnection.getDefaultSSLSocketFactory();
+        final SSLSocketFactory tlsFactory;
         final RSAKey signingKey = new RSAKeyGenerator(2048).keyID("provider-key").generate();
         final SecurityContext admin = SecurityContext.createContext().withUserIdentity(new InternalUserImpl("root",
                 List.of(new Grant("admin", List.of(
@@ -1346,7 +1364,7 @@ class OrionOidcOnboardingTest {
             trust.init(keyStore);
             SSLContext tls = SSLContext.getInstance("TLS");
             tls.init(keys.getKeyManagers(), trust.getTrustManagers(), null);
-            HttpsURLConnection.setDefaultSSLSocketFactory(tls.getSocketFactory());
+            tlsFactory = tls.getSocketFactory();
             provider = HttpsServer.create(new InetSocketAddress("localhost", 0), 0);
             provider.setHttpsConfigurator(new HttpsConfigurator(tls));
             issuer = URI.create("https://localhost:" + provider.getAddress().getPort());
@@ -1431,7 +1449,7 @@ class OrionOidcOnboardingTest {
             storage.snapshot = new OrionDocumentRevision(Result.of(document), new OrionRevision.Stored("0"));
             editor = new OrionConfigurationEditor(storage,
                 material,
-                EVENTS.events());
+                testRuntime.events());
             acl =
                     new OrionAccessControlServiceImpl(
                             new OrionPasswordHashingService(),
@@ -1447,7 +1465,7 @@ class OrionOidcOnboardingTest {
 
         void restart() {
             OrionOidcRoute oidc = new OrionOidcRoute(accounts, acl, editor, secrets, mapper, clock,
-                    sessions, material);
+                    sessions, material, new OidcClient(mapper, tlsFactory));
             filter = new OrionAuthorizationFilter(acl, oidc);
             servlet =
                     new OrionHttpRouteServlet(
@@ -1548,7 +1566,7 @@ class OrionOidcOnboardingTest {
                                         changed, "oidc", "secret".toCharArray());
                             })
                     .apply();
-            EVENTS.awaitEvents();
+            testRuntime.awaitEvents();
         }
 
         Reply signInSystem() throws Exception {
@@ -1607,7 +1625,7 @@ class OrionOidcOnboardingTest {
 
         Reply request(String method, String path, Map<String, Object> body, Map<String, String> parameters,
                 String cookie, SecurityContext context) throws Exception {
-            EVENTS.awaitEvents();
+            testRuntime.awaitEvents();
             byte[] bytes = mapper.writeValueAsBytes(body);
             SecurityContext[] currentContext = {context};
             HttpServletRequest request = stub(HttpServletRequest.class, (proxy, called, args) -> switch (called.getName()) {
@@ -1648,7 +1666,7 @@ class OrionOidcOnboardingTest {
             } else {
                 filter.doFilter(request, response, (ignoredRequest, ignoredResponse) -> response.setStatus(200));
             }
-            EVENTS.awaitEvents();
+            testRuntime.awaitEvents();
             String value = output.toString();
             JsonNode json = value.startsWith("{") ? mapper.readTree(value) : mapper.nullNode();
             return new Reply(status[0], json, headers);
@@ -1659,7 +1677,7 @@ class OrionOidcOnboardingTest {
         }
 
         String revision() {
-            EVENTS.awaitEvents();
+            testRuntime.awaitEvents();
             return ((OrionRevision.Stored) editor.current().revision()).value();
         }
 
@@ -1668,7 +1686,6 @@ class OrionOidcOnboardingTest {
             acl.onStop();
             editor.onStop();
             provider.stop(0);
-            HttpsURLConnection.setDefaultSSLSocketFactory(originalTls);
             material.close();
             try (DirectoryStream<Path> files = Files.newDirectoryStream(sessions)) {
                 for (Path file : files) Files.delete(file);
@@ -1689,7 +1706,7 @@ class OrionOidcOnboardingTest {
         return result;
     }
 
-    private static final class MemoryStorage implements OrionVersionedConfigurationStorage {
+    private final class MemoryStorage implements OrionVersionedConfigurationStorage {
         OrionDocumentRevision snapshot;
         int saves;
         boolean conflict;
@@ -1722,7 +1739,7 @@ class OrionOidcOnboardingTest {
             OrionRevision.Stored saved = new OrionRevision.Stored(Integer.toString(++saves));
             snapshot = new OrionDocumentRevision(Result.of(document), saved);
             if (deferPublication) savedWithoutPublication.countDown();
-            else EVENTS.events().publish(new ConfigurationChanged(this, snapshot));
+            else testRuntime.events().publish(new ConfigurationChanged(this, snapshot));
             return saved;
         }
     }

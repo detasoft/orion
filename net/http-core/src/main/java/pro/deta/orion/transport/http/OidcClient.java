@@ -24,13 +24,18 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLSocketFactory;
 
 /** OIDC authorization-code client; validates provider metadata and signed ID tokens with Nimbus. */
 final class OidcClient {
     private final ObjectMapper mapper;
+    private final SSLSocketFactory tls;
 
-    OidcClient(ObjectMapper mapper) {
+    OidcClient(ObjectMapper mapper, SSLSocketFactory tls) {
         this.mapper = mapper;
+        this.tls = Objects.requireNonNull(tls, "tls");
     }
 
     Metadata discover(OidcProvider provider) throws Exception {
@@ -118,6 +123,9 @@ final class OidcClient {
 
     private JsonNode request(URI endpoint, String body, String authorization) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) endpoint.toURL().openConnection();
+        if (connection instanceof HttpsURLConnection https) {
+            https.setSSLSocketFactory(tls);
+        }
         connection.setConnectTimeout(5000);
         connection.setReadTimeout(5000);
         connection.setInstanceFollowRedirects(false);
