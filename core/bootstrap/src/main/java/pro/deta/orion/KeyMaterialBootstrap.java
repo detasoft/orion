@@ -4,7 +4,7 @@ import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.KeyMaterialConfig;
 import pro.deta.orion.bootstrap.config.ServerSigningConfig;
 import pro.deta.orion.bootstrap.config.SigningKeyReferenceConfig;
-import pro.deta.orion.event.OrionEventManager;
+import pro.deta.orion.event.type.OrionEventPublisher;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
 import pro.deta.orion.keymaterial.KeyMaterialContentStore;
@@ -52,7 +52,7 @@ public final class KeyMaterialBootstrap {
             Map<String, String> environment,
             KeyMaterialContentStore store,
             KeyMaterialCreation creation,
-            OrionEventManager events) throws IOException, GeneralSecurityException {
+            OrionEventPublisher events) throws IOException, GeneralSecurityException {
         SigningMaterialSet signingMaterial;
         KeyMaterialOptions options;
         try {

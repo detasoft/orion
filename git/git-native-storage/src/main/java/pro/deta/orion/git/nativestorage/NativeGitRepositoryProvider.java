@@ -128,6 +128,17 @@ public class NativeGitRepositoryProvider implements AutoCloseable {
         return find(repositoryName);
     }
 
+    public NativeGitRepository retained(String repositoryName) {
+        return operation(() -> {
+            RepositoryEntry entry = entryIfPresent(RepositoryName.parse(repositoryName));
+            NativeGitRepository repository = entry == null ? null : entry.view;
+            if (repository == null) {
+                throw new IllegalStateException("Repository has not been opened: " + repositoryName);
+            }
+            return repository;
+        });
+    }
+
     public Result<NativeGitRepository> openForWrite(String repositoryName) {
         return find(repositoryName);
     }

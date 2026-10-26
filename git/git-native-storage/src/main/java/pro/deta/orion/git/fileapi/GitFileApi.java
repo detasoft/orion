@@ -49,23 +49,32 @@ public final class GitFileApi {
     public <T> T readFile(ObjectId commitId, String path, GitObjectRead<T> reader)
             throws IOException, GitOperationException {
         Objects.requireNonNull(reader, "reader");
+        TreeEntry entry = fileEntry(commitId, path);
+        return repository.storage().withAccess(bytes -> {
+            Optional<T> result = repository.index().withAccess(index -> GitObjectRead.read(
+                    bytes, index, entry.objectId(),
+                    new ResolvedGitObjectRead<>(bytes, index, (type, size, base, input) -> {
+                        if (type != GitObjectType.BLOB) {
+                            throw new IOException("File target is not a blob: " + path);
+                        }
+                        return reader.read(type, size, base, input);
+                    })));
+            return result.orElseThrow(() -> new GitOperationException("Object not found: " + entry.objectId()));
+        });
+    }
+
+    public ObjectId objectId(ObjectId commitId, String path) throws GitOperationException {
+        return fileEntry(commitId, path).objectId();
+    }
+
+    private TreeEntry fileEntry(ObjectId commitId, String path) throws GitOperationException {
         String normalized = gitPath(path);
         ObjectId tree = rootTreeId(commitId, readObject(commitId));
         TreeEntry entry = resolvePath(tree, normalized);
         if (entry.mode() == FileMode.TREE || entry.mode() == FileMode.GITLINK) {
             throw new GitOperationException("Path is not a file: " + normalized);
         }
-        return repository.storage().withAccess(bytes -> {
-            Optional<T> result = repository.index().withAccess(index -> GitObjectRead.read(
-                    bytes, index, entry.objectId(),
-                    new ResolvedGitObjectRead<>(bytes, index, (type, size, base, input) -> {
-                        if (type != GitObjectType.BLOB) {
-                            throw new IOException("File target is not a blob: " + normalized);
-                        }
-                        return reader.read(type, size, base, input);
-                    })));
-            return result.orElseThrow(() -> new GitOperationException("Object not found: " + entry.objectId()));
-        });
+        return entry;
     }
 
     public <T> T readFile(String branch, String path, GitObjectRead<T> reader)

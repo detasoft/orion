@@ -3,8 +3,6 @@ package pro.deta.orion.keymaterial;
 import pro.deta.orion.event.type.OrionEventPublisher;
 import pro.deta.orion.event.type.OrionEvent;
 import pro.deta.orion.event.OrionEventManager;
-import pro.deta.orion.util.Subscription;
-import java.util.function.Consumer;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -681,45 +679,6 @@ class OrionKeyMaterialApiTest {
         }
     }
 
-    @Test
-    void ownsItsUpdateSubscriptionAndRetainsWorkingKeysAfterAReloadFailure() throws Exception {
-        VersionedStore store = new VersionedStore();
-        AtomicInteger deliveries = new AtomicInteger();
-        OrionEventManager events = new OrionEventManager() {
-            @Override
-            public <T extends OrionEvent> Subscription subscribe(Class<T> type, Consumer<T> handler) {
-                return super.subscribe(type, event -> {
-                    deliveries.incrementAndGet();
-                    handler.accept(event);
-                });
-            }
-        };
-        events.onStart();
-        try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password());
-             OrionKeyMaterial reader = OrionKeyMaterial.open(store, options, events);
-             OrionKeyMaterial writer = open(store)) {
-            writer.withModification(modification -> {
-                modification.generateKey(SIGNING, 2048);
-                modification.apply();
-            });
-            String revision = store.read().orElseThrow().version();
-            events.publishAndWait(new KeyMaterialUpdated(revision));
-            assertThat(reader.contains(SIGNING)).isTrue();
-            byte[] payload = new byte[]{1, 2, 3};
-            byte[] signature = reader.sign(SIGNING, payload);
-            String corrupt = store.write(new byte[]{1, 2, 3}, revision);
-            events.publishAndWait(new KeyMaterialUpdated(corrupt));
-            assertThat(reader.version()).isEqualTo(1);
-            assertThat(reader.verify(SIGNING, payload, signature)).isTrue();
-            assertThat(deliveries).hasValue(2);
-            reader.close();
-            events.publishAndWait(new KeyMaterialUpdated(corrupt));
-            assertThat(deliveries).hasValue(2);
-        } finally {
-            events.onStop();
-        }
-    }
-
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void closesItsStoreOnCloseOrWhenLoadingFails(boolean invalidMaterial) throws Exception {
@@ -785,13 +744,7 @@ class OrionKeyMaterialApiTest {
     private static OrionKeyMaterial open(KeyMaterialContentStore store, OrionEventPublisher eventPublisher)
             throws Exception {
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password())) {
-            OrionEventManager events = new OrionEventManager() {
-                @Override
-                public void publishIfRunning(OrionEvent event) {
-                    eventPublisher.publishIfRunning(event);
-                }
-            };
-            return OrionKeyMaterial.open(store, options, events);
+            return OrionKeyMaterial.open(store, options, eventPublisher);
         }
     }
 

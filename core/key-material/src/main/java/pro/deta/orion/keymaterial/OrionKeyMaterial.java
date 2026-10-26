@@ -1,7 +1,6 @@
 package pro.deta.orion.keymaterial;
 
-import pro.deta.orion.event.OrionEventManager;
-import pro.deta.orion.util.Subscription;
+import pro.deta.orion.event.type.OrionEventPublisher;
 
 import java.util.Set;
 
@@ -59,15 +58,9 @@ public class OrionKeyMaterial implements AutoCloseable {
 
     private final SecureRandom secureRandom = new SecureRandom();
     private final KeyMaterialService owner;
-    private final Subscription updates;
 
     private OrionKeyMaterial(KeyMaterialService owner) {
-        this(owner, () -> {});
-    }
-
-    private OrionKeyMaterial(KeyMaterialService owner, Subscription updates) {
         this.owner = owner;
-        this.updates = updates;
     }
 
     public static OrionKeyMaterial open(KeyMaterialContentStore store, KeyMaterialOptions options)
@@ -78,27 +71,9 @@ public class OrionKeyMaterial implements AutoCloseable {
     public static OrionKeyMaterial open(
             KeyMaterialContentStore store,
             KeyMaterialOptions options,
-            OrionEventManager events) throws IOException, GeneralSecurityException {
-        KeyMaterialService owner = KeyMaterialService.open(
-                store, options, new KeyMaterialStorageCertificateFactory(), events);
-        Subscription updates = null;
-        try {
-            updates = events.subscribe(KeyMaterialUpdated.class, event -> {
-                try {
-                    owner.reload(event.revision());
-                } catch (IOException | GeneralSecurityException | RuntimeException failure) {
-                    System.getLogger(OrionKeyMaterial.class.getName()).log(System.Logger.Level.WARNING,
-                            "Retaining active key material after reload failure at " + event.revision(), failure);
-                }
-            });
-            Optional<KeyMaterialSnapshot> current = store.read();
-            if (current.isPresent()) owner.reload(current.orElseThrow().version());
-            return new OrionKeyMaterial(owner, updates);
-        } catch (IOException | GeneralSecurityException | RuntimeException failure) {
-            if (updates != null) updates.close();
-            owner.close();
-            throw failure;
-        }
+            OrionEventPublisher events) throws IOException, GeneralSecurityException {
+        return new OrionKeyMaterial(KeyMaterialService.open(
+                store, options, new KeyMaterialStorageCertificateFactory(), events));
     }
 
     protected OrionKeyMaterial() {
@@ -492,11 +467,7 @@ public class OrionKeyMaterial implements AutoCloseable {
 
     @Override
     public void close() {
-        try {
-            updates.close();
-        } finally {
-            if (owner != null) owner.close();
-        }
+        if (owner != null) owner.close();
     }
 
     public CertificateIdentity certificateIdentity(TlsMaterialConfiguration configuration)

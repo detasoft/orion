@@ -16,7 +16,7 @@ public interface KeyMaterialContentStore extends AutoCloseable {
         return snapshot;
     }
 
-    String write(byte[] bytes, String expectedVersion) throws IOException;
+    String write(byte[] bytes, String expectedRevision) throws IOException;
 
     @Override
     default void close() {}

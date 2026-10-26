@@ -1,5 +1,10 @@
 package pro.deta.orion;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
+
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
@@ -11,7 +16,15 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
-import pro.deta.orion.keymaterial.KeyMaterialUpdated;
+import pro.deta.orion.git.fileapi.GitFile;
+import pro.deta.orion.git.fileapi.GitFileEvents;
+import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
+import pro.deta.orion.keymaterial.KeyMaterialOptions;
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
+import pro.deta.orion.keymaterial.KeyMaterialPurpose;
+import java.util.Set;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import pro.deta.orion.keymaterial.KeyMaterialStoreConflictException;
@@ -85,10 +98,12 @@ class NativeGitKeyMaterialContentStoreTest {
         assertThat(fixture.repository().files().readBytes(REF, "orion.xml")).isEqualTo(bytes("configuration"));
         assertThat(fixture.repository().files().readBytes(REF, MATERIAL_PATH))
                 .isEqualTo(bytes("encrypted-material"));
+        assertThatThrownBy(() -> store.write(bytes("unexpected replacement"), null))
+                .isInstanceOf(KeyMaterialStoreConflictException.class);
     }
 
     @Test
-    void preservesAConfigurationEditMadeAfterMaterialWasOpened() throws Exception {
+    void preservesUnrelatedConfigurationChangesWithoutReloadingMaterial() throws Exception {
         Fixture fixture = fixture(Map.of(MATERIAL_PATH, bytes("initial"),
                 "orion.xml", bytes("initial config")));
         NativeGitKeyMaterialContentStore store = fixture.store();
@@ -155,9 +170,8 @@ class NativeGitKeyMaterialContentStoreTest {
                                                 new GitCommitMetadata(
                                                         GitCommitAuthor.EMPTY, "concurrent update"),
                                                 fileAccess -> {
-                                                    fileAccess.write(
-                                                            "orion.xml",
-                                                            bytes("concurrent configuration"));
+                                                    fileAccess.write("orion.xml", bytes("concurrent configuration"));
+                                                    fileAccess.write(MATERIAL_PATH, bytes("concurrent material"));
                                                     fileAccess.apply();
                                                     return null;
                                                 });
@@ -172,7 +186,7 @@ class NativeGitKeyMaterialContentStoreTest {
         assertThatThrownBy(() -> store.write(bytes("stale material"), observedVersion))
                 .isInstanceOf(KeyMaterialStoreConflictException.class);
 
-        assertThat(repository.files().readBytes(REF, MATERIAL_PATH)).isEqualTo(bytes("initial"));
+        assertThat(repository.files().readBytes(REF, MATERIAL_PATH)).isEqualTo(bytes("concurrent material"));
         assertThat(repository.files().readBytes(REF, "orion.xml")).isEqualTo(bytes("concurrent configuration"));
     }
 
@@ -227,7 +241,8 @@ class NativeGitKeyMaterialContentStoreTest {
         try (NativeGitKeyMaterialContentStore store = fixture.store()) {
             testRuntime.awaitEvents();
             List<String> revisions = new CopyOnWriteArrayList<>();
-            testRuntime.events().subscribe(KeyMaterialUpdated.class, event -> revisions.add(event.revision()));
+            GitFile file = new GitFile(fixture.provider(), REPOSITORY, REF, MATERIAL_PATH);
+            testRuntime.own(new GitFileEvents(file, revision -> revisions.add(revision.toHex())));
             fixture.repository().files().withAccess(REF,
                     new GitCommitMetadata(GitCommitAuthor.EMPTY, "unrelated file"), access -> {
                         access.write("orion.xml", bytes("updated configuration"));
@@ -252,29 +267,61 @@ class NativeGitKeyMaterialContentStoreTest {
     }
 
     @Test
-    void skipsAMissingFileAndStopsObservingWhenClosed() throws Exception {
-        Fixture fixture = fixture(Map.of(MATERIAL_PATH, bytes("initial")));
-        NativeGitKeyMaterialContentStore store = fixture.store();
-        testRuntime.awaitEvents();
-        List<String> revisions = new CopyOnWriteArrayList<>();
-        testRuntime.events().subscribe(KeyMaterialUpdated.class, event -> revisions.add(event.revision()));
-        fixture.repository().files().withAccess(REF,
-                new GitCommitMetadata(GitCommitAuthor.EMPTY, "remove material"), access -> {
-                    access.delete(MATERIAL_PATH);
-                    access.apply();
-                    return null;
+    void retainsRunningMaterialAfterAnExternalUpdateAndLoadsItWhenReopened() throws Exception {
+        char[] password = "test-password".toCharArray();
+        InMemoryKeyMaterialContentStore external = new InMemoryKeyMaterialContentStore();
+        KeyMaterialDescriptor original = new KeyMaterialDescriptor("original",
+                Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
+        KeyMaterialDescriptor local = new KeyMaterialDescriptor("local",
+                Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
+        KeyMaterialDescriptor added = new KeyMaterialDescriptor("added",
+                Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
+        try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(password);
+             OrionKeyMaterial writer = OrionKeyMaterial.open(external, options)) {
+            writer.withModification(modification -> {
+                modification.generateKey(original, 2048);
+                modification.apply();
+            });
+            Fixture fixture = fixture(Map.of(MATERIAL_PATH, external.read().orElseThrow().bytes()));
+            Logger logger = (Logger) LoggerFactory.getLogger(NativeGitKeyMaterialContentStore.class);
+            ListAppender<ILoggingEvent> warnings = new ListAppender<>();
+            warnings.start();
+            logger.addAppender(warnings);
+            try (OrionKeyMaterial running = OrionKeyMaterial.open(fixture.store(), options, testRuntime.events())) {
+                running.withModification(modification -> {
+                    modification.generateKey(local, 2048);
+                    modification.apply();
                 });
-        testRuntime.awaitEvents();
-        assertThat(revisions).isEmpty();
-        store.close();
-        fixture.repository().files().withAccess(REF,
-                new GitCommitMetadata(GitCommitAuthor.EMPTY, "restore material"), access -> {
-                    access.write(MATERIAL_PATH, bytes("restored"));
-                    access.apply();
-                    return null;
+                testRuntime.awaitEvents();
+                assertThat(warnings.list).isEmpty();
+                writer.withModification(modification -> {
+                    modification.generateKey(added, 2048);
+                    modification.apply();
                 });
-        testRuntime.awaitEvents();
-        assertThat(revisions).isEmpty();
+                fixture.repository().files().withAccess(REF,
+                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "external KMS update"), access -> {
+                            access.write(MATERIAL_PATH, external.read().orElseThrow().bytes());
+                            access.apply();
+                            return null;
+                        });
+                testRuntime.awaitEvents();
+                assertThat(running.contains(original)).isTrue();
+                assertThat(running.contains(added)).isFalse();
+                assertThat(running.contains(local)).isTrue();
+                assertThat(running.version()).isEqualTo(2);
+                assertThat(warnings.list).extracting(ILoggingEvent::getFormattedMessage)
+                        .anyMatch(message -> message.contains("restart Orion"));
+                try (OrionKeyMaterial reopened = OrionKeyMaterial.open(fixture.store(), options)) {
+                    assertThat(reopened.contains(original)).isTrue();
+                    assertThat(reopened.contains(added)).isTrue();
+                    assertThat(reopened.contains(local)).isFalse();
+                    assertThat(reopened.version()).isEqualTo(2);
+                }
+            } finally {
+                logger.detachAppender(warnings);
+                warnings.stop();
+            }
+        }
     }
 
     private Fixture fixture(Map<String, byte[]> initialFiles) throws Exception {
@@ -322,6 +369,11 @@ class NativeGitKeyMaterialContentStoreTest {
             super(pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(testRuntime.events()));
             this.delegate = delegate;
             this.beforePublish = beforePublish;
+        }
+
+        @Override
+        public NativeGitRepository retained(String repositoryName) {
+            return delegate.retained(repositoryName);
         }
 
         @Override
