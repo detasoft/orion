@@ -23,16 +23,13 @@ import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.lifecycle.state.TestOnly;
-import pro.deta.orion.bootstrap.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.bootstrap.config.KeyMaterialConfig;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.ResourceLocation;
-import pro.deta.orion.util.ResourceScheme;
 import pro.deta.orion.util.Result;
 import java.io.IOException;
-import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import org.apache.sshd.common.keyprovider.KeyPairProvider;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
@@ -116,12 +113,7 @@ public final class BootstrapContext implements AutoCloseable {
             ConfiguredNativeGitRepositoryFactory storageFactory =
                     new ConfiguredNativeGitRepositoryFactory(selectedBackend, s3Transport, events);
             provider = NativeGitRepositoryFactory.bootstrap(storageFactory, environment);
-            BootstrapConfigurationSourceConfig configuredConfiguration =
-                    repositoryConfiguration(configuration, environment);
-            provider.resolveProvisional(
-                    NativeGitRepositoryFactory.CONFIGURATION_SOURCE,
-                    configuredConfiguration,
-                    configuredConfiguration.isCreateDefaultIfMissing());
+            ConfigurationBootstrap.prepare(configuration, environment, provider);
 
             KeyMaterialConfig configuredMaterial = configuration.getBootstrap().getKeyMaterial();
             keyMaterial = KeyMaterialBootstrap.open(configuration, environment, provider, creation, events);
@@ -274,44 +266,5 @@ public final class BootstrapContext implements AutoCloseable {
             if (provider != null) provider.close();
             else if (transport != null) transport.close();
         }
-    }
-
-    private static BootstrapConfigurationSourceConfig repositoryConfiguration(
-            BootstrapConfiguration configuration, Map<String, String> environment) throws IOException {
-        BootstrapConfigurationSourceConfig configured = configuration.getBootstrap().getAccessControl();
-        ResourceLocation location = ResourceLocation.parse(configured.getLocation(), "ACL repository");
-        if (!(location.scheme() instanceof ResourceScheme.File)
-                && !(location.scheme() instanceof ResourceScheme.Empty)) {
-            return configured;
-        }
-        if (location.uri().getRawAuthority() != null || location.uri().getRawQuery() != null
-                || location.uri().getRawFragment() != null) {
-            throw new IllegalArgumentException("ACL file location must contain only a local repository path");
-        }
-        Path directory = directFileRoot(configured.getLocation(),
-                ConfigurationContext.baseDirectory(configuration, environment), "ACL repository");
-        BootstrapConfigurationSourceConfig source = new BootstrapConfigurationSourceConfig();
-        source.setLocation(directory.toUri().toString());
-        source.setRef(configured.selectedRef());
-        source.setPath(configured.getPath());
-        source.setAuth(configured.getAuth());
-        source.setCreateDefaultIfMissing(configured.isCreateDefaultIfMissing());
-        return source;
-    }
-
-    private static Path directFileRoot(
-            String configuredLocation,
-            Path baseDirectory,
-            String label) {
-        ResourceLocation location = ResourceLocation.parse(configuredLocation, label);
-        Path root = switch (location.scheme()) {
-            case ResourceScheme.Empty ignored -> Path.of(location.raw());
-            case ResourceScheme.File ignored -> Path.of(location.pathOrSchemeSpecificPart(
-                    label + " must include a path"));
-            default -> throw new IllegalArgumentException(FAILURE_MESSAGE);
-        };
-        return root.isAbsolute()
-                ? root.toAbsolutePath().normalize()
-                : baseDirectory.resolve(root).toAbsolutePath().normalize();
     }
 }
