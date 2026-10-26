@@ -13,7 +13,7 @@ public final class ConfigurationBootstrap {
     public static OrionVersionedConfigurationStorage open(
             BootstrapConfiguration configuration,
             NativeGitRepositoryFactory repositoryFactory) {
-        return new NativeGitOrionConfigurationStorage(
-                repositoryFactory, configuration.getBootstrap().getAccessControl());
+        return new NativeGitOrionConfigurationStorage(repositoryFactory.fileEvents(
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getAccessControl()));
     }
 }

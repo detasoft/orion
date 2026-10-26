@@ -58,7 +58,11 @@ class GitFileBindingTest {
         CommitId first = file.write(null, bytes("first"), METADATA);
         runtime.awaitEvents();
         List<CommitId> changes = new CopyOnWriteArrayList<>();
-        GitFileEvents events = new GitFileEvents(file, changes::add);
+        GitFileEvents events = new GitFileEvents(file);
+        runtime.own(new GitFileEvents(file));
+        runtime.own(runtime.events().subscribe(GitFileChanged.class, event -> {
+            if (events.matches(event)) changes.add(event.revision());
+        }));
         try {
             repository.files().withAccess(REF, METADATA, access -> {
                 access.write("other", bytes("unrelated"));

@@ -49,6 +49,10 @@ public final class GitFile {
                 .readBytes(Objects.requireNonNull(revision, "revision"), path);
     }
 
+    public boolean exists(CommitId revision) throws GitOperationException {
+        return objectId(Objects.requireNonNull(revision, "revision")) != null;
+    }
+
     public CommitId write(CommitId expectedRevision, byte[] bytes, GitCommitMetadata metadata) throws Exception {
         Objects.requireNonNull(bytes, "bytes");
         NativeGitRepository repository = provider.openForWrite(repositoryName)

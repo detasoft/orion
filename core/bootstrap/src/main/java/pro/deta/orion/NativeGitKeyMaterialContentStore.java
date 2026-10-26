@@ -5,17 +5,15 @@ import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
 import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.fileapi.GitFileEvents;
+import pro.deta.orion.git.fileapi.GitFileChanged;
+import pro.deta.orion.util.Subscription;
 import pro.deta.orion.git.nativestorage.GitOperationException;
-import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
-import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.keymaterial.KeyMaterialContentStore;
-import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
 import pro.deta.orion.keymaterial.KeyMaterialStoreConflictException;
 
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -27,13 +25,15 @@ import java.util.Optional;
 @Slf4j
 final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore {
     private final GitFileEvents events;
+    private final Subscription changes;
     private CommitId activeRevision;
     private int pendingWrites;
 
-    NativeGitKeyMaterialContentStore(NativeGitRepositoryProvider provider,
-            String repositoryName, String ref, String path) {
-        GitFile file = new GitFile(provider, repositoryName, ref, path);
-        events = new GitFileEvents(file, revision -> onFileChanged(file));
+    NativeGitKeyMaterialContentStore(GitFileEvents events) {
+        this.events = Objects.requireNonNull(events, "events");
+        changes = events.events().subscribe(GitFileChanged.class, event -> {
+            if (events.matches(event)) onFileChanged(events.file());
+        });
     }
 
     private void onFileChanged(GitFile file) {
@@ -56,37 +56,29 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
     }
 
     @Override
-    public Optional<KeyMaterialSnapshot> read() throws IOException {
+    public Optional<String> revision() throws IOException {
         try {
-            Optional<CommitId> revision = events.file().revision();
-            Optional<KeyMaterialSnapshot> snapshot = revision.isEmpty()
-                    ? Optional.empty() : read(revision.orElseThrow().toHex());
-            synchronized (this) {
-                if (pendingWrites == 0) activeRevision = revision.orElse(null);
-            }
-            onFileChanged(events.file());
-            return snapshot;
-        } catch (RuntimeException failure) {
-            throw new IOException("Cannot read key material store", failure);
+            GitFile file = events.file();
+            Optional<CommitId> revision = file.revision();
+            if (revision.isEmpty() || !file.exists(revision.orElseThrow())) return Optional.empty();
+            return Optional.of(revision.orElseThrow().toHex());
+        } catch (GitOperationException | RuntimeException failure) {
+            throw new IOException("Cannot read key material revision", failure);
         }
     }
 
     @Override
-    public Optional<KeyMaterialSnapshot> read(String revision) throws IOException {
-        return read(events.file(), revision);
-    }
-
-    private static Optional<KeyMaterialSnapshot> read(GitFile file, String revision) throws IOException {
+    public byte[] read(String revision) throws IOException {
         Objects.requireNonNull(revision, "revision");
         try {
-            byte[] bytes = file.read(new CommitId(revision));
-            try {
-                return Optional.of(new KeyMaterialSnapshot(bytes, revision));
-            } finally {
-                Arrays.fill(bytes, (byte) 0);
+            GitFile file = events.file();
+            CommitId requested = new CommitId(revision);
+            byte[] bytes = file.read(requested);
+            synchronized (this) {
+                if (activeRevision == null && pendingWrites == 0) activeRevision = requested;
             }
-        } catch (GitRepositoryFileNotFoundException missing) {
-            return Optional.empty();
+            onFileChanged(file);
+            return bytes;
         } catch (GitOperationException | RuntimeException failure) {
             throw new IOException("Cannot read key material store at " + revision, failure);
         }
@@ -127,6 +119,10 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
 
     @Override
     public void close() {
-        events.close();
+        try {
+            changes.close();
+        } finally {
+            events.close();
+        }
     }
 }

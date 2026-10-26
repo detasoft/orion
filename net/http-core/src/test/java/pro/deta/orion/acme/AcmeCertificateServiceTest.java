@@ -110,9 +110,9 @@ class AcmeCertificateServiceTest {
             assertThat(material.contains(ACCOUNT)).isTrue();
             assertThat(material.contains(IDENTITY)).isTrue();
             assertThat(material.version()).isEqualTo(1);
-            byte[] before = store.read().orElseThrow().bytes();
+            byte[] before = store.read(store.revision().orElseThrow());
             saveSettings(service);
-            assertThat(store.read().orElseThrow().bytes()).isEqualTo(before);
+            assertThat(store.read(store.revision().orElseThrow())).isEqualTo(before);
         }
     }
 
@@ -399,14 +399,14 @@ class AcmeCertificateServiceTest {
                     () -> service.issue(AcmeCertificateService.IssueRequest.EMPTY));
 
             assertThat(issuer.awaitStarted()).isTrue();
-            byte[] before = store.read().orElseThrow().bytes();
+            byte[] before = store.read(store.revision().orElseThrow());
             long beforeVersion = owner.version();
             try {
                 assertTimeoutPreemptively(Duration.ofSeconds(1), () -> assertThatThrownBy(
                         () -> service.issue(AcmeCertificateService.IssueRequest.EMPTY))
                         .isInstanceOf(AcmeCertificateService.IssuanceBusyException.class));
                 service.maintainCertificate(Instant.now().plus(Duration.ofDays(90)));
-                assertThat(store.read().orElseThrow().bytes()).isEqualTo(before);
+                assertThat(store.read(store.revision().orElseThrow())).isEqualTo(before);
                 assertThat(owner.version()).isEqualTo(beforeVersion);
                 assertThat(issuer.issueCalls()).isEqualTo(1);
             } finally {

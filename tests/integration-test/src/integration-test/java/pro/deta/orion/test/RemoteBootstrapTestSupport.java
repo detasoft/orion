@@ -122,7 +122,7 @@ final class RemoteBootstrapTestSupport {
             });
             TestServerIdentityMaterial.hostKeys(material);
         }
-        return store.read().orElseThrow().bytes();
+        return store.read(store.revision().orElseThrow());
     }
 
 }

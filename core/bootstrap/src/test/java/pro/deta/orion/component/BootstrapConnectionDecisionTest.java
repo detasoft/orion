@@ -214,7 +214,8 @@ class BootstrapConnectionDecisionTest {
             configuration.setLocation(source.getLocation());
             configuration.setPath(source.getPath());
             provider.resolveProvisional(NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration, false);
-            storage = new NativeGitOrionConfigurationStorage(provider, configuration);
+            storage = new NativeGitOrionConfigurationStorage(provider.fileEvents(
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration));
             KeyMaterialDescriptor signing = new KeyMaterialDescriptor("signing",
                     Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
             try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {

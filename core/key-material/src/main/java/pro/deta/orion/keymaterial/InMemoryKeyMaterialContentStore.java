@@ -2,6 +2,7 @@ package pro.deta.orion.keymaterial;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Objects;
 import java.util.Optional;
 
 public class InMemoryKeyMaterialContentStore implements KeyMaterialContentStore {
@@ -9,11 +10,17 @@ public class InMemoryKeyMaterialContentStore implements KeyMaterialContentStore 
     private long version;
 
     @Override
-    public synchronized Optional<KeyMaterialSnapshot> read() {
-        if (bytes == null) {
-            return Optional.empty();
+    public synchronized Optional<String> revision() {
+        return bytes == null ? Optional.empty() : Optional.of(versionString());
+    }
+
+    @Override
+    public synchronized byte[] read(String revision) throws IOException {
+        Objects.requireNonNull(revision, "revision");
+        if (bytes == null || !revision.equals(versionString())) {
+            throw new KeyMaterialStoreConflictException("Key material revision is no longer available: " + revision);
         }
-        return Optional.of(new KeyMaterialSnapshot(bytes, versionString()));
+        return Arrays.copyOf(bytes, bytes.length);
     }
 
     @Override

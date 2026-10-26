@@ -30,7 +30,7 @@ class KeyMaterialServiceTest {
         KeyPair generated = generateKey(service, descriptor(
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
                 KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA), 2048);
-        String savedVersion = store.read().orElseThrow().version();
+        String savedVersion = store.revision().orElseThrow();
 
         KeyMaterialService reloaded = KeyMaterialService.open(store, options());
         KeyPair loaded = reloaded.getKeyPair(KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS);
@@ -264,7 +264,7 @@ class KeyMaterialServiceTest {
                 KeyMaterialTestConstants.HTTPS_2026_05_ALIAS,
                 KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA), 2048);
 
-        byte[] pkcs12Bytes = writableStore.read().orElseThrow().bytes();
+        byte[] pkcs12Bytes = writableStore.read(writableStore.revision().orElseThrow());
         String reference = KeyMaterialTestConstants.contentBase64Reference(pkcs12Bytes);
         KeyMaterialContentStore readOnlyStore = KeyMaterialResourceResolver.standard().resolveStore(reference);
         KeyMaterialService readOnly = KeyMaterialService.open(readOnlyStore, options());
@@ -312,9 +312,11 @@ class KeyMaterialServiceTest {
                     .isInstanceOf(java.io.IOException.class);
         }
 
-        KeyMaterialSnapshot afterFailure = store.read().orElseThrow();
-        assertThat(afterFailure.version()).isEqualTo(corruptVersion);
-        assertThat(afterFailure.bytes()).isEqualTo(corruptBytes);
+        String afterFailureRevision = store.revision().orElseThrow();
+
+        byte[] afterFailureBytes = store.read(afterFailureRevision);
+        assertThat(afterFailureRevision).isEqualTo(corruptVersion);
+        assertThat(afterFailureBytes).isEqualTo(corruptBytes);
     }
 
     private static KeyPair generateKey(KeyMaterialService service, KeyMaterialDescriptor descriptor,

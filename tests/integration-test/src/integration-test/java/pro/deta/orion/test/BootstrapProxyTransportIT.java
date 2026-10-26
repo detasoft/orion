@@ -108,8 +108,8 @@ class BootstrapProxyTransportIT {
 
                     NativeGitRepository retained = provider.openForRead(cache).valueOrFailure("provisional handle");
 
-                    var storage = new NativeGitOrionConfigurationStorage(bootstrap.repositoryFactory(),
-                            configuration.getBootstrap().getAccessControl());
+                    var storage = new NativeGitOrionConfigurationStorage(bootstrap.repositoryFactory().fileEvents(
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getAccessControl()));
                     var component = runtimeComponent(configuration, bootstrap, bootstrapEvents1);
                     var lifecycle = component.orionApplicationLifecycle();
                     try {
@@ -216,8 +216,8 @@ class BootstrapProxyTransportIT {
                     String cache = restarted.repositoryFactory()
                             .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE).orElseThrow();
                     var provider = restarted.repositoryProvider();
-                    var storage = new NativeGitOrionConfigurationStorage(restarted.repositoryFactory(),
-                            configuration.getBootstrap().getAccessControl());
+                    var storage = new NativeGitOrionConfigurationStorage(restarted.repositoryFactory().fileEvents(
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getAccessControl()));
                     var before =
                             storage.load()
                                     .revision();

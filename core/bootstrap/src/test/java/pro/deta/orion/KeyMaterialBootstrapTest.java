@@ -122,7 +122,7 @@ class KeyMaterialBootstrapTest {
             assertThat(material.contains(signing(configuration).active())).isTrue();
         }
 
-        assertThat(store.read()).isPresent();
+        assertThat(store.revision()).isPresent();
     }
 
     @Test
@@ -137,7 +137,7 @@ class KeyMaterialBootstrapTest {
                 events))
                 .isInstanceOf(GeneralSecurityException.class)
                 .hasMessageContaining("creation was not requested");
-        assertThat(store.read()).isEmpty();
+        assertThat(store.revision()).isEmpty();
 
         KeyStore emptyStore = KeyStore.getInstance("PKCS12");
         char[] password = "test-password".toCharArray();
@@ -146,7 +146,7 @@ class KeyMaterialBootstrapTest {
             emptyStore.store(output, password);
             store.write(output.toByteArray(), null);
         }
-        byte[] before = store.read().orElseThrow().bytes();
+        byte[] before = store.read(store.revision().orElseThrow());
         assertThatThrownBy(() -> KeyMaterialBootstrap.open(
                 configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
@@ -155,7 +155,7 @@ class KeyMaterialBootstrapTest {
                 events))
                 .isInstanceOf(GeneralSecurityException.class)
                 .hasMessageContaining("cluster-signing-v2");
-        assertThat(store.read().orElseThrow().bytes()).isEqualTo(before);
+        assertThat(store.read(store.revision().orElseThrow())).isEqualTo(before);
     }
 
     @Test
@@ -170,13 +170,13 @@ class KeyMaterialBootstrapTest {
                 modification.apply();
             });
         }
-        byte[] before = store.read().orElseThrow().bytes();
+        byte[] before = store.read(store.revision().orElseThrow());
         assertThatThrownBy(() -> KeyMaterialBootstrap.open(
                 configuration, Map.of(PASSWORD_ENV, "test-password"), store,
                 new KeyMaterialCreation(true), events))
                 .isInstanceOf(GeneralSecurityException.class)
                 .hasMessageContaining("cluster-signing-v2");
-        assertThat(store.read().orElseThrow().bytes()).isEqualTo(before);
+        assertThat(store.read(store.revision().orElseThrow())).isEqualTo(before);
     }
 
     @Test
@@ -193,7 +193,7 @@ class KeyMaterialBootstrapTest {
                 events))
                 .isInstanceOf(GeneralSecurityException.class)
                 .hasMessageContaining("retained");
-        assertThat(store.read()).isEmpty();
+        assertThat(store.revision()).isEmpty();
     }
 
     @Test
@@ -215,7 +215,7 @@ class KeyMaterialBootstrapTest {
                 events))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("RSA");
-        assertThat(store.read()).isEmpty();
+        assertThat(store.revision()).isEmpty();
         assertThat(closes).hasValue(1);
     }
 

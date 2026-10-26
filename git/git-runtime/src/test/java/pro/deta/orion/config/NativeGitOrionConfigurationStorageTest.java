@@ -1,5 +1,9 @@
 package pro.deta.orion.config;
 
+import pro.deta.orion.git.fileapi.GitFile;
+
+import pro.deta.orion.git.fileapi.GitFileEvents;
+
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
@@ -44,12 +48,12 @@ class NativeGitOrionConfigurationStorageTest {
 
     @Test
     void requiresConfigurationRepositoryBootstrap() {
-        assertThatThrownBy(() -> new NativeGitOrionConfigurationStorage(
-                new NativeGitRepositoryFactory(
-                        pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(testRuntime.events())),
-                new BootstrapConfigurationSourceConfig()))
+        NativeGitRepositoryFactory factory = new NativeGitRepositoryFactory(
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(testRuntime.events()));
+        assertThatThrownBy(() -> factory.fileEvents(
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, new BootstrapConfigurationSourceConfig()))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Orion configuration requires a resolved Git repository");
+                .hasMessageContaining("resolved repository").hasMessageContaining("configuration");
     }
 
     @Test
@@ -70,7 +74,12 @@ class NativeGitOrionConfigurationStorageTest {
                             return null;
                         });
         OrionVersionedConfigurationStorage storage = new NativeGitOrionConfigurationStorage(
-                provider, "bootstrap/proxy-alias", "refs/heads/main", ACL_PATH);
+                new GitFileEvents(
+                new GitFile(
+                    provider,
+                    "bootstrap/proxy-alias",
+                    "refs/heads/main",
+                    ACL_PATH)));
 
         assertThat(storage.load().result().valueOrFailure("Cannot read configuration document"))
                 .isEqualTo(document("resolved acl"));
@@ -109,7 +118,8 @@ class NativeGitOrionConfigurationStorageTest {
         assertThat(provider.bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE))
                 .contains("team/repo");
         OrionVersionedConfigurationStorage storage =
-                new NativeGitOrionConfigurationStorage(provider, configuration);
+                new NativeGitOrionConfigurationStorage(provider.fileEvents(
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration));
 
         OrionDocumentRevision loaded = storage.load();
         assertThat(loaded.result()
@@ -526,8 +536,13 @@ class NativeGitOrionConfigurationStorageTest {
     private OrionVersionedConfigurationStorage resolvedStorage(
             NativeGitRepositoryProvider provider, String path) {
         testRuntime.own(provider);
-        NativeGitOrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(provider,
-                "internal/configuration", "refs/heads/configuration", path);
+        NativeGitOrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(
+                new GitFileEvents(
+                new GitFile(
+                    provider,
+                    "internal/configuration",
+                    "refs/heads/configuration",
+                    path)));
         testRuntime.own(storage);
         return storage;
     }

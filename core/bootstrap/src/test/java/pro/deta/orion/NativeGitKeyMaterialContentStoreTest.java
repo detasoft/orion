@@ -15,9 +15,9 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
-import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
 import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.fileapi.GitFileEvents;
+import pro.deta.orion.git.fileapi.GitFileChanged;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
@@ -62,7 +62,7 @@ class NativeGitKeyMaterialContentStoreTest {
                     if (event instanceof pro.deta.orion.git.nativestorage.RepositoryRefChanged
                             && activeStore.get() != null) {
                         try {
-                            executor.submit(() -> activeStore.get().read()).get(2,
+                            executor.submit(() -> activeStore.get().revision()).get(2,
                                     java.util.concurrent.TimeUnit.SECONDS);
                         } catch (Exception failure) {
                             throw new AssertionError("Store read is blocked by ref event publication", failure);
@@ -75,10 +75,15 @@ class NativeGitKeyMaterialContentStoreTest {
             try (NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(events)) {
                 provider.create(REPOSITORY).valueOrFailure("create repository");
                 try (NativeGitKeyMaterialContentStore store =
-                        new NativeGitKeyMaterialContentStore(provider, REPOSITORY, REF, MATERIAL_PATH)) {
+                        new NativeGitKeyMaterialContentStore(new GitFileEvents(
+                                new GitFile(
+                                    provider,
+                                    REPOSITORY,
+                                    REF,
+                                    MATERIAL_PATH)))) {
                     activeStore.set(store);
                     String saved = store.write(bytes("material"), null);
-                    assertThat(store.read().orElseThrow().version()).isEqualTo(saved);
+                    assertThat(store.revision().orElseThrow()).isEqualTo(saved);
                 }
             } finally {
                 events.onStop();
@@ -91,10 +96,10 @@ class NativeGitKeyMaterialContentStoreTest {
         Fixture fixture = fixture(Map.of("orion.xml", bytes("configuration")));
         NativeGitKeyMaterialContentStore store = fixture.store();
 
-        assertThat(store.read()).isEmpty();
+        assertThat(store.revision()).isEmpty();
         String version = store.write(bytes("encrypted-material"), null);
 
-        assertThat(store.read().orElseThrow().version()).isEqualTo(version);
+        assertThat(store.revision().orElseThrow()).isEqualTo(version);
         assertThat(fixture.repository().files().readBytes(REF, "orion.xml")).isEqualTo(bytes("configuration"));
         assertThat(fixture.repository().files().readBytes(REF, MATERIAL_PATH))
                 .isEqualTo(bytes("encrypted-material"));
@@ -107,7 +112,7 @@ class NativeGitKeyMaterialContentStoreTest {
         Fixture fixture = fixture(Map.of(MATERIAL_PATH, bytes("initial"),
                 "orion.xml", bytes("initial config")));
         NativeGitKeyMaterialContentStore store = fixture.store();
-        String version = store.read().orElseThrow().version();
+        String version = store.revision().orElseThrow();
         fixture.repository()
                 .files()
                 .withAccess(
@@ -121,7 +126,7 @@ class NativeGitKeyMaterialContentStoreTest {
 
         String saved = store.write(bytes("updated material"), version);
 
-        assertThat(store.read().orElseThrow().version()).isEqualTo(saved);
+        assertThat(store.revision().orElseThrow()).isEqualTo(saved);
         assertThat(fixture.repository().files().readBytes(REF, "orion.xml")).isEqualTo(bytes("new config"));
         assertThat(fixture.repository().files().readBytes(REF, MATERIAL_PATH))
                 .isEqualTo(bytes("updated material"));
@@ -132,15 +137,17 @@ class NativeGitKeyMaterialContentStoreTest {
         Fixture fixture = fixture(Map.of(MATERIAL_PATH, bytes("initial")));
         NativeGitKeyMaterialContentStore first = fixture.store();
         NativeGitKeyMaterialContentStore second = fixture.store();
-        KeyMaterialSnapshot firstSnapshot = first.read().orElseThrow();
-        KeyMaterialSnapshot secondSnapshot = second.read().orElseThrow();
+        String firstRevision = first.revision().orElseThrow();
 
-        first.write(bytes("first"), firstSnapshot.version());
+        String secondRevision = second.revision().orElseThrow();
 
-        assertThatThrownBy(() -> second.write(bytes("second"), secondSnapshot.version()))
+
+        first.write(bytes("first"), firstRevision);
+
+        assertThatThrownBy(() -> second.write(bytes("second"), secondRevision))
                 .isInstanceOf(KeyMaterialStoreConflictException.class)
                 .hasMessage("Key material store changed before save");
-        assertThat(first.read().orElseThrow().bytes()).isEqualTo(bytes("first"));
+        assertThat(first.read(first.revision().orElseThrow())).isEqualTo(bytes("first"));
     }
 
     @Test
@@ -179,9 +186,13 @@ class NativeGitKeyMaterialContentStoreTest {
                                 throw new IllegalStateException(failure);
                             }
                         });
-        NativeGitKeyMaterialContentStore store = new NativeGitKeyMaterialContentStore(
-                provider, REPOSITORY, REF, MATERIAL_PATH);
-        String observedVersion = store.read().orElseThrow().version();
+        NativeGitKeyMaterialContentStore store = new NativeGitKeyMaterialContentStore(new GitFileEvents(
+                new GitFile(
+                    provider,
+                    REPOSITORY,
+                    REF,
+                    MATERIAL_PATH)));
+        String observedVersion = store.revision().orElseThrow();
 
         assertThatThrownBy(() -> store.write(bytes("stale material"), observedVersion))
                 .isInstanceOf(KeyMaterialStoreConflictException.class);
@@ -213,13 +224,14 @@ class NativeGitKeyMaterialContentStoreTest {
         source.setRef(REF);
         source.setPath(MATERIAL_PATH);
         String repositoryName = factory.resolveProvisional("material", source, true).orElseThrow();
-        NativeGitKeyMaterialContentStore store = new NativeGitKeyMaterialContentStore(
-                factory.provider(),
-                repositoryName,
-                NativeGitRepositoryFactory.sourceRefName(source),
-                NativeGitRepositoryFactory.repositoryPath(source.getPath()));
+        NativeGitKeyMaterialContentStore store = new NativeGitKeyMaterialContentStore(new GitFileEvents(
+                new GitFile(
+                    factory.provider(),
+                    repositoryName,
+                    NativeGitRepositoryFactory.sourceRefName(source),
+                    NativeGitRepositoryFactory.repositoryPath(source.getPath()))));
 
-        assertThat(store.read()).isEmpty();
+        assertThat(store.revision()).isEmpty();
         store.write(bytes("encrypted-material"), null);
 
         Path checkout = tempDir.resolve("checkout");
@@ -242,7 +254,11 @@ class NativeGitKeyMaterialContentStoreTest {
             testRuntime.awaitEvents();
             List<String> revisions = new CopyOnWriteArrayList<>();
             GitFile file = new GitFile(fixture.provider(), REPOSITORY, REF, MATERIAL_PATH);
-            testRuntime.own(new GitFileEvents(file, revision -> revisions.add(revision.toHex())));
+            GitFileEvents source = new GitFileEvents(file);
+            testRuntime.own(source);
+            testRuntime.own(source.events().subscribe(GitFileChanged.class, event -> {
+                if (source.matches(event)) revisions.add(event.revision().toHex());
+            }));
             fixture.repository().files().withAccess(REF,
                     new GitCommitMetadata(GitCommitAuthor.EMPTY, "unrelated file"), access -> {
                         access.write("orion.xml", bytes("updated configuration"));
@@ -257,12 +273,12 @@ class NativeGitKeyMaterialContentStoreTest {
                     });
             testRuntime.awaitEvents();
             assertThat(revisions).isEmpty();
-            String first = store.write(bytes("first"), store.read().orElseThrow().version());
+            String first = store.write(bytes("first"), store.revision().orElseThrow());
             String second = store.write(bytes("second"), first);
             testRuntime.awaitEvents();
             assertThat(revisions).containsExactly(first, second);
-            assertThat(store.read(first).orElseThrow().bytes()).isEqualTo(bytes("first"));
-            assertThat(store.read(second).orElseThrow().bytes()).isEqualTo(bytes("second"));
+            assertThat(store.read(first)).isEqualTo(bytes("first"));
+            assertThat(store.read(second)).isEqualTo(bytes("second"));
         }
     }
 
@@ -282,7 +298,7 @@ class NativeGitKeyMaterialContentStoreTest {
                 modification.generateKey(original, 2048);
                 modification.apply();
             });
-            Fixture fixture = fixture(Map.of(MATERIAL_PATH, external.read().orElseThrow().bytes()));
+            Fixture fixture = fixture(Map.of(MATERIAL_PATH, external.read(external.revision().orElseThrow())));
             Logger logger = (Logger) LoggerFactory.getLogger(NativeGitKeyMaterialContentStore.class);
             ListAppender<ILoggingEvent> warnings = new ListAppender<>();
             warnings.start();
@@ -300,7 +316,7 @@ class NativeGitKeyMaterialContentStoreTest {
                 });
                 fixture.repository().files().withAccess(REF,
                         new GitCommitMetadata(GitCommitAuthor.EMPTY, "external KMS update"), access -> {
-                            access.write(MATERIAL_PATH, external.read().orElseThrow().bytes());
+                            access.write(MATERIAL_PATH, external.read(external.revision().orElseThrow()));
                             access.apply();
                             return null;
                         });
@@ -351,7 +367,12 @@ class NativeGitKeyMaterialContentStoreTest {
             NativeGitRepository repository,
             NativeGitRepositoryProvider provider) {
         private NativeGitKeyMaterialContentStore store() {
-            return new NativeGitKeyMaterialContentStore(provider, REPOSITORY, REF, MATERIAL_PATH);
+            return new NativeGitKeyMaterialContentStore(new GitFileEvents(
+                    new GitFile(
+                        provider,
+                        REPOSITORY,
+                        REF,
+                        MATERIAL_PATH)));
         }
     }
 

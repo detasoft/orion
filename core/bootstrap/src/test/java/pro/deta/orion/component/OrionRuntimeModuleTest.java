@@ -344,7 +344,7 @@ class OrionRuntimeModuleTest {
                 IllegalArgumentException.class,
                 () -> runtimeOrionVersionedConfigurationStorage(configuration));
 
-        assertEquals("Orion configuration requires a resolved Git repository", error.getMessage());
+        assertEquals("Git file requires a resolved repository: configuration", error.getMessage());
     }
 
     private OrionVersionedConfigurationStorage runtimeOrionVersionedConfigurationStorage(
@@ -360,7 +360,8 @@ class OrionRuntimeModuleTest {
                 NativeGitRepositoryFactory.CONFIGURATION_SOURCE,
                 configuration.getBootstrap().getAccessControl(),
                 configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing());
-        return new NativeGitOrionConfigurationStorage(provider, configuration.getBootstrap().getAccessControl());
+        return new NativeGitOrionConfigurationStorage(provider.fileEvents(
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getAccessControl()));
     }
 
     private byte[] aclBytes(String userId) throws Exception {

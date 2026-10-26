@@ -1,5 +1,9 @@
 package pro.deta.orion;
 
+import pro.deta.orion.git.fileapi.GitFile;
+
+import pro.deta.orion.git.fileapi.GitFileEvents;
+
 import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
@@ -126,7 +130,7 @@ public final class BootstrapContext implements AutoCloseable {
                     configuredMaterial,
                     creation.allowed());
             KeyMaterialContentStore materialStore = keyMaterialStore(
-                    configuration, environment, provider.provider(), materialRepository, configuredMaterial);
+                    configuration, environment, provider, materialRepository, configuredMaterial);
             keyMaterial = KeyMaterialBootstrap.open(configuration, environment, materialStore, creation, events);
             return new BootstrapContext(provider, keyMaterial,
                     KeyMaterialBootstrap.signingMaterial(configuredMaterial));
@@ -305,15 +309,12 @@ public final class BootstrapContext implements AutoCloseable {
     private static KeyMaterialContentStore keyMaterialStore(
             BootstrapConfiguration configuration,
             Map<String, String> environment,
-            NativeGitRepositoryProvider provider,
+            NativeGitRepositoryFactory provider,
             Optional<String> repositoryName,
             KeyMaterialConfig source) {
         if (repositoryName.isPresent()) {
             return new NativeGitKeyMaterialContentStore(
-                    provider,
-                    repositoryName.orElseThrow(),
-                    NativeGitRepositoryFactory.sourceRefName(source),
-                    NativeGitRepositoryFactory.repositoryPath(source.getPath()));
+                    provider.fileEvents(NativeGitRepositoryFactory.MATERIAL_SOURCE, source));
         }
         return KeyMaterialBootstrap.localStore(configuration, environment);
     }

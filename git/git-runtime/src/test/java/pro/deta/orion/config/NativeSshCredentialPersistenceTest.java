@@ -1,5 +1,9 @@
 package pro.deta.orion.config;
 
+import pro.deta.orion.git.fileapi.GitFile;
+
+import pro.deta.orion.git.fileapi.GitFileEvents;
+
 import java.util.Set;
 
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
@@ -50,7 +54,12 @@ class NativeSshCredentialPersistenceTest {
                 NativeGitRepositoryProvider.file(root, testRuntime.events());
         NativeGitRepository repository = provider.create("acl").valueOrFailure("create repository");
         OrionVersionedConfigurationStorage storage = new NativeGitOrionConfigurationStorage(
-                provider, "acl", "refs/heads/main", "users.xml");
+                new GitFileEvents(
+                new GitFile(
+                    provider,
+                    "acl",
+                    "refs/heads/main",
+                    "users.xml")));
         User alice = new User("alice", null, null, "alice@example.test",
                 List.of(), List.of(), List.of());
         AccessControl primary = new AccessControl(List.of(alice), List.of(), List.of());
@@ -104,11 +113,12 @@ class NativeSshCredentialPersistenceTest {
             editor.onStop();
         }
         OrionConfigurationEditor reopenedEditor = new OrionConfigurationEditor(
-                        new NativeGitOrionConfigurationStorage(
-                                NativeGitRepositoryProvider.file(root, testRuntime.events()),
-                                "acl",
-                                "refs/heads/main",
-                                "users.xml"),
+                        new NativeGitOrionConfigurationStorage(new GitFileEvents(
+                                new GitFile(
+                                    NativeGitRepositoryProvider.file(root, testRuntime.events()),
+                                    "acl",
+                                    "refs/heads/main",
+                                    "users.xml"))),
                         pro.deta.orion.keymaterial.OrionKeyMaterial.unavailable(),
                         testRuntime.events());
         OrionAccessControlServiceImpl reopened = service(reopenedEditor);

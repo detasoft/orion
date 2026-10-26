@@ -1,5 +1,9 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.fileapi.GitFileEvents;
+
+import pro.deta.orion.git.fileapi.GitFile;
+
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.decision.ConnectionFailureHandler;
 import pro.deta.orion.decision.Decision;
@@ -678,6 +682,14 @@ public final class NativeGitRepositoryFactory implements NativeGitRepositoryBack
             return new Result.Failure<>(Result.FailureCode.NOT_SUPPORTED, "Proxy endpoints require a binding");
         }
         return backend.create(repositoryName);
+    }
+
+    public GitFileEvents fileEvents(
+            String source, BootstrapSourceConfig configuration) {
+        String repository = bootstrapRepositoryName(source).orElseThrow(() ->
+                new IllegalArgumentException("Git file requires a resolved repository: " + source));
+        return new GitFileEvents(new GitFile(
+                provider(), repository, sourceRefName(configuration), repositoryPath(configuration.getPath())));
     }
 
     @Override

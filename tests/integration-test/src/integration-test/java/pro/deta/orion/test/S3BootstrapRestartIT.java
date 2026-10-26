@@ -89,7 +89,7 @@ class S3BootstrapRestartIT {
                 OrionXml.write(secrets.createSystem(document, SECRET_ID, SECRET_VALUE.toCharArray()), output);
                 xml = output.toByteArray();
             }
-            byte[] material = materialStore.read().orElseThrow().bytes();
+            byte[] material = materialStore.read(materialStore.revision().orElseThrow());
             Map<String, String> refs;
             try (NativeGitRepositoryProvider provider = S3NativeGitRepositoryFactory.repositories(
                     configuration.getStorage().getLocation(), configuration.getStorage().getEndpoint(),

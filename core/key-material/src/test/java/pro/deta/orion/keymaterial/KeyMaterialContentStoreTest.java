@@ -28,11 +28,12 @@ class KeyMaterialContentStoreTest {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
 
         String firstVersion = store.write(bytes("first"), null);
-        KeyMaterialSnapshot firstSnapshot = store.read().orElseThrow();
+        String firstRevision = store.revision().orElseThrow();
+        byte[] firstBytes = store.read(firstRevision);
 
-        assertThat(firstSnapshot.version()).isEqualTo(firstVersion);
-        assertThat(firstSnapshot.bytes()).isEqualTo(bytes("first"));
-        assertThat(store.read(firstVersion).orElseThrow().bytes()).isEqualTo(bytes("first"));
+        assertThat(firstRevision).isEqualTo(firstVersion);
+        assertThat(firstBytes).isEqualTo(bytes("first"));
+        assertThat(store.read(firstVersion)).isEqualTo(bytes("first"));
         assertThatThrownBy(() -> store.write(bytes("stale"), "missing"))
                 .isInstanceOf(KeyMaterialStoreConflictException.class);
 
@@ -40,8 +41,8 @@ class KeyMaterialContentStoreTest {
 
         assertThat(secondVersion).isNotEqualTo(firstVersion);
         assertThatThrownBy(() -> store.read(firstVersion)).isInstanceOf(KeyMaterialStoreConflictException.class);
-        assertThat(store.read(secondVersion).orElseThrow().bytes()).isEqualTo(bytes("second"));
-        assertThat(store.read().orElseThrow().bytes()).isEqualTo(bytes("second"));
+        assertThat(store.read(secondVersion)).isEqualTo(bytes("second"));
+        assertThat(store.read(store.revision().orElseThrow())).isEqualTo(bytes("second"));
     }
 
     @Test
@@ -50,17 +51,19 @@ class KeyMaterialContentStoreTest {
         LocalKeyMaterialContentStore store = new LocalKeyMaterialContentStore(path);
 
         String firstVersion = store.write(bytes("aaaa"), null);
-        KeyMaterialSnapshot firstSnapshot = store.read().orElseThrow();
+        String firstRevision = store.revision().orElseThrow();
+        byte[] firstBytes = store.read(firstRevision);
 
         Files.writeString(path, "bbbb", StandardCharsets.UTF_8);
-        KeyMaterialSnapshot changedSnapshot = store.read().orElseThrow();
+        String changedRevision = store.revision().orElseThrow();
+        byte[] changedBytes = store.read(changedRevision);
 
-        assertThat(firstSnapshot.version()).isEqualTo(firstVersion);
-        assertThat(changedSnapshot.version()).isNotEqualTo(firstSnapshot.version());
-        assertThat(changedSnapshot.bytes()).isEqualTo(bytes("bbbb"));
+        assertThat(firstRevision).isEqualTo(firstVersion);
+        assertThat(changedRevision).isNotEqualTo(firstRevision);
+        assertThat(changedBytes).isEqualTo(bytes("bbbb"));
         assertThatThrownBy(() -> store.read(firstVersion)).isInstanceOf(KeyMaterialStoreConflictException.class);
-        assertThat(store.read(changedSnapshot.version()).orElseThrow().bytes()).isEqualTo(bytes("bbbb"));
-        assertThatThrownBy(() -> store.write(bytes("cccc"), firstSnapshot.version()))
+        assertThat(store.read(changedRevision)).isEqualTo(bytes("bbbb"));
+        assertThatThrownBy(() -> store.write(bytes("cccc"), firstRevision))
                 .isInstanceOf(KeyMaterialStoreConflictException.class)
                 .hasMessageContaining("changed before save");
     }
@@ -76,8 +79,8 @@ class KeyMaterialContentStoreTest {
 
         assertThatThrownBy(() -> first.write(bytes("stale"), initialVersion))
                 .isInstanceOf(KeyMaterialStoreConflictException.class);
-        assertThat(second.read().orElseThrow().version()).isEqualTo(secondVersion);
-        assertThat(second.read().orElseThrow().bytes()).isEqualTo(bytes("second"));
+        assertThat(second.revision().orElseThrow()).isEqualTo(secondVersion);
+        assertThat(second.read(second.revision().orElseThrow())).isEqualTo(bytes("second"));
     }
 
     @Test
@@ -113,7 +116,7 @@ class KeyMaterialContentStoreTest {
 
             assertThat(successful).isEqualTo(1);
             assertThat(conflicts).isEqualTo(1);
-            assertThat(first.read().orElseThrow().bytes()).isIn(bytes("first"), bytes("second"));
+            assertThat(first.read(first.revision().orElseThrow())).isIn(bytes("first"), bytes("second"));
         } finally {
             executor.shutdownNow();
         }
@@ -141,7 +144,7 @@ class KeyMaterialContentStoreTest {
         Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rw-r--r--"));
         LocalKeyMaterialContentStore store = new LocalKeyMaterialContentStore(path);
 
-        assertThatThrownBy(store::read)
+        assertThatThrownBy(store::revision)
                 .isInstanceOf(java.io.IOException.class)
                 .hasMessageContaining("readable only by its owner");
         assertThatThrownBy(() -> store.write(bytes("replacement"), null))
@@ -175,7 +178,7 @@ class KeyMaterialContentStoreTest {
         Files.createSymbolicLink(link, target.getFileName());
         LocalKeyMaterialContentStore store = new LocalKeyMaterialContentStore(link);
 
-        assertThatThrownBy(store::read)
+        assertThatThrownBy(store::revision)
                 .isInstanceOf(java.io.IOException.class)
                 .hasMessageContaining("must not contain symbolic links");
         assertThatThrownBy(() -> store.write(bytes("replacement"), null))
@@ -193,12 +196,12 @@ class KeyMaterialContentStoreTest {
         Files.write(incomplete, bytes("incomplete"));
         setOwnerOnly(incomplete);
 
-        assertThat(store.read().orElseThrow().bytes()).isEqualTo(bytes("published"));
+        assertThat(store.read(store.revision().orElseThrow())).isEqualTo(bytes("published"));
         assertThat(Files.exists(incomplete)).isTrue();
 
         assertThat(store.discardIncompleteWrites()).isEqualTo(1);
         assertThat(Files.exists(incomplete)).isFalse();
-        assertThat(store.read().orElseThrow().bytes()).isEqualTo(bytes("published"));
+        assertThat(store.read(store.revision().orElseThrow())).isEqualTo(bytes("published"));
         assertThat(store.discardIncompleteWrites()).isZero();
     }
 

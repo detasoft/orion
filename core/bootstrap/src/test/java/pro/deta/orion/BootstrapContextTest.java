@@ -1,5 +1,9 @@
 package pro.deta.orion;
 
+import pro.deta.orion.git.fileapi.GitFile;
+
+import pro.deta.orion.git.fileapi.GitFileEvents;
+
 import org.apache.sshd.common.keyprovider.KeyPairProvider;
 import java.util.ArrayList;
 import java.security.KeyPair;
@@ -252,7 +256,8 @@ class BootstrapContextTest {
                                 return null;
                             });
             try (NativeGitOrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(
-                    context.repositoryFactory(), configuration.getBootstrap().getAccessControl())) {
+                    context.repositoryFactory().fileEvents(NativeGitRepositoryFactory.CONFIGURATION_SOURCE,
+                            configuration.getBootstrap().getAccessControl()))) {
                 assertThat(
                                 storage.load(new OrionRevision.Stored(firstCommit))
                                         .result()
@@ -409,8 +414,12 @@ class BootstrapContextTest {
                         2);
                 try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("correct-password".toCharArray());
                      OrionKeyMaterial material = OrionKeyMaterial.open(
-                             new NativeGitKeyMaterialContentStore(
-                                     backend, "orion", "refs/heads/main", "material.p12"), options)) {
+                             new NativeGitKeyMaterialContentStore(new GitFileEvents(
+                                     new GitFile(
+                                         backend,
+                                         "orion",
+                                         "refs/heads/main",
+                                         "material.p12"))), options)) {
                     material.withModification(modification -> {
                         modification.generateKey(staged, 2048);
                         modification.apply();
@@ -447,8 +456,12 @@ class BootstrapContextTest {
                     .hasMessage("Bootstrap inputs are unavailable or invalid")
                     .rootCause()
                     .hasMessageContaining("Bootstrap source path is unavailable: material");
-            assertThat(new NativeGitKeyMaterialContentStore(
-                    backend, "orion", "refs/heads/main", "material.p12").read()).isEmpty();
+            assertThat(new NativeGitKeyMaterialContentStore(new GitFileEvents(
+                    new GitFile(
+                        backend,
+                        "orion",
+                        "refs/heads/main",
+                        "material.p12"))).revision()).isEmpty();
         }
     }
 
@@ -476,8 +489,12 @@ class BootstrapContextTest {
                 assertThatThrownBy(() -> openContext(configuration, ENVIRONMENT, borrow(incomplete)))
                         .isInstanceOf(IllegalStateException.class)
                         .hasMessage("Bootstrap inputs are unavailable or invalid");
-                assertThat(new NativeGitKeyMaterialContentStore(
-                        incomplete, "orion", "refs/heads/main", "material.p12").read()).isEmpty();
+                assertThat(new NativeGitKeyMaterialContentStore(new GitFileEvents(
+                        new GitFile(
+                            incomplete,
+                            "orion",
+                            "refs/heads/main",
+                            "material.p12"))).revision()).isEmpty();
 
                 try (NativeGitRepositoryProvider restored = repositoryWith(configuration, backup)) {
                     try (BootstrapContext runtime = openContext(configuration, ENVIRONMENT, borrow(restored))) {
@@ -761,8 +778,12 @@ class BootstrapContextTest {
             assertThatThrownBy(() -> openContext(configuration, ENVIRONMENT, borrow(backend)))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessage("Bootstrap inputs are unavailable or invalid");
-            assertThat(new NativeGitKeyMaterialContentStore(
-                    backend, "orion", "refs/heads/main", "material.p12").read()).isEmpty();
+            assertThat(new NativeGitKeyMaterialContentStore(new GitFileEvents(
+                    new GitFile(
+                        backend,
+                        "orion",
+                        "refs/heads/main",
+                        "material.p12"))).revision()).isEmpty();
         }
     }
 
@@ -797,9 +818,8 @@ class BootstrapContextTest {
                 assertThat(context.repositoryFactory()
                         .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE)).isPresent();
                 OrionVersionedConfigurationStorage storage =
-                        new NativeGitOrionConfigurationStorage(
-                                context.repositoryFactory(),
-                                configuration.getBootstrap().getAccessControl());
+                        new NativeGitOrionConfigurationStorage(context.repositoryFactory().fileEvents(
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getAccessControl()));
                 storage.save(
                         new OrionRevision.Absent(),
                         OrionXml.read(new ByteArrayInputStream(xml())),
@@ -844,9 +864,8 @@ class BootstrapContextTest {
             }
             try (BootstrapContext reopened = openContext(configuration, ENVIRONMENT, borrow(backend))) {
                 OrionVersionedConfigurationStorage storage =
-                        new NativeGitOrionConfigurationStorage(
-                                reopened.repositoryFactory(),
-                                configuration.getBootstrap().getAccessControl());
+                        new NativeGitOrionConfigurationStorage(reopened.repositoryFactory().fileEvents(
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getAccessControl()));
                 assertThat(
                                 storage.load()
                                         .revision())
@@ -1049,9 +1068,8 @@ class BootstrapContextTest {
             try (BootstrapContext first = openContext(configuration, ENVIRONMENT,
                     NativeGitRepositoryProvider.inMemory(testRuntime.unstartedEvents()))) {
                 OrionVersionedConfigurationStorage storage =
-                        new NativeGitOrionConfigurationStorage(
-                                first.repositoryFactory(),
-                                configuration.getBootstrap().getAccessControl());
+                        new NativeGitOrionConfigurationStorage(first.repositoryFactory().fileEvents(
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getAccessControl()));
                 OrionRevision initialRevision =
                         storage.load().revision();
                 adopted = adopt(first, storage);
@@ -1063,9 +1081,8 @@ class BootstrapContextTest {
             try (BootstrapContext restarted = openContext(configuration, ENVIRONMENT,
                     NativeGitRepositoryProvider.inMemory(testRuntime.unstartedEvents()))) {
                 OrionVersionedConfigurationStorage storage =
-                        new NativeGitOrionConfigurationStorage(
-                                restarted.repositoryFactory(),
-                                configuration.getBootstrap().getAccessControl());
+                        new NativeGitOrionConfigurationStorage(restarted.repositoryFactory().fileEvents(
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getAccessControl()));
                 assertThat(adopt(restarted, storage)).isEqualTo(adopted);
                 assertThat(storage.load().revision())
                         .isEqualTo(adoptedRevision);
@@ -1357,8 +1374,8 @@ class BootstrapContextTest {
             try {
                 assertThat(lifecycle.runApplication())
                         .isEqualTo(RUNNING);
-                var storage = new NativeGitOrionConfigurationStorage(context.repositoryFactory(),
-                        configuration.getBootstrap().getAccessControl());
+                var storage = new NativeGitOrionConfigurationStorage(context.repositoryFactory().fileEvents(
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getAccessControl()));
                 var snapshot = storage.load();
                 assertThat(snapshot.result().valueOrFailure("Cannot read configuration document")
                         .system().proxies()).isEmpty();
@@ -1567,9 +1584,8 @@ class BootstrapContextTest {
                 assertThat(lifecycle.runApplication())
                         .isEqualTo(RUNNING);
                 OrionVersionedConfigurationStorage local =
-                        new NativeGitOrionConfigurationStorage(
-                                context.repositoryFactory(),
-                                configuration.getBootstrap().getAccessControl());
+                        new NativeGitOrionConfigurationStorage(context.repositoryFactory().fileEvents(
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getAccessControl()));
                 assertThat(
                                 local.load()
                                         .result().valueOrFailure("Cannot read configuration document")
@@ -1720,7 +1736,7 @@ class BootstrapContextTest {
                 });
             }
         }
-        return store.read().orElseThrow().bytes();
+        return store.read(store.revision().orElseThrow());
     }
 
     private static byte[] bytes(String value) {

@@ -6,13 +6,12 @@ import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.fileapi.GitFileEvents;
+import pro.deta.orion.git.fileapi.GitFileChanged;
+import pro.deta.orion.util.Subscription;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
-import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
-import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
-import pro.deta.orion.bootstrap.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.util.Result;
@@ -34,25 +33,15 @@ public final class NativeGitOrionConfigurationStorage
         implements OrionVersionedConfigurationStorage, AutoCloseable {
     private final OrionDocumentCodec codec = new OrionDocumentCodec();
     private final GitFileEvents events;
+    private final Subscription changes;
 
-    public NativeGitOrionConfigurationStorage(NativeGitRepositoryFactory repositoryFactory,
-            BootstrapConfigurationSourceConfig source) {
-        this(repositoryFactory.provider(),
-                repositoryFactory.bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE)
-                        .orElseThrow(() -> new IllegalArgumentException(
-                                "Orion configuration requires a resolved Git repository")),
-                NativeGitRepositoryFactory.sourceRefName(source),
-                NativeGitRepositoryFactory.repositoryPath(source.getPath()));
-    }
-
-    NativeGitOrionConfigurationStorage(
-            NativeGitRepositoryProvider repositoryProvider,
-            String repositoryName,
-            String configurationRef,
-            String path) {
-        GitFile file = new GitFile(repositoryProvider, repositoryName, configurationRef, path);
-        events = new GitFileEvents(file,
-                revision -> onFileChanged(file, new OrionRevision.Stored(revision.toHex())));
+    public NativeGitOrionConfigurationStorage(GitFileEvents events) {
+        this.events = Objects.requireNonNull(events, "events");
+        changes = events.events().subscribe(GitFileChanged.class, event -> {
+            if (events.matches(event)) {
+                onFileChanged(events.file(), new OrionRevision.Stored(event.revision().toHex()));
+            }
+        });
     }
 
     @Override
@@ -141,6 +130,10 @@ public final class NativeGitOrionConfigurationStorage
 
     @Override
     public void close() {
-        events.close();
+        try {
+            changes.close();
+        } finally {
+            events.close();
+        }
     }
 }

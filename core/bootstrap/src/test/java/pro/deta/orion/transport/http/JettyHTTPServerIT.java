@@ -1073,7 +1073,7 @@ class JettyHTTPServerIT {
                 KeyPair trustedClientKey = TestCertificateChain.keyPair();
                 KeyPair serverIssuerClientKey = TestCertificateChain.keyPair();
                 return new SharedMaterial(
-                        store.read().orElseThrow().bytes(),
+                        store.read(store.revision().orElseThrow()),
                         serverCertificate,
                         trustedClientKey,
                         TestCertificateChain.leaf("trusted-client", trustedClientKey, clientRoot),

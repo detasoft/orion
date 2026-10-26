@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -38,17 +39,27 @@ public class LocalKeyMaterialContentStore implements KeyMaterialContentStore {
     }
 
     @Override
-    public Optional<KeyMaterialSnapshot> read() throws IOException {
-        if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
-            return Optional.empty();
-        }
+    public Optional<String> revision() throws IOException {
+        if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) return Optional.empty();
         KeyMaterialFileSecurity.validatePublicationDirectory(path.getParent());
         byte[] bytes = KeyMaterialFileSecurity.readOwnerOnlyFile(path, "Key material location");
         try {
-            return Optional.of(new KeyMaterialSnapshot(bytes, KeyMaterialVersions.sha256(bytes)));
+            return Optional.of(KeyMaterialVersions.sha256(bytes));
         } finally {
             Arrays.fill(bytes, (byte) 0);
         }
+    }
+
+    @Override
+    public byte[] read(String revision) throws IOException {
+        Objects.requireNonNull(revision, "revision");
+        KeyMaterialFileSecurity.validatePublicationDirectory(path.getParent());
+        byte[] bytes = KeyMaterialFileSecurity.readOwnerOnlyFile(path, "Key material location");
+        if (!revision.equals(KeyMaterialVersions.sha256(bytes))) {
+            Arrays.fill(bytes, (byte) 0);
+            throw new KeyMaterialStoreConflictException("Key material revision is no longer available: " + revision);
+        }
+        return bytes;
     }
 
     @Override

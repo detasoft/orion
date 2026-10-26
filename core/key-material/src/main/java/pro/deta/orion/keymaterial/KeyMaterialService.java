@@ -45,38 +45,53 @@ import java.util.StringJoiner;
  */
 final class KeyMaterialService implements AutoCloseable {
     private static final String LOCAL_KEY_ID_ATTRIBUTE_OID = "1.2.840.113549.1.9.21";
+
+    // AI_TODO зачем?
     private static final String DESCRIPTOR_ATTRIBUTE_OID =
             "2.25.260349814076539099691640886169327825428";
+
+    // AI_TODO зачем?
     private static final String ADDITION_ATTRIBUTE_OID =
             "2.25.260349814076539099691640886169327826429";
     private final Object writes = new Object();
     private final KeyMaterialContentStore store;
     private final KeyMaterialOptions options;
     private final KeyMaterialStorageCertificateFactory storageCertificateFactory;
+
+    // AI_TODO зачем? проще наверное на EventManager? зачем тупой интерфейс?
     private final OrionEventPublisher eventPublisher;
     private final KeyStore keyStore;
     private String version;
     private long revision;
+
+    // AI_TODO зачем? проще может без него?
     private boolean closed;
 
     private KeyMaterialService(
             KeyMaterialContentStore store,
+            // AI_TODO а разве не проще было бы этот атрибут убрать в Store? и если уж на то пошло - зачем тут KeyStore? вроде бы он должен быть частью Content, нет?
             KeyMaterialOptions options,
             KeyMaterialStorageCertificateFactory storageCertificateFactory,
+            // AI_TODO может быть просто взять OrionEventManager?
             OrionEventPublisher eventPublisher,
+            // AI_TODO а разве не проще было бы этот атрибут убрать в Store? и если уж на то пошло - зачем тут KeyStore?
             KeyStore keyStore,
+            // AI_TODO а разве не проще было бы этот атрибут убрать в Store? и если уж на то пошло - зачем тут KeyStore? и версия вроде тоже относится к хранилищу
             String version) throws GeneralSecurityException {
         this.store = store;
         this.options = options;
         this.storageCertificateFactory = storageCertificateFactory;
+        // AI_TODO посмотри можно ли убрать
         this.eventPublisher = eventPublisher;
         this.keyStore = keyStore;
         this.version = version;
+        // AI_TODO зачем этот кэш - можно считать на лету?
         for (String alias : physicalAliases()) {
             revision = Math.max(revision, entryVersion(alias).kmsVersion());
         }
     }
 
+    // AI_TODO а не проще было бы создавать Store из какой-нибудь фабрики единообразно?
     public static synchronized KeyMaterialService open(
             KeyMaterialContentStore store,
             KeyMaterialOptions options)
@@ -114,11 +129,11 @@ final class KeyMaterialService implements AutoCloseable {
 
         try {
             KeyStore keyStore = KeyStore.getInstance(ownedOptions.type());
-            Optional<KeyMaterialSnapshot> snapshot = store.read();
+            Optional<String> sourceRevision = store.revision();
             char[] password = ownedOptions.password();
             try {
-                if (snapshot.isPresent()) {
-                    byte[] serialized = snapshot.get().bytes();
+                if (sourceRevision.isPresent()) {
+                    byte[] serialized = store.read(sourceRevision.orElseThrow());
                     try {
                         keyStore.load(new ByteArrayInputStream(serialized), password);
                     } finally {
@@ -130,7 +145,7 @@ final class KeyMaterialService implements AutoCloseable {
                             storageCertificateFactory,
                             eventPublisher,
                             keyStore,
-                            snapshot.get().version());
+                            sourceRevision.orElseThrow());
                 }
                 keyStore.load(null, password);
                 return new KeyMaterialService(
@@ -729,11 +744,8 @@ final class KeyMaterialService implements AutoCloseable {
         requireOpen();
         Objects.requireNonNull(requestedRevision, "revision");
         if (Objects.equals(version, requestedRevision)) return Set.of();
-        KeyMaterialSnapshot snapshot = store.read(requestedRevision)
-                .orElseThrow(() -> new IOException("Key material is missing at " + requestedRevision));
-        if (Objects.equals(version, snapshot.version())) return Set.of();
         KeyStore incoming = KeyStore.getInstance(options.type());
-        byte[] bytes = snapshot.bytes();
+        byte[] bytes = store.read(requestedRevision);
         char[] password = options.password();
         try {
             incoming.load(new ByteArrayInputStream(bytes), password);
@@ -779,7 +791,7 @@ final class KeyMaterialService implements AutoCloseable {
         } finally {
             clear(password);
         }
-        version = snapshot.version();
+        version = requestedRevision;
         revision = nextRevision;
         return Set.copyOf(resources);
     }

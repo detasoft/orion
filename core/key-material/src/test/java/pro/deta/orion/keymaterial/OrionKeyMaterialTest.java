@@ -26,11 +26,11 @@ class OrionKeyMaterialTest {
         try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options())) {
             assertThat(material.inventory(Set.of())).isEmpty();
             assertThat(material.version()).isZero();
-            assertThat(store.read()).isEmpty();
+            assertThat(store.revision()).isEmpty();
             material.withModification(modification -> {
                 modification.generateKey(signing, 2048);
                 assertThat(material.contains(signing)).isFalse();
-                assertThat(store.read()).isEmpty();
+                assertThat(store.revision()).isEmpty();
                 modification.apply();
             });
             signature = material.sign(signing, payload);
@@ -159,14 +159,14 @@ class OrionKeyMaterialTest {
         ConfigurationSecretEnvelope envelope;
         String savedVersion;
         try (OrionKeyMaterial material = openWithKey(store, signing)) {
-            String initialVersion = store.read().orElseThrow().version();
+            String initialVersion = store.revision().orElseThrow();
             assertThatThrownBy(() -> material.seal(material.configurationCipherKey(), new byte[0], context))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> material.seal(material.configurationCipherKey(), new byte[]{1}, null))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThat(store.read().orElseThrow().version()).isEqualTo(initialVersion);
+            assertThat(store.revision().orElseThrow()).isEqualTo(initialVersion);
             envelope = material.seal(material.configurationCipherKey(), "git-token".getBytes(StandardCharsets.UTF_8), context);
-            savedVersion = store.read().orElseThrow().version();
+            savedVersion = store.revision().orElseThrow();
             assertThat(savedVersion).isNotEqualTo(initialVersion);
             assertThat(material.open(material.configurationCipherKey(), envelope, context))
                     .isEqualTo("git-token".getBytes(StandardCharsets.UTF_8));
@@ -175,7 +175,7 @@ class OrionKeyMaterialTest {
             assertThat(material.open(material.configurationCipherKey(), envelope, context))
                     .isEqualTo("git-token".getBytes(StandardCharsets.UTF_8));
             material.seal(material.configurationCipherKey(), "another-token".getBytes(StandardCharsets.UTF_8), context);
-            assertThat(store.read().orElseThrow().version()).isEqualTo(savedVersion);
+            assertThat(store.revision().orElseThrow()).isEqualTo(savedVersion);
         }
     }
 
@@ -190,10 +190,10 @@ class OrionKeyMaterialTest {
             envelope = material.seal(material.configurationCipherKey(), new byte[]{1}, context);
         }
         try (OrionKeyMaterial material = openWithKey(destination, signing)) {
-            String initialVersion = destination.read().orElseThrow().version();
+            String initialVersion = destination.revision().orElseThrow();
             assertThatThrownBy(() -> material.open(material.configurationCipherKey(), envelope, context))
                     .isInstanceOf(GeneralSecurityException.class);
-            assertThat(destination.read().orElseThrow().version()).isEqualTo(initialVersion);
+            assertThat(destination.revision().orElseThrow()).isEqualTo(initialVersion);
         }
     }
 
@@ -214,11 +214,11 @@ class OrionKeyMaterialTest {
         KeyMaterialDescriptor signing = rsa("server-signing-v1", 1);
         ConfigurationSecretContext context = new ConfigurationSecretContext("system/proxy-token", "credential");
         try (OrionKeyMaterial material = openWithKey(store, signing)) {
-            String before = store.read().orElseThrow().version();
+            String before = store.revision().orElseThrow();
             store.fail = true;
             assertThatThrownBy(() -> material.seal(material.configurationCipherKey(), new byte[]{1}, context))
                     .isInstanceOf(GeneralSecurityException.class);
-            assertThat(store.read().orElseThrow().version()).isEqualTo(before);
+            assertThat(store.revision().orElseThrow()).isEqualTo(before);
             store.fail = false;
             assertThatThrownBy(() -> material.seal(material.configurationCipherKey(), new byte[]{2}, context))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
@@ -239,11 +239,11 @@ class OrionKeyMaterialTest {
                 "account-v1", KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, 1);
         String afterFailure;
         try (OrionKeyMaterial material = openWithKey(store, signing)) {
-            String before = store.read().orElseThrow().version();
+            String before = store.revision().orElseThrow();
             store.fail = true;
             assertThatThrownBy(() -> generateKeys(material, account, configuration.identity()))
                     .isInstanceOf(IOException.class).hasMessage("Material save failed");
-            afterFailure = store.read().orElseThrow().version();
+            afterFailure = store.revision().orElseThrow();
             assertThat(afterFailure.equals(before)).isEqualTo(!committed);
             store.fail = false;
             assertThatThrownBy(() -> generateKeys(material, account, configuration.identity()))
@@ -255,7 +255,7 @@ class OrionKeyMaterialTest {
             generateKeys(reopened, account, configuration.identity());
             assertThat(reopened.keyPair(account).getPrivate()).isNotNull();
             assertThat(reopened.keyPair(configuration.identity()).getPrivate()).isNotNull();
-            assertThat(store.read().orElseThrow().version().equals(afterFailure)).isEqualTo(committed);
+            assertThat(store.revision().orElseThrow().equals(afterFailure)).isEqualTo(committed);
         }
     }
 
@@ -295,11 +295,11 @@ class OrionKeyMaterialTest {
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
             expected = committed ? replacement : original;
         }
-        String durableVersion = store.read().orElseThrow().version();
+        String durableVersion = store.revision().orElseThrow();
         try (OrionKeyMaterial reopened = OrionKeyMaterial.open(store, options())) {
             assertThat(reopened.certificateIdentity(configuration).issuedCertificateChain().orElseThrow())
                     .containsExactly(expected);
-            assertThat(store.read().orElseThrow().version()).isEqualTo(durableVersion);
+            assertThat(store.revision().orElseThrow()).isEqualTo(durableVersion);
         }
     }
 
@@ -355,11 +355,11 @@ class OrionKeyMaterialTest {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialDescriptor signing = rsa("configuration-v1", 1);
         try (OrionKeyMaterial material = openWithKey(store, signing)) {
-            String before = store.read().orElseThrow().version();
+            String before = store.revision().orElseThrow();
             assertThatThrownBy(() -> material.seal(material.configurationCipherKey(), new byte[]{1},
                     new ConfigurationSecretContext("system/token", "credential")))
                     .isInstanceOf(GeneralSecurityException.class);
-            assertThat(store.read().orElseThrow().version()).isEqualTo(before);
+            assertThat(store.revision().orElseThrow()).isEqualTo(before);
             assertThat(material.sign(signing, new byte[]{1})).isNotEmpty();
         }
     }
@@ -372,10 +372,10 @@ class OrionKeyMaterialTest {
         try (OrionKeyMaterial first = openWithKey(store, signing);
              OrionKeyMaterial second = OrionKeyMaterial.open(store, options())) {
             ConfigurationSecretEnvelope envelope = first.seal(first.configurationCipherKey(), new byte[]{1}, context);
-            String winnerVersion = store.read().orElseThrow().version();
+            String winnerVersion = store.revision().orElseThrow();
             assertThatThrownBy(() -> second.seal(second.configurationCipherKey(), new byte[]{2}, context))
                     .isInstanceOf(GeneralSecurityException.class);
-            assertThat(store.read().orElseThrow().version()).isEqualTo(winnerVersion);
+            assertThat(store.revision().orElseThrow()).isEqualTo(winnerVersion);
             try (OrionKeyMaterial reopened = OrionKeyMaterial.open(store, options())) {
                 assertThat(reopened.open(reopened.configurationCipherKey(), envelope, context)).containsExactly((byte) 1);
             }
@@ -404,12 +404,12 @@ class OrionKeyMaterialTest {
             assertThatThrownBy(() -> material.seal(material.configurationCipherKey(), new byte[]{1}, context))
                     .isInstanceOf(GeneralSecurityException.class);
         }
-        String savedVersion = store.read().orElseThrow().version();
+        String savedVersion = store.revision().orElseThrow();
         store.loseResponse = false;
         try (OrionKeyMaterial reopened = OrionKeyMaterial.open(store, options())) {
             ConfigurationSecretEnvelope envelope = reopened.seal(reopened.configurationCipherKey(), new byte[]{2}, context);
             assertThat(reopened.open(reopened.configurationCipherKey(), envelope, context)).containsExactly((byte) 2);
-            assertThat(store.read().orElseThrow().version()).isEqualTo(savedVersion);
+            assertThat(store.revision().orElseThrow()).isEqualTo(savedVersion);
         }
     }
 
@@ -437,9 +437,15 @@ class OrionKeyMaterialTest {
         private int readCalls;
 
         @Override
-        public Optional<KeyMaterialSnapshot> read() throws IOException {
+        public Optional<String> revision() throws IOException {
             readCalls++;
-            return delegate.read();
+            return delegate.revision();
+        }
+
+        @Override
+        public byte[] read(String revision) throws IOException {
+            readCalls++;
+            return delegate.read(revision);
         }
 
         @Override

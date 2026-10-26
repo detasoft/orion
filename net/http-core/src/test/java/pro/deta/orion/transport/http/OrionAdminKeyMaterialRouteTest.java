@@ -12,7 +12,6 @@ import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialInventoryEntry;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 
 import java.io.IOException;
@@ -114,7 +113,8 @@ class OrionAdminKeyMaterialRouteTest {
                     {"alias":"account","purpose":"ACME_ACCOUNT"}
                     """).status()).isEqualTo(201);
             byte[] publicKey = material.publicKey(ACCOUNT).getEncoded();
-            KeyMaterialSnapshot before = store.read().orElseThrow();
+            String beforeRevision = store.revision().orElseThrow();
+            byte[] beforeBytes = store.read(beforeRevision);
 
             for (String purpose : List.of("ACME_ACCOUNT", "TLS_IDENTITY")) {
                 String body = new ObjectMapper().writeValueAsString(
@@ -123,8 +123,8 @@ class OrionAdminKeyMaterialRouteTest {
             }
             assertThat(material.publicKey(ACCOUNT).getEncoded()).isEqualTo(publicKey);
             assertThat(material.version()).isEqualTo(1);
-            assertThat(store.read().orElseThrow().bytes()).isEqualTo(before.bytes());
-            assertThat(store.read().orElseThrow().version()).isEqualTo(before.version());
+            assertThat(store.read(store.revision().orElseThrow())).isEqualTo(beforeBytes);
+            assertThat(store.revision().orElseThrow()).isEqualTo(beforeRevision);
         }
     }
 
@@ -142,7 +142,7 @@ class OrionAdminKeyMaterialRouteTest {
             }
             assertThat(post(material, "x".repeat(32769)).status()).isEqualTo(413);
             assertThat(material.inventory(Set.of())).isEmpty();
-            assertThat(store.read()).isEmpty();
+            assertThat(store.revision()).isEmpty();
         }
     }
 
@@ -156,7 +156,7 @@ class OrionAdminKeyMaterialRouteTest {
             assertThat(response.status()).isEqualTo(400);
             assertThat(response.body().toString()).doesNotContain("private-secret");
             assertThat(material.inventory(Set.of())).isEmpty();
-            assertThat(store.read()).isEmpty();
+            assertThat(store.revision()).isEmpty();
         }
     }
 
