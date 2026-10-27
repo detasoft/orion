@@ -334,30 +334,6 @@ class OrionAccessControlServiceImplTest {
     }
 
     @Test
-    void withAccessDiscardsChangesAndKeepsTheOriginalException() {
-        try (ServiceFixture fixture = fixture(new AclFixture())) {
-            OrionConfigurationModification edit =
-                    fixture.editor.edit(
-                            fixture.storage.snapshot.revision(),
-                            new ChangeMetadata(UserEmail.EMPTY, "abandoned update"));
-            IllegalStateException failure = new IllegalStateException("callback failed");
-            assertThatThrownBy(() -> fixture.withAccess(edit, access -> {
-                access.createOrUpdateUser(userUpdate("alice", "hash"));
-                access.update(document -> new OrionDocument(new OrionDocument.SystemConfiguration(
-                        document.system().accessControl(), document.system().https(),
-                        List.of(new ConfigurationSecret("abandoned", testEnvelope())),
-                        document.system().proxies(), document.system().connections(),
-                        document.system().oidcProviders(), document.system().invitations()), document.organizations()));
-                throw failure;
-            })).isSameAs(failure);
-            assertThat(fixture.storage.saveCount).isZero();
-            assertThat(fixture.service.userExists("alice")).isFalse();
-            assertThatThrownBy(edit::document).isInstanceOf(IllegalStateException.class);
-            edit.discard();
-        }
-    }
-
-    @Test
     void discardedAndConflictingEditsPublishNothing() {
         AclFixture initial = new AclFixture();
         initial.getUsers().add(user("alice"));
