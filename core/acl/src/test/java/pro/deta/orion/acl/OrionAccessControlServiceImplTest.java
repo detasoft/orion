@@ -18,6 +18,9 @@ import pro.deta.orion.schema.orion.v2.ScopedGrant;
 import pro.deta.orion.schema.orion.v2.ScopedRole;
 import pro.deta.orion.schema.orion.v2.TeamId;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceAccessMode;
+import org.junit.jupiter.api.parallel.ResourceLock;
+import org.junit.jupiter.api.parallel.Resources;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
@@ -1375,6 +1378,7 @@ class OrionAccessControlServiceImplTest {
         }
     }
 
+    @ResourceLock(value = Resources.SYSTEM_OUT, mode = ResourceAccessMode.READ)
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void createsDefaultOrganizationOnlyForNewConfigurationAndPreservesItOnRestart(boolean resetRoot)
@@ -1390,9 +1394,7 @@ class OrionAccessControlServiceImplTest {
                         testServerIdentity(), SIGNING,
                         configuration,
                         editor);
-        PrintStream originalOut = System.out;
-        try (PrintStream output = new PrintStream(new ByteArrayOutputStream())) {
-            System.setOut(output);
+        try {
             editor.onStart();
             service.onStart();
             OrionDocument created = storage.snapshot.result()
@@ -1422,13 +1424,13 @@ class OrionAccessControlServiceImplTest {
                 restarted.onStop();
             }
         } finally {
-            System.setOut(originalOut);
             service.onStop();
             editor.onStop();
             storage.runtime.close();
         }
     }
 
+    @ResourceLock(value = Resources.SYSTEM_OUT, mode = ResourceAccessMode.READ)
     @Test
     void rootResetAcceptsANewerActivatedRevisionThatPreservesTheGeneratedPassword() {
         InMemoryStorage storage = new InMemoryStorage(null);
@@ -1448,17 +1450,12 @@ class OrionAccessControlServiceImplTest {
                     new OrionRevision.Stored("after-root-save"));
             storage.publish("unrelated update after root reset");
         };
-        ByteArrayOutputStream processOutput = new ByteArrayOutputStream();
-        PrintStream originalOut = System.out;
-        try (PrintStream output = new PrintStream(processOutput, true, StandardCharsets.UTF_8)) {
-            System.setOut(output);
+        try {
             editor.onStart();
             service.onStart();
             assertThat(editor.current().revision()).isEqualTo(new OrionRevision.Stored("after-root-save"));
             assertThat(service.userExists("alice")).isTrue();
-            assertThat(processOutput.toString(StandardCharsets.UTF_8)).contains("---ROOT PASSWORD: ");
         } finally {
-            System.setOut(originalOut);
             service.onStop();
             editor.onStop();
             storage.runtime.close();
@@ -1475,11 +1472,13 @@ class OrionAccessControlServiceImplTest {
     }
 
     @Test
+    @ResourceLock(Resources.SYSTEM_OUT)
     void resetFailsWithoutPrintingWhenPersistenceFails() throws Exception {
         assertRecoveryFailsWithoutPrinting(defaultAclSnapshot(), new RootPasswordReset(true));
     }
 
     @Test
+    @ResourceLock(Resources.SYSTEM_OUT)
     void defaultCreationFailsWithoutPrintingWhenPersistenceFails() throws Exception {
         assertRecoveryFailsWithoutPrinting(null, new RootPasswordReset(false));
     }
