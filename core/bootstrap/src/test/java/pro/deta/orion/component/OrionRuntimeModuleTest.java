@@ -20,8 +20,6 @@ import pro.deta.orion.decision.DecisionAction;
 import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
-import pro.deta.orion.internal.OrionExecutor;
-import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -72,8 +70,8 @@ class OrionRuntimeModuleTest {
     void decisionAuthorizationPreservesOrganizationBoundary(String scopePath) {
         TestConfiguration desired = new TestConfiguration(testRuntime);
         desired.publish(decisionAccessDocument(true), Optional.empty());
-        try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
-                DecisionRegistry registry = OrionRuntimeModule.decisionRegistry(executor, desired.acl())) {
+        try (DecisionRegistry registry =
+                OrionRuntimeModule.decisionRegistry(testRuntime.executor(), desired.acl())) {
             Decision pending = registry.register(new Decision(UUID.randomUUID(),
                 Optional.ofNullable(scopePath).map(ConfigurationScope::parse), "Confirm operation", "",
                 List.of(new DecisionAction("Replace", false, actor -> Result.of(null)),
@@ -105,8 +103,8 @@ class OrionRuntimeModuleTest {
         TestConfiguration desired = new TestConfiguration(testRuntime);
         desired.publish(decisionAccessDocument(true), Optional.empty());
         PrincipalAddress actor = PrincipalAddress.parse("acme/reviewer");
-        try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
-                DecisionRegistry registry = OrionRuntimeModule.decisionRegistry(executor, desired.acl())) {
+        try (DecisionRegistry registry =
+                OrionRuntimeModule.decisionRegistry(testRuntime.executor(), desired.acl())) {
             Decision pending = registry.register(new Decision(UUID.randomUUID(),
                     Optional.of(ConfigurationScope.parse("acme/platform/api")), "Trust", "",
                     List.of(new DecisionAction("Save", true,
@@ -143,8 +141,8 @@ class OrionRuntimeModuleTest {
         User assigned = new User("reviewer", null, null, null, List.of(),
                 List.of("acme/reviewer"), List.of());
         PrincipalAddress actor = PrincipalAddress.parse("acme/reviewer");
-        try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
-                DecisionRegistry registry = OrionRuntimeModule.decisionRegistry(executor, desired.acl())) {
+        try (DecisionRegistry registry =
+                OrionRuntimeModule.decisionRegistry(testRuntime.executor(), desired.acl())) {
             Decision pending = registry.register(new Decision(UUID.randomUUID(),
                     Optional.of(ConfigurationScope.parse("acme/platform/api")), "Trust", "",
                     List.of(new DecisionAction("Save", false, ignored -> Result.of(null)))))
@@ -171,8 +169,8 @@ class OrionRuntimeModuleTest {
         TestConfiguration desired = new TestConfiguration(testRuntime);
         desired.publish(decisionAccessDocument(true), Optional.empty());
         PrincipalAddress actor = PrincipalAddress.parse("acme/reviewer");
-        try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
-                DecisionRegistry registry = OrionRuntimeModule.decisionRegistry(executor, desired.acl())) {
+        try (DecisionRegistry registry =
+                OrionRuntimeModule.decisionRegistry(testRuntime.executor(), desired.acl())) {
             java.util.concurrent.atomic.AtomicInteger executions = new java.util.concurrent.atomic.AtomicInteger();
             Decision pending = registry.register(new Decision(UUID.randomUUID(),
                     Optional.of(ConfigurationScope.parse("acme/platform")), "Trust", "",
