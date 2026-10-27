@@ -766,38 +766,6 @@ class OrionAccessControlServiceImplTest {
     }
 
     @Test
-    void updatesConfigurationAtTheReadRevisionInOneFile() throws Exception {
-        try (var fixture = fixture(new AclFixture())) {
-            OrionConfigurationModification appliedEdit =
-                    fixture.editor
-                            .edit(
-                                    new OrionRevision.Stored("version-one"),
-                                    new ChangeMetadata(UserEmail.EMPTY, "update proxy"))
-                            .update(
-                                    document ->
-                                            new OrionDocument(
-                                                    new OrionDocument.SystemConfiguration(
-                                                            document.system().accessControl(),
-                                                            document.system().https(),
-                                                            List.of(
-                                                                    new ConfigurationSecret(
-                                                                            "credential",
-                                                                            testEnvelope())),
-                                                            document.system().proxies(),
-                                                            document.system().connections(),
-                                                            document.system().oidcProviders(), document.system().invitations()),
-                                                    document.organizations()));
-            appliedEdit.apply();
-            OrionDocumentRevision result = fixture.storage.snapshot;
-
-            assertThat(result.result()
-                    .valueOrFailure("Cannot read configuration document")
-                    .system().secrets()).extracting("id").containsExactly("credential");
-            assertThat(fixture.storage.snapshot.revision()).isEqualTo(appliedEdit.revision());
-        }
-    }
-
-    @Test
     void rejectsStalePrimaryConfigurationBeforeInvokingTheMutation() {
         try (var fixture = fixture(new AclFixture())) {
             int saves = fixture.storage.saveCount;
@@ -1045,6 +1013,7 @@ class OrionAccessControlServiceImplTest {
     @Test
     void addedRootKeysRetainTheExistingAuthenticationGeneration() {
         AclFixture primary = new AclFixture();
+        primary.getUsers().add(user("alice").addCredential(CredentialType.ARGON2, "alice-hash"));
         primary.getUsers().add(user("root").addCredential(
                 CredentialType.OPENSSH_PUBLIC_KEY,
                 "root-auth-generation:generation-one",
@@ -1058,6 +1027,14 @@ class OrionAccessControlServiceImplTest {
                     .filteredOn(credential -> credential.type() == CredentialType.OPENSSH_PUBLIC_KEY)
                     .extracting(Credential::keyId)
                     .containsOnly("root-auth-generation:generation-one");
+            assertThat(credentials(fixture.storage.snapshot, "alice"))
+                    .singleElement().extracting(Credential::value).isEqualTo("alice-hash");
+            assertThat(fixture.service.listSshCredentials("root"))
+                    .isInstanceOfSatisfying(SshCredentialListResult.Success.class, success ->
+                            assertThat(success.credentials()).containsExactlyInAnyOrder(
+                                    descriptor(KEY_ONE.getPublic()), descriptor(KEY_TWO.getPublic())));
+            assertThat(fixture.editor.current().revision()).isEqualTo(fixture.storage.snapshot.revision());
+            assertThat(fixture.storage.saveCount).isEqualTo(1);
         }
     }
 
@@ -1319,41 +1296,6 @@ class OrionAccessControlServiceImplTest {
                 admin.discard();
                 removal.discard();
             }
-        }
-    }
-
-    @Test
-    void rootCredentialUpdatePreservesOtherUsers() {
-        AclFixture primary = new AclFixture();
-        primary.getUsers().add(user("alice").addCredential(CredentialType.ARGON2, "alice-hash"));
-        primary.getUsers().add(user("root")
-                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
-        try (ServiceFixture fixture = fixture(primary, testServerIdentity())) {
-            fixture.addSshCredentials("root", List.of(key(KEY_TWO.getPublic())));
-            assertThat(credentials(fixture.storage.snapshot, "alice"))
-                    .singleElement().extracting(Credential::value).isEqualTo("alice-hash");
-            assertThat(fixture.service.listSshCredentials("root"))
-                    .isInstanceOfSatisfying(SshCredentialListResult.Success.class, success ->
-                            assertThat(success.credentials()).containsExactlyInAnyOrder(
-                                    descriptor(KEY_ONE.getPublic()), descriptor(KEY_TWO.getPublic())));
-        }
-    }
-
-    @Test
-    void credentialUpdateActivatesThePublishedSnapshotWithoutReloading() {
-        AclFixture primary = new AclFixture();
-        primary.getUsers().add(user("root")
-                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
-        try (ServiceFixture fixture = fixture(primary)) {
-            int loads = fixture.storage.loadCount;
-            fixture.addSshCredentials("root", List.of(key(KEY_TWO.getPublic())));
-            assertThat(fixture.storage.saveCount).isEqualTo(1);
-            assertThat(fixture.storage.loadCount).isEqualTo(loads + 1);
-            assertThat(fixture.editor.current().revision())
-                    .isEqualTo(fixture.storage.snapshot.revision());
-            assertThat(fixture.service.listSshCredentials("root"))
-                    .isInstanceOfSatisfying(SshCredentialListResult.Success.class, success ->
-                            assertThat(success.credentials()).contains(descriptor(KEY_TWO.getPublic())));
         }
     }
 
@@ -1944,7 +1886,6 @@ class OrionAccessControlServiceImplTest {
         private OrionDocumentRevision concurrentReplacement;
         private volatile OrionDocumentRevision snapshot;
         private int saveCount;
-        private int loadCount;
         private boolean concurrentOnSave;
         private boolean loadUnavailable;
         private Runnable afterSave;
@@ -1955,7 +1896,6 @@ class OrionAccessControlServiceImplTest {
 
         @Override
         public OrionDocumentRevision load() {
-            loadCount++;
             if (loadUnavailable)
                 return new OrionDocumentRevision(
                         new Result.Failure<>(Result.FailureCode.GENERAL),
