@@ -4,7 +4,7 @@ import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.KeyMaterialConfig;
 import pro.deta.orion.bootstrap.config.ServerSigningConfig;
 import pro.deta.orion.bootstrap.config.SigningKeyReferenceConfig;
-import pro.deta.orion.event.type.OrionEventPublisher;
+import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
@@ -38,7 +38,7 @@ public final class KeyMaterialBootstrap {
             Map<String, String> environment,
             NativeGitRepositoryFactory repositories,
             KeyMaterialCreation creation,
-            OrionEventPublisher events) throws IOException, GeneralSecurityException {
+            OrionEventManager events) throws IOException, GeneralSecurityException {
         if (configuration == null) {
             throw new IllegalArgumentException("Orion configuration must not be null");
         }

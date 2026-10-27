@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.event.OrionEventManager;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.bouncycastle.asn1.x509.BasicConstraints;
 import org.bouncycastle.asn1.x509.Extension;
@@ -1086,7 +1088,8 @@ class JettyHTTPServerIT {
 
     private static OrionKeyMaterial owner(InMemoryKeyMaterialContentStore store) throws Exception {
         OrionKeyMaterial material = OrionKeyMaterial.open(
-                store, KeyMaterialOptions.pkcs12("test-password".toCharArray()));
+                store, KeyMaterialOptions.pkcs12("test-password".toCharArray()),
+                new OrionEventManager());
         try {
             if (!material.contains(SIGNING)) {
                 material.withModification(modification -> {

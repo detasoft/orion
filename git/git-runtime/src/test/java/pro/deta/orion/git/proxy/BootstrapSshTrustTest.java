@@ -149,11 +149,12 @@ class BootstrapSshTrustTest {
         }
     }
 
-    private static OrionKeyMaterial material() throws Exception {
+    private OrionKeyMaterial material() throws Exception {
         KeyMaterialDescriptor signing = new KeyMaterialDescriptor("signing",
                 Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
-            OrionKeyMaterial material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options);
+            OrionKeyMaterial material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
+                    testRuntime.unstartedEvents());
             try {
                 material.withModification(modification -> {
                     modification.generateKey(signing, 2048);

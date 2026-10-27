@@ -25,7 +25,8 @@ class OrionStorageConnectionsRouteTest {
     @Test
     void createsAndInspectsSystemConnectionWithEncryptedWriteOnlyCredentials() throws Exception {
         try (OrionKeyMaterial material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
-                KeyMaterialOptions.pkcs12("test-password".toCharArray()))) {
+                KeyMaterialOptions.pkcs12("test-password".toCharArray()),
+                events.unstartedEvents())) {
             StorageManagementFixture.State fixture = StorageManagementFixture.open(events,
                     NativeGitRepositoryProvider.inMemory(events.events()), List.of(), material);
             OrionStorageConnectionsRoute route = new OrionStorageConnectionsRoute(fixture.management(), mapper);

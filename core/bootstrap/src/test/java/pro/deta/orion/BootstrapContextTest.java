@@ -1,5 +1,7 @@
 package pro.deta.orion;
 
+import pro.deta.orion.event.OrionEventManager;
+
 import pro.deta.orion.git.fileapi.GitFile;
 
 import pro.deta.orion.git.fileapi.GitFileEvents;
@@ -418,7 +420,8 @@ class BootstrapContextTest {
                                          backend,
                                          "orion",
                                          "refs/heads/main",
-                                         "material.p12"))), options)) {
+                                         "material.p12"))), options,
+                             testRuntime.unstartedEvents())) {
                     material.withModification(modification -> {
                         modification.generateKey(staged, 2048);
                         modification.apply();
@@ -1722,7 +1725,8 @@ class BootstrapContextTest {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(
                 ENVIRONMENT.get(PASSWORD_ENV).toCharArray());
-             OrionKeyMaterial material = OrionKeyMaterial.open(store, options)) {
+             OrionKeyMaterial material = OrionKeyMaterial.open(store, options,
+                     new OrionEventManager())) {
             material.withModification(modification -> {
                 modification.generateKey(KeyMaterialBootstrap.signingMaterial(
                         configuration.getBootstrap().getKeyMaterial()).active(), 2048);

@@ -189,8 +189,9 @@ class AcmeConfigurationTest {
         }
     }
 
-    private static OrionKeyMaterial owner(InMemoryKeyMaterialContentStore store) throws Exception {
-        return OrionKeyMaterial.open(store, KeyMaterialOptions.pkcs12("password".toCharArray()));
+    private OrionKeyMaterial owner(InMemoryKeyMaterialContentStore store) throws Exception {
+        return OrionKeyMaterial.open(store, KeyMaterialOptions.pkcs12("password".toCharArray()),
+                events.unstartedEvents());
     }
 
     private OrionDocument save(AcmeCertificateService service, TestConfiguration desired,

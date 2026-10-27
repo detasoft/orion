@@ -293,7 +293,8 @@ class NativeGitKeyMaterialContentStoreTest {
         KeyMaterialDescriptor added = new KeyMaterialDescriptor("added",
                 Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(password);
-             OrionKeyMaterial writer = OrionKeyMaterial.open(external, options)) {
+             OrionKeyMaterial writer = OrionKeyMaterial.open(external, options,
+                     testRuntime.unstartedEvents())) {
             writer.withModification(modification -> {
                 modification.generateKey(original, 2048);
                 modification.apply();
@@ -327,7 +328,8 @@ class NativeGitKeyMaterialContentStoreTest {
                 assertThat(running.version()).isEqualTo(2);
                 assertThat(warnings.list).extracting(ILoggingEvent::getFormattedMessage)
                         .anyMatch(message -> message.contains("restart Orion"));
-                try (OrionKeyMaterial reopened = OrionKeyMaterial.open(fixture.store(), options)) {
+                try (OrionKeyMaterial reopened = OrionKeyMaterial.open(fixture.store(), options,
+                        testRuntime.unstartedEvents())) {
                     assertThat(reopened.contains(original)).isTrue();
                     assertThat(reopened.contains(added)).isTrue();
                     assertThat(reopened.contains(local)).isFalse();

@@ -1,5 +1,7 @@
 package pro.deta.orion.git.sync;
 
+import pro.deta.orion.event.OrionEventManager;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,7 +50,8 @@ class GitHubRemoteProfileTest {
     @BeforeEach
     void configureStoredCredential() throws Exception {
         material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
-                KeyMaterialOptions.pkcs12("test-password".toCharArray()));
+                KeyMaterialOptions.pkcs12("test-password".toCharArray()),
+                new OrionEventManager());
         secrets = new ConfigurationSecrets(() -> {
             resolutions.incrementAndGet();
             return current.get();

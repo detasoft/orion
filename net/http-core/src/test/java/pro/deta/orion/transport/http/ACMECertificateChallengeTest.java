@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.event.OrionEventManager;
+
 import pro.deta.orion.acme.AcmeCertificateService;
 import pro.deta.orion.acme.AcmeCertificateIssuer;
 import pro.deta.orion.acme.AcmeCertificateIssueRequest;
@@ -219,7 +221,8 @@ public class ACMECertificateChallengeTest {
 
     private static OrionKeyMaterial keyMaterial() throws Exception {
         return OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
-                KeyMaterialOptions.pkcs12("test-password".toCharArray()));
+                KeyMaterialOptions.pkcs12("test-password".toCharArray()),
+                new OrionEventManager());
     }
 
     private static final class WaitingChallengeIssuer extends AcmeCertificateIssuer {

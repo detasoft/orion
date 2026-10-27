@@ -1,5 +1,7 @@
 package pro.deta.orion.keymaterial;
 
+import pro.deta.orion.event.OrionEventManager;
+
 import java.util.Set;
 
 import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
@@ -192,7 +194,8 @@ class KeyMaterialAdministrationTest {
 
     private static OrionKeyMaterial open(InMemoryKeyMaterialContentStore store) throws Exception {
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
-            return OrionKeyMaterial.open(store, options);
+            return OrionKeyMaterial.open(store, options,
+                    new OrionEventManager());
         }
     }
 

@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.event.OrionEventManager;
+
 import java.util.Set;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -205,7 +207,8 @@ class OrionAdminKeyMaterialRouteTest {
 
     private static OrionKeyMaterial open(InMemoryKeyMaterialContentStore store) throws Exception {
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray())) {
-            return OrionKeyMaterial.open(store, options);
+            return OrionKeyMaterial.open(store, options,
+                    new OrionEventManager());
         }
     }
 }

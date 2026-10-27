@@ -33,7 +33,8 @@ class S3RepositoryManagementIT {
     void encryptedManagementPersistsActivatesCreatesAndReopensMetadataInMinio() throws Exception {
         try (MinioS3TestServer server = MinioS3TestServer.start("orion-management-" + UUID.randomUUID());
              OrionKeyMaterial material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
-                     KeyMaterialOptions.pkcs12("test-password".toCharArray()));
+                     KeyMaterialOptions.pkcs12("test-password".toCharArray()),
+                     testRuntime.unstartedEvents());
              S3Transport transport = new S3Transport();
              NativeGitRepositoryProvider local = NativeGitRepositoryProvider.inMemory(testRuntime.events())) {
             ConfiguredNativeGitRepositoryFactory configuredFactory =

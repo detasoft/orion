@@ -1,5 +1,7 @@
 package pro.deta.orion.keymaterial;
 
+import pro.deta.orion.event.OrionEventManager;
+
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
@@ -26,13 +28,15 @@ class KeyMaterialServiceTest {
     void createsPkcs12InMemoryStoreAndReloadsPrivateKey() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
 
-        KeyMaterialService service = KeyMaterialService.open(store, options());
+        KeyMaterialService service = KeyMaterialService.open(store, options(),
+                new OrionEventManager());
         KeyPair generated = generateKey(service, descriptor(
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
                 KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA), 2048);
         String savedVersion = store.revision().orElseThrow();
 
-        KeyMaterialService reloaded = KeyMaterialService.open(store, options());
+        KeyMaterialService reloaded = KeyMaterialService.open(store, options(),
+                new OrionEventManager());
         KeyPair loaded = reloaded.getKeyPair(KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS);
         Certificate[] chain = reloaded.getCertificateChain(
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS);
@@ -56,7 +60,8 @@ class KeyMaterialServiceTest {
         Path keyStorePath = tempDir.resolve(KeyMaterialTestConstants.KEY_STORE_FILE_NAME);
         LocalKeyMaterialContentStore store = new LocalKeyMaterialContentStore(keyStorePath);
 
-        KeyMaterialService service = KeyMaterialService.open(store, options());
+        KeyMaterialService service = KeyMaterialService.open(store, options(),
+                new OrionEventManager());
         generateKey(service, descriptor(
                 KeyMaterialTestConstants.SSH_HOST_RSA_2026_05_ALIAS,
                 KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.RSA), 2048);
@@ -75,7 +80,8 @@ class KeyMaterialServiceTest {
     @Test
     void trustedCertificatesRoundTripSeparatelyFromPrivateKeyEntries() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        KeyMaterialService service = KeyMaterialService.open(store, options());
+        KeyMaterialService service = KeyMaterialService.open(store, options(),
+                new OrionEventManager());
         generateKey(service, descriptor(
                 KeyMaterialTestConstants.ORION_CA_2026_05_ALIAS,
                 KeyMaterialPurpose.CERTIFICATE_AUTHORITY, KeyMaterialAlgorithm.RSA), 2048);
@@ -90,7 +96,8 @@ class KeyMaterialServiceTest {
                 .hasMessageContaining("certificate authority");
         trustCertificate(service, descriptor, issuerCertificate);
 
-        KeyMaterialService reloaded = KeyMaterialService.open(store, options());
+        KeyMaterialService reloaded = KeyMaterialService.open(store, options(),
+                new OrionEventManager());
         X509Certificate trustedCertificate = reloaded.getTrustedCertificate(descriptor);
 
         assertThat(trustedCertificate.getEncoded()).isEqualTo(issuerCertificate.getEncoded());
@@ -110,12 +117,14 @@ class KeyMaterialServiceTest {
                 KeyMaterialAlgorithm.RSA,
                 1);
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
-        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
+        try (KeyMaterialService service = KeyMaterialService.open(store, options(),
+                new OrionEventManager())) {
             trustCertificate(service, original, root.certificate());
             generateKey(service, privateEntry, 2048);
         }
 
-        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
+        try (KeyMaterialService service = KeyMaterialService.open(store, options(),
+                new OrionEventManager())) {
             KeyMaterialDescriptor wrongVersion = trustedCertificate(
                     original.alias(), 2);
             KeyMaterialDescriptor wrongAlgorithm = new KeyMaterialDescriptor(
@@ -146,13 +155,15 @@ class KeyMaterialServiceTest {
                 "server-signing-v1",
                 KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.RSA);
-        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
+        try (KeyMaterialService service = KeyMaterialService.open(store, options(),
+                new OrionEventManager())) {
             generateKey(service, rsa, 2048);
             generateKey(service, ec, 256);
             generateKey(service, signing, 2048);
         }
 
-        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
+        try (KeyMaterialService service = KeyMaterialService.open(store, options(),
+                new OrionEventManager())) {
             assertThat(service.privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST)))
                     .containsExactly(ec, rsa);
         }
@@ -168,7 +179,8 @@ class KeyMaterialServiceTest {
                 "configuration-v1", KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES);
         KeyMaterialDescriptor trust = trustedCertificate("issuer-v1", 1);
         TestCertificateChain.Authority issuer = TestCertificateChain.root("Public Root");
-        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
+        try (KeyMaterialService service = KeyMaterialService.open(store, options(),
+                new OrionEventManager())) {
             KeyPair keyPair = generateKey(service, identity, 2048);
             KeyMaterialModification modification = service.modify();
             try {
@@ -182,7 +194,8 @@ class KeyMaterialServiceTest {
             }
         }
 
-        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
+        try (KeyMaterialService service = KeyMaterialService.open(store, options(),
+                new OrionEventManager())) {
             List<KeyMaterialInventoryEntry> entries = service.inventory(Set.of());
             assertThat(entries).extracting(entry -> entry.descriptor().alias())
                     .containsExactly("configuration-v1", "issuer-v1", "tls-identity-v1");
@@ -200,7 +213,8 @@ class KeyMaterialServiceTest {
     @Test
     void refusesPrivateKeyWhenCertificateChainHasDifferentPublicKey() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        KeyMaterialService service = KeyMaterialService.open(store, options());
+        KeyMaterialService service = KeyMaterialService.open(store, options(),
+                new OrionEventManager());
 
         KeyPair signingKey = generateKey(service, descriptor(
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
@@ -232,13 +246,16 @@ class KeyMaterialServiceTest {
     void detectsConflictingStoreUpdates() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
 
-        KeyMaterialService initial = KeyMaterialService.open(store, options());
+        KeyMaterialService initial = KeyMaterialService.open(store, options(),
+                new OrionEventManager());
         generateKey(initial, descriptor(
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
                 KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA), 2048);
 
-        KeyMaterialService first = KeyMaterialService.open(store, options());
-        KeyMaterialService second = KeyMaterialService.open(store, options());
+        KeyMaterialService first = KeyMaterialService.open(store, options(),
+                new OrionEventManager());
+        KeyMaterialService second = KeyMaterialService.open(store, options(),
+                new OrionEventManager());
 
         generateKey(second, descriptor(
                 KeyMaterialTestConstants.SSH_HOST_RSA_2026_05_ALIAS,
@@ -259,7 +276,8 @@ class KeyMaterialServiceTest {
     @Test
     void loadsInlinePkcs12BytesFromContentBase64ResourceStore() throws Exception {
         InMemoryKeyMaterialContentStore writableStore = new InMemoryKeyMaterialContentStore();
-        KeyMaterialService writable = KeyMaterialService.open(writableStore, options());
+        KeyMaterialService writable = KeyMaterialService.open(writableStore, options(),
+                new OrionEventManager());
         generateKey(writable, descriptor(
                 KeyMaterialTestConstants.HTTPS_2026_05_ALIAS,
                 KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA), 2048);
@@ -267,7 +285,8 @@ class KeyMaterialServiceTest {
         byte[] pkcs12Bytes = writableStore.read(writableStore.revision().orElseThrow());
         String reference = KeyMaterialTestConstants.contentBase64Reference(pkcs12Bytes);
         KeyMaterialContentStore readOnlyStore = KeyMaterialResourceResolver.standard().resolveStore(reference);
-        KeyMaterialService readOnly = KeyMaterialService.open(readOnlyStore, options());
+        KeyMaterialService readOnly = KeyMaterialService.open(readOnlyStore, options(),
+                new OrionEventManager());
 
         assertThat(readOnly.containsAlias(KeyMaterialTestConstants.HTTPS_2026_05_ALIAS, Set.of())).isTrue();
         assertThat(readOnly.getCertificateChain(KeyMaterialTestConstants.HTTPS_2026_05_ALIAS)).hasSize(1);
@@ -277,7 +296,8 @@ class KeyMaterialServiceTest {
     void serviceOwnsAndClearsItsPasswordLifecycle() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialOptions callerOptions = options();
-        KeyMaterialService service = KeyMaterialService.open(store, callerOptions);
+        KeyMaterialService service = KeyMaterialService.open(store, callerOptions,
+                new OrionEventManager());
 
         try {
             callerOptions.close();
@@ -308,7 +328,8 @@ class KeyMaterialServiceTest {
         String corruptVersion = store.write(corruptBytes, null);
 
         try (KeyMaterialOptions options = options()) {
-            assertThatThrownBy(() -> KeyMaterialService.open(store, options))
+            assertThatThrownBy(() -> KeyMaterialService.open(store, options,
+                    new OrionEventManager()))
                     .isInstanceOf(java.io.IOException.class);
         }
 

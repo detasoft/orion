@@ -234,8 +234,9 @@ class AcmeCertificateSettingsTest {
         }
     }
 
-    private static OrionKeyMaterial owner(InMemoryKeyMaterialContentStore store) throws Exception {
-        return OrionKeyMaterial.open(store, KeyMaterialOptions.pkcs12("password".toCharArray()));
+    private OrionKeyMaterial owner(InMemoryKeyMaterialContentStore store) throws Exception {
+        return OrionKeyMaterial.open(store, KeyMaterialOptions.pkcs12("password".toCharArray()),
+                events.unstartedEvents());
     }
 
     private static AcmeCertificateService.Settings settings(String provider, String kid, String key) {

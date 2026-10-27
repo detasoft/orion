@@ -7,7 +7,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.event.disruptor.OrionDisruptor;
 import pro.deta.orion.event.type.OrionEvent;
-import pro.deta.orion.event.type.OrionEventPublisher;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.util.Subscription;
 
@@ -39,8 +38,7 @@ import java.util.function.Supplier;
 @Singleton
 @Slf4j
 @RequiredArgsConstructor(onConstructor_ = @Inject)
-public class OrionEventManager implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle,
-        OrionEventPublisher {
+public class OrionEventManager implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
     public static final int RING_BUFFER_SIZE = 32_768;
     private final OrionDisruptor rootDisruptor = new OrionDisruptor(RING_BUFFER_SIZE);
     private final CopyOnWriteArrayList<Handler<?>> handlers = new CopyOnWriteArrayList<>();
@@ -127,7 +125,6 @@ public class OrionEventManager implements ServiceLifecycleStateMachineAdapter.Se
         }
     }
 
-    @Override
     public void publishIfRunning(OrionEvent event) {
         if (running) publish(event);
     }

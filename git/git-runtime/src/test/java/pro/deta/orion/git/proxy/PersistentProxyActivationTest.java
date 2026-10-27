@@ -301,7 +301,8 @@ class PersistentProxyActivationTest {
             var signing = new KeyMaterialDescriptor("signing",
                     Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
             try (var options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
-                material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options);
+                material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
+                        testRuntime.unstartedEvents());
                 material.withModification(modification -> {
                     modification.generateKey(signing, 2048);
                     modification.apply();

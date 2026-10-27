@@ -1,6 +1,6 @@
 package pro.deta.orion.keymaterial;
 
-import pro.deta.orion.event.type.OrionEventPublisher;
+import pro.deta.orion.event.OrionEventManager;
 
 import java.util.Set;
 
@@ -63,17 +63,12 @@ public class OrionKeyMaterial implements AutoCloseable {
         this.owner = owner;
     }
 
-    public static OrionKeyMaterial open(KeyMaterialContentStore store, KeyMaterialOptions options)
-            throws IOException, GeneralSecurityException {
-        return new OrionKeyMaterial(KeyMaterialService.open(store, options));
-    }
-
     public static OrionKeyMaterial open(
             KeyMaterialContentStore store,
             KeyMaterialOptions options,
-            OrionEventPublisher events) throws IOException, GeneralSecurityException {
+            OrionEventManager events) throws IOException, GeneralSecurityException {
         return new OrionKeyMaterial(KeyMaterialService.open(
-                store, options, new KeyMaterialStorageCertificateFactory(), events));
+                store, options, events));
     }
 
     protected OrionKeyMaterial() {

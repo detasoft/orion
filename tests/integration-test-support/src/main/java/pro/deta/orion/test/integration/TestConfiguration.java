@@ -76,7 +76,8 @@ public final class TestConfiguration implements AutoCloseable {
     private static OrionKeyMaterial defaultMaterial(OrionTestRuntime events) {
         try {
             OrionKeyMaterial material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
-                    KeyMaterialOptions.pkcs12("test-password".toCharArray()));
+                    KeyMaterialOptions.pkcs12("test-password".toCharArray()),
+                    events.unstartedEvents());
             events.own(material);
             return new OrionKeyMaterial() {
                 @Override

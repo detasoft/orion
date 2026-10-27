@@ -1,6 +1,5 @@
 package pro.deta.orion.keymaterial;
 
-import pro.deta.orion.event.type.OrionEventPublisher;
 import pro.deta.orion.event.type.OrionEvent;
 import pro.deta.orion.event.OrionEventManager;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -56,7 +55,12 @@ class OrionKeyMaterialApiTest {
                     return super.write(bytes, expectedRevision);
                 }
             };
-            try (OrionKeyMaterial material = open(store, event -> assertReadable(executor, materialRef.get()))) {
+            try (OrionKeyMaterial material = open(store, new OrionEventManager() {
+                @Override
+                public void publishIfRunning(OrionEvent event) {
+                    assertReadable(executor, materialRef.get());
+                }
+            })) {
                 materialRef.set(material);
                 material.withModification(modification -> {
                     modification.generateKey(SIGNING, 2048);
@@ -74,7 +78,12 @@ class OrionKeyMaterialApiTest {
         AtomicReference<OrionKeyMaterial> readerRef =
                 new AtomicReference<>();
         try (ExecutorService executor = Executors.newSingleThreadExecutor();
-                OrionKeyMaterial reader = open(store, event -> assertReadable(executor, readerRef.get()));
+                OrionKeyMaterial reader = open(store, new OrionEventManager() {
+                    @Override
+                    public void publishIfRunning(OrionEvent event) {
+                        assertReadable(executor, readerRef.get());
+                    }
+                });
                 OrionKeyMaterial writer = open(store)) {
             readerRef.set(reader);
             writer.withModification(modification -> {
@@ -103,7 +112,10 @@ class OrionKeyMaterialApiTest {
                 return saved;
             }
         };
-        try (OrionKeyMaterial material = open(store, event -> changes.incrementAndGet())) {
+        OrionEventManager events = new OrionEventManager();
+        events.subscribe(KeyMaterialChanged.class, event -> changes.incrementAndGet());
+        events.onStart();
+        try (OrionKeyMaterial material = open(store, events)) {
             materialRef.set(material);
             material.withModification(modification -> {
                 modification.generateKey(SIGNING, 2048);
@@ -111,7 +123,10 @@ class OrionKeyMaterialApiTest {
             });
             assertThat(material.version()).isEqualTo(1);
             assertThat(material.contains(SIGNING)).isTrue();
+            events.publishAndWait(new OrionEvent() {});
             assertThat(changes).hasValue(1);
+        } finally {
+            events.onStop();
         }
     }
 
@@ -120,6 +135,48 @@ class OrionKeyMaterialApiTest {
             executor.submit(material::version).get(2, TimeUnit.SECONDS);
         } catch (Exception failure) {
             throw new AssertionError("KMS state monitor is held during publication or persistence", failure);
+        }
+    }
+
+    @Test
+    void rejectsOpeningMaterialWithoutAnEventManager() throws Exception {
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password())) {
+            assertThatThrownBy(() -> OrionKeyMaterial.open(store, options, null))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("event manager");
+        }
+    }
+
+    @Test
+    void savesMaterialWithAnUnstartedRunningAndStoppedEventManager() throws Exception {
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        OrionEventManager events = new OrionEventManager();
+        List<Set<String>> changes = new java.util.concurrent.CopyOnWriteArrayList<>();
+        events.subscribe(KeyMaterialChanged.class, event -> changes.add(event.resources()));
+        try (OrionKeyMaterial material = open(store, events)) {
+            material.withModification(modification -> {
+                modification.generateKey(SIGNING, 2048);
+                modification.apply();
+            });
+            assertThat(changes).isEmpty();
+            events.onStart();
+            material.withModification(modification -> {
+                modification.generateKey(OTHER, 2048);
+                modification.apply();
+            });
+            events.publishAndWait(new OrionEvent() {});
+            assertThat(changes).containsExactly(Set.of(OTHER.alias()));
+            events.onStop();
+            material.withModification(modification -> {
+                modification.delete(OTHER);
+                modification.apply();
+            });
+            assertThat(changes).containsExactly(Set.of(OTHER.alias()));
+            assertThat(material.contains(SIGNING)).isTrue();
+            assertThat(material.contains(OTHER)).isFalse();
+            assertThat(material.version()).isEqualTo(3);
+        } finally {
+            if (events.isRunning()) events.onStop();
         }
     }
 
@@ -311,11 +368,15 @@ class OrionKeyMaterialApiTest {
     void reportsChangedAliasesOnlyAfterACommittedModification() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         List<KeyMaterialChanged> changes = new ArrayList<>();
-        try (OrionKeyMaterial material = open(store, event -> changes.add((KeyMaterialChanged) event))) {
+        OrionEventManager events = new OrionEventManager();
+        events.subscribe(KeyMaterialChanged.class, changes::add);
+        events.onStart();
+        try (OrionKeyMaterial material = open(store, events)) {
             KeyMaterialModification discarded = material.modify();
             discarded.generateKey(SIGNING, 2048);
             discarded.discard();
             material.modify().apply();
+            events.publishAndWait(new OrionEvent() {});
             assertThat(changes).isEmpty();
             X509Certificate root = TestCertificateChain.root("Root").certificate();
 
@@ -325,8 +386,11 @@ class OrionKeyMaterialApiTest {
                 modification.apply();
             });
 
+            events.publishAndWait(new OrionEvent() {});
             assertThat(changes).extracting(KeyMaterialChanged::resources)
                     .containsExactly(Set.of(SIGNING.alias(), ROOT.alias()));
+        } finally {
+            events.onStop();
         }
     }
 
@@ -668,7 +732,10 @@ class OrionKeyMaterialApiTest {
                 Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES, 1);
         X509Certificate root = TestCertificateChain.root("Reload root").certificate();
         List<KeyMaterialChanged> changes = new ArrayList<>();
-        try (OrionKeyMaterial reader = open(store, event -> changes.add((KeyMaterialChanged) event));
+        OrionEventManager events = new OrionEventManager();
+        events.subscribe(KeyMaterialChanged.class, changes::add);
+        events.onStart();
+        try (OrionKeyMaterial reader = open(store, events);
              OrionKeyMaterial writer = open(store)) {
             writer.withModification(modification -> {
                 modification.generateKey(SIGNING, 2048);
@@ -701,6 +768,7 @@ class OrionKeyMaterialApiTest {
                 assertThat(reader.contains(ROOT)).isTrue();
                 assertThat(reader.version()).isEqualTo(3);
                 reader.reload(deleted);
+                events.publishAndWait(new OrionEvent() {});
                 assertThat(changes).extracting(KeyMaterialChanged::resources)
                         .containsExactly(Set.of("signing", "wrapping", "root"), Set.of("other"), Set.of("other"));
                 assertThatThrownBy(() -> reader.reload(added)).isInstanceOf(GeneralSecurityException.class);
@@ -713,6 +781,8 @@ class OrionKeyMaterialApiTest {
             } finally {
                 stale.discard();
             }
+        } finally {
+            events.onStop();
         }
     }
 
@@ -805,14 +875,15 @@ class OrionKeyMaterialApiTest {
 
     private static OrionKeyMaterial open(KeyMaterialContentStore store) throws Exception {
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password())) {
-            return OrionKeyMaterial.open(store, options);
+            return OrionKeyMaterial.open(store, options,
+                    new OrionEventManager());
         }
     }
 
-    private static OrionKeyMaterial open(KeyMaterialContentStore store, OrionEventPublisher eventPublisher)
+    private static OrionKeyMaterial open(KeyMaterialContentStore store, OrionEventManager events)
             throws Exception {
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password())) {
-            return OrionKeyMaterial.open(store, options, eventPublisher);
+            return OrionKeyMaterial.open(store, options, events);
         }
     }
 

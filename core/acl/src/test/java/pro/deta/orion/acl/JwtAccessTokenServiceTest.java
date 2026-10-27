@@ -1,5 +1,7 @@
 package pro.deta.orion.acl;
 
+import pro.deta.orion.event.OrionEventManager;
+
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
@@ -403,7 +405,8 @@ class JwtAccessTokenServiceTest {
 
         private TestIdentity(String activeKeyId, Map<String, KeyPair> keys) throws Exception {
             try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray())) {
-                material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options);
+                material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
+                        new OrionEventManager());
             }
             materials.add(material);
             List<KeyMaterialDescriptor> retained = new ArrayList<>();

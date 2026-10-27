@@ -1,5 +1,7 @@
 package pro.deta.orion.config;
 
+import pro.deta.orion.event.OrionEventManager;
+
 import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
@@ -58,7 +60,8 @@ class ConfigurationSecretsTest {
 
     @BeforeEach
     void open() throws Exception {
-        keyMaterial = OrionKeyMaterial.open(material, options());
+        keyMaterial = OrionKeyMaterial.open(material, options(),
+                new OrionEventManager());
         secrets = resolver(keyMaterial);
     }
 
@@ -102,7 +105,8 @@ class ConfigurationSecretsTest {
         assertThat(output.toString(StandardCharsets.UTF_8)).doesNotContain("tøken");
         current.set(OrionXml.read(new ByteArrayInputStream(output.toByteArray())));
 
-        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(material, options())) {
+        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(material, options(),
+                new OrionEventManager())) {
             char[] resolved = resolver(reopened).resolve(REPOSITORY, REFERENCE);
             assertThat(resolved).isEqualTo("tøken-🔑\r\n".toCharArray());
             assertThat(cipherOutput.get()).containsOnly((byte) 0);

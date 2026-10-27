@@ -1,5 +1,7 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.event.OrionEventManager;
+
 import pro.deta.orion.KeyMaterialBootstrap;
 
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
@@ -73,7 +75,8 @@ final class TestServerIdentityMaterial implements AutoCloseable {
         KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard(environment);
         try (KeyMaterialOptions options = resolver.pkcs12Options(
                 configuration.getBootstrap().getKeyMaterial().getPassword())) {
-            return OrionKeyMaterial.open(store, options);
+            return OrionKeyMaterial.open(store, options,
+                    new OrionEventManager());
         }
     }
 

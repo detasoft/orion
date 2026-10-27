@@ -157,11 +157,12 @@ class BootstrapProxyAdoptionTest {
                 (location, transport, repository, received, updates, atomic) -> List.of());
     }
 
-    private static OrionKeyMaterial material() throws Exception {
+    private OrionKeyMaterial material() throws Exception {
         var signing = new KeyMaterialDescriptor("signing", Set.of(KeyMaterialPurpose.SERVER_SIGNING),
                 KeyMaterialAlgorithm.RSA, 1);
         try (var options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
-            OrionKeyMaterial material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options);
+            OrionKeyMaterial material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
+                    testRuntime.unstartedEvents());
             try {
                 material.withModification(modification -> {
                     modification.generateKey(signing, 2048);

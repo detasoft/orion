@@ -1,5 +1,7 @@
 package pro.deta.orion.keymaterial;
 
+import pro.deta.orion.event.OrionEventManager;
+
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
@@ -40,7 +42,8 @@ class KeyMaterialOperationsTest {
                 Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor host = new KeyMaterialDescriptor("shared",
                 Set.of(KeyMaterialPurpose.SSH_HOST), KeyMaterialAlgorithm.RSA, 1);
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options())) {
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options(),
+                new OrionEventManager())) {
             KeyMaterialModification modification = service.modify();
             modification.generateKey(stored, 2048);
             modification.apply();
@@ -83,11 +86,13 @@ class KeyMaterialOperationsTest {
                 KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.ED25519,
                 1);
-        try (OrionKeyMaterial initial = OrionKeyMaterial.open(store, options())) {
+        try (OrionKeyMaterial initial = OrionKeyMaterial.open(store, options(),
+                new OrionEventManager())) {
             generateKey(initial, signing, 0);
         }
 
-        try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(store, options())) {
+        try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(store, options(),
+                new OrionEventManager())) {
 
             byte[] payload = "ed25519-payload".getBytes(StandardCharsets.UTF_8);
             byte[] signature = reloaded.sign(signing, payload);
@@ -116,13 +121,15 @@ class KeyMaterialOperationsTest {
                 1);
         KeyPair generatedRsa;
         KeyPair generatedEd25519;
-        try (OrionKeyMaterial initial = OrionKeyMaterial.open(store, options())) {
+        try (OrionKeyMaterial initial = OrionKeyMaterial.open(store, options(),
+                new OrionEventManager())) {
             generatedRsa = generateKey(initial, rsaClient, 2048);
             generatedEd25519 = generateKey(initial, ed25519Client, 0);
             generateKey(initial, host, 2048);
         }
 
-        try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(store, options())) {
+        try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(store, options(),
+                new OrionEventManager())) {
 
             KeyPair selectedRsa = reloaded.keyPair(rsaClient);
             KeyPair selectedEd25519 = reloaded.keyPair(ed25519Client);
@@ -193,11 +200,13 @@ class KeyMaterialOperationsTest {
                 KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.RSA,
                 1);
-        try (OrionKeyMaterial initial = OrionKeyMaterial.open(store, options())) {
+        try (OrionKeyMaterial initial = OrionKeyMaterial.open(store, options(),
+                new OrionEventManager())) {
             generateKey(initial, original, 2048);
         }
 
-        try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(store, options())) {
+        try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(store, options(),
+                new OrionEventManager())) {
             KeyMaterialDescriptor changedVersion = descriptor(
                     "server-signing-v1",
                     KeyMaterialPurpose.SERVER_SIGNING,
@@ -255,7 +264,8 @@ class KeyMaterialOperationsTest {
                 "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
         byte[] accountPublic;
         byte[] identityPublic;
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options())) {
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options(),
+                new OrionEventManager())) {
             generateKeys(service, account, identity);
             accountPublic = service.keyPair(account).getPublic().getEncoded();
             identityPublic = service.keyPair(identity).getPublic().getEncoded();
@@ -267,7 +277,8 @@ class KeyMaterialOperationsTest {
             assertThat(store.revision().orElseThrow()).isEqualTo("1");
         }
 
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options())) {
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options(),
+                new OrionEventManager())) {
             generateKeys(service, account, identity);
             assertThat(service.keyPair(account).getPublic().getEncoded()).isEqualTo(accountPublic);
             assertThat(service.keyPair(identity).getPublic().getEncoded()).isEqualTo(identityPublic);
@@ -282,7 +293,8 @@ class KeyMaterialOperationsTest {
                 "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor identity = descriptor(
                 "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.EC, 1);
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options())) {
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options(),
+                new OrionEventManager())) {
             assertThatThrownBy(() -> generateKeys(service, account, identity))
                     .isInstanceOf(Exception.class);
             assertThat(store.revision()).isEmpty();
@@ -312,7 +324,8 @@ class KeyMaterialOperationsTest {
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
         TestCertificateChain.Authority intermediate = TestCertificateChain.intermediate("Intermediate", root);
 
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options())) {
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options(),
+                new OrionEventManager())) {
 
             CertificateIdentity certificate = service.certificateIdentity(new TlsMaterialConfiguration(identity,
                     Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED));
@@ -329,7 +342,8 @@ class KeyMaterialOperationsTest {
             assertThat(certificate.issuerTrustAnchor()).contains(root.certificate());
         }
 
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options())) {
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options(),
+                new OrionEventManager())) {
             CertificateIdentity certificate = service.certificateIdentity(new TlsMaterialConfiguration(identity,
                     Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED));
             assertThat(certificate.certificateChain()).hasSize(2);
@@ -347,7 +361,8 @@ class KeyMaterialOperationsTest {
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
         TestCertificateChain.Authority otherRoot = TestCertificateChain.root("Other Root");
         TestCertificateChain.Authority intermediate = TestCertificateChain.intermediate("Intermediate", root);
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options())) {
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options(),
+                new OrionEventManager())) {
 
             CertificateIdentity certificate = service.certificateIdentity(new TlsMaterialConfiguration(identity,
                     Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED));
@@ -397,7 +412,8 @@ class KeyMaterialOperationsTest {
         KeyPair issuerSignedClientKey = TestCertificateChain.keyPair();
         X509Certificate issuerSignedClientCertificate = TestCertificateChain.leaf(
                 "issuer-signed-client", issuerSignedClientKey, serverAuthority);
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options())) {
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options(),
+                new OrionEventManager())) {
             KeyPair domainKey = generateKey(service, identity, 2048);
             installCertificateChain(service, identity,
                     List.of(TestCertificateChain.leaf("orion.example", domainKey, serverAuthority)),
@@ -461,12 +477,14 @@ class KeyMaterialOperationsTest {
         byte[] plaintext = "database-password".getBytes(StandardCharsets.UTF_8);
         ConfigurationSecretEnvelopeCodec codec = new ConfigurationSecretEnvelopeCodec();
         String serializedEnvelope;
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options())) {
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(store, options(),
+                new OrionEventManager())) {
             ConfigurationSecretEnvelope envelope = service.seal(cipher, plaintext, context);
             serializedEnvelope = codec.serialize(envelope);
         }
 
-        try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(store, options())) {
+        try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(store, options(),
+                new OrionEventManager())) {
             ConfigurationSecretEnvelope envelope = codec.parse(serializedEnvelope);
 
             assertThat(envelope.keyAlias()).isEqualTo(cipher.alias());
@@ -487,7 +505,8 @@ class KeyMaterialOperationsTest {
                 KeyMaterialPurpose.CONFIGURATION_CIPHER,
                 KeyMaterialAlgorithm.AES,
                 1);
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options())) {
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options(),
+                new OrionEventManager())) {
             byte[] plaintext = "same-password".getBytes(StandardCharsets.UTF_8);
 
             ConfigurationSecretEnvelope first = service.seal(cipher, plaintext, context());
@@ -508,7 +527,8 @@ class KeyMaterialOperationsTest {
                 KeyMaterialPurpose.CONFIGURATION_CIPHER,
                 KeyMaterialAlgorithm.AES,
                 1);
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options())) {
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options(),
+                new OrionEventManager())) {
             ConfigurationSecretEnvelope envelope = service.seal(cipher,
                     "password".getBytes(StandardCharsets.UTF_8), context());
             List<ConfigurationSecretContext> changed = List.of(
@@ -530,7 +550,8 @@ class KeyMaterialOperationsTest {
                 KeyMaterialPurpose.CONFIGURATION_CIPHER,
                 KeyMaterialAlgorithm.AES,
                 1);
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options())) {
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options(),
+                new OrionEventManager())) {
             ConfigurationSecretEnvelope envelope = service.seal(cipher,
                     "do-not-report".getBytes(StandardCharsets.UTF_8), context());
 
@@ -611,7 +632,8 @@ class KeyMaterialOperationsTest {
     }
 
     private static OrionKeyMaterial service() throws Exception {
-        return OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options());
+        return OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options(),
+                new OrionEventManager());
     }
 
     private static ConfigurationSecretContext context() {

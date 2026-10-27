@@ -1,5 +1,7 @@
 package pro.deta.orion.keymaterial;
 
+import pro.deta.orion.event.OrionEventManager;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
@@ -61,7 +63,8 @@ class KeyMaterialToolCompatibilityTest {
         Path keyStorePath = tempDir.resolve(alias + KeyMaterialTestConstants.PKCS12_EXTENSION);
         LocalKeyMaterialContentStore store = new LocalKeyMaterialContentStore(keyStorePath);
         try (OrionKeyMaterial material = OrionKeyMaterial.open(
-                store, KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password()))) {
+                store, KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password()),
+                new OrionEventManager())) {
             material.withModification(modification -> {
                 modification.generateKey(new KeyMaterialDescriptor(alias,
                         java.util.Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 1), 2048);

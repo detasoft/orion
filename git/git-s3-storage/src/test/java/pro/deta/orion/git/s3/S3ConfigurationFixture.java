@@ -50,7 +50,8 @@ final class S3ConfigurationFixture implements AutoCloseable {
                         EVENTS.events());
         provider = new NativeGitRepositoryProvider(factory);
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-material".toCharArray())) {
-            material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options);
+            material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
+                    EVENTS.unstartedEvents());
         }
         secrets = new ConfigurationSecrets(current::get,
                 material);

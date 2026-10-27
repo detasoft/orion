@@ -1,6 +1,6 @@
 package pro.deta.orion.keymaterial;
 
-import pro.deta.orion.event.type.OrionEventPublisher;
+import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.keymaterial.KeyMaterialModification.Addition;
 
 import javax.crypto.Cipher;
@@ -60,8 +60,7 @@ final class KeyMaterialService implements AutoCloseable {
     private final KeyMaterialOptions options;
     private final KeyMaterialStorageCertificateFactory storageCertificateFactory;
 
-    // AI_TODO зачем? проще наверное на EventManager? зачем тупой интерфейс?
-    private final OrionEventPublisher eventPublisher;
+    private final OrionEventManager events;
     private final KeyStore keyStore;
     private String version;
     private long revision;
@@ -74,8 +73,7 @@ final class KeyMaterialService implements AutoCloseable {
             // AI_TODO а разве не проще было бы этот атрибут убрать в Store? и если уж на то пошло - зачем тут KeyStore? вроде бы он должен быть частью Content, нет?
             KeyMaterialOptions options,
             KeyMaterialStorageCertificateFactory storageCertificateFactory,
-            // AI_TODO может быть просто взять OrionEventManager?
-            OrionEventPublisher eventPublisher,
+            OrionEventManager events,
             // AI_TODO а разве не проще было бы этот атрибут убрать в Store? и если уж на то пошло - зачем тут KeyStore?
             KeyStore keyStore,
             // AI_TODO а разве не проще было бы этот атрибут убрать в Store? и если уж на то пошло - зачем тут KeyStore? и версия вроде тоже относится к хранилищу
@@ -83,8 +81,7 @@ final class KeyMaterialService implements AutoCloseable {
         this.store = store;
         this.options = options;
         this.storageCertificateFactory = storageCertificateFactory;
-        // AI_TODO посмотри можно ли убрать
-        this.eventPublisher = eventPublisher;
+        this.events = events;
         this.keyStore = keyStore;
         this.version = version;
         // AI_TODO зачем этот кэш - можно считать на лету?
@@ -96,24 +93,16 @@ final class KeyMaterialService implements AutoCloseable {
     // AI_TODO а не проще было бы создавать Store из какой-нибудь фабрики единообразно?
     public static synchronized KeyMaterialService open(
             KeyMaterialContentStore store,
-            KeyMaterialOptions options)
-            throws IOException, GeneralSecurityException {
-        return open(store, options, new KeyMaterialStorageCertificateFactory());
-    }
-
-    public static synchronized KeyMaterialService open(
-            KeyMaterialContentStore store,
             KeyMaterialOptions options,
-            KeyMaterialStorageCertificateFactory storageCertificateFactory)
-            throws IOException, GeneralSecurityException {
-        return open(store, options, storageCertificateFactory, event -> {});
+            OrionEventManager events) throws IOException, GeneralSecurityException {
+        return open(store, options, new KeyMaterialStorageCertificateFactory(), events);
     }
 
     public static synchronized KeyMaterialService open(
             KeyMaterialContentStore store,
             KeyMaterialOptions options,
             KeyMaterialStorageCertificateFactory storageCertificateFactory,
-            OrionEventPublisher eventPublisher)
+            OrionEventManager events)
             throws IOException, GeneralSecurityException {
         if (store == null) {
             throw new IllegalArgumentException("Key material store must not be null");
@@ -124,8 +113,8 @@ final class KeyMaterialService implements AutoCloseable {
         if (storageCertificateFactory == null) {
             throw new IllegalArgumentException("Storage certificate factory must not be null");
         }
-        if (eventPublisher == null) {
-            throw new IllegalArgumentException("Orion event publisher must not be null");
+        if (events == null) {
+            throw new IllegalArgumentException("Orion event manager must not be null");
         }
         KeyMaterialOptions ownedOptions = options.copy();
 
@@ -145,7 +134,7 @@ final class KeyMaterialService implements AutoCloseable {
                             store,
                             ownedOptions,
                             storageCertificateFactory,
-                            eventPublisher,
+                            events,
                             keyStore,
                             sourceRevision.orElseThrow());
                 }
@@ -154,7 +143,7 @@ final class KeyMaterialService implements AutoCloseable {
                         store,
                         ownedOptions,
                         storageCertificateFactory,
-                        eventPublisher,
+                        events,
                         keyStore,
                         null);
             } finally {
@@ -841,7 +830,7 @@ final class KeyMaterialService implements AutoCloseable {
 
     private void publishChanged(Set<String> resources) {
         try {
-            eventPublisher.publishIfRunning(new KeyMaterialChanged(Set.copyOf(resources)));
+            events.publishIfRunning(new KeyMaterialChanged(Set.copyOf(resources)));
         } catch (RuntimeException failure) {
             System.getLogger(KeyMaterialService.class.getName()).log(System.Logger.Level.WARNING,
                     "Could not publish key material change event", failure);

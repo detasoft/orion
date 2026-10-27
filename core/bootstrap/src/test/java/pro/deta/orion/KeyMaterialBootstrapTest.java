@@ -180,7 +180,8 @@ class KeyMaterialBootstrapTest {
         LocalKeyMaterialContentStore store = new LocalKeyMaterialContentStore(
                 tempDir.resolve("security/orion.p12"));
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray());
-             OrionKeyMaterial material = OrionKeyMaterial.open(store, options)) {
+             OrionKeyMaterial material = OrionKeyMaterial.open(store, options,
+                     events)) {
             material.withModification(modification -> {
                 modification.generateKey(new KeyMaterialDescriptor("other-signing",
                         Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1), 2048);
