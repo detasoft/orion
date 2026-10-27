@@ -839,6 +839,28 @@ class OrionKeyMaterialApiTest {
         assertThat(closes).hasValue(1);
     }
 
+    @Test
+    void remainsClosedWhenStoreCleanupFails() throws Exception {
+        AtomicInteger closes = new AtomicInteger();
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore() {
+            @Override
+            public void close() {
+                closes.incrementAndGet();
+                throw new IllegalStateException("Store cleanup failed");
+            }
+        };
+        OrionKeyMaterial material = open(store);
+
+        assertThatThrownBy(material::close)
+                .isInstanceOf(IllegalStateException.class).hasMessage("Store cleanup failed");
+        assertThatThrownBy(material::version)
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
+        assertThatThrownBy(material::modify)
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
+        material.close();
+        assertThat(closes).hasValue(1);
+    }
+
     private static final class VersionedStore extends InMemoryKeyMaterialContentStore {
         private final Map<String, byte[]> history = new HashMap<>();
 

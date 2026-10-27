@@ -61,12 +61,9 @@ final class KeyMaterialService implements AutoCloseable {
     private final KeyMaterialStorageCertificateFactory storageCertificateFactory;
 
     private final OrionEventManager events;
-    private final KeyStore keyStore;
+    private KeyStore keyStore;
     private String version;
     private long revision;
-
-    // AI_TODO зачем? проще может без него?
-    private boolean closed;
 
     private KeyMaterialService(
             KeyMaterialContentStore store,
@@ -862,10 +859,10 @@ final class KeyMaterialService implements AutoCloseable {
 
     @Override
     public synchronized void close() {
-        if (closed) {
+        if (keyStore == null) {
             return;
         }
-        closed = true;
+        keyStore = null;
         try {
             options.close();
         } finally {
@@ -990,7 +987,7 @@ final class KeyMaterialService implements AutoCloseable {
     }
 
     synchronized void requireOpen() {
-        if (closed) {
+        if (keyStore == null) {
             throw new IllegalStateException("Key material service is closed");
         }
     }
