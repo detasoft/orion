@@ -11,7 +11,7 @@ import java.util.Set;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
 import pro.deta.orion.keymaterial.KeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
-import pro.deta.orion.keymaterial.KeyMaterialResourceResolver;
+import pro.deta.orion.KeyMaterialResourceResolver;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import org.apache.sshd.common.keyprovider.KeyPairProvider;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;

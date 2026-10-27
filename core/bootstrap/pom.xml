@@ -19,6 +19,10 @@
 
     <dependencies>
         <dependency>
+            <groupId>pro.deta.orion.core.ref</groupId>
+            <artifactId>reference</artifactId>
+        </dependency>
+        <dependency>
             <groupId>pro.deta.orion.tests</groupId>
             <artifactId>integration-test-support</artifactId>
             <scope>test</scope>

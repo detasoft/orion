@@ -1,4 +1,7 @@
-package pro.deta.orion.keymaterial;
+package pro.deta.orion;
+
+import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialOptions;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -8,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
+import java.util.Base64;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -45,17 +49,17 @@ class KeyMaterialResourceResolverTest {
 
     @Test
     void resolvesPlainFileAndEnvironmentLocationsToWritableStores() throws Exception {
-        Path plainPath = tempDir.resolve(KeyMaterialTestConstants.PLAIN_KEY_STORE_FILE_NAME);
-        Path filePath = tempDir.resolve(KeyMaterialTestConstants.FILE_KEY_STORE_FILE_NAME);
-        Path envPath = tempDir.resolve(KeyMaterialTestConstants.ENV_KEY_STORE_FILE_NAME);
+        Path plainPath = tempDir.resolve("plain.p12");
+        Path filePath = tempDir.resolve("file.p12");
+        Path envPath = tempDir.resolve("env.p12");
         KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard(
-                Map.of(KeyMaterialTestConstants.ORION_KEYSTORE_LOCATION_ENV, envPath.toString()));
+                Map.of("ORION_KEYSTORE_LOCATION", envPath.toString()));
 
         KeyMaterialContentStore plainStore = resolver.resolveStore(plainPath.toString());
         KeyMaterialContentStore fileStore =
-                resolver.resolveStore(KeyMaterialTestConstants.fileReference(filePath));
+                resolver.resolveStore("file:" + filePath);
         KeyMaterialContentStore envStore = resolver.resolveStore(
-                KeyMaterialTestConstants.envReference(KeyMaterialTestConstants.ORION_KEYSTORE_LOCATION_ENV));
+                "env:ORION_KEYSTORE_LOCATION");
 
         String plainVersion = plainStore.write(bytes("plain"), null);
         String fileVersion = fileStore.write(bytes("file"), null);
@@ -72,7 +76,7 @@ class KeyMaterialResourceResolverTest {
     @Test
     void resolvesInlineLocationToReadOnlyStore() throws Exception {
         KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard();
-        String reference = KeyMaterialTestConstants.contentBase64Reference(bytes("inline"));
+        String reference = contentReference(bytes("inline"));
 
         KeyMaterialContentStore store = resolver.resolveStore(reference);
 
@@ -85,22 +89,21 @@ class KeyMaterialResourceResolverTest {
 
     @Test
     void resolvesEnvironmentAndFilePasswords() throws Exception {
-        Path passwordFile = tempDir.resolve(KeyMaterialTestConstants.PASSWORD_FILE_NAME);
-        Files.writeString(passwordFile, KeyMaterialTestConstants.PASSWORD_WITH_LINE_BREAK);
+        Path passwordFile = tempDir.resolve("password.txt");
+        Files.writeString(passwordFile, "changeit\n");
         setOwnerOnly(passwordFile);
         KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard(
                 Map.of(
-                        KeyMaterialTestConstants.ORION_KEYSTORE_PASSWORD_ENV,
-                        KeyMaterialTestConstants.PASSWORD_VALUE));
+                        "ORION_KEYSTORE_PASSWORD",
+                        "changeit"));
 
-        assertThat(resolver.resolvePassword(KeyMaterialTestConstants.envReference(
-                KeyMaterialTestConstants.ORION_KEYSTORE_PASSWORD_ENV)))
-                .isEqualTo(KeyMaterialTestConstants.password());
-        assertThat(resolver.resolvePassword(KeyMaterialTestConstants.fileReference(passwordFile)))
-                .isEqualTo(KeyMaterialTestConstants.password());
+        assertThat(resolver.resolvePassword("env:ORION_KEYSTORE_PASSWORD"))
+                .isEqualTo("changeit".toCharArray());
+        assertThat(resolver.resolvePassword("file:" + passwordFile))
+                .isEqualTo("changeit".toCharArray());
         try (KeyMaterialOptions options = resolver.pkcs12Options(
-                KeyMaterialTestConstants.envReference(KeyMaterialTestConstants.ORION_KEYSTORE_PASSWORD_ENV))) {
-            assertThat(options.password()).isEqualTo(KeyMaterialTestConstants.password());
+                "env:ORION_KEYSTORE_PASSWORD")) {
+            assertThat(options.password()).isEqualTo("changeit".toCharArray());
         }
     }
 
@@ -125,66 +128,70 @@ class KeyMaterialResourceResolverTest {
         KeyMaterialResourceResolver resolver =
                 KeyMaterialResourceResolver.unsafe(Map.of());
 
-        assertThat(resolver.resolvePassword(KeyMaterialTestConstants.PASSWORD_VALUE))
-                .isEqualTo(KeyMaterialTestConstants.password());
-        assertThat(resolver.resolvePassword(KeyMaterialTestConstants.contentBase64Reference(
-                bytes(KeyMaterialTestConstants.PASSWORD_VALUE))))
-                .isEqualTo(KeyMaterialTestConstants.password());
+        assertThat(resolver.resolvePassword("changeit"))
+                .isEqualTo("changeit".toCharArray());
+        assertThat(resolver.resolvePassword(contentReference(
+                bytes("changeit"))))
+                .isEqualTo("changeit".toCharArray());
     }
 
     @Test
     void safeResolverRejectsUnprotectedPasswordFile() throws Exception {
-        assumeTrue(KeyMaterialFileSecurity.supportsPosix(tempDir), "POSIX permissions are not available");
-        Path passwordFile = tempDir.resolve(KeyMaterialTestConstants.PASSWORD_FILE_NAME);
-        Files.writeString(passwordFile, KeyMaterialTestConstants.PASSWORD_VALUE);
+        assumeTrue(Files.getFileStore(tempDir).supportsFileAttributeView("posix"), "POSIX permissions are not available");
+        Path passwordFile = tempDir.resolve("password.txt");
+        Files.writeString(passwordFile, "changeit");
         Files.setPosixFilePermissions(passwordFile, PosixFilePermissions.fromString("rw-r--r--"));
         KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard();
 
         assertThatThrownBy(() -> resolver.resolvePassword(
-                KeyMaterialTestConstants.fileReference(passwordFile)))
+                "file:" + passwordFile))
                 .isInstanceOf(java.io.IOException.class)
                 .hasMessageContaining("readable only by its owner")
-                .hasMessageNotContaining(KeyMaterialTestConstants.PASSWORD_VALUE);
+                .hasMessageNotContaining("changeit");
     }
 
     @Test
     void safeResolverRejectsPasswordFileInWritableDirectory() throws Exception {
-        assumeTrue(KeyMaterialFileSecurity.supportsPosix(tempDir), "POSIX permissions are not available");
+        assumeTrue(Files.getFileStore(tempDir).supportsFileAttributeView("posix"), "POSIX permissions are not available");
         Path exposedDirectory = tempDir.resolve("exposed");
         Files.createDirectory(exposedDirectory);
         Files.setPosixFilePermissions(exposedDirectory, PosixFilePermissions.fromString("rwxrwxrwx"));
-        Path passwordFile = exposedDirectory.resolve(KeyMaterialTestConstants.PASSWORD_FILE_NAME);
-        Files.writeString(passwordFile, KeyMaterialTestConstants.PASSWORD_VALUE);
+        Path passwordFile = exposedDirectory.resolve("password.txt");
+        Files.writeString(passwordFile, "changeit");
         setOwnerOnly(passwordFile);
         KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard();
 
         assertThatThrownBy(() -> resolver.resolvePassword(
-                KeyMaterialTestConstants.fileReference(passwordFile)))
+                "file:" + passwordFile))
                 .isInstanceOf(java.io.IOException.class)
                 .hasMessageContaining("writable by another user")
-                .hasMessageNotContaining(KeyMaterialTestConstants.PASSWORD_VALUE);
+                .hasMessageNotContaining("changeit");
     }
 
     @Test
     void safeResolverRejectsPasswordFileSymbolicLinks() throws Exception {
-        assumeTrue(KeyMaterialFileSecurity.supportsPosix(tempDir), "Symbolic links are not available");
-        Path passwordFile = tempDir.resolve(KeyMaterialTestConstants.PASSWORD_FILE_NAME);
-        Files.writeString(passwordFile, KeyMaterialTestConstants.PASSWORD_VALUE);
+        assumeTrue(Files.getFileStore(tempDir).supportsFileAttributeView("posix"), "Symbolic links are not available");
+        Path passwordFile = tempDir.resolve("password.txt");
+        Files.writeString(passwordFile, "changeit");
         setOwnerOnly(passwordFile);
         Path link = tempDir.resolve("password-link.txt");
         Files.createSymbolicLink(link, passwordFile.getFileName());
         KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard();
 
-        assertThatThrownBy(() -> resolver.resolvePassword(KeyMaterialTestConstants.fileReference(link)))
+        assertThatThrownBy(() -> resolver.resolvePassword("file:" + link))
                 .isInstanceOf(java.io.IOException.class)
                 .hasMessageContaining("must not contain symbolic links")
-                .hasMessageNotContaining(KeyMaterialTestConstants.PASSWORD_VALUE);
+                .hasMessageNotContaining("changeit");
     }
 
     private static void setOwnerOnly(Path path) throws Exception {
-        if (KeyMaterialFileSecurity.supportsPosix(path)) {
+        if (Files.getFileStore(path).supportsFileAttributeView("posix")) {
             Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rw-------"));
         }
+    }
+
+    private static String contentReference(byte[] bytes) {
+        return "content:base64," + Base64.getEncoder().encodeToString(bytes);
     }
 
     private static byte[] bytes(String value) {

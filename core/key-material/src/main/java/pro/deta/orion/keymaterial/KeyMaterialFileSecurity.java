@@ -18,7 +18,7 @@ import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.Set;
 
-final class KeyMaterialFileSecurity {
+public final class KeyMaterialFileSecurity {
     private static final Set<PosixFilePermission> OWNER_FILE_PERMISSIONS =
             PosixFilePermissions.fromString("rw-------");
     private static final Set<PosixFilePermission> OWNER_DIRECTORY_PERMISSIONS =
@@ -35,6 +35,12 @@ final class KeyMaterialFileSecurity {
             PosixFilePermission.OTHERS_WRITE);
 
     private KeyMaterialFileSecurity() {
+    }
+
+    public static byte[] readProtectedFile(Path location, String description) throws IOException {
+        Path path = normalizeLocation(location);
+        validatePublicationDirectory(path.getParent());
+        return readOwnerOnlyFile(path, description);
     }
 
     static Path normalizeLocation(Path location) {

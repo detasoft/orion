@@ -274,7 +274,7 @@ class KeyMaterialServiceTest {
     }
 
     @Test
-    void loadsInlinePkcs12BytesFromContentBase64ResourceStore() throws Exception {
+    void loadsPkcs12BytesFromReadOnlyStore() throws Exception {
         InMemoryKeyMaterialContentStore writableStore = new InMemoryKeyMaterialContentStore();
         KeyMaterialService writable = KeyMaterialService.open(writableStore, options(),
                 new OrionEventManager());
@@ -283,8 +283,7 @@ class KeyMaterialServiceTest {
                 KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA), 2048);
 
         byte[] pkcs12Bytes = writableStore.read(writableStore.revision().orElseThrow());
-        String reference = KeyMaterialTestConstants.contentBase64Reference(pkcs12Bytes);
-        KeyMaterialContentStore readOnlyStore = KeyMaterialResourceResolver.standard().resolveStore(reference);
+        KeyMaterialContentStore readOnlyStore = new ReadOnlyKeyMaterialContentStore(pkcs12Bytes, "test material");
         KeyMaterialService readOnly = KeyMaterialService.open(readOnlyStore, options(),
                 new OrionEventManager());
 

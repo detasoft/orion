@@ -1,4 +1,10 @@
-package pro.deta.orion.keymaterial;
+package pro.deta.orion;
+
+import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialFileSecurity;
+import pro.deta.orion.keymaterial.KeyMaterialOptions;
+import pro.deta.orion.keymaterial.LocalKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.ReadOnlyKeyMaterialContentStore;
 
 import pro.deta.orion.resource.reference.ResourceAddress;
 import pro.deta.orion.resource.reference.ResourceReferenceResolver;
@@ -109,14 +115,12 @@ public final class KeyMaterialResourceResolver {
     }
 
     private char[] readProtectedPasswordFile(String value) throws IOException {
-        Path path;
+        byte[] bytes;
         try {
-            path = KeyMaterialFileSecurity.normalizeLocation(Path.of(value));
+            bytes = KeyMaterialFileSecurity.readProtectedFile(Path.of(value), "Key material password file");
         } catch (InvalidPathException e) {
             throw new IllegalArgumentException("Invalid protected key material password file reference");
         }
-        KeyMaterialFileSecurity.validatePublicationDirectory(path.getParent());
-        byte[] bytes = KeyMaterialFileSecurity.readOwnerOnlyFile(path, "Key material password file");
         try {
             return decodePassword(bytes);
         } finally {
