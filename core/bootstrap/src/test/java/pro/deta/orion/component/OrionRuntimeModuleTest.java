@@ -5,7 +5,15 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import pro.deta.orion.KeyMaterialBootstrap;
+import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
+import pro.deta.orion.event.OrionEventManager;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
+import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory;
+import pro.deta.orion.git.s3.S3Transport;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
+import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.GrantAddress;
@@ -256,11 +264,33 @@ class OrionRuntimeModuleTest {
 
     @Test
     void runtimeOwnsAgentServerBeforeExternallyVisibleTransports() {
+        BootstrapConfiguration configuration = new BootstrapConfiguration();
+        OrionEventManager events = testRuntime.unstartedEvents();
+        S3Transport transport = new S3Transport();
+        ConfiguredNativeGitRepositoryFactory configured = new ConfiguredNativeGitRepositoryFactory(
+                NativeGitRepositoryBackend.inMemory(events), transport, events);
+        NativeGitRepositoryFactory repositories = new NativeGitRepositoryFactory(configured);
+        testRuntime.own(repositories.provider());
+        repositories.resolveProvisional(NativeGitRepositoryFactory.CONFIGURATION_SOURCE,
+                configuration.getBootstrap().getConfiguration(), true);
         OrionComponent component = DaggerOrionComponent.builder()
-                .defaultBootstrapConfiguration()
+                .bootstrapConfiguration(configuration)
+                .rootPasswordReset(new RootPasswordReset(false))
+                .signingMaterial(KeyMaterialBootstrap.signingMaterial(
+                        configuration.getBootstrap().getKeyMaterial()))
+                .keyMaterial(OrionKeyMaterial.unavailable())
+                .sshHostKeyProvider(session -> {
+                    throw new IllegalStateException("SSH host key material is not available");
+                })
+                .nativeGitRepositoryProvider(repositories)
+                .configuredRepositoryFactory(configured)
+                .s3Transport(transport)
+                .eventManager(events)
                 .build();
+        AggregateStateMachine runtime = component.runtimeStateMachine();
+        testRuntime.own(runtime::stop);
 
-        assertThat(component.runtimeStateMachine().childStatuses().keySet()).containsExactly(
+        assertThat(runtime.childStatuses().keySet()).containsExactly(
                 "executor",
                 "event-manager",
                 "configuration",

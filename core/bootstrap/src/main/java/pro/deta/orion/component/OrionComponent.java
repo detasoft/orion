@@ -1,7 +1,5 @@
 package pro.deta.orion.component;
 
-import pro.deta.orion.KeyMaterialBootstrap;
-
 import pro.deta.orion.event.OrionEventManager;
 
 import pro.deta.orion.config.OrionConfigurationEditor;
@@ -15,7 +13,6 @@ import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory;
-import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
@@ -72,32 +69,5 @@ public interface OrionComponent {
         @BindsInstance Builder s3Transport(S3Transport transport);
         @BindsInstance Builder eventManager(OrionEventManager events);
         @BindsInstance Builder configuredRepositoryFactory(ConfiguredNativeGitRepositoryFactory factory);
-
-        default Builder defaultBootstrapConfiguration() {
-            BootstrapConfiguration configuration = new BootstrapConfiguration();
-            OrionEventManager events = new OrionEventManager();
-            S3Transport transport = new S3Transport();
-            ConfiguredNativeGitRepositoryFactory configured =
-                    new ConfiguredNativeGitRepositoryFactory(
-                            NativeGitRepositoryBackend.inMemory(events), transport, events);
-            NativeGitRepositoryFactory repositoryProvider =
-                    new NativeGitRepositoryFactory(configured);
-            repositoryProvider.resolveProvisional(
-                    NativeGitRepositoryFactory.CONFIGURATION_SOURCE,
-                    configuration.getBootstrap().getConfiguration(),
-                    true);
-            return bootstrapConfiguration(configuration)
-                    .rootPasswordReset(new RootPasswordReset(false))
-                    .signingMaterial(KeyMaterialBootstrap.signingMaterial(
-                            configuration.getBootstrap().getKeyMaterial()))
-                    .keyMaterial(OrionKeyMaterial.unavailable())
-                    .sshHostKeyProvider(session -> {
-                        throw new IllegalStateException("SSH host key material is not available");
-                    })
-                    .nativeGitRepositoryProvider(repositoryProvider)
-                    .configuredRepositoryFactory(configured)
-                    .s3Transport(transport)
-                    .eventManager(events);
-        }
     }
 }
