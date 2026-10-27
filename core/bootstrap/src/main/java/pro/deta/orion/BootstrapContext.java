@@ -6,7 +6,6 @@ import pro.deta.orion.git.fileapi.GitFileEvents;
 
 import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.event.OrionEventManager;
-import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDocumentRevision;

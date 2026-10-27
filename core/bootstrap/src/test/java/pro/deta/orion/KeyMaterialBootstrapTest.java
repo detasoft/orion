@@ -3,7 +3,6 @@ package pro.deta.orion;
 import java.security.KeyStore;
 import java.io.ByteArrayOutputStream;
 
-import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.event.OrionEventManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

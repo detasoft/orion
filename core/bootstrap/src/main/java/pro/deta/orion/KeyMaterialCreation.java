@@ -1,3 +1,3 @@
-package pro.deta.orion.keymaterial;
+package pro.deta.orion;
 
 public record KeyMaterialCreation(boolean allowed) {}

@@ -12,7 +12,6 @@ import java.util.Set;
 
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
 
-import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.config.OrionConfigurationEditor;
 
 import org.eclipse.jgit.api.Git;

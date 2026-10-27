@@ -6,7 +6,7 @@ import pro.deta.orion.git.fileapi.GitCommitAuthor;
 
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
 
-import pro.deta.orion.keymaterial.KeyMaterialCreation;
+import pro.deta.orion.KeyMaterialCreation;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.junit.jupiter.api.Test;

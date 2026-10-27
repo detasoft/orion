@@ -1,6 +1,5 @@
 package pro.deta.orion;
 
-import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.acl.RootPasswordReset;
 
 import java.net.URI;
