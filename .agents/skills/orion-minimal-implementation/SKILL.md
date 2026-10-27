@@ -142,6 +142,35 @@ abstraction. Justify every new public contract, type, service, module, protocol
 field, configuration option, persistent fact, or dependency with a current
 requirement that existing mechanisms cannot satisfy.
 
+### Prefer direct component calls
+
+Generally prefer direct calls over callbacks. When an existing component can
+call the concrete owner directly while preserving the required behavior and
+architectural boundaries, prefer that path over an injected callback, lambda,
+or single-method forwarding interface. Do not replace an unnecessary custom
+interface with a callback merely to retain the indirection.
+
+Keep callbacks when they express a real requirement, such as dynamic handler
+registration, caller-defined behavior, or dependency inversion that protects an
+actual module or lifecycle boundary. A callback is also appropriate when it
+materially improves testability while keeping the conceptual model simple and
+easy to understand. Compare the complete alternatives: do not add fake owners,
+lifecycle machinery, or extra state solely to avoid a callback. This preference
+concerns communication between components, not ordinary uses of callback-based
+library APIs.
+
+### Check existing fields before adding dependencies
+
+Before adding or changing a field, check whether its value or capability is
+already accessible through existing fields. Prefer using one existing root
+owner over storing several dependencies reachable through it. Where appropriate,
+remove redundant fields and use that root instead of adding another entry point.
+
+Keep separate entry points when they preserve concrete testability, reuse,
+ownership, or lifecycle requirements. Do not force an otherwise reusable component
+to depend on a larger root merely to reduce its field count. Keep this adjustment
+local; avoid broad API expansion or new accessors solely to unify dependencies.
+
 For non-trivial work, state:
 
 ```text
@@ -166,6 +195,12 @@ model. Preserve required wire and persisted contracts through the canonical
 path. Tests and hypothetical consumers do not justify a second path.
 
 ## Verify and review
+
+Code must be testable without complicating its concepts or making it harder to
+understand. Mocking frameworks are forbidden. Prefer real collaborators, small
+explicit fixtures, and simple handwritten test doubles where needed. Do not
+expand production APIs or introduce abstractions merely to accommodate a test
+framework.
 
 Follow the selected workflow and the
 [pre-commit verification table](../../../docs/definitions.md#pre-commit-verification).
