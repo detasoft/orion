@@ -7,8 +7,6 @@ import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
@@ -57,7 +55,7 @@ final class KeyMaterialService implements AutoCloseable {
             "2.25.260349814076539099691640886169327826429";
     private final Object writes = new Object();
     private final KeyMaterialContentStore store;
-    private final KeyMaterialOptions options;
+    private final KeyMaterialCodec codec;
     private final KeyMaterialStorageCertificateFactory storageCertificateFactory;
 
     private final OrionEventManager events;
@@ -68,7 +66,7 @@ final class KeyMaterialService implements AutoCloseable {
     private KeyMaterialService(
             KeyMaterialContentStore store,
             // AI_TODO а разве не проще было бы этот атрибут убрать в Store? и если уж на то пошло - зачем тут KeyStore? вроде бы он должен быть частью Content, нет?
-            KeyMaterialOptions options,
+            KeyMaterialCodec codec,
             KeyMaterialStorageCertificateFactory storageCertificateFactory,
             OrionEventManager events,
             // AI_TODO а разве не проще было бы этот атрибут убрать в Store? и если уж на то пошло - зачем тут KeyStore?
@@ -76,7 +74,7 @@ final class KeyMaterialService implements AutoCloseable {
             // AI_TODO а разве не проще было бы этот атрибут убрать в Store? и если уж на то пошло - зачем тут KeyStore? и версия вроде тоже относится к хранилищу
             String version) throws GeneralSecurityException {
         this.store = store;
-        this.options = options;
+        this.codec = codec;
         this.storageCertificateFactory = storageCertificateFactory;
         this.events = events;
         this.keyStore = keyStore;
@@ -113,41 +111,25 @@ final class KeyMaterialService implements AutoCloseable {
         if (events == null) {
             throw new IllegalArgumentException("Orion event manager must not be null");
         }
-        KeyMaterialOptions ownedOptions = options.copy();
+        KeyMaterialCodec codec = new KeyMaterialCodec(options);
 
         try {
-            KeyStore keyStore = KeyStore.getInstance(ownedOptions.type());
             Optional<String> sourceRevision = store.revision();
-            char[] password = ownedOptions.password();
-            try {
-                if (sourceRevision.isPresent()) {
-                    byte[] serialized = store.read(sourceRevision.orElseThrow());
-                    try {
-                        keyStore.load(new ByteArrayInputStream(serialized), password);
-                    } finally {
-                        Arrays.fill(serialized, (byte) 0);
-                    }
-                    return new KeyMaterialService(
-                            store,
-                            ownedOptions,
-                            storageCertificateFactory,
-                            events,
-                            keyStore,
-                            sourceRevision.orElseThrow());
+            KeyStore keyStore;
+            if (sourceRevision.isPresent()) {
+                byte[] serialized = store.read(sourceRevision.orElseThrow());
+                try {
+                    keyStore = codec.decode(serialized);
+                } finally {
+                    Arrays.fill(serialized, (byte) 0);
                 }
-                keyStore.load(null, password);
-                return new KeyMaterialService(
-                        store,
-                        ownedOptions,
-                        storageCertificateFactory,
-                        events,
-                        keyStore,
-                        null);
-            } finally {
-                clear(password);
+            } else {
+                keyStore = codec.create();
             }
+            return new KeyMaterialService(
+                    store, codec, storageCertificateFactory, events, keyStore, sourceRevision.orElse(null));
         } catch (IOException | GeneralSecurityException | RuntimeException e) {
-            ownedOptions.close();
+            codec.close();
             try {
                 store.close();
             } catch (RuntimeException cleanup) {
@@ -192,7 +174,7 @@ final class KeyMaterialService implements AutoCloseable {
     public synchronized PrivateKey getPrivateKey(String alias) throws GeneralSecurityException {
         requireOpen();
         requireAlias(alias);
-        char[] password = options.password();
+        char[] password = codec.password();
         try {
             PrivateKey privateKey = (PrivateKey) keyStore.getKey(materialAlias(alias), password);
             if (privateKey == null) {
@@ -535,7 +517,7 @@ final class KeyMaterialService implements AutoCloseable {
                     trusted.getTrustedCertificate(), attributes);
             default -> throw new GeneralSecurityException("Unknown key material entry type");
         };
-        char[] password = options.password();
+        char[] password = codec.password();
         try {
             KeyStore.ProtectionParameter protection = entry instanceof KeyStore.TrustedCertificateEntry
                     ? null : new KeyStore.PasswordProtection(password);
@@ -654,7 +636,7 @@ final class KeyMaterialService implements AutoCloseable {
                 try {
                     publication = copyForPublication();
                     for (Addition addition : additions) append(publication, addition, nextVersion);
-                    serialized = serialize(publication);
+                    serialized = codec.encode(publication);
                     expected = version;
                 } catch (GeneralSecurityException failure) {
                     close();
@@ -728,14 +710,12 @@ final class KeyMaterialService implements AutoCloseable {
         requireOpen();
         Objects.requireNonNull(requestedRevision, "revision");
         if (Objects.equals(version, requestedRevision)) return Set.of();
-        KeyStore incoming = KeyStore.getInstance(options.type());
+        KeyStore incoming;
         byte[] bytes = store.read(requestedRevision);
-        char[] password = options.password();
         try {
-            incoming.load(new ByteArrayInputStream(bytes), password);
+            incoming = codec.decode(bytes);
         } finally {
             Arrays.fill(bytes, (byte) 0);
-            clear(password);
         }
         for (String physical : physicalAliases()) {
             if (!incoming.containsAlias(physical)
@@ -762,7 +742,7 @@ final class KeyMaterialService implements AutoCloseable {
             resources.add(entry.alias());
             nextRevision = Math.max(nextRevision, entry.kmsVersion());
         }
-        password = options.password();
+        char[] password = codec.password();
         try {
             for (Map.Entry<String, KeyStore.Entry> addition : additions.entrySet()) {
                 KeyStore.ProtectionParameter protection = addition.getValue() instanceof KeyStore.TrustedCertificateEntry
@@ -781,7 +761,7 @@ final class KeyMaterialService implements AutoCloseable {
     }
 
     private KeyStore.Entry readEntry(KeyStore source, String physical) throws GeneralSecurityException {
-        char[] password = options.password();
+        char[] password = codec.password();
         try {
             boolean trusted = source.entryInstanceOf(physical, KeyStore.TrustedCertificateEntry.class);
             KeyStore.ProtectionParameter protection = trusted ? null : new KeyStore.PasswordProtection(password);
@@ -835,25 +815,11 @@ final class KeyMaterialService implements AutoCloseable {
     }
 
     private KeyStore copyForPublication() throws IOException, GeneralSecurityException {
-        byte[] serialized = serialize(keyStore);
-        char[] password = options.password();
+        byte[] serialized = codec.encode(keyStore);
         try {
-            KeyStore publication = KeyStore.getInstance(options.type());
-            publication.load(new ByteArrayInputStream(serialized), password);
-            return publication;
+            return codec.decode(serialized);
         } finally {
             Arrays.fill(serialized, (byte) 0);
-            clear(password);
-        }
-    }
-
-    private byte[] serialize(KeyStore source) throws IOException, GeneralSecurityException {
-        char[] password = options.password();
-        try (SensitiveByteArrayOutputStream output = new SensitiveByteArrayOutputStream()) {
-            source.store(output, password);
-            return output.toByteArray();
-        } finally {
-            clear(password);
         }
     }
 
@@ -864,7 +830,7 @@ final class KeyMaterialService implements AutoCloseable {
         }
         keyStore = null;
         try {
-            options.close();
+            codec.close();
         } finally {
             store.close();
         }
@@ -879,7 +845,7 @@ final class KeyMaterialService implements AutoCloseable {
     synchronized SecretKey secretKey(String alias) throws GeneralSecurityException {
         requireOpen();
         requireAlias(alias);
-        char[] password = options.password();
+        char[] password = codec.password();
         try {
             if (!(keyStore.getKey(materialAlias(alias), password) instanceof SecretKey secretKey)) {
                 throw new GeneralSecurityException("Secret key alias not found: " + alias);
@@ -992,11 +958,4 @@ final class KeyMaterialService implements AutoCloseable {
         }
     }
 
-    private static final class SensitiveByteArrayOutputStream extends ByteArrayOutputStream {
-        @Override
-        public void close() throws IOException {
-            Arrays.fill(buf, (byte) 0);
-            super.close();
-        }
-    }
 }
