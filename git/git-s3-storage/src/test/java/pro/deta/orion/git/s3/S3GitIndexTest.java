@@ -347,7 +347,7 @@ class S3GitIndexTest {
             authorizations.add(exchange.getRequestHeaders().getFirst("Authorization"));
             String query = exchange.getRequestURI().getQuery();
             if (rejectMultipart && query != null && (query.contains("uploads") || query.contains("uploadId="))) {
-                exchange.getRequestBody().transferTo(java.io.OutputStream.nullOutputStream());
+                exchange.getResponseHeaders().set("Connection", "close");
                 if (method.equals("POST")) {
                     reply(exchange, 200, ("<InitiateMultipartUploadResult><UploadId>test-upload</UploadId>"
                             + "</InitiateMultipartUploadResult>").getBytes(StandardCharsets.UTF_8));

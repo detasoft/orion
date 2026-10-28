@@ -14,6 +14,7 @@ import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.parser.v2.storage.shared.PackHandle;
 import pro.deta.orion.net.io.BufferedByteInputV2;
+import software.amazon.awssdk.services.s3.model.S3Exception;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -58,7 +59,9 @@ class S3GitStorageTest {
             wire.rejectAbort = rejectAbort;
             Throwable failure = catchThrowable(handle::flush);
             assertThat(failure).isInstanceOf(IOException.class);
-            assertThat(failure.getCause().getSuppressed()).hasSize(rejectAbort ? 1 : 0);
+            assertThat(failure.getCause().getSuppressed())
+                    .filteredOn(error -> error instanceof S3Exception s3 && s3.statusCode() == 403)
+                    .hasSize(rejectAbort ? 1 : 0);
             assertThat(wire.abortedUploads).hasValue(1);
             assertThatThrownBy(handle::close).isInstanceOf(IOException.class);
             assertThat(handle.isOpen()).isFalse();
