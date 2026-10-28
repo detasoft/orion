@@ -56,7 +56,6 @@ import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.Role;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
-import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.test.util.OrionTestRuntime;
 import pro.deta.orion.util.Subscription;
@@ -70,7 +69,6 @@ import pro.deta.orion.internal.ChangeMetadata;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
-import java.io.ByteArrayInputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
@@ -373,7 +371,8 @@ class OrionAccessControlServiceImplTest {
     @Test
     void nonAclEditPublishesWithoutAnAccessControlService() {
         InMemoryStorage storage =
-                new InMemoryStorage(snapshot(serialize(new AccessControl()), Optional.empty()));
+                new InMemoryStorage(snapshot(
+                        OrionDocument.withAccessControl(new AccessControl()), Optional.empty()));
         List<OrionDocumentRevision> published = new ArrayList<>();
         try {
             OrionConfigurationEditor editor =
@@ -440,7 +439,8 @@ class OrionAccessControlServiceImplTest {
     @Test
     void failedStartupDoesNotRetainPreparationOnRetry() {
         InMemoryStorage storage =
-                new InMemoryStorage(snapshot(serialize(new AccessControl()), Optional.empty()));
+                new InMemoryStorage(snapshot(
+                        OrionDocument.withAccessControl(new AccessControl()), Optional.empty()));
         BootstrapConfiguration configuration = new BootstrapConfiguration();
         OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, testMaterial(), storage.events);
         OrionAccessControlServiceImpl service =
@@ -461,7 +461,8 @@ class OrionAccessControlServiceImplTest {
             service.onStop();
             editor.onStop();
             OrionDocumentRevision active = editor.current();
-            storage.snapshot = snapshot(serialize(new AccessControl()), Optional.of("after-stop"));
+            storage.snapshot = snapshot(
+                    OrionDocument.withAccessControl(new AccessControl()), Optional.of("after-stop"));
             storage.publish("after stopped startup retry");
             assertThat(editor.current()).isSameAs(active);
         } finally {
@@ -474,7 +475,7 @@ class OrionAccessControlServiceImplTest {
     @Test
     void reloadFailureAfterSaveConsumesTheEditWithoutClaimingRollback() {
         FailingReloadStorage storage = new FailingReloadStorage(
-                snapshot(serialize(new AccessControl()), Optional.empty()));
+                snapshot(OrionDocument.withAccessControl(new AccessControl()), Optional.empty()));
         OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, testMaterial(), new OrionEventManager());
         OrionConfigurationModification modification =
                 editor.edit(new OrionRevision.Absent(), ChangeMetadata.EMPTY);
@@ -575,7 +576,7 @@ class OrionAccessControlServiceImplTest {
             assertThat(initial.validation()).isEqualTo("valid");
 
             fixture.storage.snapshot = snapshot(
-                    serialize(invalidDocument()), Optional.of("version-two"));
+                    invalidDocument(), Optional.of("version-two"));
             OrionConfigurationEditor.ConfigurationStatus invalid = fixture.editor.status();
             assertThat(invalid.storedRevision()).contains("version-two");
             assertThat(invalid.activeRevision()).contains("version-one");
@@ -588,7 +589,8 @@ class OrionAccessControlServiceImplTest {
             assertThat(unavailable.validation()).isEqualTo("unavailable");
             fixture.storage.loadUnavailable = false;
 
-            fixture.storage.snapshot = snapshot(serialize(new AccessControl()), Optional.of("version-three"));
+            fixture.storage.snapshot = snapshot(
+                    OrionDocument.withAccessControl(new AccessControl()), Optional.of("version-three"));
             fixture.storage.publish("test recovery");
             OrionConfigurationEditor.ConfigurationStatus recovered = fixture.editor.status();
             assertThat(recovered.storedRevision()).contains("version-three");
@@ -725,7 +727,7 @@ class OrionAccessControlServiceImplTest {
             grant.addKey(GrantKey.ADMIN, "true");
             duringPasswordCheck.set(() -> {
                 fixture.storage.snapshot = snapshot(
-                        serialize(primary.toAccessControl()), Optional.of("version-two"));
+                        OrionDocument.withAccessControl(primary.toAccessControl()), Optional.of("version-two"));
                 fixture.storage.publish("replace operators membership");
             });
 
@@ -766,7 +768,7 @@ class OrionAccessControlServiceImplTest {
     @Test
     void reportsAStaleRevisionEvenWhenTheNewHeadIsInvalid() {
         try (ServiceFixture fixture = fixture(new AclFixture())) {
-            fixture.storage.snapshot = snapshot(serialize(invalidDocument()), Optional.of("version-two"));
+            fixture.storage.snapshot = snapshot(invalidDocument(), Optional.of("version-two"));
             assertThatThrownBy(
                             () ->
                                     fixture.editor
@@ -1282,8 +1284,8 @@ class OrionAccessControlServiceImplTest {
                 .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
         try (ServiceFixture fixture = fixture(initial)) {
             initial.getUsers().add(user("alice").addCredential(CredentialType.ARGON2, "alice-hash"));
-            fixture.storage.concurrentReplacement = snapshot(serialize(initial.toAccessControl()),
-                    Optional.of("winning-revision"));
+            fixture.storage.concurrentReplacement = snapshot(
+                    OrionDocument.withAccessControl(initial.toAccessControl()), Optional.of("winning-revision"));
             assertFailure(fixture.addSshCredentials("root", List.of(key(KEY_TWO.getPublic()))),
                     SshCredentialFailureCode.CONCURRENT_UPDATE);
             fixture.storage.awaitEvents();
@@ -1391,7 +1393,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     @ResourceLock(Resources.SYSTEM_OUT)
-    void resetFailsWithoutPrintingWhenPersistenceFails() throws Exception {
+    void resetFailsWithoutPrintingWhenPersistenceFails() {
         assertRecoveryFailsWithoutPrinting(defaultAclSnapshot(), new RootPasswordReset(true));
     }
 
@@ -1435,11 +1437,9 @@ class OrionAccessControlServiceImplTest {
         assertThat(processOutput.toString(StandardCharsets.UTF_8)).doesNotContain("---ROOT PASSWORD: ");
     }
 
-    private static OrionDocumentRevision defaultAclSnapshot() throws Exception {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        OrionXml.write(OrionDocument.withAccessControl(
-                DefaultAccessControl.create("old-password-hash")), output);
-        return snapshot(output.toByteArray(), Optional.of("initial"));
+    private static OrionDocumentRevision defaultAclSnapshot() {
+        return snapshot(OrionDocument.withAccessControl(
+                DefaultAccessControl.create("old-password-hash")), Optional.of("initial"));
     }
 
     @Test
@@ -1516,8 +1516,8 @@ class OrionAccessControlServiceImplTest {
         }
     }
 
-    private static OrionDocumentRevision snapshot(byte[] bytes, Optional<String> revision) {
-        return new OrionDocumentRevision(Result.of(parseDocument(bytes)),
+    private static OrionDocumentRevision snapshot(OrionDocument document, Optional<String> revision) {
+        return new OrionDocumentRevision(Result.of(document),
                 revision.<OrionRevision>map(OrionRevision.Stored::new)
                         .orElseGet(OrionRevision.Absent::new));
     }
@@ -1630,40 +1630,6 @@ class OrionAccessControlServiceImplTest {
                 id + "@updated.example.test",
                 List.of(new AccessControlCredentialUpdate(CredentialType.ARGON2, passwordHash)),
                 List.of());
-    }
-
-    private static byte[] serialize(AccessControl accessControl) {
-        try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            OrionXml.write(OrionDocument.withAccessControl(accessControl), output);
-            return output.toByteArray();
-        } catch (IOException e) {
-            throw new IllegalStateException(e);
-        }
-    }
-
-    private static byte[] serialize(OrionDocument document) {
-        try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            OrionXml.write(document, output);
-            return output.toByteArray();
-        } catch (IOException e) {
-            throw new IllegalStateException(e);
-        }
-    }
-
-    private static OrionDocument parseDocument(byte[] content) {
-        try {
-            return OrionXml.read(new ByteArrayInputStream(content));
-        } catch (IOException e) {
-            throw new IllegalStateException(e);
-        }
-    }
-
-    private static AccessControl parse(byte[] content) {
-        try {
-            return OrionXml.read(new java.io.ByteArrayInputStream(content)).system().accessControl();
-        } catch (IOException e) {
-            throw new IllegalStateException(e);
-        }
     }
 
     private static List<String> sshValues(OrionDocumentRevision file, String userId) {
