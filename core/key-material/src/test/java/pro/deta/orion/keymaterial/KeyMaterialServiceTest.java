@@ -12,10 +12,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.KeyStore;
+import java.security.GeneralSecurityException;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -23,6 +29,92 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class KeyMaterialServiceTest {
     @TempDir
     private Path tempDir;
+
+    @Test
+    void readsCommittedMaterialWhileAnotherKeyIsBeingPrepared() throws Exception {
+        InMemoryKeyMaterialContentSource source = new InMemoryKeyMaterialContentSource();
+        KeyMaterialDescriptor signing = descriptor("existing", KeyMaterialPurpose.SERVER_SIGNING,
+                KeyMaterialAlgorithm.RSA);
+        KeyMaterialDescriptor cipher = descriptor("cipher", KeyMaterialPurpose.CONFIGURATION_CIPHER,
+                KeyMaterialAlgorithm.AES);
+        KeyMaterialDescriptor trust = descriptor("root", KeyMaterialPurpose.TRUST_ANCHOR,
+                KeyMaterialAlgorithm.RSA);
+        X509Certificate root = TestCertificateChain.root("Read concurrency root").certificate();
+        KeyPair pair;
+        try (KeyMaterialOptions options = options();
+             KeyMaterialService seed = KeyMaterialService.open(new KeyMaterialContentStore(
+                     source, new KeyMaterialCodec(options), new OrionEventManager()))) {
+            KeyMaterialModification modification = seed.modify(0);
+            modification.generateKey(signing, 2048);
+            modification.generateKey(cipher, 256);
+            modification.setTrustedCertificate(trust, root);
+            modification.apply();
+            pair = seed.getKeyPair(signing.alias());
+        }
+
+        CountDownLatch preparationStarted = new CountDownLatch(1);
+        CountDownLatch releasePreparation = new CountDownLatch(1);
+        KeyMaterialStorageCertificateFactory factory = new KeyMaterialStorageCertificateFactory() {
+            @Override
+            public X509Certificate create(String alias, String purpose, KeyPair keyPair)
+                    throws GeneralSecurityException {
+                preparationStarted.countDown();
+                try {
+                    if (!releasePreparation.await(10, TimeUnit.SECONDS)) {
+                        throw new GeneralSecurityException("Preparation was not released");
+                    }
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new GeneralSecurityException("Preparation interrupted", interrupted);
+                }
+                return super.create(alias, purpose, keyPair);
+            }
+        };
+        try (KeyMaterialOptions options = options();
+             KeyMaterialService service = KeyMaterialService.open(new KeyMaterialContentStore(
+                     source, new KeyMaterialCodec(options), new OrionEventManager()), factory);
+             ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            KeyMaterialDescriptor prepared = descriptor("prepared", KeyMaterialPurpose.SERVER_SIGNING,
+                    KeyMaterialAlgorithm.RSA);
+            Future<?> preparation = executor.submit(() -> {
+                KeyMaterialModification modification = service.modify(1);
+                try {
+                    modification.importKey(prepared, pair);
+                    modification.apply();
+                } finally {
+                    modification.discard();
+                }
+                return null;
+            });
+            try {
+                assertThat(preparationStarted.await(5, TimeUnit.SECONDS)).isTrue();
+                Future<?> reads = executor.submit(() -> {
+                    assertThat(service.revision()).isEqualTo(1);
+                    assertThat(service.hasDurableSnapshot()).isTrue();
+                    assertThat(service.containsAlias(signing.alias(), signing.purposes())).isTrue();
+                    assertThat(service.getKeyPair(signing.alias()).getPublic()).isEqualTo(pair.getPublic());
+                    assertThat(service.getPrivateKey(signing.alias()).getEncoded())
+                            .isEqualTo(pair.getPrivate().getEncoded());
+                    assertThat(service.getCertificateChain(signing.alias())).hasSize(1);
+                    assertThat(service.getTrustedCertificate(trust)).isEqualTo(root);
+                    service.validateExisting(signing);
+                    assertThat(service.privateKeyDescriptors(signing.purposes())).containsExactly(signing);
+                    assertThat(service.secretKey(cipher.alias()).getAlgorithm()).isEqualTo("AES");
+                    assertThat(service.readEntry(signing.alias()).alias()).isEqualTo(signing.alias());
+                    assertThat(service.inventory(Set.of())).extracting(entry -> entry.descriptor().alias())
+                            .containsExactlyInAnyOrder(signing.alias(), cipher.alias(), trust.alias());
+                    assertThat(service.containsAlias(prepared.alias(), Set.of())).isFalse();
+                    return null;
+                });
+                reads.get(3, TimeUnit.SECONDS);
+            } finally {
+                releasePreparation.countDown();
+            }
+            preparation.get(5, TimeUnit.SECONDS);
+            assertThat(service.revision()).isEqualTo(2);
+            assertThat(service.containsAlias(prepared.alias(), Set.of())).isTrue();
+        }
+    }
 
     @Test
     void createsPkcs12InMemoryStoreAndReloadsPrivateKey() throws Exception {

@@ -31,7 +31,7 @@ import java.util.StringJoiner;
 /**
  * Validates material descriptors and prepares modifications against the store's logical revision.
  * Descriptor attributes identify persisted purposes, algorithms and descriptor versions and must remain stable.
- * @AiRule All public methods in this class must be synchronized.
+ * @AiRule Read operations must use store snapshots without acquiring the service monitor.
  */
 final class KeyMaterialService implements AutoCloseable {
     private static final String DESCRIPTOR_ATTRIBUTE_OID =
@@ -59,7 +59,7 @@ final class KeyMaterialService implements AutoCloseable {
         return new KeyMaterialService(store, storageCertificateFactory);
     }
 
-    public synchronized boolean containsAlias(String alias, Set<KeyMaterialPurpose> requiredPurposes)
+    public boolean containsAlias(String alias, Set<KeyMaterialPurpose> requiredPurposes)
             throws GeneralSecurityException {
         requireOpen();
         requireAlias(alias);
@@ -78,11 +78,11 @@ final class KeyMaterialService implements AutoCloseable {
         }
     }
 
-    synchronized boolean hasDurableSnapshot() {
+    boolean hasDurableSnapshot() {
         return store.hasDurableSnapshot();
     }
 
-    public synchronized KeyPair getKeyPair(String alias) throws GeneralSecurityException {
+    public KeyPair getKeyPair(String alias) throws GeneralSecurityException {
         KeyStore.Entry entry = requireEntry(alias);
         if (!(entry instanceof KeyStore.PrivateKeyEntry key)) {
             throw new GeneralSecurityException("Private key alias not found: " + alias);
@@ -94,7 +94,7 @@ final class KeyMaterialService implements AutoCloseable {
         return new KeyPair(chain[0].getPublicKey(), key.getPrivateKey());
     }
 
-    public synchronized PrivateKey getPrivateKey(String alias) throws GeneralSecurityException {
+    public PrivateKey getPrivateKey(String alias) throws GeneralSecurityException {
         KeyStore.Entry entry = requireEntry(alias);
         if (!(entry instanceof KeyStore.PrivateKeyEntry key)) {
             throw new GeneralSecurityException("Private key alias not found: " + alias);
@@ -102,7 +102,7 @@ final class KeyMaterialService implements AutoCloseable {
         return key.getPrivateKey();
     }
 
-    public synchronized Certificate[] getCertificateChain(String alias) throws GeneralSecurityException {
+    public Certificate[] getCertificateChain(String alias) throws GeneralSecurityException {
         KeyStore.Entry entry = requireEntry(alias);
         if (!(entry instanceof KeyStore.PrivateKeyEntry key)) {
             throw new GeneralSecurityException("Certificate chain alias not found: " + alias);
@@ -110,7 +110,7 @@ final class KeyMaterialService implements AutoCloseable {
         return key.getCertificateChain();
     }
 
-    public synchronized X509Certificate getTrustedCertificate(KeyMaterialDescriptor descriptor)
+    public X509Certificate getTrustedCertificate(KeyMaterialDescriptor descriptor)
             throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(descriptor);
@@ -147,7 +147,7 @@ final class KeyMaterialService implements AutoCloseable {
         }
     }
 
-    public synchronized void validateExisting(KeyMaterialDescriptor descriptor)
+    public void validateExisting(KeyMaterialDescriptor descriptor)
             throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(descriptor);
@@ -158,7 +158,7 @@ final class KeyMaterialService implements AutoCloseable {
         validatePrepared(addition.entry(), descriptor);
     }
 
-    public synchronized List<KeyMaterialDescriptor> privateKeyDescriptors(
+    public List<KeyMaterialDescriptor> privateKeyDescriptors(
             Set<KeyMaterialPurpose> requiredPurposes) throws GeneralSecurityException {
         requireOpen();
         Set<KeyMaterialPurpose> requested = Set.copyOf(requiredPurposes);
@@ -198,7 +198,7 @@ final class KeyMaterialService implements AutoCloseable {
         return List.copyOf(descriptors);
     }
 
-    public synchronized List<KeyMaterialInventoryEntry> inventory(Set<KeyMaterialPurpose> requiredPurposes)
+    public List<KeyMaterialInventoryEntry> inventory(Set<KeyMaterialPurpose> requiredPurposes)
             throws GeneralSecurityException {
         requireOpen();
         Set<KeyMaterialPurpose> requested = Set.copyOf(requiredPurposes);
@@ -381,7 +381,7 @@ final class KeyMaterialService implements AutoCloseable {
         return new KeyStore.TrustedCertificateEntry(certificate, descriptorAttributes(descriptor));
     }
 
-    synchronized void validatePrepared(KeyStore.Entry entry, KeyMaterialDescriptor descriptor)
+    void validatePrepared(KeyStore.Entry entry, KeyMaterialDescriptor descriptor)
             throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(descriptor);
@@ -405,7 +405,7 @@ final class KeyMaterialService implements AutoCloseable {
                 descriptor.purposes(), descriptor.algorithm(), descriptor.version());
     }
 
-    synchronized Entry readEntry(String alias) throws GeneralSecurityException {
+    Entry readEntry(String alias) throws GeneralSecurityException {
         return store.find(alias).orElse(null);
     }
 
@@ -431,7 +431,7 @@ final class KeyMaterialService implements AutoCloseable {
         requireMetadataField(alias, "version", Long.toString(version), fields[2]);
     }
 
-    synchronized long revision() {
+    long revision() {
         return store.revision();
     }
 
@@ -472,7 +472,7 @@ final class KeyMaterialService implements AutoCloseable {
         }
     }
 
-    synchronized SecretKey secretKey(String alias) throws GeneralSecurityException {
+    SecretKey secretKey(String alias) throws GeneralSecurityException {
         KeyStore.Entry entry = requireEntry(alias);
         if (!(entry instanceof KeyStore.SecretKeyEntry secret)) {
             throw new GeneralSecurityException("Secret key alias not found: " + alias);
@@ -560,7 +560,7 @@ final class KeyMaterialService implements AutoCloseable {
         return expected.equals(actual);
     }
 
-    synchronized void requireOpen() {
+    void requireOpen() {
         store.requireOpen();
     }
 
