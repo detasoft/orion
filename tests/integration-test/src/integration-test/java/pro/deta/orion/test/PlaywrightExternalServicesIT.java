@@ -66,7 +66,7 @@ class PlaywrightExternalServicesIT {
         KeyMaterialDescriptor certificateIdentity = new KeyMaterialDescriptor("acme-identity",
                 Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 1);
         try (TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(configuration)) {
-            identity.material().withModification(modification -> {
+            identity.material().withModification(identity.material().revision(), modification -> {
                 modification.generateKey(account, 2048);
                 modification.generateKey(certificateIdentity, 2048);
                 modification.apply();

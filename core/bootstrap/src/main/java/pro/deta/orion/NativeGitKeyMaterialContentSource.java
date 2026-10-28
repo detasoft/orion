@@ -1,6 +1,5 @@
 package pro.deta.orion;
 
-import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
 import pro.deta.orion.git.fileapi.GitFile;
@@ -10,49 +9,26 @@ import pro.deta.orion.util.Subscription;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
-import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialContentSource;
+import pro.deta.orion.keymaterial.KeyMaterialSourceChanged;
 import pro.deta.orion.keymaterial.KeyMaterialStoreConflictException;
 
 import java.io.IOException;
 import java.util.Objects;
 import java.util.Optional;
 
-/**
- * Adapts a Git file to KMS and warns when external changes require reopening the material.
- * Tracks accepted revisions and in-flight writes so own publications do not cause restart warnings.
- * Persistence and event publication run without holding this object's state monitor.
- */
-@Slf4j
-final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore {
+/** Bridges a Git file to a material source and reports committed file changes without retaining content. */
+final class NativeGitKeyMaterialContentSource implements KeyMaterialContentSource {
     private final GitFileEvents events;
     private final Subscription changes;
-    private CommitId activeRevision;
-    private int pendingWrites;
 
-    NativeGitKeyMaterialContentStore(GitFileEvents events) {
+    NativeGitKeyMaterialContentSource(GitFileEvents events) {
         this.events = Objects.requireNonNull(events, "events");
         changes = events.events().subscribe(GitFileChanged.class, event -> {
-            if (events.matches(event)) onFileChanged(events.file());
-        });
-    }
-
-    private void onFileChanged(GitFile file) {
-        CommitId accepted;
-        synchronized (this) {
-            if (pendingWrites != 0) return;
-            accepted = activeRevision;
-        }
-        if (accepted == null) return;
-        try {
-            boolean current = file.isCurrent(accepted);
-            synchronized (this) {
-                if (pendingWrites == 0 && Objects.equals(accepted, activeRevision) && !current) {
-                    log.warn("KMS file changed in the tracked branch; restart Orion to load the new material");
-                }
+            if (events.matches(event)) {
+                events.events().publish(new KeyMaterialSourceChanged(this, event.revision().toHex()));
             }
-        } catch (GitOperationException | RuntimeException failure) {
-            log.warn("Cannot inspect KMS file; restart Orion before using externally changed material", failure);
-        }
+        });
     }
 
     @Override
@@ -73,12 +49,7 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
         try {
             GitFile file = events.file();
             CommitId requested = new CommitId(revision);
-            byte[] bytes = file.read(requested);
-            synchronized (this) {
-                if (activeRevision == null && pendingWrites == 0) activeRevision = requested;
-            }
-            onFileChanged(file);
-            return bytes;
+            return file.read(requested);
         } catch (GitOperationException | RuntimeException failure) {
             throw new IOException("Cannot read key material store at " + revision, failure);
         }
@@ -87,17 +58,11 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
     @Override
     public String write(byte[] bytes, String expectedRevision) throws IOException {
         Objects.requireNonNull(bytes, "bytes");
-        synchronized (this) {
-            pendingWrites++;
-        }
         try {
             GitFile file = events.file();
             CommitId expected = expectedRevision == null ? null : new CommitId(expectedRevision);
             CommitId saved = file.write(expected, bytes,
                     new GitCommitMetadata(GitCommitAuthor.EMPTY, "Update server identity material"));
-            synchronized (this) {
-                activeRevision = saved;
-            }
             return saved.toHex();
         } catch (GitRefConflictException failure) {
             throw conflict();
@@ -105,11 +70,6 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
             throw failure;
         } catch (Exception failure) {
             throw new IOException("Cannot write key material store", failure);
-        } finally {
-            synchronized (this) {
-                pendingWrites--;
-            }
-            onFileChanged(events.file());
         }
     }
 

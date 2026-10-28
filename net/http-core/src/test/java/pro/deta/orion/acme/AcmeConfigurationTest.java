@@ -1,7 +1,10 @@
 package pro.deta.orion.acme;
 
-import java.util.Set;
+import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
+import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+
+import java.util.Set;
 
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.test.integration.TestConfiguration;
@@ -13,7 +16,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
@@ -36,8 +39,8 @@ class AcmeConfigurationTest {
     @Test
     void switchingExplicitAccountDoesNotReuseSavedEabCredentials() throws Exception {
         OrionDocument initial = OrionDocument.withAccessControl(new AccessControl());
-        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
-            owner.withModification(modification -> {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentSource())) {
+            owner.withModification(owner.revision(), modification -> {
                 modification.generateKey(new KeyMaterialDescriptor("other-account",
                         Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 1), 3072);
                 modification.apply();
@@ -62,7 +65,7 @@ class AcmeConfigurationTest {
 
     @Test
     void enablesExistingShorthandDirectoryWithoutReplacingItsAccountKeyReference() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentSource())) {
             TestConfiguration desired = new TestConfiguration(events, new BootstrapConfiguration(), owner);
             OrionAcmeConfiguration acme = new OrionAcmeConfiguration(false,
                     URI.create("acme://letsencrypt.org/staging"), "admin@example.test", List.of("example.test"),
@@ -77,7 +80,7 @@ class AcmeConfigurationTest {
                     List.of(), List.of()), List.of());
             KeyMaterialDescriptor account = new KeyMaterialDescriptor("account",
                     Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 1);
-            owner.withModification(modification -> {
+            owner.withModification(owner.revision(), modification -> {
                 modification.generateKey(account, 2048);
                 modification.generateKey(new KeyMaterialDescriptor("identity",
                         Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 1), 2048);
@@ -104,7 +107,7 @@ class AcmeConfigurationTest {
 
     @Test
     void encryptsEabAndPreservesItWhenSavingWithoutAReplacement() throws Exception {
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
         OrionDocument initial = OrionDocument.withAccessControl(new AccessControl());
         OrionDocument saved;
         try (OrionKeyMaterial owner = owner(store)) {
@@ -140,7 +143,7 @@ class AcmeConfigurationTest {
 
     @Test
     void replacingEabDoesNotOverwriteACredentialsSecretUsedByAnS3Connection() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentSource())) {
             TestConfiguration desired = new TestConfiguration(events, new BootstrapConfiguration(), owner);
             desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("r1"));
             ConfigurationSecrets secrets = new ConfigurationSecrets(
@@ -169,7 +172,7 @@ class AcmeConfigurationTest {
 
     @Test
     void rejectsIncompleteEabAndAllowsLetsEncryptWithoutIt() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentSource())) {
             TestConfiguration desired = new TestConfiguration(events, new BootstrapConfiguration(), owner);
             OrionDocument initial = OrionDocument.withAccessControl(new AccessControl());
             desired.publish(initial, Optional.of("r1"));
@@ -189,9 +192,11 @@ class AcmeConfigurationTest {
         }
     }
 
-    private OrionKeyMaterial owner(InMemoryKeyMaterialContentStore store) throws Exception {
-        return OrionKeyMaterial.open(store, KeyMaterialOptions.pkcs12("password".toCharArray()),
-                events.unstartedEvents());
+    private OrionKeyMaterial owner(InMemoryKeyMaterialContentSource store) throws Exception {
+        return OrionKeyMaterial.open(new KeyMaterialContentStore(
+                store,
+                new KeyMaterialCodec(KeyMaterialOptions.pkcs12("password".toCharArray())),
+                events.unstartedEvents()));
     }
 
     private OrionDocument save(AcmeCertificateService service, TestConfiguration desired,

@@ -1,10 +1,10 @@
 package pro.deta.orion;
 
-import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialContentSource;
 import pro.deta.orion.keymaterial.KeyMaterialFileSecurity;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
-import pro.deta.orion.keymaterial.LocalKeyMaterialContentStore;
-import pro.deta.orion.keymaterial.ReadOnlyKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.LocalKeyMaterialContentSource;
+import pro.deta.orion.keymaterial.ReadOnlyKeyMaterialContentSource;
 
 import pro.deta.orion.resource.reference.ResourceAddress;
 import pro.deta.orion.resource.reference.ResourceReferenceResolver;
@@ -60,20 +60,20 @@ public final class KeyMaterialResourceResolver {
         return unsafe(scope(environment));
     }
 
-    public KeyMaterialContentStore resolveStore(String locationReference) {
+    public KeyMaterialContentSource resolveSource(String locationReference) {
         ResourceAddress address = resolveAddress(
                 locationReference,
                 "Key material location reference must not be empty");
         if (address.scheme().isEmpty() || address.hasScheme(ResourceScheme.FILE)) {
-            return new LocalKeyMaterialContentStore(Path.of(address.body()));
+            return new LocalKeyMaterialContentSource(Path.of(address.body()));
         }
         if (address.hasScheme(ENV)) {
-            return resolveStore(resolveEnvironment(address.body()));
+            return resolveSource(resolveEnvironment(address.body()));
         }
         if (address.hasScheme(ResourceScheme.CONTENT)) {
             byte[] bytes = contentBytes(address.body());
             try {
-                return new ReadOnlyKeyMaterialContentStore(bytes, "inline key material");
+                return new ReadOnlyKeyMaterialContentSource(bytes, "inline key material");
             } finally {
                 Arrays.fill(bytes, (byte) 0);
             }

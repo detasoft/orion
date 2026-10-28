@@ -1,5 +1,9 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.keymaterial.KeyMaterialCodec;
+
+import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+
 import pro.deta.orion.event.OrionEventManager;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -59,7 +63,7 @@ import pro.deta.orion.agentd.session.SessionDiscovery;
 import pro.deta.orion.agentd.session.SessionManifest;
 import pro.deta.orion.agentd.session.SessionRegistry;
 import pro.deta.orion.agentd.transport.JettyHttp2Transport;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
@@ -362,8 +366,8 @@ class JettyHTTPServerIT {
 
     @Test
     void failsHttpsStartupForStorageOnlyIdentity() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
-            owner.withModification(modification -> {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentSource())) {
+            owner.withModification(owner.revision(), modification -> {
                 modification.generateKey(IDENTITY, 2048);
                 modification.apply();
             });
@@ -1036,7 +1040,7 @@ class JettyHTTPServerIT {
     }
 
     static MaterialFixture material() throws Exception {
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
         store.write(SHARED_MATERIAL.snapshot(), null);
         OrionKeyMaterial owner = owner(store);
         return new MaterialFixture(
@@ -1050,11 +1054,11 @@ class JettyHTTPServerIT {
 
     private static SharedMaterial sharedMaterial() {
         try {
-            InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+            InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
             try (OrionKeyMaterial owner = owner(store)) {
                 TestCertificateChain.Authority serverRoot = TestCertificateChain.root("Server Root");
                 TestCertificateChain.Authority clientRoot = TestCertificateChain.root("Client Root");
-                owner.withModification(modification -> {
+                owner.withModification(owner.revision(), modification -> {
                     modification.generateKey(IDENTITY, 2048);
                     modification.apply();
                 });
@@ -1086,13 +1090,14 @@ class JettyHTTPServerIT {
         }
     }
 
-    private static OrionKeyMaterial owner(InMemoryKeyMaterialContentStore store) throws Exception {
-        OrionKeyMaterial material = OrionKeyMaterial.open(
-                store, KeyMaterialOptions.pkcs12("test-password".toCharArray()),
-                new OrionEventManager());
+    private static OrionKeyMaterial owner(InMemoryKeyMaterialContentSource store) throws Exception {
+        OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+                store,
+                new KeyMaterialCodec(KeyMaterialOptions.pkcs12("test-password".toCharArray())),
+                new OrionEventManager()));
         try {
             if (!material.contains(SIGNING)) {
-                material.withModification(modification -> {
+                material.withModification(material.revision(), modification -> {
                     modification.generateKey(SIGNING, 2048);
                     modification.apply();
                 });

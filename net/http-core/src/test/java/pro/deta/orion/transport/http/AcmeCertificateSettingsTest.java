@@ -1,5 +1,9 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.keymaterial.KeyMaterialCodec;
+
+import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+
 import pro.deta.orion.acme.AcmeCertificateService;
 import pro.deta.orion.acme.AcmeCertificateIssuer;
 import pro.deta.orion.acme.AcmeCertificateIssueRequest;
@@ -8,7 +12,6 @@ import pro.deta.orion.acme.AcmeHttpChallengeService;
 import pro.deta.orion.test.certificates.TestCertificateChain;
 
 import java.util.Set;
-
 
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.test.integration.TestConfiguration;
@@ -27,7 +30,7 @@ import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
@@ -48,8 +51,8 @@ class AcmeCertificateSettingsTest {
 
     @Test
     void selectsStoredAccountKeyPersistsItsReferenceAndReusesItForIssuance() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
-            owner.withModification(modification -> {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentSource())) {
+            owner.withModification(owner.revision(), modification -> {
                 modification.generateKey(new KeyMaterialDescriptor("existing-account",
                         Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 1), 3072);
                 modification.apply();
@@ -130,7 +133,7 @@ class AcmeCertificateSettingsTest {
 
     @Test
     void savesThroughTheConfigurationRepositoryAndRejectsStaleRevisions() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentSource())) {
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
             TestConfiguration desired = new TestConfiguration(events, bootstrap,
                     owner);
@@ -234,9 +237,11 @@ class AcmeCertificateSettingsTest {
         }
     }
 
-    private OrionKeyMaterial owner(InMemoryKeyMaterialContentStore store) throws Exception {
-        return OrionKeyMaterial.open(store, KeyMaterialOptions.pkcs12("password".toCharArray()),
-                events.unstartedEvents());
+    private OrionKeyMaterial owner(InMemoryKeyMaterialContentSource store) throws Exception {
+        return OrionKeyMaterial.open(new KeyMaterialContentStore(
+                store,
+                new KeyMaterialCodec(KeyMaterialOptions.pkcs12("password".toCharArray())),
+                events.unstartedEvents()));
     }
 
     private static AcmeCertificateService.Settings settings(String provider, String kid, String key) {

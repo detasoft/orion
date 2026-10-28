@@ -1410,9 +1410,11 @@ class OrionOidcOnboardingTest {
             KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor("signing",
                     Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
             try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
-                material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
-                        testRuntime.unstartedEvents());
-                material.withModification(modification -> {
+                material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+                        new InMemoryKeyMaterialContentSource(),
+                        new KeyMaterialCodec(options),
+                        testRuntime.unstartedEvents()));
+                material.withModification(material.revision(), modification -> {
                     modification.generateKey(descriptor, 2048);
                     modification.apply();
                 });

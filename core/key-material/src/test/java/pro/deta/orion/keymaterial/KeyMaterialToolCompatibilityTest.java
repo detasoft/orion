@@ -61,11 +61,12 @@ class KeyMaterialToolCompatibilityTest {
 
     private Path createLocalPkcs12(String alias) throws Exception {
         Path keyStorePath = tempDir.resolve(alias + KeyMaterialTestConstants.PKCS12_EXTENSION);
-        LocalKeyMaterialContentStore store = new LocalKeyMaterialContentStore(keyStorePath);
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(
-                store, KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password()),
-                new OrionEventManager())) {
-            material.withModification(modification -> {
+        LocalKeyMaterialContentSource store = new LocalKeyMaterialContentSource(keyStorePath);
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+                store,
+                new KeyMaterialCodec(KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password())),
+                new OrionEventManager()))) {
+            material.withModification(material.revision(), modification -> {
                 modification.generateKey(new KeyMaterialDescriptor(alias,
                         java.util.Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 1), 2048);
                 modification.apply();

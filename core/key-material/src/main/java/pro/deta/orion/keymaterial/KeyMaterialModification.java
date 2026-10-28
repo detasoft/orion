@@ -1,6 +1,7 @@
 package pro.deta.orion.keymaterial;
 
 import pro.deta.orion.util.Modification;
+import pro.deta.orion.keymaterial.KeyMaterialContentStore.Entry;
 
 import javax.crypto.SecretKey;
 import java.io.IOException;
@@ -17,24 +18,24 @@ import java.util.Optional;
 /** Collects append-only additions for one KMS version; deletion adds a new, marked version of an entry. */
 public final class KeyMaterialModification implements Modification {
     private final KeyMaterialService owner;
-    private final long version;
-    private final List<Addition> additions = new ArrayList<>();
+    private final long expectedRevision;
+    private final List<Entry> additions = new ArrayList<>();
     private boolean finished;
 
-    KeyMaterialModification(KeyMaterialService owner, long version) {
+    KeyMaterialModification(KeyMaterialService owner, long expectedRevision) {
         this.owner = owner;
-        this.version = version;
+        this.expectedRevision = expectedRevision;
     }
 
     public long version() {
-        return version;
+        return Math.incrementExact(expectedRevision);
     }
 
     public synchronized void generateKey(KeyMaterialDescriptor descriptor, int keySize)
             throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(descriptor);
-        Addition existing = find(descriptor.alias());
+        Entry existing = find(descriptor.alias());
         if (existing != null) {
             requireAvailable(existing);
             owner.validatePrepared(existing.entry(), descriptor);
@@ -80,7 +81,7 @@ public final class KeyMaterialModification implements Modification {
             X509Certificate certificate) throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(descriptor);
-        Addition existing = find(descriptor.alias());
+        Entry existing = find(descriptor.alias());
         if (existing != null) {
             requireAvailable(existing);
             owner.validatePrepared(existing.entry(), descriptor);
@@ -103,7 +104,7 @@ public final class KeyMaterialModification implements Modification {
             throw new IllegalArgumentException("Certificate chains require TLS identity or CA material");
         }
         if (issuer == null) throw new IllegalArgumentException("Issuer optional must not be null");
-        Addition existing = requireEntry(identity.alias());
+        Entry existing = requireEntry(identity.alias());
         owner.validatePrepared(existing.entry(), identity);
         KeyStore.PrivateKeyEntry entry = (KeyStore.PrivateKeyEntry) existing.entry();
         Optional<X509Certificate> root = Optional.empty();
@@ -113,7 +114,7 @@ public final class KeyMaterialModification implements Modification {
             if (!descriptor.purposes().contains(KeyMaterialPurpose.TRUST_ANCHOR)) {
                 throw new IllegalArgumentException("Issuer must have TRUST_ANCHOR purpose");
             }
-            Addition trusted = requireEntry(descriptor.alias());
+            Entry trusted = requireEntry(descriptor.alias());
             owner.validatePrepared(trusted.entry(), descriptor);
             root = Optional.of((X509Certificate) ((KeyStore.TrustedCertificateEntry) trusted.entry())
                     .getTrustedCertificate());
@@ -129,7 +130,7 @@ public final class KeyMaterialModification implements Modification {
     public synchronized void delete(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(descriptor);
-        Addition existing = requireEntry(descriptor.alias());
+        Entry existing = requireEntry(descriptor.alias());
         owner.validatePrepared(existing.entry(), descriptor);
         add(existing.alias(), existing.entry(), true);
     }
@@ -138,7 +139,7 @@ public final class KeyMaterialModification implements Modification {
     public synchronized void apply() throws IOException {
         try {
             requireOpen();
-            owner.apply(additions, version);
+            owner.apply(additions, expectedRevision);
         } finally {
             discard();
         }
@@ -150,16 +151,16 @@ public final class KeyMaterialModification implements Modification {
         finished = true;
     }
 
-    private Addition find(String alias) throws GeneralSecurityException {
+    private Entry find(String alias) throws GeneralSecurityException {
         for (int index = additions.size() - 1; index >= 0; index--) {
-            Addition addition = additions.get(index);
+            Entry addition = additions.get(index);
             if (addition.alias().equalsIgnoreCase(alias)) return addition;
         }
-        return owner.readAddition(alias);
+        return owner.readEntry(alias);
     }
 
-    private Addition requireEntry(String alias) throws GeneralSecurityException {
-        Addition addition = find(alias);
+    private Entry requireEntry(String alias) throws GeneralSecurityException {
+        Entry addition = find(alias);
         if (addition == null) throw new GeneralSecurityException("Key material alias not found: " + alias);
         requireAvailable(addition);
         return addition;
@@ -169,14 +170,14 @@ public final class KeyMaterialModification implements Modification {
         if (find(alias) != null) throw new IllegalArgumentException("Key material name already exists");
     }
 
-    private void requireAvailable(Addition addition) throws GeneralSecurityException {
+    private void requireAvailable(Entry addition) throws GeneralSecurityException {
         if (addition.deleted()) throw new GeneralSecurityException("Key material is deleted: " + addition.alias());
     }
 
     private void add(String alias, KeyStore.Entry entry, boolean deleted) throws GeneralSecurityException {
-        Addition previous = find(alias);
+        Entry previous = find(alias);
         long next = previous == null ? 1 : Math.incrementExact(previous.version());
-        additions.add(new Addition(alias, entry, next, deleted));
+        additions.add(new Entry(alias, entry, next, deleted));
     }
 
     private void requireOpen() {
@@ -187,8 +188,6 @@ public final class KeyMaterialModification implements Modification {
     private void requireDescriptor(KeyMaterialDescriptor descriptor) {
         if (descriptor == null) throw new IllegalArgumentException("Key material descriptor must not be null");
     }
-
-    record Addition(String alias, KeyStore.Entry entry, long version, boolean deleted) {}
 
     @FunctionalInterface
     public interface Operation {

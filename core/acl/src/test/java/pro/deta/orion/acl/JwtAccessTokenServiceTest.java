@@ -1,5 +1,9 @@
 package pro.deta.orion.acl;
 
+import pro.deta.orion.keymaterial.KeyMaterialCodec;
+
+import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+
 import pro.deta.orion.event.OrionEventManager;
 
 import java.util.Set;
@@ -12,7 +16,7 @@ import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
 
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
@@ -245,7 +249,7 @@ class JwtAccessTokenServiceTest {
         JwtAccessTokenService oldService = service(identity, CLOCK);
         String oldToken = oldService.issue("alice", 600, null).value();
         KeyMaterialDescriptor next = descriptor("server-signing-v2", 2);
-        identity.material.withModification(modification -> {
+        identity.material.withModification(identity.material.revision(), modification -> {
             modification.importKey(next, newKey);
             modification.apply();
         });
@@ -405,13 +409,15 @@ class JwtAccessTokenServiceTest {
 
         private TestIdentity(String activeKeyId, Map<String, KeyPair> keys) throws Exception {
             try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray())) {
-                material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
-                        new OrionEventManager());
+                material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+                        new InMemoryKeyMaterialContentSource(),
+                        new KeyMaterialCodec(options),
+                        new OrionEventManager()));
             }
             materials.add(material);
             List<KeyMaterialDescriptor> retained = new ArrayList<>();
             KeyMaterialDescriptor active = descriptor(activeKeyId, keys.size());
-            material.withModification(modification -> {
+            material.withModification(material.revision(), modification -> {
                 for (Map.Entry<String, KeyPair> entry : keys.entrySet()) {
                     KeyMaterialDescriptor descriptor = entry.getKey().equals(activeKeyId)
                             ? active : descriptor(entry.getKey(), 1);

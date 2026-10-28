@@ -54,9 +54,10 @@ class ConfiguredStorageManagementTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
-                KeyMaterialOptions.pkcs12("test-password".toCharArray()),
-                testRuntime.unstartedEvents());
+        material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+                new InMemoryKeyMaterialContentSource(),
+                new KeyMaterialCodec(KeyMaterialOptions.pkcs12("test-password".toCharArray())),
+                testRuntime.unstartedEvents()));
         User user = new User("alice", "", "", "", List.of(), List.of(), List.of(
                 grant(GrantKey.CONNECTION, "*", GrantKey.CREATE),
                 grant(GrantKey.CONNECTION, "*", GrantKey.READ_WRITE),

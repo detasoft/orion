@@ -1,12 +1,16 @@
 package pro.deta.orion;
 
+import pro.deta.orion.keymaterial.KeyMaterialCodec;
+
+import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+
 import java.security.KeyStore;
 import java.io.ByteArrayOutputStream;
 
 import pro.deta.orion.event.OrionEventManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.keymaterial.LocalKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.LocalKeyMaterialContentSource;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import org.junit.jupiter.api.AfterEach;
@@ -56,7 +60,7 @@ class KeyMaterialBootstrapTest {
             KeyMaterialDescriptor active = signing(configuration).active();
             signature = material.sign(active, payload);
             assertThat(active.alias()).isEqualTo("cluster-signing-v2");
-            assertThat(material.version()).isEqualTo(1);
+            assertThat(material.revision()).isEqualTo(1);
         }
 
         try (OrionKeyMaterial material = openLocal(configuration,
@@ -143,7 +147,7 @@ class KeyMaterialBootstrapTest {
     @Test
     void requiresExplicitCreationAndDoesNotPopulateAnExistingEmptyStore() throws Exception {
         BootstrapConfiguration configuration = configuration();
-        LocalKeyMaterialContentStore store = new LocalKeyMaterialContentStore(
+        LocalKeyMaterialContentSource store = new LocalKeyMaterialContentSource(
                 tempDir.resolve("security/orion.p12"));
         assertThatThrownBy(() -> KeyMaterialBootstrap.open(
                 configuration,
@@ -177,12 +181,14 @@ class KeyMaterialBootstrapTest {
     @Test
     void doesNotAddTheConfiguredSigningKeyToAnExistingStore() throws Exception {
         BootstrapConfiguration configuration = configuration();
-        LocalKeyMaterialContentStore store = new LocalKeyMaterialContentStore(
+        LocalKeyMaterialContentSource store = new LocalKeyMaterialContentSource(
                 tempDir.resolve("security/orion.p12"));
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray());
-             OrionKeyMaterial material = OrionKeyMaterial.open(store, options,
-                     events)) {
-            material.withModification(modification -> {
+             OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+                     store,
+                     new KeyMaterialCodec(options),
+                     events))) {
+            material.withModification(material.revision(), modification -> {
                 modification.generateKey(new KeyMaterialDescriptor("other-signing",
                         Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1), 2048);
                 modification.apply();
@@ -202,7 +208,7 @@ class KeyMaterialBootstrapTest {
         BootstrapConfiguration configuration = configuration();
         configuration.getBootstrap().getKeyMaterial().getServerSigning()
                 .setVerification(List.of(new SigningKeyReferenceConfig("previous-signing", 1)));
-        LocalKeyMaterialContentStore store = new LocalKeyMaterialContentStore(
+        LocalKeyMaterialContentSource store = new LocalKeyMaterialContentSource(
                 tempDir.resolve("security/orion.p12"));
         assertThatThrownBy(() -> KeyMaterialBootstrap.open(
                 configuration,

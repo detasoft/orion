@@ -12,7 +12,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.bootstrap.config.location.BootstrapConfigurationReader;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.OrionXml;
 
@@ -101,7 +101,7 @@ class RemoteBootstrapConfigurationIT {
                 Files.writeString(credential, authorized);
             }
 
-            var materialStore = new InMemoryKeyMaterialContentStore();
+            var materialStore = new InMemoryKeyMaterialContentSource();
             materialStore.write(material, null);
             pro.deta.orion.event.OrionEventManager bootstrapEvents1 =
                     new pro.deta.orion.event.OrionEventManager();

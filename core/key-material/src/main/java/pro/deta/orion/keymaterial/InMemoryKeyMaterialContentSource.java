@@ -5,7 +5,7 @@ import java.util.Arrays;
 import java.util.Objects;
 import java.util.Optional;
 
-public class InMemoryKeyMaterialContentStore implements KeyMaterialContentStore {
+public class InMemoryKeyMaterialContentSource implements KeyMaterialContentSource {
     private byte[] bytes;
     private long version;
 

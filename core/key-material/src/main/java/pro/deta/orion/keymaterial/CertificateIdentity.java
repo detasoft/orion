@@ -42,7 +42,7 @@ public final class CertificateIdentity {
         List<X509Certificate> validated = requireX509Chain(certificateChain);
         Optional<X509Certificate> root = requireIssuerCertificate(
                 configuration.serverIssuerTrustAnchor(), issuerTrustAnchor);
-        material.withModification(modification -> {
+        material.withModification(material.revision(), modification -> {
             if (root.isPresent()) {
                 modification.setTrustedCertificate(
                         configuration.serverIssuerTrustAnchor().orElseThrow(), root.orElseThrow());

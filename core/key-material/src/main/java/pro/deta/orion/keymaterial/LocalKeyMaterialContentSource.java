@@ -18,13 +18,13 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.locks.ReentrantLock;
 
-public class LocalKeyMaterialContentStore implements KeyMaterialContentStore {
+public class LocalKeyMaterialContentSource implements KeyMaterialContentSource {
     private static final int JVM_LOCK_COUNT = 64;
     private static final ReentrantLock[] JVM_LOCKS = createJvmLocks();
 
     private final Path path;
 
-    public LocalKeyMaterialContentStore(Path path) {
+    public LocalKeyMaterialContentSource(Path path) {
         if (path == null) {
             throw new IllegalArgumentException("Key material path must not be null");
         }

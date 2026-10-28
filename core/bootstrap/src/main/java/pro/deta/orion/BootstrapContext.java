@@ -1,9 +1,5 @@
 package pro.deta.orion;
 
-import pro.deta.orion.git.fileapi.GitFile;
-
-import pro.deta.orion.git.fileapi.GitFileEvents;
-
 import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
@@ -236,7 +232,7 @@ public final class BootstrapContext implements AutoCloseable {
                     keyMaterial.require(descriptor);
                 }
             }
-            keyMaterial.withModification(modification -> {
+            keyMaterial.withModification(keyMaterial.revision(), modification -> {
                 modification.generateKey(rsa, KeyMaterialConstants.RSA_KEY_SIZE_BITS);
                 modification.generateKey(ec, KeyMaterialConstants.EC_KEY_SIZE_BITS);
                 modification.apply();

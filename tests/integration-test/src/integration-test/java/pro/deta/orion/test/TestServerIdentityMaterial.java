@@ -1,5 +1,9 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.keymaterial.KeyMaterialCodec;
+
+import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+
 import pro.deta.orion.event.OrionEventManager;
 
 import pro.deta.orion.KeyMaterialBootstrap;
@@ -9,7 +13,7 @@ import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import java.util.Set;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
-import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialContentSource;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.KeyMaterialResourceResolver;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
@@ -45,12 +49,12 @@ final class TestServerIdentityMaterial implements AutoCloseable {
         configuration.getBootstrap().getKeyMaterial().setLocation(
                 baseDirectory.toRealPath().resolve("material.p12").toString());
         configuration.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);
-        KeyMaterialContentStore store = KeyMaterialResourceResolver.standard(Map.of())
-                .resolveStore(configuration.getBootstrap().getKeyMaterial().getLocation());
+        KeyMaterialContentSource store = KeyMaterialResourceResolver.standard(Map.of())
+                .resolveSource(configuration.getBootstrap().getKeyMaterial().getLocation());
         OrionKeyMaterial material = openMaterial(configuration, Map.of(PASSWORD_ENV, PASSWORD), store);
         try {
             if (!material.hasDurableSnapshot()) {
-                material.withModification(modification -> {
+                material.withModification(material.revision(), modification -> {
                     modification.generateKey(KeyMaterialBootstrap.signingMaterial(
                             configuration.getBootstrap().getKeyMaterial()).active(),
                             KeyMaterialConstants.RSA_KEY_SIZE_BITS);
@@ -71,12 +75,14 @@ final class TestServerIdentityMaterial implements AutoCloseable {
     static OrionKeyMaterial openMaterial(
             BootstrapConfiguration configuration,
             Map<String, String> environment,
-            KeyMaterialContentStore store) throws Exception {
+            KeyMaterialContentSource store) throws Exception {
         KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard(environment);
         try (KeyMaterialOptions options = resolver.pkcs12Options(
                 configuration.getBootstrap().getKeyMaterial().getPassword())) {
-            return OrionKeyMaterial.open(store, options,
-                    new OrionEventManager());
+            return OrionKeyMaterial.open(new KeyMaterialContentStore(
+                    store,
+                    new KeyMaterialCodec(options),
+                    new OrionEventManager()));
         }
     }
 
@@ -87,7 +93,7 @@ final class TestServerIdentityMaterial implements AutoCloseable {
         KeyMaterialDescriptor ec = new KeyMaterialDescriptor(
                 "ssh-host-ec-v1", Set.of(KeyMaterialPurpose.SSH_HOST),
                 KeyMaterialAlgorithm.EC, 1);
-        material.withModification(modification -> {
+        material.withModification(material.revision(), modification -> {
             modification.generateKey(rsa, KeyMaterialConstants.RSA_KEY_SIZE_BITS);
             modification.generateKey(ec, KeyMaterialConstants.EC_KEY_SIZE_BITS);
             modification.apply();

@@ -5,14 +5,13 @@ import pro.deta.orion.KeyMaterialBootstrap;
 import java.security.KeyPair;
 import pro.deta.orion.internal.UserEmail;
 
-
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.auth.SshCredentialListResult;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
@@ -111,10 +110,10 @@ final class RemoteBootstrapTestSupport {
 
     static byte[] materialBytes(BootstrapConfiguration configuration, Map<String, String> environment)
             throws Exception {
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
         try (OrionKeyMaterial material = TestServerIdentityMaterial.openMaterial(
                 configuration, environment, store)) {
-            material.withModification(modification -> {
+            material.withModification(material.revision(), modification -> {
                 modification.generateKey(KeyMaterialBootstrap.signingMaterial(
                         configuration.getBootstrap().getKeyMaterial()).active(),
                         KeyMaterialConstants.RSA_KEY_SIZE_BITS);

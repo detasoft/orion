@@ -1,6 +1,6 @@
 package pro.deta.orion;
 
-import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialContentSource;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 
 import org.junit.jupiter.api.Test;
@@ -55,10 +55,10 @@ class KeyMaterialResourceResolverTest {
         KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard(
                 Map.of("ORION_KEYSTORE_LOCATION", envPath.toString()));
 
-        KeyMaterialContentStore plainStore = resolver.resolveStore(plainPath.toString());
-        KeyMaterialContentStore fileStore =
-                resolver.resolveStore("file:" + filePath);
-        KeyMaterialContentStore envStore = resolver.resolveStore(
+        KeyMaterialContentSource plainStore = resolver.resolveSource(plainPath.toString());
+        KeyMaterialContentSource fileStore =
+                resolver.resolveSource("file:" + filePath);
+        KeyMaterialContentSource envStore = resolver.resolveSource(
                 "env:ORION_KEYSTORE_LOCATION");
 
         String plainVersion = plainStore.write(bytes("plain"), null);
@@ -78,7 +78,7 @@ class KeyMaterialResourceResolverTest {
         KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard();
         String reference = contentReference(bytes("inline"));
 
-        KeyMaterialContentStore store = resolver.resolveStore(reference);
+        KeyMaterialContentSource store = resolver.resolveSource(reference);
 
         assertThat(store.read(store.revision().orElseThrow())).isEqualTo(bytes("inline"));
         assertThatThrownBy(() -> store.write(bytes("update"), store.revision().orElseThrow()))

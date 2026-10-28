@@ -1,5 +1,9 @@
 package pro.deta.orion.config;
 
+import pro.deta.orion.keymaterial.KeyMaterialCodec;
+
+import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+
 import pro.deta.orion.event.OrionEventManager;
 
 import java.util.Set;
@@ -11,7 +15,7 @@ import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
@@ -51,7 +55,7 @@ class ConfigurationSecretsTest {
     private static final KeyMaterialDescriptor CIPHER = new KeyMaterialDescriptor(
             "configuration-v1", Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER),
             KeyMaterialAlgorithm.AES, 1);
-    private final InMemoryKeyMaterialContentStore material = new InMemoryKeyMaterialContentStore();
+    private final InMemoryKeyMaterialContentSource material = new InMemoryKeyMaterialContentSource();
     private final AtomicReference<OrionDocument> current = new AtomicReference<>(document());
     private final AtomicReference<byte[]> cipherInput = new AtomicReference<>();
     private final AtomicReference<byte[]> cipherOutput = new AtomicReference<>();
@@ -60,8 +64,10 @@ class ConfigurationSecretsTest {
 
     @BeforeEach
     void open() throws Exception {
-        keyMaterial = OrionKeyMaterial.open(material, options(),
-                new OrionEventManager());
+        keyMaterial = OrionKeyMaterial.open(new KeyMaterialContentStore(
+                material,
+                new KeyMaterialCodec(options()),
+                new OrionEventManager()));
         secrets = resolver(keyMaterial);
     }
 
@@ -105,8 +111,10 @@ class ConfigurationSecretsTest {
         assertThat(output.toString(StandardCharsets.UTF_8)).doesNotContain("tøken");
         current.set(OrionXml.read(new ByteArrayInputStream(output.toByteArray())));
 
-        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(material, options(),
-                new OrionEventManager())) {
+        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(new KeyMaterialContentStore(
+                material,
+                new KeyMaterialCodec(options()),
+                new OrionEventManager()))) {
             char[] resolved = resolver(reopened).resolve(REPOSITORY, REFERENCE);
             assertThat(resolved).isEqualTo("tøken-🔑\r\n".toCharArray());
             assertThat(cipherOutput.get()).containsOnly((byte) 0);

@@ -1,5 +1,9 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.keymaterial.KeyMaterialCodec;
+
+import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+
 import pro.deta.orion.event.OrionEventManager;
 
 import java.util.Set;
@@ -8,7 +12,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialInventoryEntry;
@@ -60,7 +64,7 @@ class OrionAdminKeyMaterialRouteTest {
 
     @Test
     void publishesTheCreatedKeyOnlyAfterTheStoreAcceptsIt() throws Exception {
-        class ObservingStore extends InMemoryKeyMaterialContentStore {
+        class ObservingStore extends InMemoryKeyMaterialContentSource {
             private OrionKeyMaterial material;
 
             @Override
@@ -83,7 +87,7 @@ class OrionAdminKeyMaterialRouteTest {
             assertThat(response.status()).isEqualTo(201);
             assertThat(response.body()).isNull();
             assertThat(material.contains(ACCOUNT)).isTrue();
-            assertThat(material.version()).isEqualTo(1);
+            assertThat(material.revision()).isEqualTo(1);
         }
         try (OrionKeyMaterial reloaded = open(store)) {
             assertThat(reloaded.contains(ACCOUNT)).isTrue();
@@ -100,7 +104,7 @@ class OrionAdminKeyMaterialRouteTest {
                 + "\n-----END PRIVATE KEY-----\n";
         String body = new ObjectMapper().writeValueAsString(Map.of(
                 "alias", "account", "purpose", "ACME_ACCOUNT", "privateKeyPem", pem));
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
         try (OrionKeyMaterial material = open(store)) {
             OrionHttpResponse response = post(material, body);
             assertThat(response.status()).isEqualTo(201);
@@ -115,7 +119,7 @@ class OrionAdminKeyMaterialRouteTest {
 
     @Test
     void rejectsAnExistingAliasRegardlessOfItsPurposeWithoutReplacingTheKey() throws Exception {
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
         try (OrionKeyMaterial material = open(store)) {
             assertThat(post(material, """
                     {"alias":"account","purpose":"ACME_ACCOUNT"}
@@ -130,7 +134,7 @@ class OrionAdminKeyMaterialRouteTest {
                 assertThat(post(material, body).status()).isEqualTo(400);
             }
             assertThat(material.publicKey(ACCOUNT).getEncoded()).isEqualTo(publicKey);
-            assertThat(material.version()).isEqualTo(1);
+            assertThat(material.revision()).isEqualTo(1);
             assertThat(store.read(store.revision().orElseThrow())).isEqualTo(beforeBytes);
             assertThat(store.revision().orElseThrow()).isEqualTo(beforeRevision);
         }
@@ -138,7 +142,7 @@ class OrionAdminKeyMaterialRouteTest {
 
     @Test
     void rejectsInvalidNamesPurposesAndOversizedRequestsWithoutSaving() throws Exception {
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
         try (OrionKeyMaterial material = open(store)) {
             for (String body : List.of("null", "{", "{\"purpose\":\"UNKNOWN\"}",
                     "{\"purpose\":\"ACME_ACCOUNT\"}",
@@ -156,7 +160,7 @@ class OrionAdminKeyMaterialRouteTest {
 
     @Test
     void sanitizesMalformedImportFailuresWithoutSaving() throws Exception {
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
         try (OrionKeyMaterial material = open(store)) {
             OrionHttpResponse response = post(material, """
                     {"alias":"invalid","purpose":"ACME_ACCOUNT","privateKeyPem":"private-secret"}
@@ -171,7 +175,7 @@ class OrionAdminKeyMaterialRouteTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void reportsFailedPublicationAndReopensOnlyTheDurableKey(boolean committed) throws Exception {
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore() {
+        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource() {
             @Override
             public synchronized String write(byte[] bytes, String expectedVersion) throws IOException {
                 if (committed) super.write(bytes, expectedVersion);
@@ -188,7 +192,7 @@ class OrionAdminKeyMaterialRouteTest {
         }
         try (OrionKeyMaterial reloaded = open(store)) {
             assertThat(reloaded.contains(ACCOUNT)).isEqualTo(committed);
-            assertThat(reloaded.version()).isEqualTo(committed ? 1 : 0);
+            assertThat(reloaded.revision()).isEqualTo(committed ? 1 : 0);
         }
     }
 
@@ -205,10 +209,12 @@ class OrionAdminKeyMaterialRouteTest {
                 body, AcmeAdministrationTest.admin()));
     }
 
-    private static OrionKeyMaterial open(InMemoryKeyMaterialContentStore store) throws Exception {
+    private static OrionKeyMaterial open(InMemoryKeyMaterialContentSource store) throws Exception {
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray())) {
-            return OrionKeyMaterial.open(store, options,
-                    new OrionEventManager());
+            return OrionKeyMaterial.open(new KeyMaterialContentStore(
+                    store,
+                    new KeyMaterialCodec(options),
+                    new OrionEventManager()));
         }
     }
 }

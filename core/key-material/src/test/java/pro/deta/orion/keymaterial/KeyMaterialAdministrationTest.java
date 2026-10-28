@@ -23,10 +23,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class KeyMaterialAdministrationTest {
     @Test
     void generatesAndPersistsSeparateAccountAndTlsKeysWithPublicInventory() throws Exception {
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
         String publicKey;
         try (OrionKeyMaterial material = open(store)) {
-            material.withModification(modification -> {
+            material.withModification(material.revision(), modification -> {
                 modification.generateKey(descriptor("account", KeyMaterialPurpose.ACME_ACCOUNT), 3072);
                 modification.generateKey(descriptor("identity", KeyMaterialPurpose.TLS_IDENTITY), 3072);
                 modification.apply();
@@ -53,10 +53,10 @@ class KeyMaterialAdministrationTest {
                 .parsePrivateKey().toASN1Primitive().getEncoded();
         for (String pem : List.of(pem("PRIVATE KEY", original.getPrivate().getEncoded()),
                 pem("RSA PRIVATE KEY", pkcs1))) {
-            InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+            InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
             char[] input = pem.toCharArray();
             try (OrionKeyMaterial material = open(store)) {
-                material.withModification(modification -> {
+                material.withModification(material.revision(), modification -> {
                     modification.importKey(descriptor("imported", KeyMaterialPurpose.ACME_ACCOUNT), input);
                     modification.apply();
                 });
@@ -75,10 +75,10 @@ class KeyMaterialAdministrationTest {
         KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
         generator.initialize(2048);
         KeyPair original = generator.generateKeyPair();
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
         char[] input = (" \n" + jwk((RSAPrivateCrtKey) original.getPrivate())).toCharArray();
         try (OrionKeyMaterial material = open(store)) {
-            material.withModification(modification -> {
+            material.withModification(material.revision(), modification -> {
                 modification.importKey(descriptor("certbot", KeyMaterialPurpose.ACME_ACCOUNT), input);
                 modification.apply();
             });
@@ -107,12 +107,12 @@ class KeyMaterialAdministrationTest {
                 valid.replaceFirst("\"e\":\"[^\"]+\"", "\"e\":65537"),
                 valid.replace("\"kty\":\"RSA\"", "\"kty\":\"RSA\",\"oth\":[]"),
                 jwk((RSAPrivateCrtKey) generator.generateKeyPair().getPrivate()));
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
         try (OrionKeyMaterial material = open(store)) {
             List<KeyMaterialInventoryEntry> before = material.inventory(Set.of());
             for (String invalid : invalidKeys) {
                 char[] input = invalid.toCharArray();
-                assertThatThrownBy(() -> material.withModification(modification -> {
+                assertThatThrownBy(() -> material.withModification(material.revision(), modification -> {
                     modification.importKey(descriptor("invalid", KeyMaterialPurpose.ACME_ACCOUNT), input);
                     modification.apply();
                 })).isInstanceOf(IllegalArgumentException.class)
@@ -147,12 +147,12 @@ class KeyMaterialAdministrationTest {
         rsa.initialize(1024);
         KeyPairGenerator ec = KeyPairGenerator.getInstance("EC");
         ec.initialize(256);
-        try (OrionKeyMaterial material = open(new InMemoryKeyMaterialContentStore())) {
+        try (OrionKeyMaterial material = open(new InMemoryKeyMaterialContentSource())) {
             List<KeyMaterialInventoryEntry> before = material.inventory(Set.of());
             for (String invalid : List.of("not a key", pem("PRIVATE KEY", rsa.generateKeyPair().getPrivate().getEncoded()),
                     pem("PRIVATE KEY", ec.generateKeyPair().getPrivate().getEncoded()))) {
                 char[] input = invalid.toCharArray();
-                assertThatThrownBy(() -> material.withModification(modification -> {
+                assertThatThrownBy(() -> material.withModification(material.revision(), modification -> {
                     modification.importKey(descriptor("invalid", KeyMaterialPurpose.ACME_ACCOUNT), input);
                     modification.apply();
                 })).isInstanceOf(IllegalArgumentException.class);
@@ -165,7 +165,7 @@ class KeyMaterialAdministrationTest {
     @Test
     void aFailedSaveInvalidatesTheOwnerAndLeavesDurableMaterialUnchanged() throws Exception {
         AtomicBoolean failWrites = new AtomicBoolean();
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore() {
+        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource() {
             @Override
             public synchronized String write(byte[] bytes, String expectedVersion) throws IOException {
                 if (failWrites.get()) throw new IOException("Storage unavailable");
@@ -174,7 +174,7 @@ class KeyMaterialAdministrationTest {
         };
         try (OrionKeyMaterial material = open(store)) {
             failWrites.set(true);
-            assertThatThrownBy(() -> material.withModification(modification -> {
+            assertThatThrownBy(() -> material.withModification(material.revision(), modification -> {
                 modification.generateKey(descriptor("unsaved", KeyMaterialPurpose.ACME_ACCOUNT), 3072);
                 modification.apply();
             })).isInstanceOf(IOException.class);
@@ -192,10 +192,12 @@ class KeyMaterialAdministrationTest {
                 .encodeToString(bytes) + "\n-----END " + type + "-----\n";
     }
 
-    private static OrionKeyMaterial open(InMemoryKeyMaterialContentStore store) throws Exception {
+    private static OrionKeyMaterial open(InMemoryKeyMaterialContentSource store) throws Exception {
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
-            return OrionKeyMaterial.open(store, options,
-                    new OrionEventManager());
+            return OrionKeyMaterial.open(new KeyMaterialContentStore(
+                    store,
+                    new KeyMaterialCodec(options),
+                    new OrionEventManager()));
         }
     }
 

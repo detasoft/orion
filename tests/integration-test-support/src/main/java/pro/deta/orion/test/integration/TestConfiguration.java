@@ -1,5 +1,9 @@
 package pro.deta.orion.test.integration;
 
+import pro.deta.orion.keymaterial.KeyMaterialCodec;
+
+import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+
 import java.util.Set;
 
 import java.util.Optional;
@@ -19,7 +23,7 @@ import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
@@ -75,9 +79,10 @@ public final class TestConfiguration implements AutoCloseable {
 
     private static OrionKeyMaterial defaultMaterial(OrionTestRuntime events) {
         try {
-            OrionKeyMaterial material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
-                    KeyMaterialOptions.pkcs12("test-password".toCharArray()),
-                    events.unstartedEvents());
+            OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+                    new InMemoryKeyMaterialContentSource(),
+                    new KeyMaterialCodec(KeyMaterialOptions.pkcs12("test-password".toCharArray())),
+                    events.unstartedEvents()));
             events.own(material);
             return new OrionKeyMaterial() {
                 @Override

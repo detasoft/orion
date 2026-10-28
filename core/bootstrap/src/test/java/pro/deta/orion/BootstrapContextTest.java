@@ -1,5 +1,9 @@
 package pro.deta.orion;
 
+import pro.deta.orion.keymaterial.KeyMaterialCodec;
+
+import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+
 import pro.deta.orion.event.OrionEventManager;
 
 import pro.deta.orion.git.fileapi.GitFile;
@@ -45,13 +49,10 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
-import pro.deta.orion.event.type.OrionEvent;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -340,7 +341,7 @@ class BootstrapContextTest {
             assertThat(provider.loadKeys(null)).hasSize(1);
             KeyMaterialDescriptor removed = context.keyMaterial()
                     .privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST)).getFirst();
-            context.keyMaterial().withModification(modification -> {
+            context.keyMaterial().withModification(context.keyMaterial().revision(), modification -> {
                 modification.delete(removed);
                 modification.apply();
             });
@@ -354,11 +355,11 @@ class BootstrapContextTest {
         NativeGitRepositoryProvider backend = repositoryWith(configuration,
                 Map.of("orion.xml", xml(), "material.p12", materialBytes(configuration)));
         try (BootstrapContext context = openContext(configuration, ENVIRONMENT, backend)) {
-            long before = context.keyMaterial().version();
+            long before = context.keyMaterial().revision();
             context.sshHostKeys(List.of());
-            assertThat(context.keyMaterial().version()).isEqualTo(before + 1);
+            assertThat(context.keyMaterial().revision()).isEqualTo(before + 1);
             context.sshHostKeys(List.of());
-            assertThat(context.keyMaterial().version()).isEqualTo(before + 1);
+            assertThat(context.keyMaterial().revision()).isEqualTo(before + 1);
         }
     }
 
@@ -414,15 +415,16 @@ class BootstrapContextTest {
                         KeyMaterialAlgorithm.RSA,
                         2);
                 try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("correct-password".toCharArray());
-                     OrionKeyMaterial material = OrionKeyMaterial.open(
-                             new NativeGitKeyMaterialContentStore(new GitFileEvents(
+                     OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+                             new NativeGitKeyMaterialContentSource(new GitFileEvents(
                                      new GitFile(
                                          backend,
                                          "orion",
                                          "refs/heads/main",
-                                         "material.p12"))), options,
-                             testRuntime.unstartedEvents())) {
-                    material.withModification(modification -> {
+                                         "material.p12"))),
+                             new KeyMaterialCodec(options),
+                             testRuntime.unstartedEvents()))) {
+                    material.withModification(material.revision(), modification -> {
                         modification.generateKey(staged, 2048);
                         modification.apply();
                     });
@@ -458,7 +460,7 @@ class BootstrapContextTest {
                     .hasMessage("Bootstrap inputs are unavailable or invalid")
                     .rootCause()
                     .hasMessageContaining("Bootstrap source path is unavailable: material");
-            assertThat(new NativeGitKeyMaterialContentStore(new GitFileEvents(
+            assertThat(new NativeGitKeyMaterialContentSource(new GitFileEvents(
                     new GitFile(
                         backend,
                         "orion",
@@ -491,7 +493,7 @@ class BootstrapContextTest {
                 assertThatThrownBy(() -> openContext(configuration, ENVIRONMENT, borrow(incomplete)))
                         .isInstanceOf(IllegalStateException.class)
                         .hasMessage("Bootstrap inputs are unavailable or invalid");
-                assertThat(new NativeGitKeyMaterialContentStore(new GitFileEvents(
+                assertThat(new NativeGitKeyMaterialContentSource(new GitFileEvents(
                         new GitFile(
                             incomplete,
                             "orion",
@@ -780,7 +782,7 @@ class BootstrapContextTest {
             assertThatThrownBy(() -> openContext(configuration, ENVIRONMENT, borrow(backend)))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessage("Bootstrap inputs are unavailable or invalid");
-            assertThat(new NativeGitKeyMaterialContentStore(new GitFileEvents(
+            assertThat(new NativeGitKeyMaterialContentSource(new GitFileEvents(
                     new GitFile(
                         backend,
                         "orion",
@@ -1722,12 +1724,14 @@ class BootstrapContextTest {
 
     private static byte[] materialBytes(BootstrapConfiguration configuration,
             List<KeyMaterialDescriptor> descriptors) throws Exception {
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(
                 ENVIRONMENT.get(PASSWORD_ENV).toCharArray());
-             OrionKeyMaterial material = OrionKeyMaterial.open(store, options,
-                     new OrionEventManager())) {
-            material.withModification(modification -> {
+             OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+                     store,
+                     new KeyMaterialCodec(options),
+                     new OrionEventManager()))) {
+            material.withModification(material.revision(), modification -> {
                 modification.generateKey(KeyMaterialBootstrap.signingMaterial(
                         configuration.getBootstrap().getKeyMaterial()).active(), 2048);
                 for (KeyMaterialDescriptor descriptor : descriptors) {

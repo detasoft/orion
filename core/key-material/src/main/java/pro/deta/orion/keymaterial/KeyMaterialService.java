@@ -1,14 +1,12 @@
 package pro.deta.orion.keymaterial;
 
-import pro.deta.orion.event.OrionEventManager;
-import pro.deta.orion.keymaterial.KeyMaterialModification.Addition;
+import pro.deta.orion.keymaterial.KeyMaterialContentStore.Entry;
 
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -24,129 +22,54 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collection;
 import java.util.EnumSet;
-import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.Map;
-import java.util.LinkedHashMap;
-import java.util.Objects;
 import java.security.Key;
-import java.util.Locale;
-import java.util.Optional;
 import java.util.Set;
 import java.util.StringJoiner;
 
 /**
- * Serializes local saves separately from state access so persistence and event publication can wait
- * without holding the state monitor needed by reload handlers.
- *
- * <p>PKCS12 attributes under {@code DESCRIPTOR_ATTRIBUTE_OID} store purposes, algorithm and descriptor version.
- * Attributes under {@code ADDITION_ATTRIBUTE_OID} store logical alias, entry version, KMS revision and deletion
- * status. Both OIDs identify persisted metadata and must remain stable across saves and reopenings.</p>
+ * Validates material descriptors and prepares modifications against the store's logical revision.
+ * Descriptor attributes identify persisted purposes, algorithms and descriptor versions and must remain stable.
  * @AiRule All public methods in this class must be synchronized.
  */
 final class KeyMaterialService implements AutoCloseable {
-    private static final String LOCAL_KEY_ID_ATTRIBUTE_OID = "1.2.840.113549.1.9.21";
-
     private static final String DESCRIPTOR_ATTRIBUTE_OID =
             "2.25.260349814076539099691640886169327825428";
 
-    private static final String ADDITION_ATTRIBUTE_OID =
-            "2.25.260349814076539099691640886169327826429";
-    private final Object writes = new Object();
     private final KeyMaterialContentStore store;
-    private final KeyMaterialCodec codec;
     private final KeyMaterialStorageCertificateFactory storageCertificateFactory;
 
-    private final OrionEventManager events;
-    private KeyStore keyStore;
-    private String version;
-    private long revision;
-
-    private KeyMaterialService(
-            KeyMaterialContentStore store,
-            // AI_TODO а разве не проще было бы этот атрибут убрать в Store? и если уж на то пошло - зачем тут KeyStore? вроде бы он должен быть частью Content, нет?
-            KeyMaterialCodec codec,
-            KeyMaterialStorageCertificateFactory storageCertificateFactory,
-            OrionEventManager events,
-            // AI_TODO а разве не проще было бы этот атрибут убрать в Store? и если уж на то пошло - зачем тут KeyStore?
-            KeyStore keyStore,
-            // AI_TODO а разве не проще было бы этот атрибут убрать в Store? и если уж на то пошло - зачем тут KeyStore? и версия вроде тоже относится к хранилищу
-            String version) throws GeneralSecurityException {
-        this.store = store;
-        this.codec = codec;
-        this.storageCertificateFactory = storageCertificateFactory;
-        this.events = events;
-        this.keyStore = keyStore;
-        this.version = version;
-        // AI_TODO зачем этот кэш - можно считать на лету?
-        for (String alias : physicalAliases()) {
-            revision = Math.max(revision, entryVersion(alias).kmsVersion());
-        }
-    }
-
-    // AI_TODO а не проще было бы создавать Store из какой-нибудь фабрики единообразно?
-    public static synchronized KeyMaterialService open(
-            KeyMaterialContentStore store,
-            KeyMaterialOptions options,
-            OrionEventManager events) throws IOException, GeneralSecurityException {
-        return open(store, options, new KeyMaterialStorageCertificateFactory(), events);
-    }
-
-    public static synchronized KeyMaterialService open(
-            KeyMaterialContentStore store,
-            KeyMaterialOptions options,
-            KeyMaterialStorageCertificateFactory storageCertificateFactory,
-            OrionEventManager events)
-            throws IOException, GeneralSecurityException {
-        if (store == null) {
-            throw new IllegalArgumentException("Key material store must not be null");
-        }
-        if (options == null) {
-            throw new IllegalArgumentException("Key material options must not be null");
-        }
+    private KeyMaterialService(KeyMaterialContentStore store,
+            KeyMaterialStorageCertificateFactory storageCertificateFactory) {
+        if (store == null) throw new IllegalArgumentException("Key material store must not be null");
         if (storageCertificateFactory == null) {
             throw new IllegalArgumentException("Storage certificate factory must not be null");
         }
-        if (events == null) {
-            throw new IllegalArgumentException("Orion event manager must not be null");
-        }
-        KeyMaterialCodec codec = new KeyMaterialCodec(options);
-
-        try {
-            Optional<String> sourceRevision = store.revision();
-            KeyStore keyStore;
-            if (sourceRevision.isPresent()) {
-                byte[] serialized = store.read(sourceRevision.orElseThrow());
-                try {
-                    keyStore = codec.decode(serialized);
-                } finally {
-                    Arrays.fill(serialized, (byte) 0);
-                }
-            } else {
-                keyStore = codec.create();
-            }
-            return new KeyMaterialService(
-                    store, codec, storageCertificateFactory, events, keyStore, sourceRevision.orElse(null));
-        } catch (IOException | GeneralSecurityException | RuntimeException e) {
-            codec.close();
-            try {
-                store.close();
-            } catch (RuntimeException cleanup) {
-                e.addSuppressed(cleanup);
-            }
-            throw e;
-        }
+        this.store = store;
+        this.storageCertificateFactory = storageCertificateFactory;
     }
 
-    public synchronized boolean containsAlias(String alias, Set<KeyMaterialPurpose> requiredPurposes) throws GeneralSecurityException {
+    public static synchronized KeyMaterialService open(KeyMaterialContentStore store) {
+        return open(store, new KeyMaterialStorageCertificateFactory());
+    }
+
+    public static synchronized KeyMaterialService open(KeyMaterialContentStore store,
+            KeyMaterialStorageCertificateFactory storageCertificateFactory) {
+        return new KeyMaterialService(store, storageCertificateFactory);
+    }
+
+    public synchronized boolean containsAlias(String alias, Set<KeyMaterialPurpose> requiredPurposes)
+            throws GeneralSecurityException {
         requireOpen();
         requireAlias(alias);
         Set<KeyMaterialPurpose> requested = Set.copyOf(requiredPurposes);
-        EntryVersion latest = findVersion(alias);
+        Entry latest = store.find(alias).orElse(null);
         if (latest == null || latest.deleted()) return false;
         if (requested.isEmpty()) return true;
-        String[] fields = descriptorMetadata(alias).split(";", -1);
+        String metadata = attribute(latest.entry().getAttributes(), DESCRIPTOR_ATTRIBUTE_OID);
+        if (metadata == null) throw new GeneralSecurityException("Typed key material metadata is missing: " + alias);
+        String[] fields = metadata.split(";", -1);
         if (fields.length != 3) throw metadataFailure(alias, "format");
         try {
             return parsePurposes(fields[0]).containsAll(requested);
@@ -156,44 +79,35 @@ final class KeyMaterialService implements AutoCloseable {
     }
 
     synchronized boolean hasDurableSnapshot() {
-        requireOpen();
-        return version != null;
+        return store.hasDurableSnapshot();
     }
 
     public synchronized KeyPair getKeyPair(String alias) throws GeneralSecurityException {
-        requireOpen();
-        PrivateKey privateKey = getPrivateKey(alias);
-        Certificate[] chain = getCertificateChain(alias);
+        KeyStore.Entry entry = requireEntry(alias);
+        if (!(entry instanceof KeyStore.PrivateKeyEntry key)) {
+            throw new GeneralSecurityException("Private key alias not found: " + alias);
+        }
+        Certificate[] chain = key.getCertificateChain();
         if (chain.length == 0) {
             throw new GeneralSecurityException("Private key alias has no certificate chain: " + alias);
         }
-        PublicKey publicKey = chain[0].getPublicKey();
-        return new KeyPair(publicKey, privateKey);
+        return new KeyPair(chain[0].getPublicKey(), key.getPrivateKey());
     }
 
     public synchronized PrivateKey getPrivateKey(String alias) throws GeneralSecurityException {
-        requireOpen();
-        requireAlias(alias);
-        char[] password = codec.password();
-        try {
-            PrivateKey privateKey = (PrivateKey) keyStore.getKey(materialAlias(alias), password);
-            if (privateKey == null) {
-                throw new GeneralSecurityException("Private key alias not found: " + alias);
-            }
-            return privateKey;
-        } finally {
-            clear(password);
+        KeyStore.Entry entry = requireEntry(alias);
+        if (!(entry instanceof KeyStore.PrivateKeyEntry key)) {
+            throw new GeneralSecurityException("Private key alias not found: " + alias);
         }
+        return key.getPrivateKey();
     }
 
     public synchronized Certificate[] getCertificateChain(String alias) throws GeneralSecurityException {
-        requireOpen();
-        requireAlias(alias);
-        Certificate[] chain = keyStore.getCertificateChain(materialAlias(alias));
-        if (chain == null) {
+        KeyStore.Entry entry = requireEntry(alias);
+        if (!(entry instanceof KeyStore.PrivateKeyEntry key)) {
             throw new GeneralSecurityException("Certificate chain alias not found: " + alias);
         }
-        return Arrays.copyOf(chain, chain.length);
+        return key.getCertificateChain();
     }
 
     public synchronized X509Certificate getTrustedCertificate(KeyMaterialDescriptor descriptor)
@@ -203,21 +117,18 @@ final class KeyMaterialService implements AutoCloseable {
         if (!descriptor.purposes().contains(KeyMaterialPurpose.TRUST_ANCHOR)) {
             throw new IllegalArgumentException("Trusted certificates require TRUST_ANCHOR purpose");
         }
-        validateExisting(descriptor);
-        String alias = descriptor.alias();
-        return trustedCertificate(alias);
+        KeyStore.Entry entry = requireEntry(descriptor.alias());
+        validatePrepared(entry, descriptor);
+        return trustedCertificate(entry, descriptor.alias());
     }
 
-    private X509Certificate trustedCertificate(String alias) throws GeneralSecurityException {
-        requireAlias(alias);
-        if (!keyStore.entryInstanceOf(materialAlias(alias), KeyStore.TrustedCertificateEntry.class)) {
+    private static X509Certificate trustedCertificate(KeyStore.Entry entry, String alias)
+            throws GeneralSecurityException {
+        if (!(entry instanceof KeyStore.TrustedCertificateEntry trusted)
+                || !(trusted.getTrustedCertificate() instanceof X509Certificate certificate)) {
             throw new GeneralSecurityException("Trusted certificate alias not found: " + alias);
         }
-        Certificate certificate = keyStore.getCertificate(materialAlias(alias));
-        if (!(certificate instanceof X509Certificate x509Certificate)) {
-            throw new GeneralSecurityException("Trusted certificate is not X.509: " + alias);
-        }
-        return x509Certificate;
+        return certificate;
     }
 
     private static void requireMatchingLeaf(
@@ -240,7 +151,7 @@ final class KeyMaterialService implements AutoCloseable {
             throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(descriptor);
-        Addition addition = readAddition(descriptor.alias());
+        Entry addition = readEntry(descriptor.alias());
         if (addition == null || addition.deleted()) {
             throw new GeneralSecurityException("Key material alias not found: " + descriptor.alias());
         }
@@ -251,13 +162,15 @@ final class KeyMaterialService implements AutoCloseable {
             Set<KeyMaterialPurpose> requiredPurposes) throws GeneralSecurityException {
         requireOpen();
         Set<KeyMaterialPurpose> requested = Set.copyOf(requiredPurposes);
-        List<String> aliases = availableAliases();
         List<KeyMaterialDescriptor> descriptors = new ArrayList<>();
-        for (String alias : aliases) {
-            if (!keyStore.entryInstanceOf(materialAlias(alias), KeyStore.PrivateKeyEntry.class)) {
+        for (Entry stored : store.entries()) {
+            if (stored.deleted()) continue;
+            String alias = stored.alias();
+            KeyStore.Entry entry = stored.entry();
+            if (!(entry instanceof KeyStore.PrivateKeyEntry)) {
                 continue;
             }
-            String metadata = descriptorMetadataIfPresent(alias);
+            String metadata = attribute(entry.getAttributes(), DESCRIPTOR_ATTRIBUTE_OID);
             if (metadata == null) {
                 continue;
             }
@@ -279,7 +192,7 @@ final class KeyMaterialService implements AutoCloseable {
                         "Typed key material metadata has invalid format: " + alias,
                         failure);
             }
-            validateExisting(descriptor);
+            validatePrepared(entry, descriptor);
             descriptors.add(descriptor);
         }
         return List.copyOf(descriptors);
@@ -289,16 +202,21 @@ final class KeyMaterialService implements AutoCloseable {
             throws GeneralSecurityException {
         requireOpen();
         Set<KeyMaterialPurpose> requested = Set.copyOf(requiredPurposes);
-        List<String> aliases = availableAliases();
         List<KeyMaterialInventoryEntry> entries = new ArrayList<>();
-        for (String alias : aliases) {
-            boolean trusted = keyStore.entryInstanceOf(materialAlias(alias), KeyStore.TrustedCertificateEntry.class);
-            boolean privateKey = keyStore.entryInstanceOf(materialAlias(alias), KeyStore.PrivateKeyEntry.class);
-            boolean secretKey = keyStore.entryInstanceOf(materialAlias(alias), KeyStore.SecretKeyEntry.class);
+        for (Entry stored : store.entries()) {
+            if (stored.deleted()) continue;
+            String alias = stored.alias();
+            KeyStore.Entry entry = stored.entry();
+            boolean trusted = entry instanceof KeyStore.TrustedCertificateEntry;
+            boolean privateKey = entry instanceof KeyStore.PrivateKeyEntry;
+            boolean secretKey = entry instanceof KeyStore.SecretKeyEntry;
             if (!trusted && !privateKey && !secretKey) {
                 throw new GeneralSecurityException("Unknown key material entry type: " + alias);
             }
-            String metadata = descriptorMetadata(alias);
+            String metadata = attribute(entry.getAttributes(), DESCRIPTOR_ATTRIBUTE_OID);
+            if (metadata == null) {
+                throw new GeneralSecurityException("Typed key material metadata is missing for alias: " + alias);
+            }
             String[] fields = metadata.split(";", -1);
             if (fields.length != 3) {
                 throw new GeneralSecurityException("Typed key material metadata has invalid format: " + alias);
@@ -318,9 +236,13 @@ final class KeyMaterialService implements AutoCloseable {
                 throw new GeneralSecurityException("Key material entry type does not match purpose: " + alias);
             }
             if (!purposes.containsAll(requested)) continue;
-            Certificate[] chain = secretKey ? new Certificate[0] : keyStore.getCertificateChain(materialAlias(alias));
-            if (trusted) {
-                chain = new Certificate[]{keyStore.getCertificate(materialAlias(alias))};
+            Certificate[] chain;
+            if (secretKey) {
+                chain = new Certificate[0];
+            } else if (trusted) {
+                chain = new Certificate[]{trustedCertificate(entry, alias)};
+            } else {
+                chain = ((KeyStore.PrivateKeyEntry) entry).getCertificateChain();
             }
             String publicKey = secretKey ? null : publicKeyPem(chain[0].getPublicKey());
             List<KeyMaterialInventoryEntry.CertificateDetails> certificates = new ArrayList<>();
@@ -483,108 +405,8 @@ final class KeyMaterialService implements AutoCloseable {
                 descriptor.purposes(), descriptor.algorithm(), descriptor.version());
     }
 
-    synchronized Addition readAddition(String alias) throws GeneralSecurityException {
-        requireOpen();
-        requireAlias(alias);
-        EntryVersion latest = findVersion(alias);
-        if (latest == null) return null;
-        return new Addition(latest.alias(), readEntry(keyStore, latest.physicalAlias()),
-                latest.version(), latest.deleted());
-    }
-
-    private void append(KeyStore target, Addition addition, long kmsVersion) throws GeneralSecurityException {
-        String alias = addition.alias().toLowerCase(Locale.ROOT);
-        String physical = target.containsAlias(alias)
-                ? "__orion_kms_" + HexFormat.of().formatHex(alias.getBytes(StandardCharsets.UTF_8))
-                        + "_v" + addition.version()
-                : alias;
-        if (target.containsAlias(physical)) {
-            throw new GeneralSecurityException("Key material version already exists: " + alias);
-        }
-        Set<KeyStore.Entry.Attribute> attributes = new HashSet<>();
-        for (KeyStore.Entry.Attribute existing : addition.entry().getAttributes()) {
-            if (!ADDITION_ATTRIBUTE_OID.equals(existing.getName())) attributes.add(existing);
-        }
-        String metadata = Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(alias.getBytes(StandardCharsets.UTF_8))
-                + ";" + addition.version() + ";" + kmsVersion + ";" + addition.deleted();
-        attributes.add(new PKCS12Attribute(ADDITION_ATTRIBUTE_OID, metadata));
-        KeyStore.Entry entry = switch (addition.entry()) {
-            case KeyStore.PrivateKeyEntry key -> new KeyStore.PrivateKeyEntry(
-                    key.getPrivateKey(), key.getCertificateChain(), attributes);
-            case KeyStore.SecretKeyEntry secret -> new KeyStore.SecretKeyEntry(secret.getSecretKey(), attributes);
-            case KeyStore.TrustedCertificateEntry trusted -> new KeyStore.TrustedCertificateEntry(
-                    trusted.getTrustedCertificate(), attributes);
-            default -> throw new GeneralSecurityException("Unknown key material entry type");
-        };
-        char[] password = codec.password();
-        try {
-            KeyStore.ProtectionParameter protection = entry instanceof KeyStore.TrustedCertificateEntry
-                    ? null : new KeyStore.PasswordProtection(password);
-            target.setEntry(physical, entry, protection);
-        } finally {
-            clear(password);
-        }
-    }
-
-    private List<String> physicalAliases() throws GeneralSecurityException {
-        return physicalAliases(keyStore);
-    }
-
-    private static List<String> physicalAliases(KeyStore source) throws GeneralSecurityException {
-        List<String> aliases = new ArrayList<>();
-        source.aliases().asIterator().forEachRemaining(aliases::add);
-        return aliases;
-    }
-
-    private List<String> availableAliases() throws GeneralSecurityException {
-        List<String> aliases = new ArrayList<>();
-        for (String physical : physicalAliases()) {
-            String alias = entryVersion(physical).alias();
-            if (!aliases.contains(alias) && !findVersion(alias).deleted()) aliases.add(alias);
-        }
-        aliases.sort(String::compareTo);
-        return aliases;
-    }
-
-    private String materialAlias(String alias) throws GeneralSecurityException {
-        EntryVersion latest = findVersion(alias);
-        if (latest == null || latest.deleted()) {
-            throw new GeneralSecurityException("Key material alias not found: " + alias);
-        }
-        return latest.physicalAlias();
-    }
-
-    private EntryVersion findVersion(String alias) throws GeneralSecurityException {
-        EntryVersion latest = null;
-        for (String physical : physicalAliases()) {
-            EntryVersion entry = entryVersion(physical);
-            if (entry.alias().equalsIgnoreCase(alias)
-                    && (latest == null || entry.version() > latest.version())) latest = entry;
-        }
-        return latest;
-    }
-
-    private EntryVersion entryVersion(String physical) throws GeneralSecurityException {
-        return entryVersion(keyStore, physical);
-    }
-
-    private static EntryVersion entryVersion(KeyStore source, String physical) throws GeneralSecurityException {
-        String metadata = attribute(source.getAttributes(physical), ADDITION_ATTRIBUTE_OID);
-        if (metadata == null) return new EntryVersion(physical, physical, 1, 0, false);
-        try {
-            String[] fields = metadata.split(";", -1);
-            if (fields.length != 4 || (!fields[3].equals("true") && !fields[3].equals("false"))) {
-                throw new IllegalArgumentException();
-            }
-            String alias = new String(Base64.getUrlDecoder().decode(fields[0]), StandardCharsets.UTF_8);
-            long entryVersion = Long.parseLong(fields[1]);
-            long kmsVersion = Long.parseLong(fields[2]);
-            if (alias.isBlank() || entryVersion < 1 || kmsVersion < 1) throw new IllegalArgumentException();
-            return new EntryVersion(physical, alias, entryVersion, kmsVersion, Boolean.parseBoolean(fields[3]));
-        } catch (IllegalArgumentException failure) {
-            throw new GeneralSecurityException("Invalid key material addition: " + physical, failure);
-        }
+    synchronized Entry readEntry(String alias) throws GeneralSecurityException {
+        return store.find(alias).orElse(null);
     }
 
     private static String attribute(Set<KeyStore.Entry.Attribute> attributes, String oid) {
@@ -609,231 +431,39 @@ final class KeyMaterialService implements AutoCloseable {
         requireMetadataField(alias, "version", Long.toString(version), fields[2]);
     }
 
-    private record EntryVersion(String physicalAlias, String alias, long version, long kmsVersion, boolean deleted) {}
-
     synchronized long revision() {
-        requireOpen();
-        return revision;
+        return store.revision();
     }
 
-    synchronized KeyMaterialModification modify() {
+    synchronized KeyMaterialModification modify(long expectedRevision) throws KeyMaterialStoreConflictException {
         requireOpen();
-        return new KeyMaterialModification(this, Math.incrementExact(revision));
-    }
-
-    void apply(List<Addition> additions, long nextVersion) throws IOException {
-        Set<String> resources = new HashSet<>();
-        synchronized (writes) {
-            byte[] serialized;
-            String expected;
-            KeyStore publication;
-            synchronized (this) {
-                requireOpen();
-                if (revision != nextVersion - 1) {
-                    throw new KeyMaterialStoreConflictException("Key material changed before apply");
-                }
-                if (additions.isEmpty()) return;
-                try {
-                    publication = copyForPublication();
-                    for (Addition addition : additions) append(publication, addition, nextVersion);
-                    serialized = codec.encode(publication);
-                    expected = version;
-                } catch (GeneralSecurityException failure) {
-                    close();
-                    throw new IOException("Cannot prepare key material", failure);
-                } catch (IOException | RuntimeException failure) {
-                    close();
-                    throw failure;
-                }
-            }
-            try {
-                String saved;
-                try {
-                    saved = store.write(serialized, expected);
-                } finally {
-                    Arrays.fill(serialized, (byte) 0);
-                }
-                synchronized (this) {
-                    requireOpen();
-                    if (revision < nextVersion) {
-                        for (Addition addition : additions) {
-                            append(keyStore, addition, nextVersion);
-                            resources.add(addition.alias());
-                        }
-                        version = saved;
-                        revision = nextVersion;
-                    } else {
-                        for (String physical : physicalAliases(publication)) {
-                            if (!keyStore.containsAlias(physical)
-                                    || !sameEntry(readEntry(keyStore, physical), readEntry(publication, physical))) {
-                                throw new GeneralSecurityException("Reloaded material does not contain saved history");
-                            }
-                        }
-                    }
-                }
-            } catch (GeneralSecurityException failure) {
-                close();
-                throw new IOException("Cannot save key material", failure);
-            } catch (IOException | RuntimeException failure) {
-                close();
-                throw failure;
-            }
+        if (store.revision() != expectedRevision) {
+            throw new KeyMaterialStoreConflictException("Key material changed before modify");
         }
-        if (!resources.isEmpty()) publishChanged(resources);
+        return new KeyMaterialModification(this, expectedRevision);
+    }
+
+    void apply(List<Entry> additions, long expectedRevision) throws IOException {
+        store.apply(expectedRevision, additions);
     }
 
     void prepareConfigurationCipher(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
-        synchronized (writes) {
-            if (containsAlias(descriptor.alias(), Set.of())) return;
-            try {
-                KeyMaterialModification modification = modify();
-                try {
-                    modification.generateKey(descriptor, 256);
-                    modification.apply();
-                } finally {
-                    modification.discard();
-                }
-            } catch (IOException | GeneralSecurityException | RuntimeException failure) {
-                close();
-                throw new GeneralSecurityException("Cannot persist configuration cipher", failure);
-            }
+        if (containsAlias(descriptor.alias(), Set.of())) return;
+        try {
+            store.addIfAbsent(descriptor.alias(), prepareKey(descriptor, 256));
+        } catch (IOException | GeneralSecurityException | RuntimeException failure) {
+            close();
+            throw new GeneralSecurityException("Cannot persist configuration cipher", failure);
         }
     }
 
     void reload(String requestedRevision) throws IOException, GeneralSecurityException {
-        Set<String> resources = reloadState(requestedRevision);
-        if (!resources.isEmpty()) publishChanged(resources);
-    }
-
-    private synchronized Set<String> reloadState(String requestedRevision)
-            throws IOException, GeneralSecurityException {
-        requireOpen();
-        Objects.requireNonNull(requestedRevision, "revision");
-        if (Objects.equals(version, requestedRevision)) return Set.of();
-        KeyStore incoming;
-        byte[] bytes = store.read(requestedRevision);
-        try {
-            incoming = codec.decode(bytes);
-        } finally {
-            Arrays.fill(bytes, (byte) 0);
-        }
-        for (String physical : physicalAliases()) {
-            if (!incoming.containsAlias(physical)
-                    || !sameEntry(readEntry(keyStore, physical), readEntry(incoming, physical))) {
-                throw new GeneralSecurityException("Key material history was replaced or removed: " + physical);
-            }
-        }
-        Map<String, KeyStore.Entry> additions = new LinkedHashMap<>();
-        Set<String> resources = new HashSet<>();
-        Set<String> entryVersions = new HashSet<>();
-        long nextRevision = revision;
-        for (String physical : physicalAliases(incoming)) {
-            EntryVersion entry = entryVersion(incoming, physical);
-            if (!entryVersions.add(entry.alias() + ":" + entry.version())) {
-                throw new GeneralSecurityException("Duplicate key material version: " + entry.alias());
-            }
-            if (keyStore.containsAlias(physical)) continue;
-            EntryVersion previous = findVersion(entry.alias());
-            if (entry.kmsVersion() <= revision
-                    || (previous != null && entry.version() <= previous.version())) {
-                throw new GeneralSecurityException("Key material revision does not extend active history");
-            }
-            additions.put(physical, readEntry(incoming, physical));
-            resources.add(entry.alias());
-            nextRevision = Math.max(nextRevision, entry.kmsVersion());
-        }
-        char[] password = codec.password();
-        try {
-            for (Map.Entry<String, KeyStore.Entry> addition : additions.entrySet()) {
-                KeyStore.ProtectionParameter protection = addition.getValue() instanceof KeyStore.TrustedCertificateEntry
-                        ? null : new KeyStore.PasswordProtection(password);
-                keyStore.setEntry(addition.getKey(), addition.getValue(), protection);
-            }
-        } catch (GeneralSecurityException failure) {
-            close();
-            throw failure;
-        } finally {
-            clear(password);
-        }
-        version = requestedRevision;
-        revision = nextRevision;
-        return Set.copyOf(resources);
-    }
-
-    private KeyStore.Entry readEntry(KeyStore source, String physical) throws GeneralSecurityException {
-        char[] password = codec.password();
-        try {
-            boolean trusted = source.entryInstanceOf(physical, KeyStore.TrustedCertificateEntry.class);
-            KeyStore.ProtectionParameter protection = trusted ? null : new KeyStore.PasswordProtection(password);
-            return source.getEntry(physical, protection);
-        } finally {
-            clear(password);
-        }
-    }
-
-    private static boolean sameEntry(KeyStore.Entry first, KeyStore.Entry second) {
-        if (!stableAttributes(first).equals(stableAttributes(second))) return false;
-        return switch (first) {
-            case KeyStore.PrivateKeyEntry key -> second instanceof KeyStore.PrivateKeyEntry other
-                    && sameKey(key.getPrivateKey(), other.getPrivateKey())
-                    && Arrays.equals(key.getCertificateChain(), other.getCertificateChain());
-            case KeyStore.SecretKeyEntry key -> second instanceof KeyStore.SecretKeyEntry other
-                    && sameKey(key.getSecretKey(), other.getSecretKey());
-            case KeyStore.TrustedCertificateEntry trusted -> second instanceof KeyStore.TrustedCertificateEntry other
-                    && trusted.getTrustedCertificate().equals(other.getTrustedCertificate());
-            default -> false;
-        };
-    }
-
-    private static Set<KeyStore.Entry.Attribute> stableAttributes(KeyStore.Entry entry) {
-        Set<KeyStore.Entry.Attribute> attributes = new HashSet<>();
-        for (KeyStore.Entry.Attribute attribute : entry.getAttributes()) {
-            if (!LOCAL_KEY_ID_ATTRIBUTE_OID.equals(attribute.getName())) attributes.add(attribute);
-        }
-        return attributes;
-    }
-
-    private static boolean sameKey(Key first, Key second) {
-        byte[] firstEncoded = first.getEncoded();
-        byte[] secondEncoded = second.getEncoded();
-        try {
-            return firstEncoded != null && secondEncoded != null
-                    && MessageDigest.isEqual(firstEncoded, secondEncoded);
-        } finally {
-            if (firstEncoded != null) Arrays.fill(firstEncoded, (byte) 0);
-            if (secondEncoded != null) Arrays.fill(secondEncoded, (byte) 0);
-        }
-    }
-
-    private void publishChanged(Set<String> resources) {
-        try {
-            events.publishIfRunning(new KeyMaterialChanged(Set.copyOf(resources)));
-        } catch (RuntimeException failure) {
-            System.getLogger(KeyMaterialService.class.getName()).log(System.Logger.Level.WARNING,
-                    "Could not publish key material change event", failure);
-        }
-    }
-
-    private KeyStore copyForPublication() throws IOException, GeneralSecurityException {
-        byte[] serialized = codec.encode(keyStore);
-        try {
-            return codec.decode(serialized);
-        } finally {
-            Arrays.fill(serialized, (byte) 0);
-        }
+        store.reload(requestedRevision);
     }
 
     @Override
     public synchronized void close() {
-        if (keyStore == null) {
-            return;
-        }
-        keyStore = null;
-        try {
-            codec.close();
-        } finally {
-            store.close();
-        }
+        store.close();
     }
 
     private static void requireAlias(String alias) {
@@ -843,29 +473,11 @@ final class KeyMaterialService implements AutoCloseable {
     }
 
     synchronized SecretKey secretKey(String alias) throws GeneralSecurityException {
-        requireOpen();
-        requireAlias(alias);
-        char[] password = codec.password();
-        try {
-            if (!(keyStore.getKey(materialAlias(alias), password) instanceof SecretKey secretKey)) {
-                throw new GeneralSecurityException("Secret key alias not found: " + alias);
-            }
-            return secretKey;
-        } finally {
-            clear(password);
+        KeyStore.Entry entry = requireEntry(alias);
+        if (!(entry instanceof KeyStore.SecretKeyEntry secret)) {
+            throw new GeneralSecurityException("Secret key alias not found: " + alias);
         }
-    }
-
-    private String descriptorMetadata(String alias) throws GeneralSecurityException {
-        String metadata = descriptorMetadataIfPresent(alias);
-        if (metadata != null) {
-            return metadata;
-        }
-        throw new GeneralSecurityException("Typed key material metadata is missing for alias: " + alias);
-    }
-
-    private String descriptorMetadataIfPresent(String alias) throws GeneralSecurityException {
-        return attribute(keyStore.getAttributes(materialAlias(alias)), DESCRIPTOR_ATTRIBUTE_OID);
+        return secret.getSecretKey();
     }
 
     private static Set<KeyStore.Entry.Attribute> descriptorAttributes(KeyMaterialDescriptor descriptor) {
@@ -948,14 +560,14 @@ final class KeyMaterialService implements AutoCloseable {
         return expected.equals(actual);
     }
 
-    private static void clear(char[] value) {
-        Arrays.fill(value, '\0');
-    }
-
     synchronized void requireOpen() {
-        if (keyStore == null) {
-            throw new IllegalStateException("Key material service is closed");
-        }
+        store.requireOpen();
     }
 
+    private KeyStore.Entry requireEntry(String alias) throws GeneralSecurityException {
+        Entry entry = store.find(alias).orElseThrow(
+                () -> new GeneralSecurityException("Key material alias not found: " + alias));
+        if (entry.deleted()) throw new GeneralSecurityException("Key material alias not found: " + alias);
+        return entry.entry();
+    }
 }

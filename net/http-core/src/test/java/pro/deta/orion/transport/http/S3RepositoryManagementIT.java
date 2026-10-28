@@ -1,6 +1,5 @@
 package pro.deta.orion.transport.http;
 
-
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import pro.deta.orion.auth.*;
@@ -32,9 +31,10 @@ class S3RepositoryManagementIT {
     @Test
     void encryptedManagementPersistsActivatesCreatesAndReopensMetadataInMinio() throws Exception {
         try (MinioS3TestServer server = MinioS3TestServer.start("orion-management-" + UUID.randomUUID());
-             OrionKeyMaterial material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
-                     KeyMaterialOptions.pkcs12("test-password".toCharArray()),
-                     testRuntime.unstartedEvents());
+             OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+                     new InMemoryKeyMaterialContentSource(),
+                     new KeyMaterialCodec(KeyMaterialOptions.pkcs12("test-password".toCharArray())),
+                     testRuntime.unstartedEvents()));
              S3Transport transport = new S3Transport();
              NativeGitRepositoryProvider local = NativeGitRepositoryProvider.inMemory(testRuntime.events())) {
             ConfiguredNativeGitRepositoryFactory configuredFactory =

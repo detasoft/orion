@@ -62,7 +62,7 @@ public final class OrionAdminKeyMaterialRoute extends BaseAdminRoute {
             KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(alias,
                     Set.of(input.purpose()), KeyMaterialAlgorithm.RSA, 1);
             char[] privateKeyPem = input.privateKeyPem();
-            material.withModification(modification -> {
+            material.withModification(material.revision(), modification -> {
                 if (material.contains(alias, Set.of())) {
                     throw new IllegalArgumentException("Key material name already exists");
                 }

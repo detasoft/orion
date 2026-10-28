@@ -1,7 +1,5 @@
 package pro.deta.orion.keymaterial;
 
-import pro.deta.orion.event.OrionEventManager;
-
 import java.util.Set;
 
 import com.google.gson.stream.JsonReader;
@@ -63,12 +61,8 @@ public class OrionKeyMaterial implements AutoCloseable {
         this.owner = owner;
     }
 
-    public static OrionKeyMaterial open(
-            KeyMaterialContentStore store,
-            KeyMaterialOptions options,
-            OrionEventManager events) throws IOException, GeneralSecurityException {
-        return new OrionKeyMaterial(KeyMaterialService.open(
-                store, options, events));
+    public static OrionKeyMaterial open(KeyMaterialContentStore store) {
+        return new OrionKeyMaterial(KeyMaterialService.open(store));
     }
 
     protected OrionKeyMaterial() {
@@ -89,20 +83,20 @@ public class OrionKeyMaterial implements AutoCloseable {
         owner.reload(revision);
     }
 
-    public long version() {
+    public long revision() {
         requireAvailable();
         return owner.revision();
     }
 
-    public KeyMaterialModification modify() {
+    public KeyMaterialModification modify(long expectedRevision) throws KeyMaterialStoreConflictException {
         requireAvailable();
-        return owner.modify();
+        return owner.modify(expectedRevision);
     }
 
-    public void withModification(KeyMaterialModification.Operation operation)
+    public void withModification(long expectedRevision, KeyMaterialModification.Operation operation)
             throws IOException, GeneralSecurityException {
         Objects.requireNonNull(operation, "operation");
-        KeyMaterialModification modification = modify();
+        KeyMaterialModification modification = modify(expectedRevision);
         try {
             operation.accept(modification);
         } finally {

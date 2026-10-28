@@ -1,5 +1,9 @@
 package pro.deta.orion.component;
 
+import pro.deta.orion.keymaterial.KeyMaterialCodec;
+
+import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+
 import java.util.Set;
 
 import pro.deta.orion.config.OrionConfigurationEditor;
@@ -14,7 +18,7 @@ import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.decision.DecisionRequest;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
@@ -219,9 +223,11 @@ class BootstrapConnectionDecisionTest {
             KeyMaterialDescriptor signing = new KeyMaterialDescriptor("signing",
                     Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
             try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
-                material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
-                        testRuntime.unstartedEvents());
-                material.withModification(modification -> {
+                material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+                        new InMemoryKeyMaterialContentSource(),
+                        new KeyMaterialCodec(options),
+                        testRuntime.unstartedEvents()));
+                material.withModification(material.revision(), modification -> {
                     modification.generateKey(signing, 2048);
                     modification.apply();
                 });

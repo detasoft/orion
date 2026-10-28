@@ -1,5 +1,9 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.keymaterial.KeyMaterialCodec;
+
+import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+
 import pro.deta.orion.event.OrionEventManager;
 
 import pro.deta.orion.acme.AcmeCertificateService;
@@ -12,7 +16,7 @@ import pro.deta.orion.test.certificates.TestCertificateChain;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.HttpTransportConfig;
@@ -220,9 +224,10 @@ public class ACMECertificateChallengeTest {
     }
 
     private static OrionKeyMaterial keyMaterial() throws Exception {
-        return OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(),
-                KeyMaterialOptions.pkcs12("test-password".toCharArray()),
-                new OrionEventManager());
+        return OrionKeyMaterial.open(new KeyMaterialContentStore(
+                new InMemoryKeyMaterialContentSource(),
+                new KeyMaterialCodec(KeyMaterialOptions.pkcs12("test-password".toCharArray())),
+                new OrionEventManager()));
     }
 
     private static final class WaitingChallengeIssuer extends AcmeCertificateIssuer {

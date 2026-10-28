@@ -5,11 +5,11 @@ import java.util.Arrays;
 import java.util.Objects;
 import java.util.Optional;
 
-public class ReadOnlyKeyMaterialContentStore implements KeyMaterialContentStore {
+public class ReadOnlyKeyMaterialContentSource implements KeyMaterialContentSource {
     private final byte[] bytes;
     private final String sourceName;
 
-    public ReadOnlyKeyMaterialContentStore(byte[] bytes, String sourceName) {
+    public ReadOnlyKeyMaterialContentSource(byte[] bytes, String sourceName) {
         if (bytes == null) {
             throw new IllegalArgumentException("Key material bytes must not be null");
         }

@@ -9,10 +9,10 @@ import java.util.Arrays;
 import java.util.Objects;
 
 /** Converts key stores to and from bytes while owning the format options and clearing temporary buffers. */
-final class KeyMaterialCodec implements AutoCloseable {
+public final class KeyMaterialCodec implements AutoCloseable {
     private final KeyMaterialOptions options;
 
-    KeyMaterialCodec(KeyMaterialOptions options) {
+    public KeyMaterialCodec(KeyMaterialOptions options) {
         this.options = Objects.requireNonNull(options, "options").copy();
     }
 

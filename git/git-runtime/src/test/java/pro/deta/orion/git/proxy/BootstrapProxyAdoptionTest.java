@@ -1,12 +1,16 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.keymaterial.KeyMaterialCodec;
+
+import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+
 import java.util.Set;
 
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
@@ -161,10 +165,12 @@ class BootstrapProxyAdoptionTest {
         var signing = new KeyMaterialDescriptor("signing", Set.of(KeyMaterialPurpose.SERVER_SIGNING),
                 KeyMaterialAlgorithm.RSA, 1);
         try (var options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
-            OrionKeyMaterial material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
-                    testRuntime.unstartedEvents());
+            OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+                    new InMemoryKeyMaterialContentSource(),
+                    new KeyMaterialCodec(options),
+                    testRuntime.unstartedEvents()));
             try {
-                material.withModification(modification -> {
+                material.withModification(material.revision(), modification -> {
                     modification.generateKey(signing, 2048);
                     modification.apply();
                 });

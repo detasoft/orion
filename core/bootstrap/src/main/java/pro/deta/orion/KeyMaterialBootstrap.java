@@ -1,5 +1,9 @@
 package pro.deta.orion;
 
+import pro.deta.orion.keymaterial.KeyMaterialCodec;
+
+import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.KeyMaterialConfig;
 import pro.deta.orion.bootstrap.config.ServerSigningConfig;
@@ -8,7 +12,7 @@ import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
-import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialContentSource;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
@@ -50,12 +54,15 @@ public final class KeyMaterialBootstrap {
         try (KeyMaterialOptions options = resolver.pkcs12Options(password)) {
             boolean gitSource = repositories.resolveProvisional(
                     NativeGitRepositoryFactory.MATERIAL_SOURCE, material, creation.allowed()).isPresent();
-            KeyMaterialContentStore store = gitSource
-                    ? new NativeGitKeyMaterialContentStore(
+            KeyMaterialContentSource store = gitSource
+                    ? new NativeGitKeyMaterialContentSource(
                             repositories.fileEvents(NativeGitRepositoryFactory.MATERIAL_SOURCE, material))
-                    : resolver.resolveStore(resolveAgainstBaseDirectory(
+                    : resolver.resolveSource(resolveAgainstBaseDirectory(
                             material.getLocation(), baseDirectory, "location"));
-            OrionKeyMaterial keys = OrionKeyMaterial.open(store, options, events);
+            OrionKeyMaterial keys = OrionKeyMaterial.open(new KeyMaterialContentStore(
+                    store,
+                    new KeyMaterialCodec(options),
+                    events));
             try {
                 if (!keys.hasDurableSnapshot()) {
                     if (!creation.allowed()) {
@@ -66,7 +73,7 @@ public final class KeyMaterialBootstrap {
                         throw new GeneralSecurityException(
                                 "A new material store cannot contain retained server identities");
                     }
-                    keys.withModification(modification -> {
+                    keys.withModification(keys.revision(), modification -> {
                         modification.generateKey(
                                 signingMaterial.active(), KeyMaterialConstants.RSA_KEY_SIZE_BITS);
                         modification.apply();

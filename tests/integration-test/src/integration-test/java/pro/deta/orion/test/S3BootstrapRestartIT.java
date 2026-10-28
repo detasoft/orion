@@ -18,7 +18,7 @@ import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.s3.S3NativeGitRepositoryFactory;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
@@ -69,7 +69,7 @@ class S3BootstrapRestartIT {
                     PASSWORD_ENV, "bootstrap-test-password", "S3_BOOTSTRAP_SECRET", s3.secretAccessKey());
             BootstrapConfiguration configuration = configuration(s3, tempDir);
             configuration.getBootstrap().getConfiguration().setCreateDefaultIfMissing(false);
-            InMemoryKeyMaterialContentStore materialStore = new InMemoryKeyMaterialContentStore();
+            InMemoryKeyMaterialContentSource materialStore = new InMemoryKeyMaterialContentSource();
             materialStore.write(materialBytes(configuration, environment), null);
             byte[] payload = "preseeded S3 server identity".getBytes(StandardCharsets.UTF_8);
             byte[] signature;
