@@ -169,6 +169,9 @@
                         <manifest>
                             <mainClass>pro.deta.orion.agentd.AgentdMain</mainClass>
                         </manifest>
+                        <manifestEntries>
+                            <Enable-Native-Access>ALL-UNNAMED</Enable-Native-Access>
+                        </manifestEntries>
                     </archive>
                 </configuration>
             </plugin>

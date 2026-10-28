@@ -288,7 +288,7 @@
           <artifactId>maven-surefire-plugin</artifactId>
           <version>3.3.0</version>
           <configuration>
-            <argLine>${argLine} ${orion.test.jvm.args}</argLine>
+            <argLine>${argLine} ${orion.test.jvm.args} --enable-native-access=ALL-UNNAMED</argLine>
             <systemPropertyVariables>
               <orion.testDurations.enabled>${orion.testDurations.enabled}</orion.testDurations.enabled>
               <orion.testDurations.output>${orion.testDurations.output}</orion.testDurations.output>
@@ -308,7 +308,7 @@
           <artifactId>maven-failsafe-plugin</artifactId>
           <version>3.3.0</version>
           <configuration>
-            <argLine>${argLine} ${orion.test.jvm.args}</argLine>
+            <argLine>${argLine} ${orion.test.jvm.args} --enable-native-access=ALL-UNNAMED</argLine>
             <systemPropertyVariables>
               <orion.testDurations.enabled>${orion.testDurations.enabled}</orion.testDurations.enabled>
               <orion.testDurations.output>${orion.testDurations.output}</orion.testDurations.output>

@@ -84,6 +84,7 @@
                         <configuration>
                             <argLine>
                                 ${argLine} ${orion.test.jvm.args}
+                                --enable-native-access=ALL-UNNAMED
                                 -Djdk.net.hosts.file=${externalFixtureRoot}/hosts
                             </argLine>
                             <systemPropertyVariables>
