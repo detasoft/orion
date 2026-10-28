@@ -1818,7 +1818,8 @@ fn terminate_bypasses_a_full_queue_with_blocked_pty_input() {
         &[1_u8, 0, 0, 0],
     );
 
-    let status = host.wait_with_timeout(Duration::from_secs(2));
+    wait_for_command_result(host.directory(), 65);
+    let status = host.wait_with_timeout(TIMEOUT);
     assert!(status.success(), "session-host exited with {status}");
     input_thread.join().unwrap();
     drop(terminate_stream);
@@ -2122,6 +2123,37 @@ fn rejects_a_second_host_without_unlinking_the_live_endpoint() {
     assert!(host.wait().success());
 }
 
+#[test]
+fn host_guard_cleans_up_after_normal_drop_and_rejection_during_unwind() {
+    for unwind in [false, true] {
+        let directory = temporary_directory("host-guard-cleanup");
+        let host = HostGuard::spawn(
+            directory.clone(),
+            &["/bin/sh", "-c", "printf READY; kill -STOP $$"],
+            "xterm-256color",
+            80,
+            24,
+        );
+        wait_for_output(host.directory(), b"READY");
+        let host_pid = host.child.as_ref().unwrap().id() as i32;
+        let child_pid = journal::read_metadata(host.directory()).unwrap().child_pid.unwrap() as i32;
+        if unwind {
+            let mut stream = connect(host.directory());
+            send_operation(&mut stream, control_message::RESIZE, u64::MAX - 1,
+                b"cleanup-sequence-already-used", &[80, 0, 0, 0, 24, 0, 0, 0]);
+            wait_for_command_result(host.directory(), u64::MAX - 1);
+        }
+        let result = std::panic::catch_unwind(move || {
+            let _host = host;
+            assert!(!unwind, "intentional panic to exercise HostGuard cleanup");
+        });
+        assert_eq!(result.is_err(), unwind);
+        wait_for_process_exit(host_pid);
+        wait_for_process_exit(child_pid);
+        assert!(!directory.exists());
+    }
+}
+
 struct HostGuard {
     child: Option<Child>,
     directory: DirectoryGuard,
@@ -2219,14 +2251,28 @@ impl Drop for HostGuard {
             return;
         }
         if let Ok(mut stream) = UnixStream::connect(self.directory.path().join("control.sock")) {
-            let terminate = [1_u8, 0, 0, 0];
-            send_operation(
-                &mut stream,
-                control_message::TERMINATE,
-                u64::MAX - 1,
-                b"server-envelope-test-cleanup",
-                &terminate,
-            );
+            // Cleanup must tolerate rejected commands and transport failures while unwinding.
+            let _ = (|| -> Result<(), Box<dyn std::error::Error>> {
+                let timeout = Some(Duration::from_millis(250));
+                stream.set_read_timeout(timeout)?;
+                stream.set_write_timeout(timeout)?;
+                let payload = protocol::encode_operation_control_payload(
+                    control_message::TERMINATE,
+                    protocol::OperationSource::Server,
+                    Some(b"server-envelope-test-cleanup"),
+                    &[1_u8, 0, 0, 0],
+                )?;
+                let bytes = protocol::encode_control_frame(ControlFrame {
+                    message_type: control_message::TERMINATE,
+                    payload_schema_version: 3,
+                    flags: 0,
+                    sequence: u64::MAX - 1,
+                    payload: &payload,
+                })?;
+                stream.write_all(&bytes)?;
+                let _ = host::read_control_frame(&mut stream)?;
+                Ok(())
+            })();
             thread::sleep(Duration::from_millis(50));
         }
         if child.try_wait().ok().flatten().is_none() {
