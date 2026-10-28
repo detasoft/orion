@@ -134,9 +134,18 @@ class GitHttpRequestBodyTest {
     }
 
     @Test
-    void preservesSourceAvailabilityFailureAfterMember() throws Exception {
-        IOException failure = new IOException("availability failed");
+    void preservesSourceFailureAfterMember() throws Exception {
+        IOException failure = new IOException("source failed after member");
         InputStream source = new java.io.FilterInputStream(new ByteArrayInputStream(gzip(REQUEST))) {
+            @Override
+            public int read() throws IOException {
+                int value = super.read();
+                if (value == -1) {
+                    throw failure;
+                }
+                return value;
+            }
+
             @Override
             public int available() throws IOException {
                 throw failure;
