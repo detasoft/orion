@@ -463,7 +463,7 @@ class SegmentCompressionTest {
     void finalContentVerificationDoesNotHoldTheSessionLock() throws Exception {
         BlockingFinalVerificationOperations operations =
                 new BlockingFinalVerificationOperations();
-        SessionEventRecord first = randomEvent(1, 128_000);
+        SessionEventRecord first = randomEvent(1, 4_096);
         SessionEventRecord second = event(2);
         SessionEventRecord third = event(3);
 
@@ -917,7 +917,7 @@ class SegmentCompressionTest {
     void sourceDeletionWaitsForAReadSnapshotThatReferencesIt() throws Exception {
         CapturingExecutor maintenanceExecutor = new CapturingExecutor();
         BlockingReadOperations operations = new BlockingReadOperations();
-        SessionEventRecord first = randomEvent(1, 100_000);
+        SessionEventRecord first = randomEvent(1, 4_096);
         SessionEventRecord second = event(2);
         JournalStorageConfig config = segmentConfig(first.encodedRecord().size());
 
@@ -944,7 +944,7 @@ class SegmentCompressionTest {
     void aNewCompressedSnapshotDoesNotKeepAnOldSourceLeaseAlive() throws Exception {
         CapturingExecutor maintenanceExecutor = new CapturingExecutor();
         OverlappingReadOperations operations = new OverlappingReadOperations();
-        SessionEventRecord first = randomEvent(1, 100_000);
+        SessionEventRecord first = randomEvent(1, 4_096);
         SessionEventRecord second = event(2);
         JournalStorageConfig config = segmentConfig(first.encodedRecord().size());
 
