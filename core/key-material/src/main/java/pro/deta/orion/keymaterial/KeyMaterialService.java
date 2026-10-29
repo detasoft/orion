@@ -160,39 +160,11 @@ final class KeyMaterialService implements AutoCloseable {
 
     public List<KeyMaterialDescriptor> privateKeyDescriptors(
             Set<KeyMaterialPurpose> requiredPurposes) throws GeneralSecurityException {
-        requireOpen();
-        Set<KeyMaterialPurpose> requested = Set.copyOf(requiredPurposes);
         List<KeyMaterialDescriptor> descriptors = new ArrayList<>();
-        for (Entry stored : store.entries()) {
-            if (stored.deleted()) continue;
-            String alias = stored.alias();
-            KeyStore.Entry entry = stored.entry();
-            if (!(entry instanceof KeyStore.PrivateKeyEntry)) {
-                continue;
-            }
-            String metadata = attribute(entry.getAttributes(), DESCRIPTOR_ATTRIBUTE_OID);
-            if (metadata == null) {
-                continue;
-            }
-            String[] fields = metadata.split(";", -1);
-            if (fields.length != 3) {
-                throw new GeneralSecurityException("Typed key material metadata has invalid format: " + alias);
-            }
-            KeyMaterialDescriptor descriptor;
-            try {
-                Set<KeyMaterialPurpose> purposes = parsePurposes(fields[0]);
-                if (!purposes.containsAll(requested)) continue;
-                descriptor = new KeyMaterialDescriptor(
-                        alias,
-                        purposes,
-                        KeyMaterialAlgorithm.valueOf(fields[1]),
-                        Long.parseLong(fields[2]));
-            } catch (IllegalArgumentException failure) {
-                throw new GeneralSecurityException(
-                        "Typed key material metadata has invalid format: " + alias,
-                        failure);
-            }
-            validatePrepared(entry, descriptor);
+        for (KeyMaterialInventoryEntry entry : inventory(requiredPurposes)) {
+            KeyMaterialDescriptor descriptor = entry.descriptor();
+            if (descriptor.purposes().contains(KeyMaterialPurpose.TRUST_ANCHOR)
+                    || descriptor.purposes().contains(KeyMaterialPurpose.CONFIGURATION_CIPHER)) continue;
             descriptors.add(descriptor);
         }
         return List.copyOf(descriptors);
@@ -236,6 +208,7 @@ final class KeyMaterialService implements AutoCloseable {
                 throw new GeneralSecurityException("Key material entry type does not match purpose: " + alias);
             }
             if (!purposes.containsAll(requested)) continue;
+            validatePrepared(entry, descriptor);
             Certificate[] chain;
             if (secretKey) {
                 chain = new Certificate[0];

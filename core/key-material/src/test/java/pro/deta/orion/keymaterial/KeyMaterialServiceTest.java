@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.KeyStore;
+import java.security.PKCS12Attribute;
 import java.security.GeneralSecurityException;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
@@ -321,6 +322,31 @@ class KeyMaterialServiceTest {
             assertThat(entries.get(2).certificates().getFirst().subject()).contains("orion.test");
             assertThat(entries.get(2).certificates().getFirst().dnsNames()).isEmpty();
             assertThat(entries.toString()).doesNotContain("PRIVATE KEY", "SECRET KEY");
+            assertThat(service.privateKeyDescriptors(Set.of())).containsExactly(identity);
+            assertThat(service.privateKeyDescriptors(Set.of(KeyMaterialPurpose.TLS_IDENTITY)))
+                    .containsExactly(identity);
+            assertThat(service.privateKeyDescriptors(Set.of(KeyMaterialPurpose.TRUST_ANCHOR))).isEmpty();
+            assertThat(service.privateKeyDescriptors(Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER))).isEmpty();
+        }
+    }
+
+    @Test
+    void inventoryAndPrivateKeyDiscoveryRejectAnAlgorithmThatDoesNotMatchTheKey() throws Exception {
+        TestCertificateChain.Authority issuer = TestCertificateChain.root("Mismatched metadata");
+        KeyStore.PrivateKeyEntry entry = new KeyStore.PrivateKeyEntry(
+                issuer.keyPair().getPrivate(), new Certificate[]{issuer.certificate()},
+                Set.of(new PKCS12Attribute("2.25.260349814076539099691640886169327825428", "SSH_HOST;EC;1")));
+        KeyMaterialContentStore store = new KeyMaterialContentStore(
+                new InMemoryKeyMaterialContentSource(), new KeyMaterialCodec(options()), new OrionEventManager());
+        try (KeyMaterialService service = KeyMaterialService.open(store)) {
+            store.apply(0, List.of(new KeyMaterialContentStore.Entry("mismatched", entry, 1, false)));
+
+            assertThatThrownBy(() -> service.inventory(Set.of(KeyMaterialPurpose.SSH_HOST)))
+                    .isInstanceOf(GeneralSecurityException.class)
+                    .hasMessageContaining("algorithm does not match");
+            assertThatThrownBy(() -> service.privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST)))
+                    .isInstanceOf(GeneralSecurityException.class)
+                    .hasMessageContaining("algorithm does not match");
         }
     }
 
