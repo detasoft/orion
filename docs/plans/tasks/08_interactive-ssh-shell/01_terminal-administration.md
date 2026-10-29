@@ -3,7 +3,8 @@
 Status: active
 
 - [ ] Fix terminal interaction and expose organization, Git proxy, and material administration.
-  - Owner: codex, session terminal-admin-20260908-1639, started 2026-09-08 18:39 Europe/Amsterdam.
+  - Owner: codex, session terminal-admin-20260908-1639, branch `codex/terminal-administration`,
+    worktree `.worktrees/terminal-administration`, started 2026-09-08 18:39 Europe/Amsterdam.
 
 ## Scope
 
@@ -76,6 +77,14 @@ the same material owner through narrow purpose-specific capabilities.
 - Connect proxy list/show to configured transparent proxies; provide create, update and delete with
   stable scoped aliases, sanitized upstream, ref/transport and credential references. Support system
   and organization scope using existing scope rules; preserve inherited credential restrictions.
+- Expose the stable internal references `git+proxy:system/<id>` and
+  `git+proxy:org/<organization-id>/<id>` in proxy metadata. Resolve these references through the
+  existing native repository provider's read and write operations, including upstream refresh and
+  compare-and-set publication. Keep physical repository names private to the provider; resolve only
+  configured active aliases, so deleted or missing references cannot read an old cache. Preserve the
+  existing contract that proxy references and physical proxy repositories are inaccessible through
+  public HTTP/SSH Git routes and excluded from ordinary repository enumeration. This requires no
+  additional proxy registry or resource-resolution service.
 - Changes survive reload/restart and are applied through the existing native proxy runtime. A command
   must not report active success for a merely in-memory or unusable placeholder. Keep bootstrap
   configuration/material proxies usable when activating or updating the persistent catalog; reject
@@ -116,8 +125,9 @@ Implement production continuation logic before its tests where applicable. Exten
 every slice: straightforward success plus cancellation/races, invalid or missing state, forbidden access,
 update/delete, reload, stale revision, failed persistence and confidentiality. Include a real SSH flow
 for hidden import and a native proxy flow proving imported credentials and persisted aliases are usable.
+Use the internal reference returned by proxy metadata for native reads and writes instead of deriving
+physical repository names in the test. Change upstream content before restarting Orion and verify the
+new content through the restored alias, so an old local cache cannot hide a missing runtime binding.
 
-Use `make test MODULE=<module> TEST='<locator>'` for focused Maven checks, outside the sandbox.
-The implementation worker owns development verification (`mvn verify -Pdev -T 4`) and `make test` after
-code commits. Keep logs and exact verification outcomes. Update the module review to distinguish fixed
-findings from still-pending streaming/session attachment work; document actual terminal syntax.
+Update the module review to distinguish fixed findings from still-pending streaming/session attachment
+work; document actual terminal syntax.
