@@ -94,7 +94,7 @@ class KeyMaterialServiceTest {
                     assertThat(service.hasDurableSnapshot()).isTrue();
                     assertThat(service.containsAlias(signing.alias(), signing.purposes())).isTrue();
                     assertThat(service.getKeyPair(signing.alias()).getPublic()).isEqualTo(pair.getPublic());
-                    assertThat(service.getPrivateKey(signing.alias()).getEncoded())
+                    assertThat(service.getKeyPair(signing.alias()).getPrivate().getEncoded())
                             .isEqualTo(pair.getPrivate().getEncoded());
                     assertThat(service.getCertificateChain(signing.alias())).hasSize(1);
                     assertThat(service.getTrustedCertificate(trust)).isEqualTo(root);
@@ -204,7 +204,8 @@ class KeyMaterialServiceTest {
         X509Certificate trustedCertificate = reloaded.getTrustedCertificate(descriptor);
 
         assertThat(trustedCertificate.getEncoded()).isEqualTo(issuerCertificate.getEncoded());
-        assertThatThrownBy(() -> reloaded.getPrivateKey(KeyMaterialTestConstants.ORION_CA_CERT_2026_05_ALIAS))
+        assertThatThrownBy(() -> reloaded.getKeyPair(
+                KeyMaterialTestConstants.ORION_CA_CERT_2026_05_ALIAS).getPrivate())
                 .isInstanceOf(Exception.class)
                 .hasMessageContaining("Private key alias not found");
     }

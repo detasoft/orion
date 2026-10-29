@@ -12,7 +12,6 @@ import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.KeyStore;
 import java.security.PKCS12Attribute;
-import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.MessageDigest;
 import java.security.cert.Certificate;
@@ -92,14 +91,6 @@ final class KeyMaterialService implements AutoCloseable {
             throw new GeneralSecurityException("Private key alias has no certificate chain: " + alias);
         }
         return new KeyPair(chain[0].getPublicKey(), key.getPrivateKey());
-    }
-
-    public PrivateKey getPrivateKey(String alias) throws GeneralSecurityException {
-        KeyStore.Entry entry = requireEntry(alias);
-        if (!(entry instanceof KeyStore.PrivateKeyEntry key)) {
-            throw new GeneralSecurityException("Private key alias not found: " + alias);
-        }
-        return key.getPrivateKey();
     }
 
     public Certificate[] getCertificateChain(String alias) throws GeneralSecurityException {
