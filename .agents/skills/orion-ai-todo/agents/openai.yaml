@@ -1,4 +1,0 @@
-interface:
-  display_name: "Orion AI TODO"
-  short_description: "Assess and resolve AI_TODO comments with review"
-  default_prompt: "Use $orion-ai-todo to find AI_TODO comments, assess their justification, and resolve them one checkpoint at a time through Simple workflow with user review."
