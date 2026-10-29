@@ -239,6 +239,14 @@
             <build>
                 <plugins>
                     <plugin>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <configuration>
+                            <systemPropertyVariables>
+                                <orion.distribution.archive>${project.build.directory}/orion-dist.tar.gz</orion.distribution.archive>
+                            </systemPropertyVariables>
+                        </configuration>
+                    </plugin>
+                    <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-antrun-plugin</artifactId>
                         <executions>
@@ -277,7 +285,13 @@
                                              compression="gzip"
                                              longfile="gnu">
                                             <tarfileset dir="${project.build.directory}/orion-dist"
-                                                        prefix="orion"/>
+                                                        prefix="orion" filemode="755">
+                                                <executable/>
+                                            </tarfileset>
+                                            <tarfileset dir="${project.build.directory}/orion-dist"
+                                                        prefix="orion" filemode="644">
+                                                <not><executable/></not>
+                                            </tarfileset>
                                         </tar>
                                     </target>
                                 </configuration>
