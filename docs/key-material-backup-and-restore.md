@@ -5,6 +5,48 @@ active and retained key aliases, and the `orion.xml` source. These inputs must b
 restored as a matching generation. The material store contains previous keys even
 after their aliases are retired from active use; rotation does not delete them.
 
+## Entry versions and the KMS revision
+
+KMS has exactly two version concepts:
+
+- **Entry version** is an incrementing number for one material alias. It is part
+  of the entry identifier, `KeyMaterialId(alias, version)`, serialized in XML
+  references to keys, certificates, or certificate chains.
+- **KMS revision** identifies the complete persisted KMS state. For Git storage
+  it is the Git commit ID read from the content source. It is the expected
+  revision on which a modification is based, not an independent numeric counter.
+
+The following rules govern the KMS contract, references, and persistence:
+
+1. The first entry for an alias has version `1`. Updating that alias appends a
+   new entry with its previous version plus one. Existing entry versions are
+   not overwritten.
+2. The version belongs to the entry, not only to its key pair. Installing or
+   renewing a certificate chain also appends a new entry version, even when
+   the private key stays the same.
+3. An XML reference identifies the explicit alias and numeric entry version.
+   Resolving it must not silently select the latest version for that alias.
+   Selecting an updated entry requires changing the reference to its new ID.
+4. Publishing an updated entry version must change the KMS revision. A changed
+   KMS revision does not imply that all entries changed: unrelated entries
+   retain their IDs and versions.
+5. A modification uses the expected KMS revision for conditional publication
+   of the complete next state. The expected revision comes from Git; do not
+   manufacture a second application-managed revision for that state.
+6. Entry versions and the KMS revision are not interchangeable. Increment an
+   entry version numerically; treat the Git revision as an opaque commit ID.
+7. Do not maintain a separate material-generation number alongside the entry
+   version. References, descriptors, and storage must use the same entry version.
+
+For example, Git revision `R1` may contain `(server, 1)` and `(root, 3)`.
+Renewing the certificate chain for `server` appends `(server, 2)` and publishes
+Git revision `R2`. The root entry remains `(root, 3)`. Configuration that should
+use the renewed chain must select `(server, 2)` explicitly.
+
+This section defines the agreed contract. The current implementation still
+separates descriptor and stored-entry versions and maintains a numeric KMS
+revision; it must be aligned with these rules during the KMS contract change.
+
 ## Capture a generation
 
 1. Quiesce writers to the material store, bootstrap configuration, and versioned
