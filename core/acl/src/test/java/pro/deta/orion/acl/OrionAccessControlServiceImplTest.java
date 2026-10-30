@@ -1,5 +1,7 @@
 package pro.deta.orion.acl;
 
+import pro.deta.orion.keymaterial.KeyMaterialId;
+
 import java.util.Set;
 
 import pro.deta.orion.config.OrionConfigurationEditor;
@@ -795,7 +797,7 @@ class OrionAccessControlServiceImplTest {
                         "localhost",
                         8443,
                         URI.create("https://localhost:8443"),
-                        Optional.of(new OrionMaterialReference("https-identity", 1)),
+                        Optional.of(new KeyMaterialId("https-identity", 1)),
                         Optional.empty(),
                         OrionHttpsConfiguration.ClientAuthentication.DISABLED,
                         List.of(),
@@ -831,7 +833,7 @@ class OrionAccessControlServiceImplTest {
             OrionDocumentRevision lastValid = fixture.editor.current();
             OrionHttpsConfiguration https = new OrionHttpsConfiguration(true, "localhost", 8443,
                     URI.create("https://localhost:8443"),
-                    Optional.of(new OrionMaterialReference("missing-identity", 1)), Optional.empty(),
+                    Optional.of(new KeyMaterialId("missing-identity", 1)), Optional.empty(),
                     OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), Optional.empty());
             OrionDocument candidate =
                     new OrionDocument(

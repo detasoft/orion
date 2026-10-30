@@ -45,7 +45,7 @@ class KeyMaterialServiceTest {
         try (KeyMaterialOptions options = options();
              KeyMaterialService seed = KeyMaterialService.open(new KeyMaterialContentStore(
                      source, new KeyMaterialCodec(options), new OrionEventManager()))) {
-            KeyMaterialModification modification = seed.modify(0);
+            KeyMaterialModification modification = seed.modify(seed.revision());
             modification.generateKey(signing, 2048);
             modification.generateKey(cipher, 256);
             modification.setTrustedCertificate(trust, root);
@@ -78,7 +78,7 @@ class KeyMaterialServiceTest {
             KeyMaterialDescriptor prepared = descriptor("prepared", KeyMaterialPurpose.SERVER_SIGNING,
                     KeyMaterialAlgorithm.RSA);
             Future<?> preparation = executor.submit(() -> {
-                KeyMaterialModification modification = service.modify(1);
+                KeyMaterialModification modification = service.modify(service.revision());
                 try {
                     modification.importKey(prepared, pair);
                     modification.apply();
@@ -90,7 +90,7 @@ class KeyMaterialServiceTest {
             try {
                 assertThat(preparationStarted.await(5, TimeUnit.SECONDS)).isTrue();
                 Future<?> reads = executor.submit(() -> {
-                    assertThat(service.revision()).isEqualTo(1);
+                    assertThat(service.revision()).isEqualTo("1");
                     assertThat(service.hasDurableSnapshot()).isTrue();
                     assertThat(service.containsAlias(signing.alias(), signing.purposes())).isTrue();
                     assertThat(service.getKeyPair(signing.alias()).getPublic()).isEqualTo(pair.getPublic());
@@ -112,7 +112,7 @@ class KeyMaterialServiceTest {
                 releasePreparation.countDown();
             }
             preparation.get(5, TimeUnit.SECONDS);
-            assertThat(service.revision()).isEqualTo(2);
+            assertThat(service.revision()).isEqualTo("2");
             assertThat(service.containsAlias(prepared.alias(), Set.of())).isTrue();
         }
     }
@@ -128,7 +128,7 @@ class KeyMaterialServiceTest {
         KeyPair generated = generateKey(service, descriptor(
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
                 KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA), 2048);
-        String savedVersion = store.revision().orElseThrow();
+        String savedVersion = store.load().revision();
 
         KeyMaterialService reloaded = KeyMaterialService.open(new KeyMaterialContentStore(
                 store,
@@ -340,7 +340,8 @@ class KeyMaterialServiceTest {
         KeyMaterialContentStore store = new KeyMaterialContentStore(
                 new InMemoryKeyMaterialContentSource(), new KeyMaterialCodec(options()), new OrionEventManager());
         try (KeyMaterialService service = KeyMaterialService.open(store)) {
-            store.apply(0, List.of(new KeyMaterialContentStore.Entry("mismatched", entry, 1, false)));
+            store.apply(store.revision(), List.of(
+                    new KeyMaterialContentStore.Entry("mismatched", entry, 1, false)));
 
             assertThatThrownBy(() -> service.inventory(Set.of(KeyMaterialPurpose.SSH_HOST)))
                     .isInstanceOf(GeneralSecurityException.class)
@@ -433,7 +434,7 @@ class KeyMaterialServiceTest {
                 KeyMaterialTestConstants.HTTPS_2026_05_ALIAS,
                 KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA), 2048);
 
-        byte[] pkcs12Bytes = writableStore.read(writableStore.revision().orElseThrow());
+        byte[] pkcs12Bytes = writableStore.load().bytes();
         KeyMaterialContentSource readOnlyStore = new ReadOnlyKeyMaterialContentSource(pkcs12Bytes, "test material");
         KeyMaterialService readOnly = KeyMaterialService.open(new KeyMaterialContentStore(
                 readOnlyStore,
@@ -489,7 +490,7 @@ class KeyMaterialServiceTest {
                     .isInstanceOf(java.io.IOException.class);
         }
 
-        String afterFailureRevision = store.revision().orElseThrow();
+        String afterFailureRevision = store.load().revision();
 
         byte[] afterFailureBytes = store.read(afterFailureRevision);
         assertThat(afterFailureRevision).isEqualTo(corruptVersion);

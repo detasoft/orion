@@ -20,7 +20,7 @@ import pro.deta.orion.command.CommandNode;
 import pro.deta.orion.command.CommandQuery;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.CommandValue;
-import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 
 import java.util.Arrays;
 import java.util.List;
@@ -72,8 +72,8 @@ public final class AcmeCommandCatalog {
             if (parameters.containsKey("account-key") != parameters.containsKey("account-key-version")) {
                 throw new IllegalArgumentException("Account key alias and version must be supplied together");
             }
-            OrionMaterialReference account = parameters.containsKey("account-key")
-                    ? new OrionMaterialReference(parameters.get("account-key"),
+            KeyMaterialId account = parameters.containsKey("account-key")
+                    ? new KeyMaterialId(parameters.get("account-key"),
                             Long.parseLong(parameters.get("account-key-version"))) : null;
             return view(certificates.save(new AcmeCertificateService.Settings(parameters.get("revision"),
                     parameters.get("provider"), parameters.get("directory-url"), parameters.get("email"),

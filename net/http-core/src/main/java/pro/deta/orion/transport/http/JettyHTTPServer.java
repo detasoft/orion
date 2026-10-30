@@ -28,7 +28,7 @@ import pro.deta.orion.bootstrap.config.HttpTransportConfig;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
-import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.security.GeneralSecurityException;
@@ -341,7 +341,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
         Optional<KeyMaterialDescriptor> issuer = https.serverIssuerTrustAnchor()
                 .map(this::trustedCertificate);
         List<KeyMaterialDescriptor> clientRoots = new ArrayList<>();
-        for (OrionMaterialReference root : https.clientTrustAnchors()) {
+        for (KeyMaterialId root : https.clientTrustAnchors()) {
             clientRoots.add(trustedCertificate(root));
         }
         return new TlsMaterialConfiguration(
@@ -352,7 +352,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
     }
 
     private KeyMaterialDescriptor descriptor(
-            OrionMaterialReference reference,
+            KeyMaterialId reference,
             KeyMaterialPurpose purpose) {
         return new KeyMaterialDescriptor(
                 reference.alias(),
@@ -361,7 +361,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
                 reference.version());
     }
 
-    private KeyMaterialDescriptor trustedCertificate(OrionMaterialReference reference) {
+    private KeyMaterialDescriptor trustedCertificate(KeyMaterialId reference) {
         return new KeyMaterialDescriptor(
                 reference.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
                 KeyMaterialAlgorithm.RSA,

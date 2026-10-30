@@ -103,7 +103,7 @@ class S3BootstrapProxyColdStartIT {
                     OrionXml.write(secrets.createSystem(document, SECRET_ID, SECRET_VALUE.toCharArray()), output);
                     xml = output.toByteArray();
                 }
-                material = materialStore.read(materialStore.revision().orElseThrow());
+                material = materialStore.load().bytes();
                 NativeGitRepository repository = upstream.repositoryProvider().create("bootstrap-inputs")
                         .valueOrFailure("seed remote bootstrap repository");
                 repository

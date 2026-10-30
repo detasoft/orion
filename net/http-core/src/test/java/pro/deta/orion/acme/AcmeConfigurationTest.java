@@ -9,7 +9,7 @@ import java.util.Set;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.test.integration.TestConfiguration;
 import java.net.URI;
-import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import java.util.List;
 import java.util.Optional;
@@ -57,7 +57,7 @@ class AcmeConfigurationTest {
             OrionDocument saved = save(service, desired, "zerossl", "key-id", EAB_KEY);
             assertThatThrownBy(() -> service.save(new AcmeCertificateService.Settings(service.view().revision(),
                     "zerossl", "", "admin@example.test", List.of("example.test"), "key-id", null,
-                    new OrionMaterialReference("other-account", 1)), "root"))
+                    new KeyMaterialId("other-account", 1)), "root"))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThat(desired.stored().result().valueOrFailure("configuration")).isEqualTo(saved);
         }
@@ -69,10 +69,10 @@ class AcmeConfigurationTest {
             TestConfiguration desired = new TestConfiguration(events, new BootstrapConfiguration(), owner);
             OrionAcmeConfiguration acme = new OrionAcmeConfiguration(false,
                     URI.create("acme://letsencrypt.org/staging"), "admin@example.test", List.of("example.test"),
-                    null, Optional.of(new OrionMaterialReference("account", 1)),
+                    null, Optional.of(new KeyMaterialId("account", 1)),
                     60, 60, false, false, Optional.empty(), Optional.empty());
             OrionHttpsConfiguration https = new OrionHttpsConfiguration(false, "localhost", 8443, null,
-                    Optional.of(new OrionMaterialReference("identity", 1)), Optional.empty(),
+                    Optional.of(new KeyMaterialId("identity", 1)), Optional.empty(),
                     OrionHttpsConfiguration.ClientAuthentication.DISABLED,
                     List.of(), Optional.of(acme));
             OrionDocument initial = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),

@@ -11,6 +11,28 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class KeyMaterialContentStoreTest {
     @Test
+    void usesTheSourceRevisionAsTheModificationBase() throws Exception {
+        try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password());
+             KeyMaterialCodec codec = new KeyMaterialCodec(options)) {
+            byte[] bytes = codec.encode(codec.create());
+            try {
+                ReadOnlyKeyMaterialContentSource source = new ReadOnlyKeyMaterialContentSource(bytes, "test");
+                String revision = source.load().revision();
+                try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+                        source, new KeyMaterialCodec(options), new OrionEventManager()))) {
+                    assertThat(material.revision()).isEqualTo(revision);
+                    KeyMaterialModification modification = material.modify(material.revision());
+                    assertThat(modification.version()).isEqualTo(revision);
+                    modification.apply();
+                    assertThat(material.revision()).isEqualTo(revision);
+                }
+            } finally {
+                Arrays.fill(bytes, (byte) 0);
+            }
+        }
+    }
+
+    @Test
     void observesAnUpdateBetweenInitialReadAndEventSubscription() throws Exception {
         KeyMaterialDescriptor first = new KeyMaterialDescriptor("first", Set.of(KeyMaterialPurpose.SERVER_SIGNING),
                 KeyMaterialAlgorithm.RSA, 1);
@@ -22,16 +44,16 @@ class KeyMaterialContentStoreTest {
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password());
              OrionKeyMaterial writer = OrionKeyMaterial.open(new KeyMaterialContentStore(
                      writerSource, new KeyMaterialCodec(options), new OrionEventManager()))) {
-            writer.withModification(0, modification -> {
+            writer.withModification(writer.revision(), modification -> {
                 modification.generateKey(first, 2048);
                 modification.apply();
             });
-            initial = writerSource.read(writerSource.revision().orElseThrow());
-            writer.withModification(1, modification -> {
+            initial = writerSource.load().bytes();
+            writer.withModification(writer.revision(), modification -> {
                 modification.generateKey(second, 2048);
                 modification.apply();
             });
-            updated = writerSource.read(writerSource.revision().orElseThrow());
+            updated = writerSource.load().bytes();
             byte[] nextContent = updated;
             InMemoryKeyMaterialContentSource readerSource = new InMemoryKeyMaterialContentSource() {
                 private boolean updatedDuringRead;
@@ -49,7 +71,7 @@ class KeyMaterialContentStoreTest {
             readerSource.write(initial, null);
             try (OrionKeyMaterial reader = OrionKeyMaterial.open(new KeyMaterialContentStore(
                     readerSource, new KeyMaterialCodec(options), new OrionEventManager()))) {
-                assertThat(reader.revision()).isEqualTo(2);
+                assertThat(reader.revision()).isEqualTo("2");
                 assertThat(reader.contains(first)).isTrue();
                 assertThat(reader.contains(second)).isTrue();
             }

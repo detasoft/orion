@@ -3,15 +3,14 @@ package pro.deta.orion.keymaterial;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Objects;
-import java.util.Optional;
 
 public class InMemoryKeyMaterialContentSource implements KeyMaterialContentSource {
     private byte[] bytes;
     private long version;
 
     @Override
-    public synchronized Optional<String> revision() {
-        return bytes == null ? Optional.empty() : Optional.of(versionString());
+    public synchronized Content load() throws IOException {
+        return bytes == null ? new Content(null, null) : new Content(versionString(), read(versionString()));
     }
 
     @Override

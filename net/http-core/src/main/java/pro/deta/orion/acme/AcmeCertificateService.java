@@ -45,7 +45,7 @@ import pro.deta.orion.schema.orion.v2.GitProxyBinding;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
-import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.util.LogScope;
 import pro.deta.orion.util.Result;
 
@@ -150,10 +150,10 @@ public class AcmeCertificateService implements ServiceLifecycle {
             throw new IllegalArgumentException("ACME account email is invalid");
         }
         OrionHttpsConfiguration https = document.system().https().orElseGet(() -> new OrionHttpsConfiguration(
-                false, "0.0.0.0", 8443, null, Optional.of(new OrionMaterialReference("https-identity-v1", 1)),
+                false, "0.0.0.0", 8443, null, Optional.of(new KeyMaterialId("https-identity-v1", 1)),
                 Optional.empty(), OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), Optional.empty()));
         OrionAcmeConfiguration previous = https.acme().orElse(null);
-        OrionMaterialReference requestedAccount = input.accountMaterial();
+        KeyMaterialId requestedAccount = input.accountMaterial();
         if (requestedAccount != null) {
             try {
                 keyMaterial.require(new KeyMaterialDescriptor(requestedAccount.alias(),
@@ -192,11 +192,11 @@ public class AcmeCertificateService implements ServiceLifecycle {
                 document = secrets.createSystem(document, secret.orElseThrow(), key);
             }
         }
-        OrionMaterialReference account = requestedAccount;
+        KeyMaterialId account = requestedAccount;
         if (account == null) {
             account = sameAccount && previous.accountMaterial().isPresent()
                     ? previous.accountMaterial().orElseThrow()
-                    : new OrionMaterialReference("acme-account-" + UUID.randomUUID(), 1);
+                    : new KeyMaterialId("acme-account-" + UUID.randomUUID(), 1);
         }
         OrionAcmeConfiguration acme = new OrionAcmeConfiguration(true, directory, email, input.domains(),
                 previous == null ? null : previous.organization(), Optional.of(account),
@@ -205,7 +205,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
                 previous != null && previous.allowRequestedDomains(), kid, secret);
         OrionHttpsConfiguration configured = new OrionHttpsConfiguration(https.enabled(), https.address(),
                 https.port(), https.publicUrl(), https.identity().isPresent() ? https.identity()
-                        : Optional.of(new OrionMaterialReference("https-identity-v1", 1)),
+                        : Optional.of(new KeyMaterialId("https-identity-v1", 1)),
                 https.serverIssuerTrustAnchor(), https.clientAuthentication(), https.clientTrustAnchors(),
                 Optional.of(acme));
         return new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
@@ -539,7 +539,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
     }
 
     private static KeyMaterialDescriptor descriptor(
-            OrionMaterialReference reference,
+            KeyMaterialId reference,
             KeyMaterialPurpose purpose) {
         return new KeyMaterialDescriptor(
                 reference.alias(),
@@ -549,7 +549,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
     }
 
     private static KeyMaterialDescriptor trustedCertificate(
-            OrionMaterialReference reference) {
+            KeyMaterialId reference) {
         return new KeyMaterialDescriptor(
                 reference.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
                 KeyMaterialAlgorithm.RSA,
@@ -649,11 +649,11 @@ public class AcmeCertificateService implements ServiceLifecycle {
 
     public record View(String revision, boolean enabled, String provider, String directoryUrl, String accountEmail,
                        List<String> domains, String eabKeyId, boolean eabConfigured, List<Preset> presets,
-                       RenewalStatus renewal, OrionMaterialReference accountMaterial) {}
+                       RenewalStatus renewal, KeyMaterialId accountMaterial) {}
 
     public record Settings(String revision, String provider, String directoryUrl, String accountEmail,
                            List<String> domains, String eabKeyId, char[] eabHmacKey,
-                           OrionMaterialReference accountMaterial) {
+                           KeyMaterialId accountMaterial) {
         @Override
         public String toString() {
             return "AcmeSettings[credentials=<redacted>]";

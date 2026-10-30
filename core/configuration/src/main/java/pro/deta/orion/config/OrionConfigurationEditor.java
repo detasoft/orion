@@ -11,7 +11,7 @@ import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
-import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.util.Subscription;
 import java.security.GeneralSecurityException;
@@ -177,7 +177,7 @@ public final class OrionConfigurationEditor implements ServiceLifecycleStateMach
                 if (https.serverIssuerTrustAnchor().isPresent()) {
                     requireTrust(https.serverIssuerTrustAnchor().orElseThrow());
                 }
-                for (OrionMaterialReference anchor : https.clientTrustAnchors()) {
+                for (KeyMaterialId anchor : https.clientTrustAnchors()) {
                     requireTrust(anchor);
                 }
                 if (https.acme().isPresent() && https.acme().orElseThrow().accountMaterial().isPresent()) {
@@ -193,14 +193,14 @@ public final class OrionConfigurationEditor implements ServiceLifecycleStateMach
         }
     }
 
-    private void requireKey(OrionMaterialReference reference, KeyMaterialPurpose purpose)
+    private void requireKey(KeyMaterialId reference, KeyMaterialPurpose purpose)
             throws GeneralSecurityException {
         configurationMaterial.require(new KeyMaterialDescriptor(
                 reference.alias(), Set.of(purpose), KeyMaterialAlgorithm.RSA,
                 reference.version()));
     }
 
-    private void requireTrust(OrionMaterialReference reference) throws GeneralSecurityException {
+    private void requireTrust(KeyMaterialId reference) throws GeneralSecurityException {
         configurationMaterial.require(new KeyMaterialDescriptor(reference.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
                 KeyMaterialAlgorithm.RSA, reference.version()));
     }

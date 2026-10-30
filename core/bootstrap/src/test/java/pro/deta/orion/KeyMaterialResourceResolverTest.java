@@ -68,9 +68,9 @@ class KeyMaterialResourceResolverTest {
         assertThat(Files.readAllBytes(plainPath)).isEqualTo(bytes("plain"));
         assertThat(Files.readAllBytes(filePath)).isEqualTo(bytes("file"));
         assertThat(Files.readAllBytes(envPath)).isEqualTo(bytes("env"));
-        assertThat(plainStore.revision().orElseThrow()).isEqualTo(plainVersion);
-        assertThat(fileStore.revision().orElseThrow()).isEqualTo(fileVersion);
-        assertThat(envStore.revision().orElseThrow()).isEqualTo(envVersion);
+        assertThat(plainStore.load().revision()).isEqualTo(plainVersion);
+        assertThat(fileStore.load().revision()).isEqualTo(fileVersion);
+        assertThat(envStore.load().revision()).isEqualTo(envVersion);
     }
 
     @Test
@@ -80,8 +80,8 @@ class KeyMaterialResourceResolverTest {
 
         KeyMaterialContentSource store = resolver.resolveSource(reference);
 
-        assertThat(store.read(store.revision().orElseThrow())).isEqualTo(bytes("inline"));
-        assertThatThrownBy(() -> store.write(bytes("update"), store.revision().orElseThrow()))
+        assertThat(store.load().bytes()).isEqualTo(bytes("inline"));
+        assertThatThrownBy(() -> store.write(bytes("update"), store.load().revision()))
                 .isInstanceOf(java.io.IOException.class)
                 .hasMessageContaining("read-only")
                 .hasMessageNotContaining(reference);

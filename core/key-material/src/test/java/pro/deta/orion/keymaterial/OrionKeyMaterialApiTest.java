@@ -66,7 +66,7 @@ class OrionKeyMaterialApiTest {
                     modification.generateKey(SIGNING, 2048);
                     modification.apply();
                 });
-                assertThat(material.revision()).isEqualTo(1);
+                assertThat(material.revision()).isEqualTo("1");
                 assertThat(material.contains(SIGNING)).isTrue();
             }
         }
@@ -90,7 +90,7 @@ class OrionKeyMaterialApiTest {
                 modification.generateKey(SIGNING, 2048);
                 modification.apply();
             });
-            reader.reload(store.revision().orElseThrow());
+            reader.reload(store.load().revision());
             assertThat(reader.contains(SIGNING)).isTrue();
         }
     }
@@ -121,7 +121,7 @@ class OrionKeyMaterialApiTest {
                 modification.generateKey(SIGNING, 2048);
                 modification.apply();
             });
-            assertThat(material.revision()).isEqualTo(1);
+            assertThat(material.revision()).isEqualTo("1");
             assertThat(material.contains(SIGNING)).isTrue();
             events.publishAndWait(new OrionEvent() {});
             assertThat(changes).hasValue(1);
@@ -177,7 +177,7 @@ class OrionKeyMaterialApiTest {
             assertThat(changes).containsExactly(Set.of(OTHER.alias()));
             assertThat(material.contains(SIGNING)).isTrue();
             assertThat(material.contains(OTHER)).isFalse();
-            assertThat(material.revision()).isEqualTo(3);
+            assertThat(material.revision()).isEqualTo("3");
         } finally {
             if (events.isRunning()) events.onStop();
         }
@@ -339,17 +339,17 @@ class OrionKeyMaterialApiTest {
             modification.generateKey(host, 2048);
 
             assertThat(material.hasDurableSnapshot()).isFalse();
-            assertThat(material.revision()).isZero();
-            assertThat(modification.version()).isEqualTo(1);
+            assertThat(material.revision()).isNull();
+            assertThat(modification.version()).isNull();
             assertThat(material.contains(SIGNING)).isFalse();
             assertThat(material.inventory(Set.of())).isEmpty();
-            assertThat(store.revision()).isEmpty();
+            assertThat(store.load().bytes()).isNull();
 
             modification.apply();
 
             assertThat(material.hasDurableSnapshot()).isTrue();
-            assertThat(material.revision()).isEqualTo(1);
-            assertThat(store.revision().orElseThrow()).isEqualTo("1");
+            assertThat(material.revision()).isEqualTo("1");
+            assertThat(store.load().revision()).isEqualTo("1");
             assertThat(material.privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST))).containsExactly(host);
             assertThat(material.sshHostKeyPairs(List.of())).hasSize(1);
             signature = material.sign(SIGNING, payload);
@@ -360,7 +360,7 @@ class OrionKeyMaterialApiTest {
 
         try (OrionKeyMaterial reloaded = open(store)) {
             assertThat(reloaded.hasDurableSnapshot()).isTrue();
-            assertThat(reloaded.revision()).isEqualTo(1);
+            assertThat(reloaded.revision()).isEqualTo("1");
             assertThat(reloaded.publicKey(SIGNING).getEncoded()).isEqualTo(publicKey);
             assertThat(reloaded.verify(SIGNING, payload, signature)).isTrue();
             assertThat(reloaded.verify(SIGNING, new byte[]{1}, signature)).isFalse();
@@ -412,7 +412,7 @@ class OrionKeyMaterialApiTest {
             modification.importSecretKey(cipher, generator.generateKey());
             modification.apply();
             envelope = material.seal(cipher, plaintext, context);
-            assertThat(material.revision()).isEqualTo(1);
+            assertThat(material.revision()).isEqualTo("1");
         }
 
         try (OrionKeyMaterial reloaded = open(store)) {
@@ -470,7 +470,7 @@ class OrionKeyMaterialApiTest {
             assertThat(material.issuedCertificateChain(IDENTITY)).isEmpty();
             assertThat(material.contains(ROOT)).isFalse();
             modification.apply();
-            assertThat(material.revision()).isEqualTo(1);
+            assertThat(material.revision()).isEqualTo("1");
             assertThat(material.issuedCertificateChain(IDENTITY).orElseThrow())
                     .containsExactlyElementsOf(chain);
         }
@@ -498,8 +498,8 @@ class OrionKeyMaterialApiTest {
             assertThatThrownBy(() -> discarded.generateKey(SIGNING, 2048))
                     .isInstanceOf(IllegalStateException.class);
             assertThat(material.contains(SIGNING)).isFalse();
-            assertThat(material.revision()).isZero();
-            assertThat(store.revision()).isEmpty();
+            assertThat(material.revision()).isNull();
+            assertThat(store.load().bytes()).isNull();
 
             material.withModification(material.revision(), modification -> {
                 modification.generateKey(OTHER, 2048);
@@ -507,7 +507,7 @@ class OrionKeyMaterialApiTest {
             });
             assertThat(material.contains(OTHER)).isTrue();
             assertThat(material.contains(SIGNING)).isFalse();
-            assertThat(material.revision()).isEqualTo(1);
+            assertThat(material.revision()).isEqualTo("1");
         }
     }
 
@@ -530,8 +530,8 @@ class OrionKeyMaterialApiTest {
             }
             assertThatThrownBy(retained.getFirst()::apply).isInstanceOf(IllegalStateException.class);
             assertThat(material.contains(SIGNING)).isFalse();
-            assertThat(material.revision()).isZero();
-            assertThat(store.revision()).isEmpty();
+            assertThat(material.revision()).isNull();
+            assertThat(store.load().bytes()).isNull();
         }
     }
 
@@ -540,21 +540,21 @@ class OrionKeyMaterialApiTest {
         InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
         try (OrionKeyMaterial material = open(store)) {
             material.modify(material.revision()).apply();
-            assertThat(store.revision()).isEmpty();
-            assertThat(material.revision()).isZero();
+            assertThat(store.load().bytes()).isNull();
+            assertThat(material.revision()).isNull();
             material.withModification(material.revision(), modification -> {
                 modification.generateKey(SIGNING, 2048);
                 modification.apply();
             });
-            String beforeRevision = store.revision().orElseThrow();
+            String beforeRevision = store.load().revision();
             byte[] beforeBytes = store.read(beforeRevision);
             material.withModification(material.revision(), modification -> {
                 modification.generateKey(SIGNING, 2048);
                 modification.apply();
             });
-            assertThat(material.revision()).isEqualTo(1);
-            assertThat(store.read(store.revision().orElseThrow())).isEqualTo(beforeBytes);
-            assertThat(store.revision().orElseThrow()).isEqualTo(beforeRevision);
+            assertThat(material.revision()).isEqualTo("1");
+            assertThat(store.load().bytes()).isEqualTo(beforeBytes);
+            assertThat(store.load().revision()).isEqualTo(beforeRevision);
         }
     }
 
@@ -576,15 +576,15 @@ class OrionKeyMaterialApiTest {
                 assertThat(material.contains(SIGNING)).isEqualTo(firstWon);
                 assertThat(material.contains(OTHER)).isEqualTo(secondWon);
             }
-            assertThat(material.revision()).isEqualTo(1);
-            assertThat(store.revision().orElseThrow()).isEqualTo("1");
+            assertThat(material.revision()).isEqualTo("1");
+            assertThat(store.load().revision()).isEqualTo("1");
             assertThat(material.inventory(Set.of())).hasSize(1);
             assertThatThrownBy(first::apply).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(second::apply).isInstanceOf(IllegalStateException.class);
         }
         try (OrionKeyMaterial reloaded = open(store)) {
             assertThat(reloaded.inventory(Set.of())).hasSize(1);
-            assertThat(reloaded.revision()).isEqualTo(1);
+            assertThat(reloaded.revision()).isEqualTo("1");
         }
     }
 
@@ -592,7 +592,7 @@ class OrionKeyMaterialApiTest {
     void rejectsAnOutdatedRevisionBeforeCallingTheModificationOperation() throws Exception {
         InMemoryKeyMaterialContentSource source = new InMemoryKeyMaterialContentSource();
         try (OrionKeyMaterial material = open(source)) {
-            long previous = material.revision();
+            String previous = material.revision();
             KeyMaterialModification pending = material.modify(previous);
             material.withModification(previous, modification -> {
                 modification.generateKey(SIGNING, 2048);
@@ -605,33 +605,33 @@ class OrionKeyMaterialApiTest {
             assertThatThrownBy(() -> material.modify(previous))
                     .isInstanceOf(KeyMaterialStoreConflictException.class);
             assertThatThrownBy(pending::apply).isInstanceOf(KeyMaterialStoreConflictException.class);
-            assertThat(material.revision()).isEqualTo(previous + 1);
+            assertThat(material.revision()).isEqualTo(source.load().revision()).isNotEqualTo(previous);
             assertThat(material.contains(SIGNING)).isTrue();
         }
     }
 
     @Test
-    void comparesTheMaterialRevisionIndependentlyOfTheSourceVersion() throws Exception {
+    void usesTheSourceRevisionEvenWhenMaterialContentHasNotChanged() throws Exception {
         InMemoryKeyMaterialContentSource source = new InMemoryKeyMaterialContentSource();
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password());
              KeyMaterialCodec codec = new KeyMaterialCodec(options)) {
             byte[] bytes = codec.encode(codec.create());
             try {
                 source.write(bytes, null);
-                source.write(bytes, source.revision().orElseThrow());
+                source.write(bytes, source.load().revision());
             } finally {
                 java.util.Arrays.fill(bytes, (byte) 0);
             }
         }
         try (OrionKeyMaterial material = open(source)) {
-            assertThat(source.revision()).contains("2");
-            assertThat(material.revision()).isZero();
-            material.withModification(0, modification -> {
+            assertThat(source.load().revision()).isEqualTo("2");
+            assertThat(material.revision()).isEqualTo("2");
+            material.withModification(material.revision(), modification -> {
                 modification.generateKey(SIGNING, 2048);
                 modification.apply();
             });
-            assertThat(material.revision()).isEqualTo(1);
-            assertThat(source.revision()).contains("3");
+            assertThat(material.revision()).isEqualTo("3");
+            assertThat(source.load().revision()).isEqualTo("3");
         }
     }
 
@@ -652,7 +652,7 @@ class OrionKeyMaterialApiTest {
             }
         };
         try (OrionKeyMaterial material = open(source, events)) {
-            KeyMaterialModification modification = material.modify(0);
+            KeyMaterialModification modification = material.modify(material.revision());
             modification.generateKey(SIGNING, 2048);
             if (responseLost) {
                 assertThatThrownBy(modification::apply)
@@ -661,7 +661,7 @@ class OrionKeyMaterialApiTest {
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
             } else {
                 modification.apply();
-                assertThat(material.revision()).isEqualTo(1);
+                assertThat(material.revision()).isEqualTo("1");
             }
             events.publishAndWait(new OrionEvent() {});
             assertThat(notifications).hasValue(responseLost ? 0 : 1);
@@ -670,7 +670,7 @@ class OrionKeyMaterialApiTest {
         }
         try (OrionKeyMaterial reopened = open(source)) {
             assertThat(reopened.contains(SIGNING)).isTrue();
-            assertThat(reopened.revision()).isEqualTo(1);
+            assertThat(reopened.revision()).isEqualTo("1");
         }
     }
 
@@ -683,19 +683,19 @@ class OrionKeyMaterialApiTest {
             winner.generateKey(SIGNING, 2048);
             loser.generateKey(OTHER, 2048);
             winner.apply();
-            String beforeRevision = store.revision().orElseThrow();
+            String beforeRevision = store.load().revision();
             byte[] beforeBytes = store.read(beforeRevision);
 
             assertThatThrownBy(loser::apply).isInstanceOf(KeyMaterialStoreConflictException.class);
             assertThatThrownBy(() -> second.contains(OTHER)).isInstanceOf(IllegalStateException.class);
             assertThat(first.contains(SIGNING)).isTrue();
-            assertThat(store.read(store.revision().orElseThrow())).isEqualTo(beforeBytes);
-            assertThat(store.revision().orElseThrow()).isEqualTo(beforeRevision);
+            assertThat(store.load().bytes()).isEqualTo(beforeBytes);
+            assertThat(store.load().revision()).isEqualTo(beforeRevision);
         }
         try (OrionKeyMaterial reloaded = open(store)) {
             assertThat(reloaded.contains(SIGNING)).isTrue();
             assertThat(reloaded.contains(OTHER)).isFalse();
-            assertThat(reloaded.revision()).isEqualTo(1);
+            assertThat(reloaded.revision()).isEqualTo("1");
         }
     }
 
@@ -717,7 +717,7 @@ class OrionKeyMaterialApiTest {
                 modification.apply();
             });
             assertThat(material.trustedCertificate(ROOT)).isEqualTo(replacement);
-            assertThat(material.revision()).isEqualTo(2);
+            assertThat(material.revision()).isEqualTo("2");
 
             KeyMaterialModification deletion = material.modify(material.revision());
             deletion.delete(SIGNING);
@@ -726,7 +726,7 @@ class OrionKeyMaterialApiTest {
             assertThat(material.trustedCertificate(ROOT)).isEqualTo(replacement);
             deletion.apply();
 
-            assertThat(material.revision()).isEqualTo(3);
+            assertThat(material.revision()).isEqualTo("3");
             assertThat(material.contains(SIGNING)).isFalse();
             assertThat(material.contains(ROOT)).isFalse();
             assertThat(material.inventory(Set.of())).isEmpty();
@@ -735,7 +735,7 @@ class OrionKeyMaterialApiTest {
                     .isInstanceOf(GeneralSecurityException.class);
         }
         try (OrionKeyMaterial reloaded = open(store)) {
-            assertThat(reloaded.revision()).isEqualTo(3);
+            assertThat(reloaded.revision()).isEqualTo("3");
             assertThat(reloaded.contains(SIGNING)).isFalse();
             assertThat(reloaded.contains(ROOT)).isFalse();
             assertThat(reloaded.inventory(Set.of())).isEmpty();
@@ -744,7 +744,7 @@ class OrionKeyMaterialApiTest {
         }
 
         KeyStore history = KeyStore.getInstance("PKCS12");
-        history.load(new ByteArrayInputStream(store.read(store.revision().orElseThrow())),
+        history.load(new ByteArrayInputStream(store.load().bytes()),
                 KeyMaterialTestConstants.password());
         assertThat(history.size()).isEqualTo(5);
         assertThat(history.getCertificate("signing").getPublicKey().getEncoded()).isEqualTo(publicKey);
@@ -775,17 +775,17 @@ class OrionKeyMaterialApiTest {
             assertThatThrownBy(modification::apply).isInstanceOf(IllegalStateException.class);
         }
         store.fail = false;
-        String durableRevision = store.revision().orElseThrow();
+        String durableRevision = store.load().revision();
         byte[] durableBytes = store.read(durableRevision);
         try (OrionKeyMaterial reloaded = open(store)) {
-            assertThat(reloaded.revision()).isEqualTo(committed ? 2 : 1);
+            assertThat(reloaded.revision()).isEqualTo(committed ? "2" : "1");
             assertThat(reloaded.contains(SIGNING)).isEqualTo(!committed);
             assertThat(reloaded.contains(OTHER)).isEqualTo(committed);
             KeyMaterialDescriptor available = committed ? OTHER : SIGNING;
             byte[] payload = new byte[]{1};
             assertThat(reloaded.verify(available, payload, reloaded.sign(available, payload))).isTrue();
-            assertThat(store.read(store.revision().orElseThrow())).isEqualTo(durableBytes);
-            assertThat(store.revision().orElseThrow()).isEqualTo(durableRevision);
+            assertThat(store.load().bytes()).isEqualTo(durableBytes);
+            assertThat(store.load().revision()).isEqualTo(durableRevision);
         }
     }
 
@@ -797,7 +797,7 @@ class OrionKeyMaterialApiTest {
                 modification.generateKey(SIGNING, 2048);
                 modification.apply();
             });
-            String beforeRevision = store.revision().orElseThrow();
+            String beforeRevision = store.load().revision();
             byte[] beforeBytes = store.read(beforeRevision);
             KeyMaterialDescriptor otherPurpose = descriptor("signing", KeyMaterialPurpose.TLS_IDENTITY);
             KeyMaterialModification modification = material.modify(material.revision());
@@ -807,10 +807,10 @@ class OrionKeyMaterialApiTest {
                     .isInstanceOf(GeneralSecurityException.class).hasMessageContaining("purpose");
             modification.apply();
 
-            assertThat(material.revision()).isEqualTo(1);
+            assertThat(material.revision()).isEqualTo("1");
             assertThat(material.contains(SIGNING)).isTrue();
-            assertThat(store.read(store.revision().orElseThrow())).isEqualTo(beforeBytes);
-            assertThat(store.revision().orElseThrow()).isEqualTo(beforeRevision);
+            assertThat(store.load().bytes()).isEqualTo(beforeBytes);
+            assertThat(store.load().revision()).isEqualTo(beforeRevision);
         }
     }
 
@@ -832,7 +832,7 @@ class OrionKeyMaterialApiTest {
                 modification.setTrustedCertificate(ROOT, root);
                 modification.apply();
             });
-            reader.reload(store.revision().orElseThrow());
+            reader.reload(store.load().revision());
             KeyMaterialModification stale = reader.modify(reader.revision());
             stale.generateKey(descriptor("stale", KeyMaterialPurpose.SERVER_SIGNING), 2048);
             try {
@@ -840,33 +840,33 @@ class OrionKeyMaterialApiTest {
                     modification.generateKey(OTHER, 2048);
                     modification.apply();
                 });
-                String added = store.revision().orElseThrow();
+                String added = store.load().revision();
                 writer.withModification(writer.revision(), modification -> {
                     modification.delete(OTHER);
                     modification.apply();
                 });
-                String deleted = store.revision().orElseThrow();
+                String deleted = store.load().revision();
                 reader.reload(added);
                 assertThat(reader.contains(OTHER)).isTrue();
-                assertThat(reader.revision()).isEqualTo(2);
+                assertThat(reader.revision()).isEqualTo("2");
                 assertThatThrownBy(stale::apply).isInstanceOf(KeyMaterialStoreConflictException.class);
                 reader.reload(deleted);
                 assertThat(reader.contains(OTHER)).isFalse();
                 assertThat(reader.contains(SIGNING)).isTrue();
                 assertThat(reader.contains(secret)).isTrue();
                 assertThat(reader.contains(ROOT)).isTrue();
-                assertThat(reader.revision()).isEqualTo(3);
+                assertThat(reader.revision()).isEqualTo("3");
                 reader.reload(deleted);
                 events.publishAndWait(new OrionEvent() {});
                 assertThat(changes).extracting(KeyMaterialChanged::resources)
                         .containsExactly(Set.of("signing", "wrapping", "root"), Set.of("other"), Set.of("other"));
                 assertThatThrownBy(() -> reader.reload(added)).isInstanceOf(GeneralSecurityException.class);
-                assertThat(reader.revision()).isEqualTo(3);
+                assertThat(reader.revision()).isEqualTo("3");
                 reader.withModification(reader.revision(), modification -> {
                     modification.generateKey(descriptor("after-reload", KeyMaterialPurpose.SERVER_SIGNING), 2048);
                     modification.apply();
                 });
-                assertThat(reader.revision()).isEqualTo(4);
+                assertThat(reader.revision()).isEqualTo("4");
             } finally {
                 stale.discard();
             }
@@ -893,13 +893,13 @@ class OrionKeyMaterialApiTest {
                     modification.generateKey(SIGNING, 2048);
                     modification.apply();
                 });
-                replacement = otherStore.read(otherStore.revision().orElseThrow());
+                replacement = otherStore.load().bytes();
             }
             String revision = store.write(corrupt ? new byte[]{1, 2, 3} : replacement,
-                    store.revision().orElseThrow());
+                    store.load().revision());
             assertThatThrownBy(() -> reader.reload(revision)).isInstanceOfAny(
                     IOException.class, GeneralSecurityException.class);
-            assertThat(reader.revision()).isEqualTo(1);
+            assertThat(reader.revision()).isEqualTo("1");
             assertThat(reader.verify(SIGNING, payload, signature)).isTrue();
         }
     }

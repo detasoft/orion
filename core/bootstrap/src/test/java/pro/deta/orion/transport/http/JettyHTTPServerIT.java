@@ -76,7 +76,7 @@ import pro.deta.orion.bootstrap.config.HttpTransportConfig;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
-import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.util.NetworkUtils;
 
 import javax.net.ssl.HttpsURLConnection;
@@ -1078,7 +1078,7 @@ class JettyHTTPServerIT {
                 KeyPair trustedClientKey = TestCertificateChain.keyPair();
                 KeyPair serverIssuerClientKey = TestCertificateChain.keyPair();
                 return new SharedMaterial(
-                        store.read(store.revision().orElseThrow()),
+                        store.load().bytes(),
                         serverCertificate,
                         trustedClientKey,
                         TestCertificateChain.leaf("trusted-client", trustedClientKey, clientRoot),
@@ -1121,9 +1121,9 @@ class JettyHTTPServerIT {
             OrionHttpsConfiguration.ClientAuthentication mode,
             List<KeyMaterialDescriptor> clientRoots,
             int port) {
-        List<OrionMaterialReference> references = new java.util.ArrayList<>();
+        List<KeyMaterialId> references = new java.util.ArrayList<>();
         for (KeyMaterialDescriptor root : clientRoots) {
-            references.add(new OrionMaterialReference(root.alias(), root.version()));
+            references.add(new KeyMaterialId(root.alias(), root.version()));
         }
         OrionHttpsConfiguration https = new OrionHttpsConfiguration(
                 true,
@@ -1191,8 +1191,8 @@ class JettyHTTPServerIT {
                 1);
     }
 
-    private static OrionMaterialReference reference(KeyMaterialDescriptor descriptor) {
-        return new OrionMaterialReference(descriptor.alias(), descriptor.version());
+    private static KeyMaterialId reference(KeyMaterialDescriptor descriptor) {
+        return new KeyMaterialId(descriptor.alias(), descriptor.version());
     }
 
     private static void request(URL url) {

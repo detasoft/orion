@@ -24,8 +24,7 @@ import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
-import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
-
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.test.integration.TestConfiguration;
 import java.io.IOException;
 import java.net.HttpURLConnection;
@@ -157,7 +156,7 @@ public class ACMECertificateChallengeTest {
                 "admin@example.test",
                 List.of("example.test"),
                 "ORION",
-                Optional.of(new OrionMaterialReference("acme-account-v1", 1)),
+                Optional.of(new KeyMaterialId("acme-account-v1", 1)),
                 30,
                 40,
                 true,
@@ -167,7 +166,7 @@ public class ACMECertificateChallengeTest {
                 "localhost",
                 8443,
                 URI.create("https://example.test"),
-                Optional.of(new OrionMaterialReference("https-identity-v1", 1)),
+                Optional.of(new KeyMaterialId("https-identity-v1", 1)),
                 Optional.empty(),
                 OrionHttpsConfiguration.ClientAuthentication.DISABLED,
                 List.of(),

@@ -20,7 +20,7 @@ import java.time.Duration;
 import java.util.concurrent.CopyOnWriteArrayList;
 import pro.deta.orion.util.OrionUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import java.security.KeyPair;
 import java.util.ArrayList;
 import java.util.List;
@@ -57,7 +57,7 @@ class AcmeCertificateSettingsTest {
                         Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 1), 3072);
                 modification.apply();
             });
-            OrionMaterialReference reference = new OrionMaterialReference("existing-account", 1);
+            KeyMaterialId reference = new KeyMaterialId("existing-account", 1);
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
             TestConfiguration desired = new TestConfiguration(events, bootstrap,
                     owner);
@@ -109,8 +109,8 @@ class AcmeCertificateSettingsTest {
             String expected = owner.inventory(Set.of()).getFirst().publicKeyPem();
             assertThat(expected.replaceAll("\\s", "")).contains(java.util.Base64.getEncoder()
                     .encodeToString(issuedKeys.getFirst().getPublic().getEncoded()));
-            for (OrionMaterialReference invalid : List.of(new OrionMaterialReference("missing", 1),
-                    new OrionMaterialReference("existing-account", 2), new OrionMaterialReference("signing", 1))) {
+            for (KeyMaterialId invalid : List.of(new KeyMaterialId("missing", 1),
+                    new KeyMaterialId("existing-account", 2), new KeyMaterialId("signing", 1))) {
                 assertThatThrownBy(
                                 () ->
                                         service.save(

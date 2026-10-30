@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.xml.sax.InputSource;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.CredentialType;
 import pro.deta.orion.schema.acl.Grant;
@@ -228,16 +229,16 @@ class OrionXmlTest {
 
     @Test
     void roundTripsHttpsAndAcmeMaterialReferencesInTheSystemConfiguration() throws Exception {
-        OrionMaterialReference identity = new OrionMaterialReference("https-identity", 3);
-        OrionMaterialReference issuer = new OrionMaterialReference("server-root", 1);
-        OrionMaterialReference clientRoot = new OrionMaterialReference("client-root", 2);
+        KeyMaterialId identity = new KeyMaterialId("https-identity", 3);
+        KeyMaterialId issuer = new KeyMaterialId("server-root", 1);
+        KeyMaterialId clientRoot = new KeyMaterialId("client-root", 2);
         OrionAcmeConfiguration acme = new OrionAcmeConfiguration(
                 true,
                 URI.create("acme://letsencrypt.org/staging"),
                 "admin@example.test",
                 List.of("example.test", "www.example.test"),
                 "ORION",
-                Optional.of(new OrionMaterialReference("acme-account", 4)),
+                Optional.of(new KeyMaterialId("acme-account", 4)),
                 30,
                 40,
                 true,
@@ -272,12 +273,8 @@ class OrionXmlTest {
 
     @Test
     void rejectsInvalidHttpsAndAcmeDesiredState() {
-        OrionMaterialReference identity = new OrionMaterialReference("identity", 1);
+        KeyMaterialId identity = new KeyMaterialId("identity", 1);
 
-        assertThatThrownBy(() -> new OrionMaterialReference(" ", 1))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new OrionMaterialReference("identity", 0))
-                .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new OrionHttpsConfiguration(
                 true,
                 "localhost",
@@ -296,7 +293,7 @@ class OrionXmlTest {
                 "admin@example.test",
                 List.of("example.test", "example.test"),
                 null,
-                Optional.of(new OrionMaterialReference("account", 1)),
+                Optional.of(new KeyMaterialId("account", 1)),
                 30,
                 30,
                 false,

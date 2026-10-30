@@ -83,17 +83,17 @@ public class OrionKeyMaterial implements AutoCloseable {
         owner.reload(revision);
     }
 
-    public long revision() {
+    public String revision() {
         requireAvailable();
         return owner.revision();
     }
 
-    public KeyMaterialModification modify(long expectedRevision) throws KeyMaterialStoreConflictException {
+    public KeyMaterialModification modify(String expectedRevision) throws KeyMaterialStoreConflictException {
         requireAvailable();
         return owner.modify(expectedRevision);
     }
 
-    public void withModification(long expectedRevision, KeyMaterialModification.Operation operation)
+    public void withModification(String expectedRevision, KeyMaterialModification.Operation operation)
             throws IOException, GeneralSecurityException {
         Objects.requireNonNull(operation, "operation");
         KeyMaterialModification modification = modify(expectedRevision);

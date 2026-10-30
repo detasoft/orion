@@ -87,7 +87,7 @@ class OrionAdminKeyMaterialRouteTest {
             assertThat(response.status()).isEqualTo(201);
             assertThat(response.body()).isNull();
             assertThat(material.contains(ACCOUNT)).isTrue();
-            assertThat(material.revision()).isEqualTo(1);
+            assertThat(material.revision()).isEqualTo("1");
         }
         try (OrionKeyMaterial reloaded = open(store)) {
             assertThat(reloaded.contains(ACCOUNT)).isTrue();
@@ -125,7 +125,7 @@ class OrionAdminKeyMaterialRouteTest {
                     {"alias":"account","purpose":"ACME_ACCOUNT"}
                     """).status()).isEqualTo(201);
             byte[] publicKey = material.publicKey(ACCOUNT).getEncoded();
-            String beforeRevision = store.revision().orElseThrow();
+            String beforeRevision = store.load().revision();
             byte[] beforeBytes = store.read(beforeRevision);
 
             for (String purpose : List.of("ACME_ACCOUNT", "TLS_IDENTITY")) {
@@ -134,9 +134,9 @@ class OrionAdminKeyMaterialRouteTest {
                 assertThat(post(material, body).status()).isEqualTo(400);
             }
             assertThat(material.publicKey(ACCOUNT).getEncoded()).isEqualTo(publicKey);
-            assertThat(material.revision()).isEqualTo(1);
-            assertThat(store.read(store.revision().orElseThrow())).isEqualTo(beforeBytes);
-            assertThat(store.revision().orElseThrow()).isEqualTo(beforeRevision);
+            assertThat(material.revision()).isEqualTo("1");
+            assertThat(store.load().bytes()).isEqualTo(beforeBytes);
+            assertThat(store.load().revision()).isEqualTo(beforeRevision);
         }
     }
 
@@ -154,7 +154,7 @@ class OrionAdminKeyMaterialRouteTest {
             }
             assertThat(post(material, "x".repeat(32769)).status()).isEqualTo(413);
             assertThat(material.inventory(Set.of())).isEmpty();
-            assertThat(store.revision()).isEmpty();
+            assertThat(store.load().bytes()).isNull();
         }
     }
 
@@ -168,7 +168,7 @@ class OrionAdminKeyMaterialRouteTest {
             assertThat(response.status()).isEqualTo(400);
             assertThat(response.body().toString()).doesNotContain("private-secret");
             assertThat(material.inventory(Set.of())).isEmpty();
-            assertThat(store.revision()).isEmpty();
+            assertThat(store.load().bytes()).isNull();
         }
     }
 
@@ -192,7 +192,7 @@ class OrionAdminKeyMaterialRouteTest {
         }
         try (OrionKeyMaterial reloaded = open(store)) {
             assertThat(reloaded.contains(ACCOUNT)).isEqualTo(committed);
-            assertThat(reloaded.revision()).isEqualTo(committed ? 1 : 0);
+            assertThat(reloaded.revision()).isEqualTo(committed ? "1" : null);
         }
     }
 

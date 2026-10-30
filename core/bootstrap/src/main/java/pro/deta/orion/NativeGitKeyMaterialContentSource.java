@@ -7,6 +7,7 @@ import pro.deta.orion.git.fileapi.GitFileEvents;
 import pro.deta.orion.git.fileapi.GitFileChanged;
 import pro.deta.orion.util.Subscription;
 import pro.deta.orion.git.nativestorage.GitOperationException;
+import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
 import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.keymaterial.KeyMaterialContentSource;
@@ -14,8 +15,8 @@ import pro.deta.orion.keymaterial.KeyMaterialSourceChanged;
 import pro.deta.orion.keymaterial.KeyMaterialStoreConflictException;
 
 import java.io.IOException;
+import java.io.FileNotFoundException;
 import java.util.Objects;
-import java.util.Optional;
 
 /** Bridges a Git file to a material source and reports committed file changes without retaining content. */
 final class NativeGitKeyMaterialContentSource implements KeyMaterialContentSource {
@@ -32,14 +33,18 @@ final class NativeGitKeyMaterialContentSource implements KeyMaterialContentSourc
     }
 
     @Override
-    public Optional<String> revision() throws IOException {
+    public Content load() throws IOException {
+        String revision;
         try {
-            GitFile file = events.file();
-            Optional<CommitId> revision = file.revision();
-            if (revision.isEmpty() || !file.exists(revision.orElseThrow())) return Optional.empty();
-            return Optional.of(revision.orElseThrow().toHex());
-        } catch (GitOperationException | RuntimeException failure) {
+            revision = events.file().revision().map(CommitId::toHex).orElse(null);
+        } catch (RuntimeException failure) {
             throw new IOException("Cannot read key material revision", failure);
+        }
+        if (revision == null) return new Content(null, null);
+        try {
+            return new Content(revision, read(revision));
+        } catch (FileNotFoundException missing) {
+            return new Content(revision, null);
         }
     }
 
@@ -50,6 +55,10 @@ final class NativeGitKeyMaterialContentSource implements KeyMaterialContentSourc
             GitFile file = events.file();
             CommitId requested = new CommitId(revision);
             return file.read(requested);
+        } catch (GitRepositoryFileNotFoundException missing) {
+            FileNotFoundException failure = new FileNotFoundException("Key material is absent at " + revision);
+            failure.initCause(missing);
+            throw failure;
         } catch (GitOperationException | RuntimeException failure) {
             throw new IOException("Cannot read key material store at " + revision, failure);
         }

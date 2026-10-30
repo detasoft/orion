@@ -355,11 +355,13 @@ class BootstrapContextTest {
         NativeGitRepositoryProvider backend = repositoryWith(configuration,
                 Map.of("orion.xml", xml(), "material.p12", materialBytes(configuration)));
         try (BootstrapContext context = openContext(configuration, ENVIRONMENT, backend)) {
-            long before = context.keyMaterial().revision();
+            String before = context.keyMaterial().revision();
             context.sshHostKeys(List.of());
-            assertThat(context.keyMaterial().revision()).isEqualTo(before + 1);
+            String saved = context.keyMaterial().revision();
+            assertThat(saved).isEqualTo(backend.retained("orion").refs().get("refs/heads/main"))
+                    .isNotEqualTo(before);
             context.sshHostKeys(List.of());
-            assertThat(context.keyMaterial().revision()).isEqualTo(before + 1);
+            assertThat(context.keyMaterial().revision()).isEqualTo(saved);
         }
     }
 
@@ -465,7 +467,8 @@ class BootstrapContextTest {
                         backend,
                         "orion",
                         "refs/heads/main",
-                        "material.p12"))).revision()).isEmpty();
+                        "material.p12"))).load().revision())
+                    .isEqualTo(backend.retained("orion").refs().get("refs/heads/main"));
         }
     }
 
@@ -498,7 +501,8 @@ class BootstrapContextTest {
                             incomplete,
                             "orion",
                             "refs/heads/main",
-                            "material.p12"))).revision()).isEmpty();
+                            "material.p12"))).load().revision())
+                        .isEqualTo(incomplete.retained("orion").refs().get("refs/heads/main"));
 
                 try (NativeGitRepositoryProvider restored = repositoryWith(configuration, backup)) {
                     try (BootstrapContext runtime = openContext(configuration, ENVIRONMENT, borrow(restored))) {
@@ -787,7 +791,8 @@ class BootstrapContextTest {
                         backend,
                         "orion",
                         "refs/heads/main",
-                        "material.p12"))).revision()).isEmpty();
+                        "material.p12"))).load().revision())
+                    .isEqualTo(backend.retained("orion").refs().get("refs/heads/main"));
         }
     }
 
@@ -1740,7 +1745,7 @@ class BootstrapContextTest {
                 modification.apply();
             });
         }
-        return store.read(store.revision().orElseThrow());
+        return store.load().bytes();
     }
 
     private static byte[] bytes(String value) {
