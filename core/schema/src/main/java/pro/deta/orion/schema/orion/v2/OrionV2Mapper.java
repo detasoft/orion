@@ -1,5 +1,6 @@
 package pro.deta.orion.schema.orion.v2;
 
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
 import pro.deta.orion.schema.acl.CredentialType;
@@ -61,7 +62,7 @@ public final class OrionV2Mapper {
     }
 
     private static OrionHttpsConfiguration toCurrent(OrionV2.Https source) {
-        List<OrionMaterialReference> clientRoots = new ArrayList<>();
+        List<KeyMaterialId> clientRoots = new ArrayList<>();
         for (OrionV2.MaterialReference reference : listOrEmpty(source.getClientTrustAnchors())) {
             clientRoots.add(toCurrent(reference));
         }
@@ -79,7 +80,7 @@ public final class OrionV2Mapper {
 
     private static OrionV2.Https fromCurrent(OrionHttpsConfiguration source) {
         List<OrionV2.MaterialReference> clientRoots = new ArrayList<>();
-        for (OrionMaterialReference reference : source.clientTrustAnchors()) {
+        for (KeyMaterialId reference : source.clientTrustAnchors()) {
             clientRoots.add(fromCurrent(reference));
         }
         return new OrionV2.Https(
@@ -126,11 +127,11 @@ public final class OrionV2Mapper {
                 source.eabSecret().orElse(null));
     }
 
-    private static OrionMaterialReference toCurrent(OrionV2.MaterialReference source) {
-        return new OrionMaterialReference(source.getAlias(), source.getVersion());
+    private static KeyMaterialId toCurrent(OrionV2.MaterialReference source) {
+        return new KeyMaterialId(source.getAlias(), source.getVersion());
     }
 
-    private static OrionV2.MaterialReference fromCurrent(OrionMaterialReference source) {
+    private static OrionV2.MaterialReference fromCurrent(KeyMaterialId source) {
         return new OrionV2.MaterialReference(source.alias(), source.version());
     }
 

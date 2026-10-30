@@ -286,11 +286,11 @@ class KeyMaterialOperationsTest {
             accountPublic = service.keyPair(account).getPublic().getEncoded();
             identityPublic = service.keyPair(identity).getPublic().getEncoded();
 
-            assertThat(store.revision().orElseThrow()).isEqualTo("1");
+            assertThat(store.load().revision()).isEqualTo("1");
             generateKeys(service, account, identity);
             assertThat(service.keyPair(account).getPublic().getEncoded())
                     .isEqualTo(accountPublic);
-            assertThat(store.revision().orElseThrow()).isEqualTo("1");
+            assertThat(store.load().revision()).isEqualTo("1");
         }
 
         try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialContentStore(
@@ -300,7 +300,7 @@ class KeyMaterialOperationsTest {
             generateKeys(service, account, identity);
             assertThat(service.keyPair(account).getPublic().getEncoded()).isEqualTo(accountPublic);
             assertThat(service.keyPair(identity).getPublic().getEncoded()).isEqualTo(identityPublic);
-            assertThat(store.revision().orElseThrow()).isEqualTo("1");
+            assertThat(store.load().revision()).isEqualTo("1");
         }
     }
 
@@ -317,7 +317,7 @@ class KeyMaterialOperationsTest {
                 new OrionEventManager()))) {
             assertThatThrownBy(() -> generateKeys(service, account, identity))
                     .isInstanceOf(Exception.class);
-            assertThat(store.revision()).isEmpty();
+            assertThat(store.load().bytes()).isNull();
         }
     }
 
@@ -359,7 +359,7 @@ class KeyMaterialOperationsTest {
                     List.of(leaf, intermediate.certificate()),
                     Optional.of(root.certificate()));
 
-            assertThat(store.revision().orElseThrow()).isEqualTo("2");
+            assertThat(store.load().revision()).isEqualTo("2");
             assertThat(certificate.certificateChain()).containsExactly(leaf, intermediate.certificate());
             assertThat(certificate.issuerTrustAnchor()).contains(root.certificate());
         }
@@ -419,7 +419,7 @@ class KeyMaterialOperationsTest {
                     List.of(nonX509Certificate(), intermediate.certificate()),
                     Optional.of(root.certificate())))
                     .hasMessageContaining("X.509");
-            assertThat(store.revision().orElseThrow()).isEqualTo("1");
+            assertThat(store.load().revision()).isEqualTo("1");
         }
     }
 

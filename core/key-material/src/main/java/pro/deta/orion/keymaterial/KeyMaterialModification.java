@@ -15,20 +15,20 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
-/** Collects append-only additions for one KMS version; deletion adds a new, marked version of an entry. */
+/** Collects append-only additions against a captured source revision; deletion appends a marked entry. */
 public final class KeyMaterialModification implements Modification {
     private final KeyMaterialService owner;
-    private final long expectedRevision;
+    private final String expectedRevision;
     private final List<Entry> additions = new ArrayList<>();
     private boolean finished;
 
-    KeyMaterialModification(KeyMaterialService owner, long expectedRevision) {
+    KeyMaterialModification(KeyMaterialService owner, String expectedRevision) {
         this.owner = owner;
         this.expectedRevision = expectedRevision;
     }
 
-    public long version() {
-        return Math.incrementExact(expectedRevision);
+    public String version() {
+        return expectedRevision;
     }
 
     public synchronized void generateKey(KeyMaterialDescriptor descriptor, int keySize)

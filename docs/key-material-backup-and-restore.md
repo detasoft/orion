@@ -44,8 +44,8 @@ Git revision `R2`. The root entry remains `(root, 3)`. Configuration that should
 use the renewed chain must select `(server, 2)` explicitly.
 
 This section defines the agreed contract. The current implementation still
-separates descriptor and stored-entry versions and maintains a numeric KMS
-revision; it must be aligned with these rules during the KMS contract change.
+separates descriptor and stored-entry versions; these must be aligned during
+the KMS contract change. The whole-store revision comes from the content source.
 
 ## Capture a generation
 

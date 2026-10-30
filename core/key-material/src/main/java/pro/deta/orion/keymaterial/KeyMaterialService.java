@@ -23,12 +23,13 @@ import java.util.Collection;
 import java.util.EnumSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Objects;
 import java.security.Key;
 import java.util.Set;
 import java.util.StringJoiner;
 
 /**
- * Validates material descriptors and prepares modifications against the store's logical revision.
+ * Validates material descriptors and prepares modifications against the content-source revision.
  * Descriptor attributes identify persisted purposes, algorithms and descriptor versions and must remain stable.
  * @AiRule Read operations must use store snapshots without acquiring the service monitor.
  */
@@ -395,19 +396,20 @@ final class KeyMaterialService implements AutoCloseable {
         requireMetadataField(alias, "version", Long.toString(version), fields[2]);
     }
 
-    long revision() {
+    String revision() {
         return store.revision();
     }
 
-    synchronized KeyMaterialModification modify(long expectedRevision) throws KeyMaterialStoreConflictException {
+    synchronized KeyMaterialModification modify(String expectedRevision)
+            throws KeyMaterialStoreConflictException {
         requireOpen();
-        if (store.revision() != expectedRevision) {
+        if (!Objects.equals(store.revision(), expectedRevision)) {
             throw new KeyMaterialStoreConflictException("Key material changed before modify");
         }
         return new KeyMaterialModification(this, expectedRevision);
     }
 
-    void apply(List<Entry> additions, long expectedRevision) throws IOException {
+    void apply(List<Entry> additions, String expectedRevision) throws IOException {
         store.apply(expectedRevision, additions);
     }
 

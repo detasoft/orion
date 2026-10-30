@@ -60,7 +60,8 @@ class KeyMaterialBootstrapTest {
             KeyMaterialDescriptor active = signing(configuration).active();
             signature = material.sign(active, payload);
             assertThat(active.alias()).isEqualTo("cluster-signing-v2");
-            assertThat(material.revision()).isEqualTo(1);
+            assertThat(material.revision()).isEqualTo(new LocalKeyMaterialContentSource(
+                    tempDir.resolve("security/orion.p12")).load().revision());
         }
 
         try (OrionKeyMaterial material = openLocal(configuration,
@@ -157,7 +158,7 @@ class KeyMaterialBootstrapTest {
                 events))
                 .isInstanceOf(GeneralSecurityException.class)
                 .hasMessageContaining("creation was not requested");
-        assertThat(store.revision()).isEmpty();
+        assertThat(store.load().bytes()).isNull();
 
         KeyStore emptyStore = KeyStore.getInstance("PKCS12");
         char[] password = "test-password".toCharArray();
@@ -166,7 +167,7 @@ class KeyMaterialBootstrapTest {
             emptyStore.store(output, password);
             store.write(output.toByteArray(), null);
         }
-        byte[] before = store.read(store.revision().orElseThrow());
+        byte[] before = store.load().bytes();
         assertThatThrownBy(() -> KeyMaterialBootstrap.open(
                 configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
@@ -175,7 +176,7 @@ class KeyMaterialBootstrapTest {
                 events))
                 .isInstanceOf(GeneralSecurityException.class)
                 .hasMessageContaining("cluster-signing-v2");
-        assertThat(store.read(store.revision().orElseThrow())).isEqualTo(before);
+        assertThat(store.load().bytes()).isEqualTo(before);
     }
 
     @Test
@@ -194,13 +195,13 @@ class KeyMaterialBootstrapTest {
                 modification.apply();
             });
         }
-        byte[] before = store.read(store.revision().orElseThrow());
+        byte[] before = store.load().bytes();
         assertThatThrownBy(() -> KeyMaterialBootstrap.open(
                 configuration, Map.of(PASSWORD_ENV, "test-password"), repositories,
                 new KeyMaterialCreation(true), events))
                 .isInstanceOf(GeneralSecurityException.class)
                 .hasMessageContaining("cluster-signing-v2");
-        assertThat(store.read(store.revision().orElseThrow())).isEqualTo(before);
+        assertThat(store.load().bytes()).isEqualTo(before);
     }
 
     @Test
@@ -218,7 +219,7 @@ class KeyMaterialBootstrapTest {
                 events))
                 .isInstanceOf(GeneralSecurityException.class)
                 .hasMessageContaining("retained");
-        assertThat(store.revision()).isEmpty();
+        assertThat(store.load().bytes()).isNull();
     }
 
     @Test

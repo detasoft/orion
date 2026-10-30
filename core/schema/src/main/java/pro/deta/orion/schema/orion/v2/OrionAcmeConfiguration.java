@@ -1,5 +1,7 @@
 package pro.deta.orion.schema.orion.v2;
 
+import pro.deta.orion.keymaterial.KeyMaterialId;
+
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -15,7 +17,7 @@ public record OrionAcmeConfiguration(
         String accountEmail,
         List<String> domains,
         String organization,
-        Optional<OrionMaterialReference> accountMaterial,
+        Optional<KeyMaterialId> accountMaterial,
         long authorizationTimeoutSeconds,
         long orderTimeoutSeconds,
         boolean agreeToTermsOfService,

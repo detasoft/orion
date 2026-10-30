@@ -1,7 +1,8 @@
-package pro.deta.orion.schema.orion.v2;
+package pro.deta.orion.keymaterial;
 
-public record OrionMaterialReference(String alias, long version) {
-    public OrionMaterialReference {
+/** Identifies one material entry by alias and its positive per-alias version. */
+public record KeyMaterialId(String alias, long version) {
+    public KeyMaterialId {
         if (alias == null || alias.isBlank()) {
             throw new IllegalArgumentException("Material alias must not be blank");
         }

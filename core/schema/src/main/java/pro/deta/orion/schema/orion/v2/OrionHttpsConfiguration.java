@@ -1,5 +1,7 @@
 package pro.deta.orion.schema.orion.v2;
 
+import pro.deta.orion.keymaterial.KeyMaterialId;
+
 import java.net.URI;
 import java.util.HashSet;
 import java.util.List;
@@ -11,10 +13,10 @@ public record OrionHttpsConfiguration(
         String address,
         int port,
         URI publicUrl,
-        Optional<OrionMaterialReference> identity,
-        Optional<OrionMaterialReference> serverIssuerTrustAnchor,
+        Optional<KeyMaterialId> identity,
+        Optional<KeyMaterialId> serverIssuerTrustAnchor,
         ClientAuthentication clientAuthentication,
-        List<OrionMaterialReference> clientTrustAnchors,
+        List<KeyMaterialId> clientTrustAnchors,
         Optional<OrionAcmeConfiguration> acme) {
     public OrionHttpsConfiguration {
         if (port < 1 || port > 65535) {

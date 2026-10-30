@@ -3,7 +3,6 @@ package pro.deta.orion.keymaterial;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Objects;
-import java.util.Optional;
 
 public class ReadOnlyKeyMaterialContentSource implements KeyMaterialContentSource {
     private final byte[] bytes;
@@ -21,8 +20,8 @@ public class ReadOnlyKeyMaterialContentSource implements KeyMaterialContentSourc
     }
 
     @Override
-    public Optional<String> revision() {
-        return Optional.of(KeyMaterialVersions.sha256(bytes));
+    public Content load() {
+        return new Content(KeyMaterialVersions.sha256(bytes), Arrays.copyOf(bytes, bytes.length));
     }
 
     @Override

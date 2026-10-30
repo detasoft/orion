@@ -1,9 +1,11 @@
 package pro.deta.orion.keymaterial;
 
 import pro.deta.orion.event.OrionEventManager;
+import pro.deta.orion.keymaterial.KeyMaterialContentSource.Content;
 import pro.deta.orion.util.Subscription;
 
 import java.io.IOException;
+import java.io.FileNotFoundException;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.KeyStore;
@@ -27,8 +29,8 @@ import java.util.concurrent.locks.ReentrantLock;
  * Owns decoded material, revisions, persistence, and source-change handling without retaining serialized bytes.
  * Writer coordination is separate from state access. Source notifications during a write are deferred until
  * it finishes, and material events are published outside both locks. Failed writes invalidate this owner.
- * The addition attribute OID stores logical aliases, entry versions, KMS revisions and deletion markers;
- * its persisted identifier and format must remain stable.
+ * The addition attribute stores logical aliases, per-alias entry versions and deletion markers.
+ * The content source alone supplies the whole-store revision; it is not stored in individual entries.
  */
 public final class KeyMaterialContentStore implements AutoCloseable {
     private static final String LOCAL_KEY_ID_ATTRIBUTE_OID = "1.2.840.113549.1.9.21";
@@ -41,7 +43,7 @@ public final class KeyMaterialContentStore implements AutoCloseable {
     private KeyStore keyStore;
     private String sourceRevision;
     private boolean sourceChangePending;
-    private long revision;
+    private boolean durableSnapshot;
 
     public KeyMaterialContentStore(KeyMaterialContentSource source, KeyMaterialCodec codec,
             OrionEventManager events) throws IOException, GeneralSecurityException {
@@ -51,28 +53,26 @@ public final class KeyMaterialContentStore implements AutoCloseable {
         this.events = events;
         Subscription subscribed = null;
         try {
-            Optional<String> stored = source.revision();
-            if (stored.isPresent()) {
-                sourceRevision = stored.orElseThrow();
-                byte[] bytes = source.read(sourceRevision);
-                try {
-                    keyStore = codec.decode(bytes);
-                } finally {
-                    Arrays.fill(bytes, (byte) 0);
-                }
-            } else {
-                keyStore = codec.create();
+            Content initial = source.load();
+            sourceRevision = initial.revision();
+            byte[] bytes = initial.bytes();
+            try {
+                keyStore = bytes == null ? codec.create() : codec.decode(bytes);
+                durableSnapshot = bytes != null;
+            } finally {
+                if (bytes != null) Arrays.fill(bytes, (byte) 0);
             }
-            for (String alias : physicalAliases()) {
-                revision = Math.max(revision, entryVersion(alias).kmsVersion());
-            }
+            for (String physical : physicalAliases()) entryVersion(physical);
             subscribed = events.subscribe(KeyMaterialSourceChanged.class, event -> {
                 if (event.source() == source) reloadChangedSource(event.revision());
             });
             changes = subscribed;
-            Optional<String> current = source.revision();
-            if (current.isPresent()) {
-                reloadChangedSource(current.orElseThrow());
+            Content current = source.load();
+            try {
+                reload(current);
+            } catch (IOException | GeneralSecurityException | RuntimeException failure) {
+                System.getLogger(KeyMaterialContentStore.class.getName()).log(System.Logger.Level.WARNING,
+                        "Cannot reload key material; retaining the last valid state", failure);
             }
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {
             if (subscribed != null) subscribed.close();
@@ -140,10 +140,10 @@ public final class KeyMaterialContentStore implements AutoCloseable {
 
     synchronized boolean hasDurableSnapshot() {
         requireOpen();
-        return sourceRevision != null;
+        return durableSnapshot;
     }
 
-    private void append(KeyStore target, Entry addition, long kmsVersion) throws GeneralSecurityException {
+    private void append(KeyStore target, Entry addition) throws GeneralSecurityException {
         String alias = addition.alias().toLowerCase(Locale.ROOT);
         String physical = target.containsAlias(alias)
                 ? "__orion_kms_" + HexFormat.of().formatHex(alias.getBytes(StandardCharsets.UTF_8))
@@ -158,7 +158,7 @@ public final class KeyMaterialContentStore implements AutoCloseable {
         }
         String metadata = Base64.getUrlEncoder().withoutPadding()
                 .encodeToString(alias.getBytes(StandardCharsets.UTF_8))
-                + ";" + addition.version() + ";" + kmsVersion + ";" + addition.deleted();
+                + ";" + addition.version() + ";" + addition.deleted();
         attributes.add(new PKCS12Attribute(ADDITION_ATTRIBUTE_OID, metadata));
         KeyStore.Entry entry = switch (addition.entry()) {
             case KeyStore.PrivateKeyEntry key -> new KeyStore.PrivateKeyEntry(
@@ -204,17 +204,16 @@ public final class KeyMaterialContentStore implements AutoCloseable {
 
     private static EntryVersion entryVersion(KeyStore source, String physical) throws GeneralSecurityException {
         String metadata = attribute(source.getAttributes(physical), ADDITION_ATTRIBUTE_OID);
-        if (metadata == null) return new EntryVersion(physical, physical, 1, 0, false);
+        if (metadata == null) return new EntryVersion(physical, physical, 1, false);
         try {
             String[] fields = metadata.split(";", -1);
-            if (fields.length != 4 || (!fields[3].equals("true") && !fields[3].equals("false"))) {
+            if (fields.length != 3 || (!fields[2].equals("true") && !fields[2].equals("false"))) {
                 throw new IllegalArgumentException();
             }
             String alias = new String(Base64.getUrlDecoder().decode(fields[0]), StandardCharsets.UTF_8);
             long entryVersion = Long.parseLong(fields[1]);
-            long kmsVersion = Long.parseLong(fields[2]);
-            if (alias.isBlank() || entryVersion < 1 || kmsVersion < 1) throw new IllegalArgumentException();
-            return new EntryVersion(physical, alias, entryVersion, kmsVersion, Boolean.parseBoolean(fields[3]));
+            if (alias.isBlank() || entryVersion < 1) throw new IllegalArgumentException();
+            return new EntryVersion(physical, alias, entryVersion, Boolean.parseBoolean(fields[2]));
         } catch (IllegalArgumentException failure) {
             throw new GeneralSecurityException("Invalid key material addition: " + physical, failure);
         }
@@ -227,14 +226,14 @@ public final class KeyMaterialContentStore implements AutoCloseable {
         return null;
     }
 
-    private record EntryVersion(String physicalAlias, String alias, long version, long kmsVersion, boolean deleted) {}
+    private record EntryVersion(String physicalAlias, String alias, long version, boolean deleted) {}
 
-    public synchronized long revision() {
+    public synchronized String revision() {
         requireOpen();
-        return revision;
+        return sourceRevision;
     }
 
-    public void apply(long expectedRevision, List<Entry> additions) throws IOException {
+    public void apply(String expectedRevision, List<Entry> additions) throws IOException {
         try {
             Set<String> resources = applyState(expectedRevision, additions);
             if (!resources.isEmpty()) publishChanged(resources);
@@ -253,34 +252,29 @@ public final class KeyMaterialContentStore implements AutoCloseable {
             sourceChangePending = false;
         }
         try {
-            Optional<String> current = source.revision();
-            if (current.isPresent()) reloadChangedSource(current.orElseThrow());
-        } catch (IOException | RuntimeException failure) {
+            reload(source.load());
+        } catch (IOException | GeneralSecurityException | RuntimeException failure) {
             System.getLogger(KeyMaterialContentStore.class.getName()).log(System.Logger.Level.WARNING,
                     "Cannot refresh material source after save; retaining the committed state", failure);
         }
     }
 
-    private Set<String> applyState(long expectedRevision, List<Entry> additions) throws IOException {
-        long nextVersion;
+    private Set<String> applyState(String expectedRevision, List<Entry> additions) throws IOException {
         Set<String> resources = new HashSet<>();
         writes.lock();
         try {
             byte[] serialized;
-            String expected;
             KeyStore publication;
             synchronized (this) {
                 requireOpen();
-                if (revision != expectedRevision) {
+                if (!Objects.equals(sourceRevision, expectedRevision)) {
                     throw new KeyMaterialStoreConflictException("Key material changed before apply");
                 }
                 if (additions.isEmpty()) return Set.of();
-                nextVersion = Math.incrementExact(expectedRevision);
                 try {
                     publication = copyForPublication();
-                    for (Entry addition : additions) append(publication, addition, nextVersion);
+                    for (Entry addition : additions) append(publication, addition);
                     serialized = codec.encode(publication);
-                    expected = sourceRevision;
                 } catch (GeneralSecurityException failure) {
                     close();
                     throw new IOException("Cannot prepare key material", failure);
@@ -292,19 +286,19 @@ public final class KeyMaterialContentStore implements AutoCloseable {
             try {
                 String saved;
                 try {
-                    saved = source.write(serialized, expected);
+                    saved = source.write(serialized, expectedRevision);
                 } finally {
                     Arrays.fill(serialized, (byte) 0);
                 }
                 synchronized (this) {
                     requireOpen();
-                    if (revision < nextVersion) {
+                    if (Objects.equals(sourceRevision, expectedRevision)) {
+                        keyStore = publication;
                         for (Entry addition : additions) {
-                            append(keyStore, addition, nextVersion);
                             resources.add(addition.alias());
                         }
                         sourceRevision = saved;
-                        revision = nextVersion;
+                        durableSnapshot = true;
                     } else {
                         for (String physical : physicalAliases(publication)) {
                             if (!keyStore.containsAlias(physical)
@@ -328,21 +322,29 @@ public final class KeyMaterialContentStore implements AutoCloseable {
     }
 
     public void reload(String requestedRevision) throws IOException, GeneralSecurityException {
-        Set<String> resources = reloadState(requestedRevision);
+        synchronized (this) {
+            requireOpen();
+            Objects.requireNonNull(requestedRevision, "revision");
+            if (Objects.equals(sourceRevision, requestedRevision)) return;
+        }
+        reload(new Content(requestedRevision, readContent(requestedRevision)));
+    }
+
+    private void reload(Content content) throws IOException, GeneralSecurityException {
+        Set<String> resources = reloadState(content);
         if (!resources.isEmpty()) publishChanged(resources);
     }
 
-    private synchronized Set<String> reloadState(String requestedRevision)
+    private synchronized Set<String> reloadState(Content content)
             throws IOException, GeneralSecurityException {
-        requireOpen();
-        Objects.requireNonNull(requestedRevision, "revision");
-        if (Objects.equals(sourceRevision, requestedRevision)) return Set.of();
         KeyStore incoming;
-        byte[] bytes = source.read(requestedRevision);
+        byte[] bytes = content.bytes();
         try {
-            incoming = codec.decode(bytes);
+            requireOpen();
+            if (Objects.equals(sourceRevision, content.revision())) return Set.of();
+            incoming = bytes == null ? codec.create() : codec.decode(bytes);
         } finally {
-            Arrays.fill(bytes, (byte) 0);
+            if (bytes != null) Arrays.fill(bytes, (byte) 0);
         }
         for (String physical : physicalAliases()) {
             if (!incoming.containsAlias(physical)
@@ -352,7 +354,6 @@ public final class KeyMaterialContentStore implements AutoCloseable {
         }
         Set<String> resources = new HashSet<>();
         Set<String> entryVersions = new HashSet<>();
-        long nextRevision = revision;
         for (String physical : physicalAliases(incoming)) {
             EntryVersion entry = entryVersion(incoming, physical);
             if (!entryVersions.add(entry.alias() + ":" + entry.version())) {
@@ -360,18 +361,24 @@ public final class KeyMaterialContentStore implements AutoCloseable {
             }
             if (keyStore.containsAlias(physical)) continue;
             EntryVersion previous = findVersion(entry.alias());
-            if (entry.kmsVersion() <= revision
-                    || (previous != null && entry.version() <= previous.version())) {
+            if (previous != null && entry.version() <= previous.version()) {
                 throw new GeneralSecurityException("Key material revision does not extend active history");
             }
             readEntry(incoming, physical);
             resources.add(entry.alias());
-            nextRevision = Math.max(nextRevision, entry.kmsVersion());
         }
         keyStore = incoming;
-        sourceRevision = requestedRevision;
-        revision = nextRevision;
+        sourceRevision = content.revision();
+        durableSnapshot = bytes != null;
         return Set.copyOf(resources);
+    }
+
+    private byte[] readContent(String revision) throws IOException {
+        try {
+            return source.read(revision);
+        } catch (FileNotFoundException missing) {
+            return null;
+        }
     }
 
     private KeyStore.Entry readEntry(KeyStore source, String physical) throws GeneralSecurityException {

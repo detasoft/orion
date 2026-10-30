@@ -13,7 +13,6 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.locks.ReentrantLock;
@@ -39,15 +38,11 @@ public class LocalKeyMaterialContentSource implements KeyMaterialContentSource {
     }
 
     @Override
-    public Optional<String> revision() throws IOException {
-        if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) return Optional.empty();
+    public Content load() throws IOException {
+        if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) return new Content(null, null);
         KeyMaterialFileSecurity.validatePublicationDirectory(path.getParent());
         byte[] bytes = KeyMaterialFileSecurity.readOwnerOnlyFile(path, "Key material location");
-        try {
-            return Optional.of(KeyMaterialVersions.sha256(bytes));
-        } finally {
-            Arrays.fill(bytes, (byte) 0);
-        }
+        return new Content(KeyMaterialVersions.sha256(bytes), bytes);
     }
 
     @Override

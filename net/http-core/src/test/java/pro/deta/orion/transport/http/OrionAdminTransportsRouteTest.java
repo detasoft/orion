@@ -12,8 +12,7 @@ import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.SshTransportConfig;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
-import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
-
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.test.integration.TestConfiguration;
 import java.net.URI;
 import java.util.List;
@@ -138,7 +137,7 @@ class OrionAdminTransportsRouteTest {
                                 "127.0.0.1",
                                 9443,
                                 URI.create("https://git.example"),
-                                Optional.of(new OrionMaterialReference("https-identity", 1)),
+                                Optional.of(new KeyMaterialId("https-identity", 1)),
                                 Optional.empty(),
                                 OrionHttpsConfiguration.ClientAuthentication.DISABLED,
                                 List.of(),

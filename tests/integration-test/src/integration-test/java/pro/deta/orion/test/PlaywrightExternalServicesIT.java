@@ -18,7 +18,7 @@ import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
-import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.TeamId;
 import pro.deta.orion.test.integration.OrionTestRootAccess;
@@ -98,11 +98,11 @@ class PlaywrightExternalServicesIT {
                 .refs().get(configuration.getBootstrap().getConfiguration().selectedRef());
         OrionAcmeConfiguration acme = new OrionAcmeConfiguration(
                 true, URI.create(DIRECTORY_URL), "orion@orion.test", List.of("orion.test"), "Orion",
-                Optional.of(new OrionMaterialReference("acme-account", 1)), 90, 120, true, false,
+                Optional.of(new KeyMaterialId("acme-account", 1)), 90, 120, true, false,
                 Optional.empty(), Optional.empty());
         OrionHttpsConfiguration https = new OrionHttpsConfiguration(
                 false, "0.0.0.0", 9443, URI.create("https://orion.test:9443"),
-                Optional.of(new OrionMaterialReference("acme-identity", 1)), Optional.empty(),
+                Optional.of(new KeyMaterialId("acme-identity", 1)), Optional.empty(),
                 OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), Optional.of(acme));
         TestRuntimeBootstrap.updateConfiguration(
                 component,
