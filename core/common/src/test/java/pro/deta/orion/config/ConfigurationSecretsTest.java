@@ -1,5 +1,7 @@
 package pro.deta.orion.config;
 
+import pro.deta.orion.keymaterial.KeyMaterialModification;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
 import pro.deta.orion.keymaterial.KeyMaterialContentStore;
@@ -139,6 +141,36 @@ class ConfigurationSecretsTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> secrets.resolve(REPOSITORY, REFERENCE))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void resolvesEachEnvelopeWithItsExactWrappingKeyVersion() throws Exception {
+        current.set(secrets.createSystem(current.get(), "github-token", "old-secret".toCharArray()));
+        javax.crypto.KeyGenerator generator = javax.crypto.KeyGenerator.getInstance("AES");
+        generator.init(256);
+        KeyMaterialModification rotation = keyMaterial.modify(keyMaterial.revision());
+        KeyMaterialId next = rotation.importSecretKey(CIPHER, generator.generateKey());
+        rotation.apply();
+        assertThat(next.version()).isEqualTo(2);
+        assertThat(secrets.resolveSystem("github-token")).isEqualTo("old-secret".toCharArray());
+
+        byte[] plaintext = "new-secret".getBytes(StandardCharsets.UTF_8);
+        String encoded;
+        try {
+            ConfigurationSecretEnvelope envelope =
+                    keyMaterial.seal(keyMaterial.read(next).descriptor(), plaintext,
+                    new ConfigurationSecretContext("system/github-token", "credential"));
+            encoded = new ConfigurationSecretEnvelopeCodec().serialize(envelope);
+        } finally {
+            java.util.Arrays.fill(plaintext, (byte) 0);
+        }
+        OrionDocument.SystemConfiguration system = current.get().system();
+        current.set(new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(),
+                system.https(),
+                List.of(new ConfigurationSecret("github-token", encoded)), system.proxies(),
+                        system.connections(),
+                system.oidcProviders(), system.invitations()), current.get().organizations()));
+        assertThat(secrets.resolveSystem("github-token")).isEqualTo("new-secret".toCharArray());
     }
 
     @Test

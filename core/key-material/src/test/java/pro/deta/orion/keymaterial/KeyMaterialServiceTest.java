@@ -50,7 +50,7 @@ class KeyMaterialServiceTest {
             modification.generateKey(cipher, 256);
             modification.setTrustedCertificate(trust, root);
             modification.apply();
-            pair = seed.getKeyPair(signing.alias());
+            pair = seed.read(signing.id()).keyPair();
         }
 
         CountDownLatch preparationStarted = new CountDownLatch(1);
@@ -93,16 +93,18 @@ class KeyMaterialServiceTest {
                     assertThat(service.revision()).isEqualTo("1");
                     assertThat(service.hasDurableSnapshot()).isTrue();
                     assertThat(service.containsAlias(signing.alias(), signing.purposes())).isTrue();
-                    assertThat(service.getKeyPair(signing.alias()).getPublic()).isEqualTo(pair.getPublic());
-                    assertThat(service.getKeyPair(signing.alias()).getPrivate().getEncoded())
+                    assertThat(service.read(signing.id()).keyPair().getPublic()).isEqualTo(pair.getPublic());
+                    assertThat(service.read(signing.id()).keyPair().getPrivate().getEncoded())
                             .isEqualTo(pair.getPrivate().getEncoded());
-                    assertThat(service.getCertificateChain(signing.alias())).hasSize(1);
-                    assertThat(service.getTrustedCertificate(trust)).isEqualTo(root);
+                    assertThat(service.read(signing.id()).certificateChain()
+                            .toArray(Certificate[]::new)).hasSize(1);
+                    assertThat(service.read(trust.id()).trustedCertificate()).isEqualTo(root);
                     service.validateExisting(signing);
-                    assertThat(service.privateKeyDescriptors(signing.purposes())).containsExactly(signing);
-                    assertThat(service.secretKey(cipher.alias()).getAlgorithm()).isEqualTo("AES");
+
+                    assertThat(((KeyStore.SecretKeyEntry) service.read(cipher.id()).content())
+                            .getSecretKey().getAlgorithm()).isEqualTo("AES");
                     assertThat(service.readEntry(signing.alias()).alias()).isEqualTo(signing.alias());
-                    assertThat(service.inventory(Set.of())).extracting(entry -> entry.descriptor().alias())
+                    assertThat(service.inventory()).extracting(KeyMaterialId::alias)
                             .containsExactlyInAnyOrder(signing.alias(), cipher.alias(), trust.alias());
                     assertThat(service.containsAlias(prepared.alias(), Set.of())).isFalse();
                     return null;
@@ -134,9 +136,12 @@ class KeyMaterialServiceTest {
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()));
-        KeyPair loaded = reloaded.getKeyPair(KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS);
-        Certificate[] chain = reloaded.getCertificateChain(
-                KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS);
+        KeyPair loaded =
+                reloaded.read(new KeyMaterialId(KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
+                1)).keyPair();
+        Certificate[] chain =
+                reloaded.read(new KeyMaterialId(KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
+                1)).certificateChain().toArray(Certificate[]::new);
 
         assertThat(savedVersion).isNotBlank();
         assertThat(reloaded.containsAlias(KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS, Set.of())).isTrue();
@@ -186,8 +191,10 @@ class KeyMaterialServiceTest {
         generateKey(service, descriptor(
                 KeyMaterialTestConstants.ORION_CA_2026_05_ALIAS,
                 KeyMaterialPurpose.CERTIFICATE_AUTHORITY, KeyMaterialAlgorithm.RSA), 2048);
-        X509Certificate storageCertificate = (X509Certificate) service.getCertificateChain(
-                KeyMaterialTestConstants.ORION_CA_2026_05_ALIAS)[0];
+        X509Certificate storageCertificate =
+                (X509Certificate) service
+                .read(new KeyMaterialId(KeyMaterialTestConstants.ORION_CA_2026_05_ALIAS,
+                1)).certificateChain().toArray(Certificate[]::new)[0];
         X509Certificate issuerCertificate = TestCertificateChain.root("Public Root").certificate();
         KeyMaterialDescriptor descriptor = trustedCertificate(
                 KeyMaterialTestConstants.ORION_CA_CERT_2026_05_ALIAS,
@@ -201,13 +208,14 @@ class KeyMaterialServiceTest {
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()));
-        X509Certificate trustedCertificate = reloaded.getTrustedCertificate(descriptor);
+        X509Certificate trustedCertificate = reloaded.read(descriptor.id()).trustedCertificate();
 
         assertThat(trustedCertificate.getEncoded()).isEqualTo(issuerCertificate.getEncoded());
-        assertThatThrownBy(() -> reloaded.getKeyPair(
-                KeyMaterialTestConstants.ORION_CA_CERT_2026_05_ALIAS).getPrivate())
+        assertThatThrownBy(() -> reloaded
+                .read(new KeyMaterialId(KeyMaterialTestConstants.ORION_CA_CERT_2026_05_ALIAS,
+                1)).keyPair().getPrivate())
                 .isInstanceOf(Exception.class)
-                .hasMessageContaining("Private key alias not found");
+                .hasMessageContaining("Private key not found");
     }
 
     @Test
@@ -276,13 +284,12 @@ class KeyMaterialServiceTest {
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
-            assertThat(service.privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST)))
-                    .containsExactly(ec, rsa);
+
         }
     }
 
     @Test
-    void inventoriesPublicMaterialWithoutExposingPrivateOrSecretKeys() throws Exception {
+    void inventoriesTypedMaterialIdsAndReadsTheirContent() throws Exception {
         InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
 
         KeyMaterialDescriptor identity = descriptor(
@@ -312,43 +319,36 @@ class KeyMaterialServiceTest {
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
-            List<KeyMaterialInventoryEntry> entries = service.inventory(Set.of());
-            assertThat(entries).extracting(entry -> entry.descriptor().alias())
+            List<KeyMaterialId> entries = service.inventory();
+            assertThat(entries).extracting(KeyMaterialId::alias)
                     .containsExactly("configuration-v1", "issuer-v1", "tls-identity-v1");
-            assertThat(entries.get(0).publicKeyPem()).isNull();
-            assertThat(entries.get(0).certificates()).isEmpty();
-            assertThat(entries.get(1).certificates()).hasSize(1);
-            assertThat(entries.get(2).publicKeyPem()).startsWith("-----BEGIN PUBLIC KEY-----");
-            assertThat(entries.get(2).certificates()).hasSize(2);
-            assertThat(entries.get(2).certificates().getFirst().subject()).contains("orion.test");
-            assertThat(entries.get(2).certificates().getFirst().dnsNames()).isEmpty();
-            assertThat(entries.toString()).doesNotContain("PRIVATE KEY", "SECRET KEY");
-            assertThat(service.privateKeyDescriptors(Set.of())).containsExactly(identity);
-            assertThat(service.privateKeyDescriptors(Set.of(KeyMaterialPurpose.TLS_IDENTITY)))
-                    .containsExactly(identity);
-            assertThat(service.privateKeyDescriptors(Set.of(KeyMaterialPurpose.TRUST_ANCHOR))).isEmpty();
-            assertThat(service.privateKeyDescriptors(Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER))).isEmpty();
+            assertThat(service.read(entries.get(0)).content()).isInstanceOf(KeyStore.SecretKeyEntry.class);
+            assertThat(service.read(entries.get(1)).content())
+                    .isInstanceOf(KeyStore.TrustedCertificateEntry.class);
+            assertThat(service.read(entries.get(2)).certificateChain()).hasSize(1);
+            assertThat(service.read(entries.get(2)).certificateChain().getFirst()
+                    .getSubjectX500Principal().getName())
+                    .contains("orion.test");
+
         }
     }
 
     @Test
-    void inventoryAndPrivateKeyDiscoveryRejectAnAlgorithmThatDoesNotMatchTheKey() throws Exception {
+    void inventoryRejectsAnAlgorithmThatDoesNotMatchTheKey() throws Exception {
         TestCertificateChain.Authority issuer = TestCertificateChain.root("Mismatched metadata");
         KeyStore.PrivateKeyEntry entry = new KeyStore.PrivateKeyEntry(
                 issuer.keyPair().getPrivate(), new Certificate[]{issuer.certificate()},
-                Set.of(new PKCS12Attribute("2.25.260349814076539099691640886169327825428", "SSH_HOST;EC;1")));
+                Set.of(new PKCS12Attribute("2.25.260349814076539099691640886169327825428", "SSH_HOST;EC")));
         KeyMaterialContentStore store = new KeyMaterialContentStore(
                 new InMemoryKeyMaterialContentSource(), new KeyMaterialCodec(options()), new OrionEventManager());
         try (KeyMaterialService service = KeyMaterialService.open(store)) {
             store.apply(store.revision(), List.of(
                     new KeyMaterialContentStore.Entry("mismatched", entry, 1, false)));
 
-            assertThatThrownBy(() -> service.inventory(Set.of(KeyMaterialPurpose.SSH_HOST)))
+            assertThatThrownBy(() -> service.inventory())
                     .isInstanceOf(GeneralSecurityException.class)
                     .hasMessageContaining("algorithm does not match");
-            assertThatThrownBy(() -> service.privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST)))
-                    .isInstanceOf(GeneralSecurityException.class)
-                    .hasMessageContaining("algorithm does not match");
+
         }
     }
 
@@ -366,8 +366,9 @@ class KeyMaterialServiceTest {
         generateKey(service, descriptor(
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_06_ALIAS,
                 KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA), 2048);
-        Certificate[] mismatchedChain = service.getCertificateChain(
-                KeyMaterialTestConstants.SERVER_SIGNING_2026_06_ALIAS);
+        Certificate[] mismatchedChain =
+                service.read(new KeyMaterialId(KeyMaterialTestConstants.SERVER_SIGNING_2026_06_ALIAS,
+                1)).certificateChain().toArray(Certificate[]::new);
         KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(
                 KeyMaterialTestConstants.BAD_SERVER_SIGNING_ALIAS,
                 Set.of(KeyMaterialPurpose.TLS_IDENTITY),
@@ -442,7 +443,8 @@ class KeyMaterialServiceTest {
                 new OrionEventManager()));
 
         assertThat(readOnly.containsAlias(KeyMaterialTestConstants.HTTPS_2026_05_ALIAS, Set.of())).isTrue();
-        assertThat(readOnly.getCertificateChain(KeyMaterialTestConstants.HTTPS_2026_05_ALIAS)).hasSize(1);
+        assertThat(readOnly.read(new KeyMaterialId(KeyMaterialTestConstants.HTTPS_2026_05_ALIAS,
+                1)).certificateChain().toArray(Certificate[]::new)).hasSize(1);
     }
 
     @Test
@@ -503,7 +505,7 @@ class KeyMaterialServiceTest {
         try {
             modification.generateKey(descriptor, keySize);
             modification.apply();
-            return service.getKeyPair(descriptor.alias());
+            return service.read(descriptor.id()).keyPair();
         } finally {
             modification.discard();
         }

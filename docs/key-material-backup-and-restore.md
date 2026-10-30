@@ -43,9 +43,10 @@ Renewing the certificate chain for `server` appends `(server, 2)` and publishes
 Git revision `R2`. The root entry remains `(root, 3)`. Configuration that should
 use the renewed chain must select `(server, 2)` explicitly.
 
-This section defines the agreed contract. The current implementation still
-separates descriptor and stored-entry versions; these must be aligned during
-the KMS contract change. The whole-store revision comes from the content source.
+Descriptors and stored entries use the same entry version. Version ordering is
+meaningful only within one alias; configuration selects active and retained
+materials without comparing versions across aliases. The whole-store revision
+comes from the content source.
 
 ## Capture a generation
 

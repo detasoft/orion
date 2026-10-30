@@ -184,7 +184,7 @@ class OrionKeyMaterialApiTest {
     }
 
     @Test
-    void inventoriesKeysAndTrustAnchorsThroughTheSameDescriptorAfterReopening() throws Exception {
+    void inventoriesKeysAndTrustAnchorsByExactIdAfterReopening() throws Exception {
         InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
         KeyMaterialDescriptor cipher = new KeyMaterialDescriptor("cipher",
                 Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES, 1);
@@ -198,13 +198,11 @@ class OrionKeyMaterialApiTest {
             });
         }
         try (OrionKeyMaterial material = open(store)) {
-            assertThat(material.inventory(Set.of())).extracting(KeyMaterialInventoryEntry::descriptor)
-                    .containsExactlyInAnyOrder(SIGNING, cipher, ROOT);
+            assertThat(material.inventory()).containsExactlyInAnyOrder(SIGNING.id(), cipher.id(), ROOT.id());
             assertThat(material.contains(ROOT)).isTrue();
-            assertThat(material.trustedCertificate(ROOT)).isEqualTo(root.certificate());
-            assertThat(material.keyPair(SIGNING).getPrivate()).isNotNull();
-            assertThat(material.inventory(Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER)).getFirst().publicKeyPem())
-                    .isNull();
+            assertThat(material.read(ROOT.id()).trustedCertificate()).isEqualTo(root.certificate());
+            assertThat(material.read(SIGNING.id()).keyPair().getPrivate()).isNotNull();
+            assertThat(material.read(cipher.id()).content()).isInstanceOf(KeyStore.SecretKeyEntry.class);
         }
     }
 
@@ -233,9 +231,10 @@ class OrionKeyMaterialApiTest {
                 modification.setTrustedCertificate(ROOT, root.certificate());
                 modification.apply();
             });
-            assertThatThrownBy(() -> material.keyPair(ROOT)).isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> material.trustedCertificate(IDENTITY))
-                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("TRUST_ANCHOR");
+            assertThatThrownBy(() -> material.read(ROOT.id())
+                    .keyPair()).isInstanceOf(GeneralSecurityException.class);
+            assertThatThrownBy(() -> material.read(IDENTITY.id()).trustedCertificate())
+                    .isInstanceOf(GeneralSecurityException.class).hasMessageContaining("Trusted certificate");
             assertThatThrownBy(() -> new TlsMaterialConfiguration(trustedIdentity, Optional.empty(),
                     List.of(), TlsClientAuthentication.DISABLED)).isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> new TlsMaterialConfiguration(IDENTITY, Optional.of(IDENTITY),
@@ -266,11 +265,9 @@ class OrionKeyMaterialApiTest {
             });
         }
         try (OrionKeyMaterial material = open(store)) {
-            assertThat(material.privateKeyDescriptors(signingAndHost)).containsExactly(shared);
-            assertThat(material.privateKeyDescriptors(Set.of(KeyMaterialPurpose.SERVER_SIGNING)))
-                    .containsExactlyInAnyOrder(shared, OTHER);
-            assertThat(material.inventory(trustAndCa)).extracting(entry -> entry.descriptor().alias())
-                    .containsExactly("shared-root");
+
+            assertThat(material.read(trusted.id()).purposes()).containsAll(trustAndCa);
+            assertThat(material.read(shared.id()).purposes()).containsAll(signingAndHost);
             assertThat(material.contains("shared", signingAndHost)).isTrue();
             assertThat(material.contains("shared", trustAndCa)).isFalse();
             assertThat(material.contains("missing", signingAndHost)).isFalse();
@@ -283,9 +280,8 @@ class OrionKeyMaterialApiTest {
                 modification.apply();
             });
             assertThat(material.contains("shared", Set.of())).isFalse();
-            assertThat(material.privateKeyDescriptors(signingAndHost)).isEmpty();
-            assertThat(material.inventory(signingAndHost)).isEmpty();
-            assertThat(material.inventory(Set.of())).hasSize(2);
+
+            assertThat(material.inventory()).doesNotContain(shared.id()).hasSize(2);
         }
     }
 
@@ -307,7 +303,8 @@ class OrionKeyMaterialApiTest {
                 modification.setTrustedCertificate(fullRoot, root.certificate());
                 modification.apply();
             });
-            X509Certificate leaf = TestCertificateChain.leaf("example.test", material.keyPair(IDENTITY), root);
+            X509Certificate leaf =
+                    TestCertificateChain.leaf("example.test", material.read(IDENTITY.id()).keyPair(), root);
             material.withModification(material.revision(), modification -> {
                 modification.setTrustedCertificate(ROOT, root.certificate());
                 modification.installCertificateChain(IDENTITY, List.of(leaf), Optional.of(ROOT));
@@ -315,13 +312,14 @@ class OrionKeyMaterialApiTest {
             });
         }
         try (OrionKeyMaterial material = open(store)) {
-            assertThat(material.inventory(identityPurposes)).extracting(entry -> entry.descriptor().purposes())
-                    .containsExactly(identityPurposes);
-            assertThat(material.inventory(rootPurposes)).extracting(entry -> entry.descriptor().purposes())
-                    .containsExactly(rootPurposes);
-            assertThat(material.certificateChain(fullIdentity)).hasSize(1);
-            assertThat(material.trustedCertificate(fullRoot)).isEqualTo(root.certificate());
-            assertThat(material.createTlsContext(new TlsMaterialConfiguration(IDENTITY, Optional.of(ROOT),
+            assertThat(material.read(new KeyMaterialId(fullIdentity.alias(), 2)).purposes())
+                    .isEqualTo(identityPurposes);
+            assertThat(material.read(new KeyMaterialId(fullRoot.alias(),
+                    2)).purposes()).isEqualTo(rootPurposes);
+            assertThat(material.read(fullIdentity.id()).certificateChain()).hasSize(1);
+            assertThat(material.read(fullRoot.id()).trustedCertificate()).isEqualTo(root.certificate());
+            assertThat(material.createTlsContext(new TlsMaterialConfiguration(
+                    material.read(new KeyMaterialId(IDENTITY.alias(), 2)).descriptor(), Optional.of(ROOT),
                     List.of(fullRoot), TlsClientAuthentication.WANT)).getProtocol()).isEqualTo("TLS");
         }
     }
@@ -342,7 +340,7 @@ class OrionKeyMaterialApiTest {
             assertThat(material.revision()).isNull();
             assertThat(modification.version()).isNull();
             assertThat(material.contains(SIGNING)).isFalse();
-            assertThat(material.inventory(Set.of())).isEmpty();
+            assertThat(material.inventory()).isEmpty();
             assertThat(store.load().bytes()).isNull();
 
             modification.apply();
@@ -350,10 +348,10 @@ class OrionKeyMaterialApiTest {
             assertThat(material.hasDurableSnapshot()).isTrue();
             assertThat(material.revision()).isEqualTo("1");
             assertThat(store.load().revision()).isEqualTo("1");
-            assertThat(material.privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST))).containsExactly(host);
+
             assertThat(material.sshHostKeyPairs(List.of())).hasSize(1);
             signature = material.sign(SIGNING, payload);
-            publicKey = material.publicKey(SIGNING).getEncoded();
+            publicKey = material.read(SIGNING.id()).publicKey().getEncoded();
             modification.discard();
             assertThatThrownBy(modification::apply).isInstanceOf(IllegalStateException.class);
         }
@@ -361,7 +359,7 @@ class OrionKeyMaterialApiTest {
         try (OrionKeyMaterial reloaded = open(store)) {
             assertThat(reloaded.hasDurableSnapshot()).isTrue();
             assertThat(reloaded.revision()).isEqualTo("1");
-            assertThat(reloaded.publicKey(SIGNING).getEncoded()).isEqualTo(publicKey);
+            assertThat(reloaded.read(SIGNING.id()).publicKey().getEncoded()).isEqualTo(publicKey);
             assertThat(reloaded.verify(SIGNING, payload, signature)).isTrue();
             assertThat(reloaded.verify(SIGNING, new byte[]{1}, signature)).isFalse();
         }
@@ -444,7 +442,8 @@ class OrionKeyMaterialApiTest {
         }
 
         try (OrionKeyMaterial reloaded = open(store)) {
-            assertThat(reloaded.publicKey(SIGNING).getEncoded()).isEqualTo(imported.getPublic().getEncoded());
+            assertThat(reloaded.read(SIGNING.id()).publicKey().getEncoded())
+                    .isEqualTo(imported.getPublic().getEncoded());
             assertThat(reloaded.contains(OTHER)).isFalse();
         }
     }
@@ -467,19 +466,22 @@ class OrionKeyMaterialApiTest {
                     IDENTITY, List.of(wrongLeaf, intermediate.certificate()), Optional.of(ROOT)))
                     .isInstanceOf(GeneralSecurityException.class).hasMessageContaining("public key");
             modification.installCertificateChain(IDENTITY, chain, Optional.of(ROOT));
-            assertThat(material.issuedCertificateChain(IDENTITY)).isEmpty();
+            assertThat(material.contains(IDENTITY)).isFalse();
             assertThat(material.contains(ROOT)).isFalse();
             modification.apply();
             assertThat(material.revision()).isEqualTo("1");
-            assertThat(material.issuedCertificateChain(IDENTITY).orElseThrow())
+            assertThat(material.read(new KeyMaterialId(IDENTITY.alias(),
+                    2)).issuedCertificateChain().orElseThrow())
                     .containsExactlyElementsOf(chain);
         }
 
         try (OrionKeyMaterial reloaded = open(store)) {
-            assertThat(reloaded.certificateChain(IDENTITY)).containsExactlyElementsOf(chain);
-            assertThat(reloaded.trustedCertificate(ROOT)).isEqualTo(root.certificate());
+            assertThat(reloaded.read(new KeyMaterialId(IDENTITY.alias(),
+                    2)).certificateChain()).containsExactlyElementsOf(chain);
+            assertThat(reloaded.read(ROOT.id()).trustedCertificate()).isEqualTo(root.certificate());
             TlsMaterialConfiguration tls = new TlsMaterialConfiguration(
-                    IDENTITY, Optional.of(ROOT), List.of(), TlsClientAuthentication.DISABLED);
+                    reloaded.read(new KeyMaterialId(IDENTITY.alias(), 2)).descriptor(),
+                    Optional.of(ROOT), List.of(), TlsClientAuthentication.DISABLED);
             assertThat(reloaded.createTlsContext(tls).getSocketFactory().getSupportedCipherSuites())
                     .isNotEmpty();
         }
@@ -578,12 +580,12 @@ class OrionKeyMaterialApiTest {
             }
             assertThat(material.revision()).isEqualTo("1");
             assertThat(store.load().revision()).isEqualTo("1");
-            assertThat(material.inventory(Set.of())).hasSize(1);
+            assertThat(material.inventory()).hasSize(1);
             assertThatThrownBy(first::apply).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(second::apply).isInstanceOf(IllegalStateException.class);
         }
         try (OrionKeyMaterial reloaded = open(store)) {
-            assertThat(reloaded.inventory(Set.of())).hasSize(1);
+            assertThat(reloaded.inventory()).hasSize(1);
             assertThat(reloaded.revision()).isEqualTo("1");
         }
     }
@@ -711,26 +713,28 @@ class OrionKeyMaterialApiTest {
                 modification.setTrustedCertificate(ROOT, original);
                 modification.apply();
             });
-            publicKey = material.publicKey(SIGNING).getEncoded();
+            publicKey = material.read(SIGNING.id()).publicKey().getEncoded();
             material.withModification(material.revision(), modification -> {
                 modification.setTrustedCertificate(ROOT, replacement);
                 modification.apply();
             });
-            assertThat(material.trustedCertificate(ROOT)).isEqualTo(replacement);
+            assertThat(material.read(new KeyMaterialId(ROOT.alias(),
+                    2)).trustedCertificate()).isEqualTo(replacement);
             assertThat(material.revision()).isEqualTo("2");
 
             KeyMaterialModification deletion = material.modify(material.revision());
             deletion.delete(SIGNING);
             deletion.delete(ROOT);
             assertThat(material.contains(SIGNING)).isTrue();
-            assertThat(material.trustedCertificate(ROOT)).isEqualTo(replacement);
+            assertThat(material.read(new KeyMaterialId(ROOT.alias(),
+                    2)).trustedCertificate()).isEqualTo(replacement);
             deletion.apply();
 
             assertThat(material.revision()).isEqualTo("3");
             assertThat(material.contains(SIGNING)).isFalse();
             assertThat(material.contains(ROOT)).isFalse();
-            assertThat(material.inventory(Set.of())).isEmpty();
-            assertThat(material.privateKeyDescriptors(Set.of(KeyMaterialPurpose.SERVER_SIGNING))).isEmpty();
+            assertThat(material.inventory()).isEmpty();
+
             assertThatThrownBy(() -> material.sign(SIGNING, new byte[]{1}))
                     .isInstanceOf(GeneralSecurityException.class);
         }
@@ -738,8 +742,8 @@ class OrionKeyMaterialApiTest {
             assertThat(reloaded.revision()).isEqualTo("3");
             assertThat(reloaded.contains(SIGNING)).isFalse();
             assertThat(reloaded.contains(ROOT)).isFalse();
-            assertThat(reloaded.inventory(Set.of())).isEmpty();
-            assertThatThrownBy(() -> reloaded.trustedCertificate(ROOT))
+            assertThat(reloaded.inventory()).isEmpty();
+            assertThatThrownBy(() -> reloaded.read(ROOT.id()).trustedCertificate())
                     .isInstanceOf(GeneralSecurityException.class);
         }
 

@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.config.OrionDocumentRevision;
 import java.util.Set;
 
 import jakarta.inject.Inject;
@@ -134,24 +135,39 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
         ActiveTls current = activeTls;
         if (current == null || !isRunning()) return;
         try {
-            List<X509Certificate> chain = keyMaterial.certificateChain(current.material().identity());
-            if (chain.equals(current.chain())) {
+            Optional<OrionHttpsConfiguration> configured = httpsConfiguration();
+            if (configured.isEmpty() || !configured.orElseThrow().enabled()) return;
+            TlsMaterialConfiguration selected = tlsMaterial(configured.orElseThrow());
+            List<X509Certificate> chain = keyMaterial.read(selected.identity().id()).certificateChain();
+            if (selected.equals(current.material()) && chain.equals(current.chain())) {
                 certificateActivationError = "";
                 return;
             }
-            SSLContext replacement = keyMaterial.createTlsContext(current.material());
+            SSLContext replacement = keyMaterial.createTlsContext(selected);
             SSLContext previous = current.factory().getSslContext();
             try {
-                current.factory().reload(factory -> factory.setSslContext(replacement));
+                current.factory().reload(factory -> {
+                    current.factory().setWantClientAuth(
+                            selected.clientAuthentication() == TlsClientAuthentication.WANT);
+                    current.factory().setNeedClientAuth(
+                            selected.clientAuthentication() == TlsClientAuthentication.REQUIRED);
+                    factory.setSslContext(replacement);
+                });
             } catch (Exception failure) {
                 try {
-                    current.factory().reload(factory -> factory.setSslContext(previous));
+                    current.factory().reload(factory -> {
+                        current.factory().setWantClientAuth(
+                                current.material().clientAuthentication() == TlsClientAuthentication.WANT);
+                        current.factory().setNeedClientAuth(
+                                current.material().clientAuthentication() == TlsClientAuthentication.REQUIRED);
+                        factory.setSslContext(previous);
+                    });
                 } catch (Exception rollbackFailure) {
                     failure.addSuppressed(rollbackFailure);
                 }
                 throw failure;
             }
-            activeTls = new ActiveTls(current.material(), current.factory(), List.copyOf(chain));
+            activeTls = new ActiveTls(selected, current.factory(), List.copyOf(chain));
             certificateActivationError = "";
         } catch (Exception failure) {
             certificateActivationError = "Could not activate the saved certificate. Retrying automatically.";
@@ -161,6 +177,10 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
 
     void reloadHttpsCertificate(Set<String> resources) {
         if (usesKeyMaterialResources(resources)) reloadHttpsCertificate();
+    }
+
+    boolean usesConfiguration(OrionDocumentRevision snapshot) {
+        return editor.current().equals(snapshot);
     }
 
     private record ActiveTls(TlsMaterialConfiguration material, SslContextFactory.Server factory,
@@ -218,7 +238,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
         OrionHttpsConfiguration https = configured.orElseThrow();
         TlsMaterialConfiguration material = tlsMaterial(https);
         SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
-        List<X509Certificate> chain = keyMaterial.certificateChain(material.identity());
+        List<X509Certificate> chain = keyMaterial.read(material.identity().id()).certificateChain();
         sslContextFactory.setSslContext(keyMaterial.createTlsContext(material));
         activeTls = new ActiveTls(material, sslContextFactory, List.copyOf(chain));
         sslContextFactory.setWantClientAuth(

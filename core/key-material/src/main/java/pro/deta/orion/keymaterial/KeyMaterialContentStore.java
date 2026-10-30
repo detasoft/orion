@@ -112,6 +112,21 @@ public final class KeyMaterialContentStore implements AutoCloseable {
                 latest.version(), latest.deleted()));
     }
 
+    public synchronized Optional<Entry> find(KeyMaterialId id) throws GeneralSecurityException {
+        requireOpen();
+        Objects.requireNonNull(id, "id");
+        EntryVersion latest = findVersion(id.alias());
+        if (latest == null || latest.deleted()) return Optional.empty();
+        for (String physical : physicalAliases()) {
+            EntryVersion version = entryVersion(physical);
+            if (version.alias().equalsIgnoreCase(id.alias()) && version.version() == id.version()) {
+                return Optional.of(new Entry(version.alias(), readEntry(keyStore, physical),
+                        version.version(), version.deleted()));
+            }
+        }
+        return Optional.empty();
+    }
+
     public synchronized List<Entry> entries() throws GeneralSecurityException {
         requireOpen();
         Set<String> aliases = new TreeSet<>();

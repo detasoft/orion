@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.keymaterial.KeyMaterialModification;
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
 import pro.deta.orion.keymaterial.KeyMaterialContentStore;
@@ -373,7 +374,9 @@ class JettyHTTPServerIT {
             });
             JettyHTTPServer server = server(
                     httpConfiguration(false),
-                    desiredState(testRuntime, OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of()),
+                    desiredState(testRuntime, Optional.of(new OrionHttpsConfiguration(true, "localhost",
+                            NetworkUtils.findAvailablePort(), null, Optional.of(IDENTITY.id()), Optional.empty(),
+                            OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), Optional.empty()))),
                     owner,
                     new OkRoute());
 
@@ -1062,23 +1065,28 @@ class JettyHTTPServerIT {
                     modification.generateKey(IDENTITY, 2048);
                     modification.apply();
                 });
-                KeyPair identityKey = owner.keyPair(IDENTITY);
+                KeyPair identityKey = owner.read(IDENTITY.id()).keyPair();
                 TlsMaterialConfiguration clientProvisioning = new TlsMaterialConfiguration(
                         IDENTITY, Optional.of(CLIENT_ROOT), List.of(), TlsClientAuthentication.DISABLED);
                 owner.certificateIdentity(clientProvisioning).installCertificateChain(
                         List.of(TestCertificateChain.leaf("localhost", identityKey, clientRoot)),
                         Optional.of(clientRoot.certificate()));
-                TlsMaterialConfiguration serverProvisioning = new TlsMaterialConfiguration(
-                        IDENTITY, Optional.of(SERVER_ROOT), List.of(), TlsClientAuthentication.DISABLED);
                 X509Certificate serverCertificate = TestCertificateChain.leaf(
                         "localhost", identityKey, serverRoot);
-                owner.certificateIdentity(serverProvisioning).installCertificateChain(
-                        List.of(serverCertificate),
-                        Optional.of(serverRoot.certificate()));
+                KeyMaterialModification modification = owner.modify(owner.revision());
+                KeyMaterialId identityId;
+                try {
+                    modification.setTrustedCertificate(SERVER_ROOT, serverRoot.certificate());
+                    identityId = modification.installCertificateChain(IDENTITY, List.of(serverCertificate),
+                            Optional.of(SERVER_ROOT));
+                    modification.apply();
+                } finally {
+                    modification.discard();
+                }
                 KeyPair trustedClientKey = TestCertificateChain.keyPair();
                 KeyPair serverIssuerClientKey = TestCertificateChain.keyPair();
                 return new SharedMaterial(
-                        store.load().bytes(),
+                        identityId, store.load().bytes(),
                         serverCertificate,
                         trustedClientKey,
                         TestCertificateChain.leaf("trusted-client", trustedClientKey, clientRoot),
@@ -1130,7 +1138,7 @@ class JettyHTTPServerIT {
                 "localhost",
                 port,
                 null,
-                Optional.of(reference(IDENTITY)),
+                Optional.of(SHARED_MATERIAL.identityId()),
                 Optional.of(reference(SERVER_ROOT)),
                 mode,
                 references,
@@ -1450,7 +1458,7 @@ class JettyHTTPServerIT {
             X509Certificate serverIssuerClientCertificate) implements AutoCloseable {
         X509Certificate serverRootCertificate() throws java.security.GeneralSecurityException {
             return owner.certificateIdentity(new pro.deta.orion.keymaterial.TlsMaterialConfiguration(
-                    IDENTITY, Optional.of(SERVER_ROOT), List.of(),
+                    owner.read(SHARED_MATERIAL.identityId()).descriptor(), Optional.of(SERVER_ROOT), List.of(),
                     pro.deta.orion.keymaterial.TlsClientAuthentication.DISABLED)).issuerTrustAnchor().orElseThrow();
         }
 
@@ -1545,6 +1553,7 @@ class JettyHTTPServerIT {
     }
 
     private record SharedMaterial(
+            KeyMaterialId identityId,
             byte[] snapshot,
             X509Certificate serverCertificate,
             KeyPair trustedClientKey,

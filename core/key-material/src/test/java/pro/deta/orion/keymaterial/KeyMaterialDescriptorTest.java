@@ -37,32 +37,22 @@ class KeyMaterialDescriptorTest {
     }
 
     @Test
-    void rejectsActiveAliasWithDifferentVerificationVersion() {
-        assertThatThrownBy(() -> new SigningMaterialSet(
-                signing("server-signing", 2),
-                List.of(signing("server-signing", 1))))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("alias")
-                .hasMessageContaining("server-signing");
+    void selectsSigningVersionsByFullIdentityWithoutOrderingDifferentAliases() {
+        KeyMaterialDescriptor active = signing("signing", 2);
+        KeyMaterialDescriptor retained = signing("signing", 1);
+        KeyMaterialDescriptor unrelated = signing("other", 20);
+        assertThat(new SigningMaterialSet(active, List.of(retained, unrelated, retained)).verification())
+                .containsExactly(retained, unrelated);
     }
 
     @Test
-    void rejectsConflictingVerificationDescriptorsForOneAlias() {
-        assertThatThrownBy(() -> new SigningMaterialSet(
-                signing("server-signing-v3", 3),
-                List.of(signing("retired-signing", 1), signing("retired-signing", 2))))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("alias")
-                .hasMessageContaining("retired-signing");
-    }
-
-    @Test
-    void rejectsVerificationMaterialThatIsNotOlderThanActive() {
-        assertThatThrownBy(() -> new SigningMaterialSet(
-                signing("server-signing-v2", 2),
-                List.of(signing("server-signing-v3", 3))))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("older");
+    void rejectsConflictingMetadataForTheSameId() {
+        KeyMaterialDescriptor active = signing("signing", 1);
+        KeyMaterialDescriptor conflicting = new KeyMaterialDescriptor("signing",
+                Set.of(KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialPurpose.SSH_HOST),
+                KeyMaterialAlgorithm.RSA, 1);
+        assertThatThrownBy(() -> new SigningMaterialSet(active, List.of(conflicting)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("conflicting");
     }
 
     @ParameterizedTest

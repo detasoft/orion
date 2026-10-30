@@ -63,8 +63,8 @@ final class TestServerIdentityMaterial implements AutoCloseable {
             }
             return new TestServerIdentityMaterial(
                     material,
-                    material.keyPair(KeyMaterialBootstrap.signingMaterial(
-                            configuration.getBootstrap().getKeyMaterial()).active()),
+                    material.read(KeyMaterialBootstrap.signingMaterial(
+                            configuration.getBootstrap().getKeyMaterial()).active().id()).keyPair(),
                     hostKeys(material));
         } catch (Exception failure) {
             material.close();
@@ -98,7 +98,7 @@ final class TestServerIdentityMaterial implements AutoCloseable {
             modification.generateKey(ec, KeyMaterialConstants.EC_KEY_SIZE_BITS);
             modification.apply();
         });
-        return session -> List.of(material.keyPair(ec), material.keyPair(rsa));
+        return session -> List.of(material.read(ec.id()).keyPair(), material.read(rsa.id()).keyPair());
     }
 
     OrionKeyMaterial material() {

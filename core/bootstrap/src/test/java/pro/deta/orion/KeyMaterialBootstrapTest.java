@@ -257,7 +257,7 @@ class KeyMaterialBootstrapTest {
         configuration.getBootstrap()
                 .getKeyMaterial()
                 .getServerSigning()
-                .setActive(new SigningKeyReferenceConfig("cluster-signing-v2", 2));
+                .setActive(new SigningKeyReferenceConfig("cluster-signing-v2", 1));
         return configuration;
     }
 }

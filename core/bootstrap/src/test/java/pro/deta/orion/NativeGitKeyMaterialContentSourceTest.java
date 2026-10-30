@@ -1,9 +1,34 @@
 package pro.deta.orion;
 
+import java.math.BigInteger;
+import java.util.Date;
+import java.time.Instant;
+import java.security.cert.X509Certificate;
+import javax.security.auth.x500.X500Principal;
+import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
+import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
+import org.bouncycastle.cert.X509v3CertificateBuilder;
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
 import pro.deta.orion.keymaterial.KeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialContentSource.Content;
+import pro.deta.orion.keymaterial.KeyMaterialId;
+import pro.deta.orion.acme.AcmeCertificateService;
+import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
+import pro.deta.orion.config.OrionConfigurationEditor;
+import pro.deta.orion.acme.AcmeCertificateIssuer;
+import pro.deta.orion.acme.AcmeCertificateIssueRequest;
+import pro.deta.orion.acme.IssuedAcmeCertificate;
+import pro.deta.orion.acme.AcmeHttpChallengeService;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
+import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
+import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.orion.OrionXml;
+import java.io.ByteArrayOutputStream;
+import java.net.URI;
+import java.util.Optional;
 
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 
@@ -50,6 +75,76 @@ class NativeGitKeyMaterialContentSourceTest {
 
     @TempDir
     private Path tempDir;
+
+    @Test
+    void activatesAnIssuedCertificateWhenConfigurationAndMaterialShareTheGitBranch() throws Exception {
+        KeyMaterialDescriptor account = new KeyMaterialDescriptor("account", Set.of(KeyMaterialPurpose.ACME_ACCOUNT),
+                KeyMaterialAlgorithm.RSA, 1);
+        KeyMaterialDescriptor identity = new KeyMaterialDescriptor("identity", Set.of(KeyMaterialPurpose.TLS_IDENTITY),
+                KeyMaterialAlgorithm.RSA, 1);
+        OrionAcmeConfiguration acme = new OrionAcmeConfiguration(true, URI.create("acme://letsencrypt.org/staging"),
+                "admin@example.test", List.of("example.test"), "ORION", Optional.of(account.id()),
+                30, 40, true, false, Optional.empty(), Optional.empty());
+        OrionHttpsConfiguration https = new OrionHttpsConfiguration(false, "localhost", 8443, null,
+                Optional.of(identity.id()), Optional.empty(), OrionHttpsConfiguration.ClientAuthentication.DISABLED,
+                List.of(), Optional.of(acme));
+        OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
+                Optional.of(https), List.of(), List.of(), List.of(), List.of(), List.of()), List.of());
+        ByteArrayOutputStream xml = new ByteArrayOutputStream();
+        OrionXml.write(document, xml);
+        Fixture fixture = fixture(Map.of("orion.xml", xml.toByteArray()));
+        try (NativeGitRepositoryProvider provider = fixture.provider();
+             KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray());
+             OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(fixture.store(),
+                     new KeyMaterialCodec(options), testRuntime.events()));
+             NativeGitOrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(new GitFileEvents(
+                     new GitFile(provider, REPOSITORY, REF, "orion.xml")))) {
+            material.withModification(material.revision(), modification -> {
+                modification.generateKey(account, 2048);
+                modification.generateKey(identity, 2048);
+                modification.apply();
+            });
+            OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, material, testRuntime.events());
+            editor.onStart();
+            try {
+                AcmeCertificateIssuer issuer = new AcmeCertificateIssuer(new AcmeHttpChallengeService()) {
+                    @Override
+                    public IssuedAcmeCertificate issue(AcmeCertificateIssueRequest request) {
+                        try {
+                            X500Principal subject =
+                                    new X500Principal("CN=example.test");
+                            Instant now = Instant.now();
+                            X509v3CertificateBuilder builder =
+                                    new JcaX509v3CertificateBuilder(subject,
+                                            BigInteger.ONE, Date.from(now.minusSeconds(60)),
+                                            Date.from(now.plusSeconds(3600)), subject,
+                                            request.domainKeyPair().getPublic());
+                            X509Certificate certificate =
+                                    new JcaX509CertificateConverter().getCertificate(
+                                            builder.build(new JcaContentSignerBuilder(
+                                                    "SHA256withRSA").build(request.domainKeyPair().getPrivate())));
+                            return new IssuedAcmeCertificate(request.domains(), List.of(certificate));
+                        } catch (Exception failure) {
+                            throw new AssertionError(failure);
+                        }
+                    }
+                };
+                AcmeCertificateService service = new AcmeCertificateService(editor, material, issuer,
+                        null, testRuntime.executor());
+                IssuedAcmeCertificate issued = service.issue(AcmeCertificateService.IssueRequest.EMPTY);
+                testRuntime.awaitEvents();
+                KeyMaterialId active = editor.current().result().valueOrFailure("configuration")
+                        .system().https().orElseThrow().identity().orElseThrow();
+                assertThat(active).isEqualTo(new KeyMaterialId("identity", 2));
+                assertThat(material.read(active).certificateChain())
+                        .containsExactlyElementsOf(issued.certificateChain());
+                assertThat(storage.load().result().valueOrFailure("stored configuration").system().https()
+                        .orElseThrow().identity()).contains(active);
+            } finally {
+                editor.onStop();
+            }
+        }
+    }
 
     @Test
     void allowsReadingMaterialWhileARefChangeIsBeingPublished() throws Exception {

@@ -22,25 +22,24 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class KeyMaterialAdministrationTest {
     @Test
-    void generatesAndPersistsSeparateAccountAndTlsKeysWithPublicInventory() throws Exception {
+    void generatesAndPersistsSeparateAccountAndTlsKeys() throws Exception {
         InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
-        String publicKey;
+        byte[] publicKey;
         try (OrionKeyMaterial material = open(store)) {
             material.withModification(material.revision(), modification -> {
                 modification.generateKey(descriptor("account", KeyMaterialPurpose.ACME_ACCOUNT), 3072);
                 modification.generateKey(descriptor("identity", KeyMaterialPurpose.TLS_IDENTITY), 3072);
                 modification.apply();
             });
-            publicKey = material.inventory(Set.of()).getFirst().publicKeyPem();
-            assertThat(publicKey).contains("BEGIN PUBLIC KEY");
+            publicKey = material.read(new KeyMaterialId("account", 1)).publicKey().getEncoded();
         }
         try (OrionKeyMaterial material = open(store)) {
             material.require(descriptor("account", KeyMaterialPurpose.ACME_ACCOUNT));
             material.require(descriptor("identity", KeyMaterialPurpose.TLS_IDENTITY));
-            assertThat(material.inventory(Set.of()).getFirst().publicKeyPem()).isEqualTo(publicKey);
-            assertThat(material.inventory(Set.of()).getFirst().publicKeySha256Fingerprint())
-                    .matches("([0-9a-f]{2}:){31}[0-9a-f]{2}");
-            assertThat(material.inventory(Set.of()).toString()).doesNotContain("PRIVATE KEY");
+            assertThat(material.read(new KeyMaterialId("account",
+                    1)).publicKey().getEncoded()).isEqualTo(publicKey);
+            assertThat(material.inventory()).containsExactly(new KeyMaterialId("account", 1),
+                    new KeyMaterialId("identity", 1));
         }
     }
 
@@ -63,7 +62,8 @@ class KeyMaterialAdministrationTest {
                 assertThat(input).containsOnly('\0');
             }
             try (OrionKeyMaterial material = open(store)) {
-                KeyPair loaded = material.keyPair(descriptor("imported", KeyMaterialPurpose.ACME_ACCOUNT));
+                KeyPair loaded =
+                        material.read(descriptor("imported", KeyMaterialPurpose.ACME_ACCOUNT).id()).keyPair();
                 assertThat(loaded.getPrivate().getEncoded()).isEqualTo(original.getPrivate().getEncoded());
                 assertThat(loaded.getPublic().getEncoded()).isEqualTo(original.getPublic().getEncoded());
             }
@@ -85,7 +85,8 @@ class KeyMaterialAdministrationTest {
             assertThat(input).containsOnly('\0');
         }
         try (OrionKeyMaterial material = open(store)) {
-            KeyPair loaded = material.keyPair(descriptor("certbot", KeyMaterialPurpose.ACME_ACCOUNT));
+            KeyPair loaded =
+                    material.read(descriptor("certbot", KeyMaterialPurpose.ACME_ACCOUNT).id()).keyPair();
             assertThat(loaded.getPrivate().getEncoded()).isEqualTo(original.getPrivate().getEncoded());
             assertThat(loaded.getPublic().getEncoded()).isEqualTo(original.getPublic().getEncoded());
         }
@@ -109,7 +110,7 @@ class KeyMaterialAdministrationTest {
                 jwk((RSAPrivateCrtKey) generator.generateKeyPair().getPrivate()));
         InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
         try (OrionKeyMaterial material = open(store)) {
-            List<KeyMaterialInventoryEntry> before = material.inventory(Set.of());
+            List<KeyMaterialId> before = material.inventory();
             for (String invalid : invalidKeys) {
                 char[] input = invalid.toCharArray();
                 assertThatThrownBy(() -> material.withModification(material.revision(), modification -> {
@@ -118,11 +119,11 @@ class KeyMaterialAdministrationTest {
                 })).isInstanceOf(IllegalArgumentException.class)
                         .hasMessage("Invalid RSA private key").hasNoCause();
                 assertThat(input).containsOnly('\0');
-                assertThat(material.inventory(Set.of())).isEqualTo(before);
+                assertThat(material.inventory()).isEqualTo(before);
             }
         }
         try (OrionKeyMaterial material = open(store)) {
-            assertThat(material.inventory(Set.of())).isEmpty();
+            assertThat(material.inventory()).isEmpty();
         }
     }
 
@@ -148,7 +149,7 @@ class KeyMaterialAdministrationTest {
         KeyPairGenerator ec = KeyPairGenerator.getInstance("EC");
         ec.initialize(256);
         try (OrionKeyMaterial material = open(new InMemoryKeyMaterialContentSource())) {
-            List<KeyMaterialInventoryEntry> before = material.inventory(Set.of());
+            List<KeyMaterialId> before = material.inventory();
             for (String invalid : List.of("not a key", pem("PRIVATE KEY", rsa.generateKeyPair().getPrivate().getEncoded()),
                     pem("PRIVATE KEY", ec.generateKeyPair().getPrivate().getEncoded()))) {
                 char[] input = invalid.toCharArray();
@@ -157,7 +158,7 @@ class KeyMaterialAdministrationTest {
                     modification.apply();
                 })).isInstanceOf(IllegalArgumentException.class);
                 assertThat(input).containsOnly('\0');
-                assertThat(material.inventory(Set.of())).isEqualTo(before);
+                assertThat(material.inventory()).isEqualTo(before);
             }
         }
     }
@@ -178,12 +179,12 @@ class KeyMaterialAdministrationTest {
                 modification.generateKey(descriptor("unsaved", KeyMaterialPurpose.ACME_ACCOUNT), 3072);
                 modification.apply();
             })).isInstanceOf(IOException.class);
-            assertThatThrownBy(() -> material.inventory(Set.of()))
+            assertThatThrownBy(() -> material.inventory())
                     .isInstanceOf(IllegalStateException.class);
         }
         failWrites.set(false);
         try (OrionKeyMaterial material = open(store)) {
-            assertThat(material.inventory(Set.of())).isEmpty();
+            assertThat(material.inventory()).isEmpty();
         }
     }
 

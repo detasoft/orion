@@ -141,8 +141,8 @@ class KeyMaterialOperationsTest {
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
 
-            KeyPair selectedRsa = reloaded.keyPair(rsaClient);
-            KeyPair selectedEd25519 = reloaded.keyPair(ed25519Client);
+            KeyPair selectedRsa = reloaded.read(rsaClient.id()).keyPair();
+            KeyPair selectedEd25519 = reloaded.read(ed25519Client.id()).keyPair();
 
             assertThat(selectedRsa.getPublic().getEncoded())
                     .isEqualTo(generatedRsa.getPublic().getEncoded());
@@ -164,13 +164,13 @@ class KeyMaterialOperationsTest {
                     KeyMaterialAlgorithm.EC,
                     rsaClient.version());
 
-            assertThatThrownBy(() -> reloaded.keyPair(wrongPurpose))
+            assertThatThrownBy(() -> reloaded.require(wrongPurpose))
                     .isInstanceOf(GeneralSecurityException.class)
                     .hasMessageContaining("purpose");
-            assertThatThrownBy(() -> reloaded.keyPair(wrongAlgorithm))
+            assertThatThrownBy(() -> reloaded.require(wrongAlgorithm))
                     .isInstanceOf(GeneralSecurityException.class)
                     .hasMessageContaining("algorithm");
-            assertThat(reloaded.keyPair(host).getPublic().getAlgorithm()).isEqualTo("RSA");
+            assertThat(reloaded.read(host.id()).keyPair().getPublic().getAlgorithm()).isEqualTo("RSA");
             assertThatThrownBy(() -> descriptor(
                     "invalid-client-v1",
                     KeyMaterialPurpose.SSH_CLIENT,
@@ -251,21 +251,21 @@ class KeyMaterialOperationsTest {
 
             TestCertificateChain.Authority authority = TestCertificateChain.root("tls-root");
             X509Certificate leaf = TestCertificateChain.leaf(
-                    "localhost", service.keyPair(tls), authority);
-            installCertificateChain(service, tls, List.of(leaf), Optional.empty(), Optional.empty());
+                    "localhost", service.read(tls.id()).keyPair(), authority);
+            tls = installCertificateChain(service, tls, List.of(leaf), Optional.empty(), Optional.empty());
             SSLContext context = service.certificateIdentity(new TlsMaterialConfiguration(
                     tls,
                     Optional.empty(),
                     List.of(),
                     TlsClientAuthentication.DISABLED)).createContext();
-            KeyPair sshHostKey = service.keyPair(ssh);
+            KeyPair sshHostKey = service.read(ssh.id()).keyPair();
             byte[] payload = "certificate-body".getBytes(StandardCharsets.UTF_8);
             byte[] signature = service.sign(ca, payload);
 
             assertThat(context.getProtocol()).isEqualTo("TLS");
             assertThat(sshHostKey.getPrivate().getAlgorithm()).isEqualTo("RSA");
             assertThat(service.verify(ca, payload, signature)).isTrue();
-            assertThat(service.certificateChain(ca)).hasSize(1);
+            assertThat(service.read(ca.id()).certificateChain()).hasSize(1);
         }
     }
 
@@ -283,12 +283,12 @@ class KeyMaterialOperationsTest {
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
             generateKeys(service, account, identity);
-            accountPublic = service.keyPair(account).getPublic().getEncoded();
-            identityPublic = service.keyPair(identity).getPublic().getEncoded();
+            accountPublic = service.read(account.id()).keyPair().getPublic().getEncoded();
+            identityPublic = service.read(identity.id()).keyPair().getPublic().getEncoded();
 
             assertThat(store.load().revision()).isEqualTo("1");
             generateKeys(service, account, identity);
-            assertThat(service.keyPair(account).getPublic().getEncoded())
+            assertThat(service.read(account.id()).keyPair().getPublic().getEncoded())
                     .isEqualTo(accountPublic);
             assertThat(store.load().revision()).isEqualTo("1");
         }
@@ -298,8 +298,9 @@ class KeyMaterialOperationsTest {
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
             generateKeys(service, account, identity);
-            assertThat(service.keyPair(account).getPublic().getEncoded()).isEqualTo(accountPublic);
-            assertThat(service.keyPair(identity).getPublic().getEncoded()).isEqualTo(identityPublic);
+            assertThat(service.read(account.id()).keyPair().getPublic().getEncoded()).isEqualTo(accountPublic);
+            assertThat(service.read(identity.id()).keyPair().getPublic().getEncoded())
+                    .isEqualTo(identityPublic);
             assertThat(store.load().revision()).isEqualTo("1");
         }
     }
@@ -352,10 +353,10 @@ class KeyMaterialOperationsTest {
             CertificateIdentity certificate = service.certificateIdentity(new TlsMaterialConfiguration(identity,
                     Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED));
             generateKey(service, identity, 2048);
-            KeyPair domainKey = service.keyPair(identity);
+            KeyPair domainKey = service.read(identity.id()).keyPair();
             X509Certificate leaf = TestCertificateChain.leaf("orion.example", domainKey, intermediate);
 
-            certificate.installCertificateChain(
+            certificate = certificate.installCertificateChain(
                     List.of(leaf, intermediate.certificate()),
                     Optional.of(root.certificate()));
 
@@ -368,7 +369,8 @@ class KeyMaterialOperationsTest {
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
-            CertificateIdentity certificate = service.certificateIdentity(new TlsMaterialConfiguration(identity,
+            CertificateIdentity certificate = service.certificateIdentity(new TlsMaterialConfiguration(
+                    service.read(new KeyMaterialId(identity.alias(), 2)).descriptor(),
                     Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED));
             assertThat(certificate.certificateChain()).hasSize(2);
             assertThat(certificate.issuerTrustAnchor()).contains(root.certificate());
@@ -393,7 +395,7 @@ class KeyMaterialOperationsTest {
             CertificateIdentity certificate = service.certificateIdentity(new TlsMaterialConfiguration(identity,
                     Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED));
             generateKey(service, identity, 2048);
-            KeyPair domainKey = service.keyPair(identity);
+            KeyPair domainKey = service.read(identity.id()).keyPair();
             KeyPair otherKey = KeyPairGenerator.getInstance("RSA").generateKeyPair();
             X509Certificate validLeaf = TestCertificateChain.leaf("orion.example", domainKey, intermediate);
             X509Certificate wrongLeaf = TestCertificateChain.leaf("other.example", otherKey, intermediate);
@@ -443,24 +445,24 @@ class KeyMaterialOperationsTest {
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
             KeyPair domainKey = generateKey(service, identity, 2048);
-            installCertificateChain(service, identity,
+            KeyMaterialDescriptor installedIdentity = installCertificateChain(service, identity,
                     List.of(TestCertificateChain.leaf("orion.example", domainKey, serverAuthority)),
                     Optional.empty(), Optional.empty());
             setTrustedCertificate(service, serverRoot, serverAuthority.certificate());
             setTrustedCertificate(service, clientRoot, clientAuthority.certificate());
 
             CertificateIdentity disabled = service.certificateIdentity(new TlsMaterialConfiguration(
-                    identity,
+                    installedIdentity,
                     Optional.of(serverRoot),
                     List.of(),
                     TlsClientAuthentication.DISABLED));
             CertificateIdentity wanted = service.certificateIdentity(new TlsMaterialConfiguration(
-                    identity,
+                    installedIdentity,
                     Optional.of(serverRoot),
                     List.of(clientRoot),
                     TlsClientAuthentication.WANT));
             CertificateIdentity required = service.certificateIdentity(new TlsMaterialConfiguration(
-                    identity,
+                    installedIdentity,
                     Optional.of(serverRoot),
                     List.of(clientRoot),
                     TlsClientAuthentication.REQUIRED));
@@ -477,14 +479,14 @@ class KeyMaterialOperationsTest {
             assertThat(handshake(required, issuerSignedClient).successful()).isFalse();
 
             CertificateIdentity sharedRootRoles = service.certificateIdentity(new TlsMaterialConfiguration(
-                    identity,
+                    installedIdentity,
                     Optional.of(serverRoot),
                     List.of(clientRoot, serverRoot),
                     TlsClientAuthentication.REQUIRED));
             assertThat(handshake(sharedRootRoles, issuerSignedClient))
                     .isEqualTo(new HandshakeResult(true, true));
             assertThatThrownBy(() -> service.certificateIdentity(new TlsMaterialConfiguration(
-                    identity,
+                    installedIdentity,
                     Optional.of(serverRoot),
                     List.of(),
                     TlsClientAuthentication.REQUIRED)))
@@ -634,7 +636,7 @@ class KeyMaterialOperationsTest {
             modification.generateKey(descriptor, keySize);
             modification.apply();
         });
-        return material.keyPair(descriptor);
+        return material.read(descriptor.id()).keyPair();
     }
 
     private static void setTrustedCertificate(OrionKeyMaterial material, KeyMaterialDescriptor descriptor,
@@ -645,16 +647,18 @@ class KeyMaterialOperationsTest {
         });
     }
 
-    private static void installCertificateChain(OrionKeyMaterial material, KeyMaterialDescriptor identity,
-            List<X509Certificate> chain, Optional<KeyMaterialDescriptor> issuer,
+    private static KeyMaterialDescriptor installCertificateChain(OrionKeyMaterial material,
+            KeyMaterialDescriptor identity, List<X509Certificate> chain, Optional<KeyMaterialDescriptor> issuer,
             Optional<X509Certificate> root) throws Exception {
-        material.withModification(material.revision(), modification -> {
-            if (root.isPresent()) {
-                modification.setTrustedCertificate(issuer.orElseThrow(), root.orElseThrow());
-            }
-            modification.installCertificateChain(identity, chain, issuer);
+        KeyMaterialModification modification = material.modify(material.revision());
+        try {
+            if (root.isPresent()) modification.setTrustedCertificate(issuer.orElseThrow(), root.orElseThrow());
+            KeyMaterialId id = modification.installCertificateChain(identity, chain, issuer);
             modification.apply();
-        });
+            return material.read(id).descriptor();
+        } finally {
+            modification.discard();
+        }
     }
 
     private static void generateKeys(OrionKeyMaterial service, KeyMaterialDescriptor first,

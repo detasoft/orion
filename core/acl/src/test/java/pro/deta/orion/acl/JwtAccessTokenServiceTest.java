@@ -1,5 +1,7 @@
 package pro.deta.orion.acl;
 
+import pro.deta.orion.keymaterial.KeyMaterialModification;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
 import pro.deta.orion.keymaterial.KeyMaterialContentStore;
@@ -220,13 +222,31 @@ class JwtAccessTokenServiceTest {
     }
 
     @Test
-    void usesActiveMaterialAliasAsKid() throws Exception {
+    void verifiesRetainedVersionsOfOneAliasAndRejectsTheAliasOnlyKid() throws Exception {
+        TestIdentity identity = single("signing");
+        JwtAccessTokenService original = service(identity, CLOCK);
+        String old = original.issue("alice", 600, null).value();
+        KeyMaterialModification rotation =
+                identity.material.modify(identity.material.revision());
+        KeyMaterialId next = rotation.importKey(identity.signing.active(), rsaKeyPair());
+        rotation.apply();
+        JwtAccessTokenService current = new JwtAccessTokenService(identity.material,
+                new SigningMaterialSet(identity.material.read(next).descriptor(),
+                        List.of(identity.signing.active())), CLOCK);
+        assertThat(header(current.issue("alice", 600, null).value())).contains("\"kid\":\"signing:2\"");
+        assertVerified(current, old, "alice", null);
+        assertThat(current.verify(signedToken(identity, validPayload(), "signing")))
+                .isEqualTo(JwtAccessTokenService.VerificationResult.failure("JWT signing key is unknown"));
+    }
+
+    @Test
+    void usesTheFullMaterialIdAsKid() throws Exception {
         TestIdentity identity = single("server-signing-v2");
         JwtAccessTokenService service = service(identity, CLOCK);
 
         JwtAccessTokenService.IssuedToken token = service.issue("alice", 600, null);
 
-        assertThat(header(token.value())).contains("\"kid\":\"server-signing-v2\"");
+        assertThat(header(token.value())).contains("\"kid\":\"server-signing-v2:1\"");
         assertVerified(service, token.value(), "alice", null);
     }
 
@@ -237,7 +257,7 @@ class JwtAccessTokenServiceTest {
 
         JwtAccessTokenService.IssuedToken token = service.issue("alice", 600, null);
 
-        assertThat(header(token.value())).contains("\"kid\":\"server-\\\"signing\\\\v2\"");
+        assertThat(header(token.value())).contains("\"kid\":\"server-\\\"signing\\\\v2:1\"");
         assertVerified(service, token.value(), "alice", null);
     }
 
@@ -248,21 +268,21 @@ class JwtAccessTokenServiceTest {
         TestIdentity identity = new TestIdentity("server-signing-v1", Map.of("server-signing-v1", oldKey));
         JwtAccessTokenService oldService = service(identity, CLOCK);
         String oldToken = oldService.issue("alice", 600, null).value();
-        KeyMaterialDescriptor next = descriptor("server-signing-v2", 2);
+        KeyMaterialDescriptor next = descriptor("server-signing-v2", 1);
         identity.material.withModification(identity.material.revision(), modification -> {
             modification.importKey(next, newKey);
             modification.apply();
         });
 
         String stagedToken = oldService.issue("alice", 600, null).value();
-        assertThat(header(stagedToken)).contains("\"kid\":\"server-signing-v1\"");
+        assertThat(header(stagedToken)).contains("\"kid\":\"server-signing-v1:1\"");
         assertVerified(oldService, stagedToken, "alice", null);
         JwtAccessTokenService rotatedService = new JwtAccessTokenService(identity.material,
                 new SigningMaterialSet(next, List.of(identity.signing.active())), CLOCK);
         String newToken = rotatedService.issue("alice", 600, null).value();
 
         assertVerified(rotatedService, oldToken, "alice", null);
-        assertThat(header(newToken)).contains("\"kid\":\"server-signing-v2\"");
+        assertThat(header(newToken)).contains("\"kid\":\"server-signing-v2:1\"");
         assertVerified(rotatedService, newToken, "alice", null);
         assertThat(oldService.verify(newToken)).isEqualTo(
                 JwtAccessTokenService.VerificationResult.failure("JWT signing key is unknown"));
@@ -360,9 +380,14 @@ class JwtAccessTokenServiceTest {
     }
 
     private static String signedToken(TestIdentity identity, String payload) throws GeneralSecurityException {
+        return signedToken(identity, payload, identity.activeKeyId());
+    }
+
+    private static String signedToken(TestIdentity identity, String payload, String kid)
+            throws GeneralSecurityException {
         Base64.Encoder encoder = Base64.getUrlEncoder().withoutPadding();
         String header = "{\"alg\":\"RS256\",\"typ\":\"JWT\",\"kid\":\""
-                + identity.activeKeyId()
+                + kid
                 + "\"}";
         String signingInput = encoder.encodeToString(header.getBytes(StandardCharsets.UTF_8))
                 + "."
@@ -416,7 +441,7 @@ class JwtAccessTokenServiceTest {
             }
             materials.add(material);
             List<KeyMaterialDescriptor> retained = new ArrayList<>();
-            KeyMaterialDescriptor active = descriptor(activeKeyId, keys.size());
+            KeyMaterialDescriptor active = descriptor(activeKeyId, 1);
             material.withModification(material.revision(), modification -> {
                 for (Map.Entry<String, KeyPair> entry : keys.entrySet()) {
                     KeyMaterialDescriptor descriptor = entry.getKey().equals(activeKeyId)
@@ -430,7 +455,7 @@ class JwtAccessTokenServiceTest {
         }
 
         private String activeKeyId() {
-            return signing.active().alias();
+            return signing.active().alias() + ":" + signing.active().version();
         }
 
         private byte[] sign(byte[] payload) throws GeneralSecurityException {

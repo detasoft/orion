@@ -86,7 +86,7 @@ class AcmeConfigurationTest {
                         Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 1), 2048);
                 modification.apply();
             });
-            byte[] accountKey = owner.keyPair(account).getPublic().getEncoded();
+            byte[] accountKey = owner.read(account.id()).keyPair().getPublic().getEncoded();
             desired.publish(initial, Optional.of("r1"));
             AcmeCertificateService service = new AcmeCertificateService(desired.editor(),
                     owner, null, null, events.executor());
@@ -101,7 +101,7 @@ class AcmeConfigurationTest {
             OrionAcmeConfiguration enabled = updated.system().https().orElseThrow().acme().orElseThrow();
             assertThat(enabled.enabled()).isTrue();
             assertThat(enabled.accountMaterial()).isEqualTo(acme.accountMaterial());
-            assertThat(owner.keyPair(account).getPublic().getEncoded()).isEqualTo(accountKey);
+            assertThat(owner.read(account.id()).keyPair().getPublic().getEncoded()).isEqualTo(accountKey);
         }
     }
 

@@ -1,6 +1,5 @@
 package pro.deta.orion.keymaterial;
 
-
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -19,22 +18,18 @@ public record SigningMaterialSet(KeyMaterialDescriptor active, List<KeyMaterialD
             verification = List.of();
         }
         LinkedHashSet<KeyMaterialDescriptor> validated = new LinkedHashSet<>();
-        Map<String, KeyMaterialDescriptor> descriptorsByAlias = new LinkedHashMap<>();
-        descriptorsByAlias.put(active.alias(), active);
+        Map<KeyMaterialId, KeyMaterialDescriptor> descriptorsById = new LinkedHashMap<>();
+        descriptorsById.put(active.id(), active);
         for (KeyMaterialDescriptor candidate : verification) {
             requireCompatible(active, candidate);
-            KeyMaterialDescriptor existing = descriptorsByAlias.get(candidate.alias());
+            KeyMaterialDescriptor existing = descriptorsById.get(candidate.id());
             if (existing != null) {
                 if (!existing.equals(candidate)) {
                     throw conflictingAlias(candidate);
                 }
                 continue;
             }
-            if (candidate.version() >= active.version()) {
-                throw new IllegalArgumentException(
-                        "Verification material must be older than active material");
-            }
-            descriptorsByAlias.put(candidate.alias(), candidate);
+            descriptorsById.put(candidate.id(), candidate);
             validated.add(candidate);
         }
         verification = List.copyOf(validated);
