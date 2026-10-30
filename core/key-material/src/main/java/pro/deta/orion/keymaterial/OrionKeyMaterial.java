@@ -60,7 +60,7 @@ public class OrionKeyMaterial implements AutoCloseable {
     }
 
     public static OrionKeyMaterial open(KeyMaterialContentStore store) {
-        return new OrionKeyMaterial(KeyMaterialService.open(store));
+        return new OrionKeyMaterial(new KeyMaterialService(store));
     }
 
     protected OrionKeyMaterial() {

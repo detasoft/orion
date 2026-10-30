@@ -36,7 +36,11 @@ final class KeyMaterialService implements AutoCloseable {
     private final KeyMaterialContentStore store;
     private final KeyMaterialStorageCertificateFactory storageCertificateFactory;
 
-    private KeyMaterialService(KeyMaterialContentStore store,
+    KeyMaterialService(KeyMaterialContentStore store) {
+        this(store, new KeyMaterialStorageCertificateFactory());
+    }
+
+    KeyMaterialService(KeyMaterialContentStore store,
             KeyMaterialStorageCertificateFactory storageCertificateFactory) {
         if (store == null) throw new IllegalArgumentException("Key material store must not be null");
         if (storageCertificateFactory == null) {
@@ -44,15 +48,6 @@ final class KeyMaterialService implements AutoCloseable {
         }
         this.store = store;
         this.storageCertificateFactory = storageCertificateFactory;
-    }
-
-    public static synchronized KeyMaterialService open(KeyMaterialContentStore store) {
-        return open(store, new KeyMaterialStorageCertificateFactory());
-    }
-
-    public static synchronized KeyMaterialService open(KeyMaterialContentStore store,
-            KeyMaterialStorageCertificateFactory storageCertificateFactory) {
-        return new KeyMaterialService(store, storageCertificateFactory);
     }
 
     public boolean containsAlias(String alias, Set<KeyMaterialPurpose> requiredPurposes)

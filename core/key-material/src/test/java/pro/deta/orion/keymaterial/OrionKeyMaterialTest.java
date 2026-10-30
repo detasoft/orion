@@ -56,7 +56,7 @@ class OrionKeyMaterialTest {
         KeyMaterialDescriptor active = rsa("server-signing-v2", 1);
         byte[] payload = "retained-jwt".getBytes(StandardCharsets.UTF_8);
         byte[] oldSignature;
-        try (KeyMaterialService service = KeyMaterialService.open(new KeyMaterialContentStore(
+        try (KeyMaterialService service = new KeyMaterialService(new KeyMaterialContentStore(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
