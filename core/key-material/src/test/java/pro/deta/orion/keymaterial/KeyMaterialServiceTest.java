@@ -1,5 +1,11 @@
 package pro.deta.orion.keymaterial;
 
+import pro.deta.orion.storage.BlobStorage;
+import pro.deta.orion.storage.BlobStorageConflictException;
+import pro.deta.orion.storage.InMemoryBlobStorage;
+import pro.deta.orion.storage.LocalBlobStorage;
+import pro.deta.orion.storage.ReadOnlyBlobStorage;
+
 import pro.deta.orion.event.OrionEventManager;
 
 import java.util.Set;
@@ -33,7 +39,7 @@ class KeyMaterialServiceTest {
 
     @Test
     void readsCommittedMaterialWhileAnotherKeyIsBeingPrepared() throws Exception {
-        InMemoryKeyMaterialContentSource source = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage source = new InMemoryBlobStorage();
         KeyMaterialDescriptor signing = descriptor("existing", KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.RSA);
         KeyMaterialDescriptor cipher = descriptor("cipher", KeyMaterialPurpose.CONFIGURATION_CIPHER,
@@ -43,7 +49,7 @@ class KeyMaterialServiceTest {
         X509Certificate root = TestCertificateChain.root("Read concurrency root").certificate();
         KeyPair pair;
         try (KeyMaterialOptions options = options();
-             KeyMaterialService seed = new KeyMaterialService(new KeyMaterialContentStore(
+             KeyMaterialService seed = new KeyMaterialService(new KeyMaterialRepository(
                      source, new KeyMaterialCodec(options), new OrionEventManager()))) {
             KeyMaterialModification modification = seed.modify(seed.revision());
             modification.generateKey(signing, 2048);
@@ -72,7 +78,7 @@ class KeyMaterialServiceTest {
             }
         };
         try (KeyMaterialOptions options = options();
-             KeyMaterialService service = new KeyMaterialService(new KeyMaterialContentStore(
+             KeyMaterialService service = new KeyMaterialService(new KeyMaterialRepository(
                      source, new KeyMaterialCodec(options), new OrionEventManager()), factory);
              ExecutorService executor = Executors.newFixedThreadPool(2)) {
             KeyMaterialDescriptor prepared = descriptor("prepared", KeyMaterialPurpose.SERVER_SIGNING,
@@ -121,9 +127,9 @@ class KeyMaterialServiceTest {
 
     @Test
     void createsPkcs12InMemoryStoreAndReloadsPrivateKey() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
 
-        KeyMaterialService service = new KeyMaterialService(new KeyMaterialContentStore(
+        KeyMaterialService service = new KeyMaterialService(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()));
@@ -132,7 +138,7 @@ class KeyMaterialServiceTest {
                 KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA), 2048);
         String savedVersion = store.load().revision();
 
-        KeyMaterialService reloaded = new KeyMaterialService(new KeyMaterialContentStore(
+        KeyMaterialService reloaded = new KeyMaterialService(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()));
@@ -160,9 +166,9 @@ class KeyMaterialServiceTest {
     @Test
     void localPkcs12StoreCanBeOpenedWithJavaKeyStore() throws Exception {
         Path keyStorePath = tempDir.resolve(KeyMaterialTestConstants.KEY_STORE_FILE_NAME);
-        LocalKeyMaterialContentSource store = new LocalKeyMaterialContentSource(keyStorePath);
+        LocalBlobStorage store = new LocalBlobStorage(keyStorePath);
 
-        KeyMaterialService service = new KeyMaterialService(new KeyMaterialContentStore(
+        KeyMaterialService service = new KeyMaterialService(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()));
@@ -183,8 +189,8 @@ class KeyMaterialServiceTest {
 
     @Test
     void trustedCertificatesRoundTripSeparatelyFromPrivateKeyEntries() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
-        KeyMaterialService service = new KeyMaterialService(new KeyMaterialContentStore(
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
+        KeyMaterialService service = new KeyMaterialService(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()));
@@ -204,7 +210,7 @@ class KeyMaterialServiceTest {
                 .hasMessageContaining("certificate authority");
         trustCertificate(service, descriptor, issuerCertificate);
 
-        KeyMaterialService reloaded = new KeyMaterialService(new KeyMaterialContentStore(
+        KeyMaterialService reloaded = new KeyMaterialService(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()));
@@ -220,7 +226,7 @@ class KeyMaterialServiceTest {
 
     @Test
     void validatesTypedTrustedCertificateMetadataAndEntryType() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         KeyMaterialDescriptor original = trustedCertificate(
                 "public-root-v1", 1);
         KeyMaterialDescriptor privateEntry = new KeyMaterialDescriptor(
@@ -229,7 +235,7 @@ class KeyMaterialServiceTest {
                 KeyMaterialAlgorithm.RSA,
                 1);
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
-        try (KeyMaterialService service = new KeyMaterialService(new KeyMaterialContentStore(
+        try (KeyMaterialService service = new KeyMaterialService(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -237,7 +243,7 @@ class KeyMaterialServiceTest {
             generateKey(service, privateEntry, 2048);
         }
 
-        try (KeyMaterialService service = new KeyMaterialService(new KeyMaterialContentStore(
+        try (KeyMaterialService service = new KeyMaterialService(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -261,7 +267,7 @@ class KeyMaterialServiceTest {
 
     @Test
     void discoversTypedPrivateKeysByPurpose() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
 
         KeyMaterialDescriptor rsa = descriptor(
                 "ssh-host-z-rsa-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.RSA);
@@ -271,7 +277,7 @@ class KeyMaterialServiceTest {
                 "server-signing-v1",
                 KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.RSA);
-        try (KeyMaterialService service = new KeyMaterialService(new KeyMaterialContentStore(
+        try (KeyMaterialService service = new KeyMaterialService(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -280,7 +286,7 @@ class KeyMaterialServiceTest {
             generateKey(service, signing, 2048);
         }
 
-        try (KeyMaterialService service = new KeyMaterialService(new KeyMaterialContentStore(
+        try (KeyMaterialService service = new KeyMaterialService(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -290,7 +296,7 @@ class KeyMaterialServiceTest {
 
     @Test
     void inventoriesTypedMaterialIdsAndReadsTheirContent() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
 
         KeyMaterialDescriptor identity = descriptor(
                 "tls-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA);
@@ -298,7 +304,7 @@ class KeyMaterialServiceTest {
                 "configuration-v1", KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES);
         KeyMaterialDescriptor trust = trustedCertificate("issuer-v1", 1);
         TestCertificateChain.Authority issuer = TestCertificateChain.root("Public Root");
-        try (KeyMaterialService service = new KeyMaterialService(new KeyMaterialContentStore(
+        try (KeyMaterialService service = new KeyMaterialService(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -315,7 +321,7 @@ class KeyMaterialServiceTest {
             }
         }
 
-        try (KeyMaterialService service = new KeyMaterialService(new KeyMaterialContentStore(
+        try (KeyMaterialService service = new KeyMaterialService(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -339,11 +345,11 @@ class KeyMaterialServiceTest {
         KeyStore.PrivateKeyEntry entry = new KeyStore.PrivateKeyEntry(
                 issuer.keyPair().getPrivate(), new Certificate[]{issuer.certificate()},
                 Set.of(new PKCS12Attribute("2.25.260349814076539099691640886169327825428", "SSH_HOST;EC")));
-        KeyMaterialContentStore store = new KeyMaterialContentStore(
-                new InMemoryKeyMaterialContentSource(), new KeyMaterialCodec(options()), new OrionEventManager());
+        KeyMaterialRepository store = new KeyMaterialRepository(
+                new InMemoryBlobStorage(), new KeyMaterialCodec(options()), new OrionEventManager());
         try (KeyMaterialService service = new KeyMaterialService(store)) {
             store.apply(store.revision(), List.of(
-                    new KeyMaterialContentStore.Entry("mismatched", entry, 1, false)));
+                    new KeyMaterialRepository.Entry("mismatched", entry, 1, false)));
 
             assertThatThrownBy(() -> service.inventory())
                     .isInstanceOf(GeneralSecurityException.class)
@@ -354,8 +360,8 @@ class KeyMaterialServiceTest {
 
     @Test
     void refusesPrivateKeyWhenCertificateChainHasDifferentPublicKey() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
-        KeyMaterialService service = new KeyMaterialService(new KeyMaterialContentStore(
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
+        KeyMaterialService service = new KeyMaterialService(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()));
@@ -389,9 +395,9 @@ class KeyMaterialServiceTest {
 
     @Test
     void detectsConflictingStoreUpdates() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
 
-        KeyMaterialService initial = new KeyMaterialService(new KeyMaterialContentStore(
+        KeyMaterialService initial = new KeyMaterialService(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()));
@@ -399,11 +405,11 @@ class KeyMaterialServiceTest {
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
                 KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA), 2048);
 
-        KeyMaterialService first = new KeyMaterialService(new KeyMaterialContentStore(
+        KeyMaterialService first = new KeyMaterialService(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()));
-        KeyMaterialService second = new KeyMaterialService(new KeyMaterialContentStore(
+        KeyMaterialService second = new KeyMaterialService(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()));
@@ -417,7 +423,7 @@ class KeyMaterialServiceTest {
             modification.generateKey(descriptor("acme-account",
                     KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA), 2048);
             assertThatThrownBy(modification::apply)
-                    .isInstanceOf(KeyMaterialStoreConflictException.class)
+                    .isInstanceOf(BlobStorageConflictException.class)
                     .hasMessageContaining("changed before save");
         } finally {
             modification.discard();
@@ -426,8 +432,8 @@ class KeyMaterialServiceTest {
 
     @Test
     void loadsPkcs12BytesFromReadOnlyStore() throws Exception {
-        InMemoryKeyMaterialContentSource writableStore = new InMemoryKeyMaterialContentSource();
-        KeyMaterialService writable = new KeyMaterialService(new KeyMaterialContentStore(
+        InMemoryBlobStorage writableStore = new InMemoryBlobStorage();
+        KeyMaterialService writable = new KeyMaterialService(new KeyMaterialRepository(
                 writableStore,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()));
@@ -436,8 +442,8 @@ class KeyMaterialServiceTest {
                 KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA), 2048);
 
         byte[] pkcs12Bytes = writableStore.load().bytes();
-        KeyMaterialContentSource readOnlyStore = new ReadOnlyKeyMaterialContentSource(pkcs12Bytes, "test material");
-        KeyMaterialService readOnly = new KeyMaterialService(new KeyMaterialContentStore(
+        BlobStorage readOnlyStore = new ReadOnlyBlobStorage(pkcs12Bytes, "test material");
+        KeyMaterialService readOnly = new KeyMaterialService(new KeyMaterialRepository(
                 readOnlyStore,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()));
@@ -449,9 +455,9 @@ class KeyMaterialServiceTest {
 
     @Test
     void serviceOwnsAndClearsItsPasswordLifecycle() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         KeyMaterialOptions callerOptions = options();
-        KeyMaterialService service = new KeyMaterialService(new KeyMaterialContentStore(
+        KeyMaterialService service = new KeyMaterialService(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(callerOptions),
                 new OrionEventManager()));
@@ -480,12 +486,12 @@ class KeyMaterialServiceTest {
     @Test
     void corruptExistingStoreIsNeverReplaced() throws Exception {
         Path keyStorePath = tempDir.resolve(KeyMaterialTestConstants.KEY_STORE_FILE_NAME);
-        LocalKeyMaterialContentSource store = new LocalKeyMaterialContentSource(keyStorePath);
+        LocalBlobStorage store = new LocalBlobStorage(keyStorePath);
         byte[] corruptBytes = "not-a-pkcs12-store".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        String corruptVersion = store.write(corruptBytes, null);
+        String corruptVersion = store.write(new BlobStorage.Modification(null, corruptBytes));
 
         try (KeyMaterialOptions options = options()) {
-            assertThatThrownBy(() -> new KeyMaterialService(new KeyMaterialContentStore(
+            assertThatThrownBy(() -> new KeyMaterialService(new KeyMaterialRepository(
                     store,
                     new KeyMaterialCodec(options),
                     new OrionEventManager())))

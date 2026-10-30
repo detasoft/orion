@@ -1,5 +1,6 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.storage.BlobStorage;
 import pro.deta.orion.KeyMaterialBootstrap;
 
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
@@ -17,7 +18,7 @@ import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.S3NativeGitRepositoryFactory;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
+import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
@@ -84,8 +85,9 @@ class S3BootstrapProxyColdStartIT {
             String refreshedRevision;
             try (RuntimeHttpTestSupport.StartedOrion upstream = RuntimeHttpTestSupport.start(upstreamConfiguration)) {
                 environment.putAll(configureSources(tempDir, configuration, upstream, "http"));
-                InMemoryKeyMaterialContentSource materialStore = new InMemoryKeyMaterialContentSource();
-                materialStore.write(materialBytes(configuration, environment), null);
+                InMemoryBlobStorage materialStore = new InMemoryBlobStorage();
+                materialStore.write(new BlobStorage.Modification(null, materialBytes(configuration,
+                        environment)));
                 byte[] payload = "preseeded proxy server identity".getBytes(StandardCharsets.UTF_8);
                 String signingKeyId;
                 byte[] signature;

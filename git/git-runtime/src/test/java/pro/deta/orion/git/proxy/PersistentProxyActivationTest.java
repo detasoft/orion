@@ -2,7 +2,7 @@ package pro.deta.orion.git.proxy;
 
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
-import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialRepository;
 
 import java.util.Set;
 
@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitUploadPackClient;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
+import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
@@ -305,8 +305,8 @@ class PersistentProxyActivationTest {
             var signing = new KeyMaterialDescriptor("signing",
                     Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
             try (var options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
-                material = OrionKeyMaterial.open(new KeyMaterialContentStore(
-                        new InMemoryKeyMaterialContentSource(),
+                material = OrionKeyMaterial.open(new KeyMaterialRepository(
+                        new InMemoryBlobStorage(),
                         new KeyMaterialCodec(options),
                         testRuntime.unstartedEvents()));
                 material.withModification(material.revision(), modification -> {

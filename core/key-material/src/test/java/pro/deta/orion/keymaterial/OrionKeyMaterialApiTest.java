@@ -1,5 +1,10 @@
 package pro.deta.orion.keymaterial;
 
+import pro.deta.orion.storage.BlobChanged;
+import pro.deta.orion.storage.BlobStorage;
+import pro.deta.orion.storage.BlobStorageConflictException;
+import pro.deta.orion.storage.InMemoryBlobStorage;
+
 import pro.deta.orion.event.type.OrionEvent;
 import pro.deta.orion.event.OrionEventManager;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -48,11 +53,13 @@ class OrionKeyMaterialApiTest {
         AtomicReference<OrionKeyMaterial> materialRef =
                 new AtomicReference<>();
         try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
-            InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource() {
+            InMemoryBlobStorage store = new InMemoryBlobStorage() {
                 @Override
-                public synchronized String write(byte[] bytes, String expectedRevision) throws IOException {
+                public synchronized String write(BlobStorage.Modification modification) throws IOException {
+                    byte[] bytes = modification.bytes();
+                    String expectedRevision = modification.expectedRevision();
                     assertReadable(executor, materialRef.get());
-                    return super.write(bytes, expectedRevision);
+                    return super.write(new BlobStorage.Modification(expectedRevision, bytes));
                 }
             };
             try (OrionKeyMaterial material = open(store, new OrionEventManager() {
@@ -74,7 +81,7 @@ class OrionKeyMaterialApiTest {
 
     @Test
     void releasesStateMonitorBeforePublishingReloadChanges() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         AtomicReference<OrionKeyMaterial> readerRef =
                 new AtomicReference<>();
         try (ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -100,10 +107,12 @@ class OrionKeyMaterialApiTest {
         AtomicReference<OrionKeyMaterial> materialRef =
                 new AtomicReference<>();
         AtomicInteger changes = new AtomicInteger();
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource() {
+        InMemoryBlobStorage store = new InMemoryBlobStorage() {
             @Override
-            public synchronized String write(byte[] bytes, String expectedRevision) throws IOException {
-                String saved = super.write(bytes, expectedRevision);
+            public synchronized String write(BlobStorage.Modification modification) throws IOException {
+                byte[] bytes = modification.bytes();
+                String expectedRevision = modification.expectedRevision();
+                String saved = super.write(new BlobStorage.Modification(expectedRevision, bytes));
                 try {
                     materialRef.get().reload(saved);
                 } catch (GeneralSecurityException failure) {
@@ -140,9 +149,9 @@ class OrionKeyMaterialApiTest {
 
     @Test
     void rejectsOpeningMaterialWithoutAnEventManager() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password())) {
-            assertThatThrownBy(() -> OrionKeyMaterial.open(new KeyMaterialContentStore(
+            assertThatThrownBy(() -> OrionKeyMaterial.open(new KeyMaterialRepository(
                     store,
                     new KeyMaterialCodec(options),
                     null)))
@@ -152,7 +161,7 @@ class OrionKeyMaterialApiTest {
 
     @Test
     void savesMaterialWithAnUnstartedRunningAndStoppedEventManager() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         OrionEventManager events = new OrionEventManager();
         List<Set<String>> changes = new java.util.concurrent.CopyOnWriteArrayList<>();
         events.subscribe(KeyMaterialChanged.class, event -> changes.add(event.resources()));
@@ -185,7 +194,7 @@ class OrionKeyMaterialApiTest {
 
     @Test
     void inventoriesKeysAndTrustAnchorsByExactIdAfterReopening() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         KeyMaterialDescriptor cipher = new KeyMaterialDescriptor("cipher",
                 Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES, 1);
         TestCertificateChain.Authority root = TestCertificateChain.root("Inventory root");
@@ -208,7 +217,7 @@ class OrionKeyMaterialApiTest {
 
     @Test
     void enforcesEntryKindsAtOperationsUsingTheCommonDescriptor() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         TestCertificateChain.Authority root = TestCertificateChain.root("Operation root");
         KeyMaterialDescriptor trustedIdentity = new KeyMaterialDescriptor("root",
                 Set.of(KeyMaterialPurpose.TRUST_ANCHOR, KeyMaterialPurpose.TLS_IDENTITY),
@@ -246,7 +255,7 @@ class OrionKeyMaterialApiTest {
 
     @Test
     void persistsPurposeSetsAndSearchesForAllRequestedFlagsAfterReload() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         Set<KeyMaterialPurpose> signingAndHost =
                 Set.of(KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialPurpose.SSH_HOST);
         Set<KeyMaterialPurpose> trustAndCa =
@@ -287,7 +296,7 @@ class OrionKeyMaterialApiTest {
 
     @Test
     void certificateUpdatesThroughSubsetDescriptorsPreserveEveryStoredPurpose() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         Set<KeyMaterialPurpose> identityPurposes =
                 Set.of(KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialPurpose.SERVER_SIGNING);
         Set<KeyMaterialPurpose> rootPurposes =
@@ -326,7 +335,7 @@ class OrionKeyMaterialApiTest {
 
     @Test
     void publishesGeneratedKeysTogetherAndSignsAfterReload() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         KeyMaterialDescriptor host = descriptor("ssh", KeyMaterialPurpose.SSH_HOST);
         byte[] payload = "token".getBytes(StandardCharsets.UTF_8);
         byte[] signature;
@@ -367,7 +376,7 @@ class OrionKeyMaterialApiTest {
 
     @Test
     void reportsChangedAliasesOnlyAfterACommittedModification() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         List<KeyMaterialChanged> changes = new ArrayList<>();
         OrionEventManager events = new OrionEventManager();
         events.subscribe(KeyMaterialChanged.class, changes::add);
@@ -397,7 +406,7 @@ class OrionKeyMaterialApiTest {
 
     @Test
     void importsSecretKeyAndAuthenticatesEnvelopesAfterReload() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         ConfigurationSecretContext context = new ConfigurationSecretContext("github-token", "access-token");
         byte[] plaintext = "password".getBytes(StandardCharsets.UTF_8);
         KeyMaterialDescriptor cipher;
@@ -425,7 +434,7 @@ class OrionKeyMaterialApiTest {
 
     @Test
     void importsPemAndClearsBothAcceptedAndRejectedInput() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         KeyPair imported = TestCertificateChain.keyPair();
         char[] pem = ("-----BEGIN PRIVATE KEY-----\n"
                 + Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(imported.getPrivate().getEncoded())
@@ -450,7 +459,7 @@ class OrionKeyMaterialApiTest {
 
     @Test
     void installsPendingIdentityAndIssuerTogetherWithoutPublishingInvalidChain() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
         TestCertificateChain.Authority intermediate = TestCertificateChain.intermediate("Intermediate", root);
         KeyPair keyPair = TestCertificateChain.keyPair();
@@ -489,7 +498,7 @@ class OrionKeyMaterialApiTest {
 
     @Test
     void discardsChangesAndKeepsTheOwnerUsable() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         try (OrionKeyMaterial material = open(store)) {
             KeyMaterialModification discarded = material.modify(material.revision());
             discarded.generateKey(SIGNING, 2048);
@@ -516,7 +525,7 @@ class OrionKeyMaterialApiTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void callbackWithoutApplyDiscardsChangesEvenWhenItThrows(boolean fail) throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         try (OrionKeyMaterial material = open(store)) {
             List<KeyMaterialModification> retained = new ArrayList<>();
             KeyMaterialModification.Operation operation = modification -> {
@@ -539,7 +548,7 @@ class OrionKeyMaterialApiTest {
 
     @Test
     void emptyAndRepeatedGenerationDoNotPublishNewVersions() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         try (OrionKeyMaterial material = open(store)) {
             material.modify(material.revision()).apply();
             assertThat(store.load().bytes()).isNull();
@@ -562,7 +571,7 @@ class OrionKeyMaterialApiTest {
 
     @Test
     void onlyOneConcurrentModificationCanApplyEvenForDifferentAliases() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         try (OrionKeyMaterial material = open(store)) {
             KeyMaterialModification first = material.modify(material.revision());
             KeyMaterialModification second = material.modify(material.revision());
@@ -592,7 +601,7 @@ class OrionKeyMaterialApiTest {
 
     @Test
     void rejectsAnOutdatedRevisionBeforeCallingTheModificationOperation() throws Exception {
-        InMemoryKeyMaterialContentSource source = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage source = new InMemoryBlobStorage();
         try (OrionKeyMaterial material = open(source)) {
             String previous = material.revision();
             KeyMaterialModification pending = material.modify(previous);
@@ -602,11 +611,11 @@ class OrionKeyMaterialApiTest {
             });
             AtomicInteger calls = new AtomicInteger();
             assertThatThrownBy(() -> material.withModification(previous, modification -> calls.incrementAndGet()))
-                    .isInstanceOf(KeyMaterialStoreConflictException.class);
+                    .isInstanceOf(BlobStorageConflictException.class);
             assertThat(calls).hasValue(0);
             assertThatThrownBy(() -> material.modify(previous))
-                    .isInstanceOf(KeyMaterialStoreConflictException.class);
-            assertThatThrownBy(pending::apply).isInstanceOf(KeyMaterialStoreConflictException.class);
+                    .isInstanceOf(BlobStorageConflictException.class);
+            assertThatThrownBy(pending::apply).isInstanceOf(BlobStorageConflictException.class);
             assertThat(material.revision()).isEqualTo(source.load().revision()).isNotEqualTo(previous);
             assertThat(material.contains(SIGNING)).isTrue();
         }
@@ -614,13 +623,13 @@ class OrionKeyMaterialApiTest {
 
     @Test
     void usesTheSourceRevisionEvenWhenMaterialContentHasNotChanged() throws Exception {
-        InMemoryKeyMaterialContentSource source = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage source = new InMemoryBlobStorage();
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password());
              KeyMaterialCodec codec = new KeyMaterialCodec(options)) {
             byte[] bytes = codec.encode(codec.create());
             try {
-                source.write(bytes, null);
-                source.write(bytes, source.load().revision());
+                source.write(new BlobStorage.Modification(null, bytes));
+                source.write(new BlobStorage.Modification(source.load().revision(), bytes));
             } finally {
                 java.util.Arrays.fill(bytes, (byte) 0);
             }
@@ -644,11 +653,19 @@ class OrionKeyMaterialApiTest {
         AtomicInteger notifications = new AtomicInteger();
         events.subscribe(KeyMaterialChanged.class, event -> notifications.incrementAndGet());
         events.onStart();
-        InMemoryKeyMaterialContentSource source = new InMemoryKeyMaterialContentSource() {
+        InMemoryBlobStorage source = new InMemoryBlobStorage() {
             @Override
-            public String write(byte[] bytes, String expectedRevision) throws IOException {
-                String saved = super.write(bytes, expectedRevision);
-                events.publishAndWait(new KeyMaterialSourceChanged(this, saved));
+            public pro.deta.orion.util.Subscription subscribe(
+                    java.util.function.Consumer<BlobChanged> subscriber) {
+                return events.subscribe(BlobChanged.class, subscriber);
+            }
+
+            @Override
+            public String write(BlobStorage.Modification modification) throws IOException {
+                byte[] bytes = modification.bytes();
+                String expectedRevision = modification.expectedRevision();
+                String saved = super.write(new BlobStorage.Modification(expectedRevision, bytes));
+                events.publishAndWait(new BlobChanged(expectedRevision, saved));
                 if (responseLost) throw new IOException("Write response lost");
                 return saved;
             }
@@ -678,7 +695,7 @@ class OrionKeyMaterialApiTest {
 
     @Test
     void rejectsAnOutdatedOwnerWithoutOverwritingTheStoredWinner() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         try (OrionKeyMaterial first = open(store); OrionKeyMaterial second = open(store)) {
             KeyMaterialModification winner = first.modify(first.revision());
             KeyMaterialModification loser = second.modify(second.revision());
@@ -688,7 +705,7 @@ class OrionKeyMaterialApiTest {
             String beforeRevision = store.load().revision();
             byte[] beforeBytes = store.read(beforeRevision);
 
-            assertThatThrownBy(loser::apply).isInstanceOf(KeyMaterialStoreConflictException.class);
+            assertThatThrownBy(loser::apply).isInstanceOf(BlobStorageConflictException.class);
             assertThatThrownBy(() -> second.contains(OTHER)).isInstanceOf(IllegalStateException.class);
             assertThat(first.contains(SIGNING)).isTrue();
             assertThat(store.load().bytes()).isEqualTo(beforeBytes);
@@ -703,7 +720,7 @@ class OrionKeyMaterialApiTest {
 
     @Test
     void deletionAppendsVersionsAndKeepsOldCertificatesAfterReload() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         X509Certificate original = TestCertificateChain.root("Original root").certificate();
         X509Certificate replacement = TestCertificateChain.root("Replacement root").certificate();
         byte[] publicKey;
@@ -795,7 +812,7 @@ class OrionKeyMaterialApiTest {
 
     @Test
     void rejectsMetadataMismatchWithoutChangingExistingKeys() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         try (OrionKeyMaterial material = open(store)) {
             material.withModification(material.revision(), modification -> {
                 modification.generateKey(SIGNING, 2048);
@@ -853,7 +870,7 @@ class OrionKeyMaterialApiTest {
                 reader.reload(added);
                 assertThat(reader.contains(OTHER)).isTrue();
                 assertThat(reader.revision()).isEqualTo("2");
-                assertThatThrownBy(stale::apply).isInstanceOf(KeyMaterialStoreConflictException.class);
+                assertThatThrownBy(stale::apply).isInstanceOf(BlobStorageConflictException.class);
                 reader.reload(deleted);
                 assertThat(reader.contains(OTHER)).isFalse();
                 assertThat(reader.contains(SIGNING)).isTrue();
@@ -891,7 +908,7 @@ class OrionKeyMaterialApiTest {
             byte[] payload = new byte[]{1, 2, 3};
             byte[] signature = reader.sign(SIGNING, payload);
             byte[] replacement;
-            InMemoryKeyMaterialContentSource otherStore = new InMemoryKeyMaterialContentSource();
+            InMemoryBlobStorage otherStore = new InMemoryBlobStorage();
             try (OrionKeyMaterial other = open(otherStore)) {
                 other.withModification(other.revision(), modification -> {
                     modification.generateKey(SIGNING, 2048);
@@ -899,8 +916,8 @@ class OrionKeyMaterialApiTest {
                 });
                 replacement = otherStore.load().bytes();
             }
-            String revision = store.write(corrupt ? new byte[]{1, 2, 3} : replacement,
-                    store.load().revision());
+            String revision = store.write(new BlobStorage.Modification(store.load().revision(),
+                    corrupt ? new byte[]{1, 2, 3} : replacement));
             assertThatThrownBy(() -> reader.reload(revision)).isInstanceOfAny(
                     IOException.class, GeneralSecurityException.class);
             assertThat(reader.revision()).isEqualTo("1");
@@ -912,22 +929,22 @@ class OrionKeyMaterialApiTest {
     @ValueSource(booleans = {false, true})
     void closesItsStoreOnCloseOrWhenLoadingFails(boolean invalidMaterial) throws Exception {
         AtomicInteger closes = new AtomicInteger();
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource() {
+        InMemoryBlobStorage store = new InMemoryBlobStorage() {
             @Override
             public void close() {
                 closes.incrementAndGet();
             }
         };
-        if (invalidMaterial) store.write(new byte[]{1, 2, 3}, null);
+        if (invalidMaterial) store.write(new BlobStorage.Modification(null, new byte[]{1, 2, 3}));
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password())) {
             if (invalidMaterial) {
-                assertThatThrownBy(() -> OrionKeyMaterial.open(new KeyMaterialContentStore(
+                assertThatThrownBy(() -> OrionKeyMaterial.open(new KeyMaterialRepository(
                         store,
                         new KeyMaterialCodec(options),
                         new OrionEventManager())))
                         .isInstanceOfAny(IOException.class, GeneralSecurityException.class);
             } else {
-                OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+                OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
                         store,
                         new KeyMaterialCodec(options),
                         new OrionEventManager()));
@@ -941,7 +958,7 @@ class OrionKeyMaterialApiTest {
     @Test
     void remainsClosedWhenStoreCleanupFails() throws Exception {
         AtomicInteger closes = new AtomicInteger();
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource() {
+        InMemoryBlobStorage store = new InMemoryBlobStorage() {
             @Override
             public void close() {
                 closes.incrementAndGet();
@@ -960,12 +977,14 @@ class OrionKeyMaterialApiTest {
         assertThat(closes).hasValue(1);
     }
 
-    private static final class VersionedStore extends InMemoryKeyMaterialContentSource {
+    private static final class VersionedStore extends InMemoryBlobStorage {
         private final Map<String, byte[]> history = new HashMap<>();
 
         @Override
-        public synchronized String write(byte[] bytes, String expectedVersion) throws IOException {
-            String revision = super.write(bytes, expectedVersion);
+        public synchronized String write(BlobStorage.Modification modification) throws IOException {
+            byte[] bytes = modification.bytes();
+            String expectedVersion = modification.expectedRevision();
+            String revision = super.write(new BlobStorage.Modification(expectedVersion, bytes));
             history.put(revision, super.read(revision));
             return revision;
         }
@@ -973,7 +992,7 @@ class OrionKeyMaterialApiTest {
         @Override
         public synchronized byte[] read(String revision) throws IOException {
             byte[] bytes = history.get(revision);
-            if (bytes == null) throw new KeyMaterialStoreConflictException("Unknown revision: " + revision);
+            if (bytes == null) throw new BlobStorageConflictException("Unknown revision: " + revision);
             return java.util.Arrays.copyOf(bytes, bytes.length);
         }
     }
@@ -984,7 +1003,7 @@ class OrionKeyMaterialApiTest {
         try {
             modification.apply();
             return true;
-        } catch (KeyMaterialStoreConflictException expected) {
+        } catch (BlobStorageConflictException expected) {
             return false;
         }
     }
@@ -994,26 +1013,26 @@ class OrionKeyMaterialApiTest {
                 KeyMaterialAlgorithm.RSA, 1);
     }
 
-    private static OrionKeyMaterial open(KeyMaterialContentSource store) throws Exception {
+    private static OrionKeyMaterial open(BlobStorage store) throws Exception {
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password())) {
-            return OrionKeyMaterial.open(new KeyMaterialContentStore(
+            return OrionKeyMaterial.open(new KeyMaterialRepository(
                     store,
                     new KeyMaterialCodec(options),
                     new OrionEventManager()));
         }
     }
 
-    private static OrionKeyMaterial open(KeyMaterialContentSource store, OrionEventManager events)
+    private static OrionKeyMaterial open(BlobStorage store, OrionEventManager events)
             throws Exception {
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password())) {
-            return OrionKeyMaterial.open(new KeyMaterialContentStore(
+            return OrionKeyMaterial.open(new KeyMaterialRepository(
                     store,
                     new KeyMaterialCodec(options),
                     events));
         }
     }
 
-    private static final class FailingStore extends InMemoryKeyMaterialContentSource {
+    private static final class FailingStore extends InMemoryBlobStorage {
         private final boolean committed;
         private boolean fail;
 
@@ -1022,12 +1041,14 @@ class OrionKeyMaterialApiTest {
         }
 
         @Override
-        public synchronized String write(byte[] bytes, String expectedVersion) throws IOException {
+        public synchronized String write(BlobStorage.Modification modification) throws IOException {
+            byte[] bytes = modification.bytes();
+            String expectedVersion = modification.expectedRevision();
             if (fail) {
-                if (committed) super.write(bytes, expectedVersion);
+                if (committed) super.write(new BlobStorage.Modification(expectedVersion, bytes));
                 throw new IOException("save failed");
             }
-            return super.write(bytes, expectedVersion);
+            return super.write(new BlobStorage.Modification(expectedVersion, bytes));
         }
     }
 }

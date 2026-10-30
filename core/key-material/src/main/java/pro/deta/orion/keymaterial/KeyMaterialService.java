@@ -1,6 +1,8 @@
 package pro.deta.orion.keymaterial;
 
-import pro.deta.orion.keymaterial.KeyMaterialContentStore.Entry;
+import pro.deta.orion.storage.BlobStorageConflictException;
+
+import pro.deta.orion.keymaterial.KeyMaterialRepository.Entry;
 
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
@@ -33,14 +35,14 @@ final class KeyMaterialService implements AutoCloseable {
     private static final String DESCRIPTOR_ATTRIBUTE_OID =
             "2.25.260349814076539099691640886169327825428";
 
-    private final KeyMaterialContentStore store;
+    private final KeyMaterialRepository store;
     private final KeyMaterialStorageCertificateFactory storageCertificateFactory;
 
-    KeyMaterialService(KeyMaterialContentStore store) {
+    KeyMaterialService(KeyMaterialRepository store) {
         this(store, new KeyMaterialStorageCertificateFactory());
     }
 
-    KeyMaterialService(KeyMaterialContentStore store,
+    KeyMaterialService(KeyMaterialRepository store,
             KeyMaterialStorageCertificateFactory storageCertificateFactory) {
         if (store == null) throw new IllegalArgumentException("Key material store must not be null");
         if (storageCertificateFactory == null) {
@@ -274,10 +276,10 @@ final class KeyMaterialService implements AutoCloseable {
     }
 
     synchronized KeyMaterialModification modify(String expectedRevision)
-            throws KeyMaterialStoreConflictException {
+            throws BlobStorageConflictException {
         requireOpen();
         if (!Objects.equals(store.revision(), expectedRevision)) {
-            throw new KeyMaterialStoreConflictException("Key material changed before modify");
+            throw new BlobStorageConflictException("Key material changed before modify");
         }
         return new KeyMaterialModification(this, expectedRevision);
     }

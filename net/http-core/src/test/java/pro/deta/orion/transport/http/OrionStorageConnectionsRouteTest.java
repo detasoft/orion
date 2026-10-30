@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.storage.InMemoryBlobStorage;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.*;
@@ -23,8 +25,8 @@ class OrionStorageConnectionsRouteTest {
 
     @Test
     void createsAndInspectsSystemConnectionWithEncryptedWriteOnlyCredentials() throws Exception {
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
-                new InMemoryKeyMaterialContentSource(),
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
+                new InMemoryBlobStorage(),
                 new KeyMaterialCodec(KeyMaterialOptions.pkcs12("test-password".toCharArray())),
                 events.unstartedEvents()))) {
             StorageManagementFixture.State fixture = StorageManagementFixture.open(events,

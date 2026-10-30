@@ -1,8 +1,9 @@
 package pro.deta.orion;
 
+import pro.deta.orion.storage.BlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
-import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialRepository;
 
 import java.security.KeyStore;
 import java.io.ByteArrayOutputStream;
@@ -10,7 +11,7 @@ import java.io.ByteArrayOutputStream;
 import pro.deta.orion.event.OrionEventManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.keymaterial.LocalKeyMaterialContentSource;
+import pro.deta.orion.storage.LocalBlobStorage;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import org.junit.jupiter.api.AfterEach;
@@ -60,7 +61,7 @@ class KeyMaterialBootstrapTest {
             KeyMaterialDescriptor active = signing(configuration).active();
             signature = material.sign(active, payload);
             assertThat(active.alias()).isEqualTo("cluster-signing-v2");
-            assertThat(material.revision()).isEqualTo(new LocalKeyMaterialContentSource(
+            assertThat(material.revision()).isEqualTo(new LocalBlobStorage(
                     tempDir.resolve("security/orion.p12")).load().revision());
         }
 
@@ -148,7 +149,7 @@ class KeyMaterialBootstrapTest {
     @Test
     void requiresExplicitCreationAndDoesNotPopulateAnExistingEmptyStore() throws Exception {
         BootstrapConfiguration configuration = configuration();
-        LocalKeyMaterialContentSource store = new LocalKeyMaterialContentSource(
+        LocalBlobStorage store = new LocalBlobStorage(
                 tempDir.resolve("security/orion.p12"));
         assertThatThrownBy(() -> KeyMaterialBootstrap.open(
                 configuration,
@@ -165,7 +166,7 @@ class KeyMaterialBootstrapTest {
         emptyStore.load(null, password);
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             emptyStore.store(output, password);
-            store.write(output.toByteArray(), null);
+            store.write(new BlobStorage.Modification(null, output.toByteArray()));
         }
         byte[] before = store.load().bytes();
         assertThatThrownBy(() -> KeyMaterialBootstrap.open(
@@ -182,10 +183,10 @@ class KeyMaterialBootstrapTest {
     @Test
     void doesNotAddTheConfiguredSigningKeyToAnExistingStore() throws Exception {
         BootstrapConfiguration configuration = configuration();
-        LocalKeyMaterialContentSource store = new LocalKeyMaterialContentSource(
+        LocalBlobStorage store = new LocalBlobStorage(
                 tempDir.resolve("security/orion.p12"));
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray());
-             OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+             OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
                      store,
                      new KeyMaterialCodec(options),
                      events))) {
@@ -209,7 +210,7 @@ class KeyMaterialBootstrapTest {
         BootstrapConfiguration configuration = configuration();
         configuration.getBootstrap().getKeyMaterial().getServerSigning()
                 .setVerification(List.of(new SigningKeyReferenceConfig("previous-signing", 1)));
-        LocalKeyMaterialContentSource store = new LocalKeyMaterialContentSource(
+        LocalBlobStorage store = new LocalBlobStorage(
                 tempDir.resolve("security/orion.p12"));
         assertThatThrownBy(() -> KeyMaterialBootstrap.open(
                 configuration,

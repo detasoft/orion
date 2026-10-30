@@ -4,7 +4,7 @@ import pro.deta.orion.keymaterial.KeyMaterialModification;
 import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
-import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialRepository;
 
 import pro.deta.orion.event.OrionEventManager;
 
@@ -17,7 +17,7 @@ import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
+import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
@@ -57,7 +57,7 @@ class ConfigurationSecretsTest {
     private static final KeyMaterialDescriptor CIPHER = new KeyMaterialDescriptor(
             "configuration-v1", Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER),
             KeyMaterialAlgorithm.AES, 1);
-    private final InMemoryKeyMaterialContentSource material = new InMemoryKeyMaterialContentSource();
+    private final InMemoryBlobStorage material = new InMemoryBlobStorage();
     private final AtomicReference<OrionDocument> current = new AtomicReference<>(document());
     private final AtomicReference<byte[]> cipherInput = new AtomicReference<>();
     private final AtomicReference<byte[]> cipherOutput = new AtomicReference<>();
@@ -66,7 +66,7 @@ class ConfigurationSecretsTest {
 
     @BeforeEach
     void open() throws Exception {
-        keyMaterial = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        keyMaterial = OrionKeyMaterial.open(new KeyMaterialRepository(
                 material,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()));
@@ -113,7 +113,7 @@ class ConfigurationSecretsTest {
         assertThat(output.toString(StandardCharsets.UTF_8)).doesNotContain("tøken");
         current.set(OrionXml.read(new ByteArrayInputStream(output.toByteArray())));
 
-        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(new KeyMaterialRepository(
                 material,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {

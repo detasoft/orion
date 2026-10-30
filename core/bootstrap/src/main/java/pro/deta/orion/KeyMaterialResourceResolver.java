@@ -1,10 +1,10 @@
 package pro.deta.orion;
 
-import pro.deta.orion.keymaterial.KeyMaterialContentSource;
-import pro.deta.orion.keymaterial.KeyMaterialFileSecurity;
+import pro.deta.orion.storage.BlobStorage;
+import pro.deta.orion.storage.ProtectedFiles;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
-import pro.deta.orion.keymaterial.LocalKeyMaterialContentSource;
-import pro.deta.orion.keymaterial.ReadOnlyKeyMaterialContentSource;
+import pro.deta.orion.storage.LocalBlobStorage;
+import pro.deta.orion.storage.ReadOnlyBlobStorage;
 
 import pro.deta.orion.resource.reference.ResourceAddress;
 import pro.deta.orion.resource.reference.ResourceReferenceResolver;
@@ -60,12 +60,12 @@ public final class KeyMaterialResourceResolver {
         return unsafe(scope(environment));
     }
 
-    public KeyMaterialContentSource resolveSource(String locationReference) {
+    public BlobStorage resolveSource(String locationReference) {
         ResourceAddress address = resolveAddress(
                 locationReference,
                 "Key material location reference must not be empty");
         if (address.scheme().isEmpty() || address.hasScheme(ResourceScheme.FILE)) {
-            return new LocalKeyMaterialContentSource(Path.of(address.body()));
+            return new LocalBlobStorage(Path.of(address.body()));
         }
         if (address.hasScheme(ENV)) {
             return resolveSource(resolveEnvironment(address.body()));
@@ -73,7 +73,7 @@ public final class KeyMaterialResourceResolver {
         if (address.hasScheme(ResourceScheme.CONTENT)) {
             byte[] bytes = contentBytes(address.body());
             try {
-                return new ReadOnlyKeyMaterialContentSource(bytes, "inline key material");
+                return new ReadOnlyBlobStorage(bytes, "inline key material");
             } finally {
                 Arrays.fill(bytes, (byte) 0);
             }
@@ -117,7 +117,7 @@ public final class KeyMaterialResourceResolver {
     private char[] readProtectedPasswordFile(String value) throws IOException {
         byte[] bytes;
         try {
-            bytes = KeyMaterialFileSecurity.readProtectedFile(Path.of(value), "Key material password file");
+            bytes = ProtectedFiles.readProtectedFile(Path.of(value), "Key material password file");
         } catch (InvalidPathException e) {
             throw new IllegalArgumentException("Invalid protected key material password file reference");
         }

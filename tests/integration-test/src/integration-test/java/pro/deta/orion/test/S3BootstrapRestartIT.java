@@ -1,5 +1,6 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.storage.BlobStorage;
 import pro.deta.orion.KeyMaterialBootstrap;
 
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
@@ -18,7 +19,7 @@ import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.s3.S3NativeGitRepositoryFactory;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
+import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
@@ -69,8 +70,8 @@ class S3BootstrapRestartIT {
                     PASSWORD_ENV, "bootstrap-test-password", "S3_BOOTSTRAP_SECRET", s3.secretAccessKey());
             BootstrapConfiguration configuration = configuration(s3, tempDir);
             configuration.getBootstrap().getConfiguration().setCreateDefaultIfMissing(false);
-            InMemoryKeyMaterialContentSource materialStore = new InMemoryKeyMaterialContentSource();
-            materialStore.write(materialBytes(configuration, environment), null);
+            InMemoryBlobStorage materialStore = new InMemoryBlobStorage();
+            materialStore.write(new BlobStorage.Modification(null, materialBytes(configuration, environment)));
             byte[] payload = "preseeded S3 server identity".getBytes(StandardCharsets.UTF_8);
             byte[] signature;
             String signingKeyId;

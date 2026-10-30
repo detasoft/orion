@@ -1,5 +1,7 @@
 package pro.deta.orion.keymaterial;
 
+import pro.deta.orion.storage.InMemoryBlobStorage;
+
 import pro.deta.orion.event.OrionEventManager;
 
 import java.util.Set;
@@ -34,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class KeyMaterialOperationsTest {
     @Test
     void reusesStoredKeyForItsRequestedPurposesWithoutGrantingMissingPurposes() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         KeyMaterialDescriptor stored = new KeyMaterialDescriptor("shared",
                 Set.of(KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialPurpose.SSH_HOST),
                 KeyMaterialAlgorithm.RSA, 1);
@@ -42,7 +44,7 @@ class KeyMaterialOperationsTest {
                 Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor host = new KeyMaterialDescriptor("shared",
                 Set.of(KeyMaterialPurpose.SSH_HOST), KeyMaterialAlgorithm.RSA, 1);
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -82,20 +84,20 @@ class KeyMaterialOperationsTest {
 
     @Test
     void reloadsAndUsesGeneratedEd25519SigningMaterial() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         KeyMaterialDescriptor signing = descriptor(
                 "server-signing-ed25519-v1",
                 KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.ED25519,
                 1);
-        try (OrionKeyMaterial initial = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial initial = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
             generateKey(initial, signing, 0);
         }
 
-        try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -109,7 +111,7 @@ class KeyMaterialOperationsTest {
 
     @Test
     void reloadsSshClientKeyMaterialAndRejectsWrongDescriptorMetadata() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         KeyMaterialDescriptor rsaClient = descriptor(
                 "provisioning-client-v1",
                 KeyMaterialPurpose.SSH_CLIENT,
@@ -127,7 +129,7 @@ class KeyMaterialOperationsTest {
                 1);
         KeyPair generatedRsa;
         KeyPair generatedEd25519;
-        try (OrionKeyMaterial initial = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial initial = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -136,7 +138,7 @@ class KeyMaterialOperationsTest {
             generateKey(initial, host, 2048);
         }
 
-        try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -204,20 +206,20 @@ class KeyMaterialOperationsTest {
 
     @Test
     void rejectsReusingExistingAliasWithDifferentVersionAfterReload() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         KeyMaterialDescriptor original = descriptor(
                 "server-signing-v1",
                 KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.RSA,
                 1);
-        try (OrionKeyMaterial initial = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial initial = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
             generateKey(initial, original, 2048);
         }
 
-        try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -271,14 +273,14 @@ class KeyMaterialOperationsTest {
 
     @Test
     void lazilyCreatesAndDurablyReusesKeysTogether() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         KeyMaterialDescriptor account = descriptor(
                 "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor identity = descriptor(
                 "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
         byte[] accountPublic;
         byte[] identityPublic;
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -293,7 +295,7 @@ class KeyMaterialOperationsTest {
             assertThat(store.load().revision()).isEqualTo("1");
         }
 
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -307,12 +309,12 @@ class KeyMaterialOperationsTest {
 
     @Test
     void doesNotDurablySaveOnlyOneKeyWhenGenerationFails() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         KeyMaterialDescriptor account = descriptor(
                 "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor identity = descriptor(
                 "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.EC, 1);
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -338,14 +340,14 @@ class KeyMaterialOperationsTest {
 
     @Test
     void validatesInstallsAndReloadsCertificateChainWithoutRootInIdentity() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         KeyMaterialDescriptor identity = descriptor(
                 "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor rootDescriptor = trustedCertificate("public-root-v1");
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
         TestCertificateChain.Authority intermediate = TestCertificateChain.intermediate("Intermediate", root);
 
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -365,7 +367,7 @@ class KeyMaterialOperationsTest {
             assertThat(certificate.issuerTrustAnchor()).contains(root.certificate());
         }
 
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -380,14 +382,14 @@ class KeyMaterialOperationsTest {
 
     @Test
     void rejectsInvalidCertificateChainsBeforeSaving() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         KeyMaterialDescriptor identity = descriptor(
                 "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor rootDescriptor = trustedCertificate("public-root-v1");
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
         TestCertificateChain.Authority otherRoot = TestCertificateChain.root("Other Root");
         TestCertificateChain.Authority intermediate = TestCertificateChain.intermediate("Intermediate", root);
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -427,7 +429,7 @@ class KeyMaterialOperationsTest {
 
     @Test
     void keepsServerIssuerAndClientTrustRolesSeparate() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         KeyMaterialDescriptor identity = descriptor(
                 "https-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor serverRoot = trustedCertificate("server-root-v1");
@@ -440,7 +442,7 @@ class KeyMaterialOperationsTest {
         KeyPair issuerSignedClientKey = TestCertificateChain.keyPair();
         X509Certificate issuerSignedClientCertificate = TestCertificateChain.leaf(
                 "issuer-signed-client", issuerSignedClientKey, serverAuthority);
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -497,7 +499,7 @@ class KeyMaterialOperationsTest {
 
     @Test
     void sealsConfigurationEnvelopeAcrossMaterialReload() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         KeyMaterialDescriptor cipher = descriptor(
                 "configuration-v1",
                 KeyMaterialPurpose.CONFIGURATION_CIPHER,
@@ -507,7 +509,7 @@ class KeyMaterialOperationsTest {
         byte[] plaintext = "database-password".getBytes(StandardCharsets.UTF_8);
         ConfigurationSecretEnvelopeCodec codec = new ConfigurationSecretEnvelopeCodec();
         String serializedEnvelope;
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -515,7 +517,7 @@ class KeyMaterialOperationsTest {
             serializedEnvelope = codec.serialize(envelope);
         }
 
-        try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -539,8 +541,8 @@ class KeyMaterialOperationsTest {
                 KeyMaterialPurpose.CONFIGURATION_CIPHER,
                 KeyMaterialAlgorithm.AES,
                 1);
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialContentStore(
-                new InMemoryKeyMaterialContentSource(),
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialRepository(
+                new InMemoryBlobStorage(),
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
             byte[] plaintext = "same-password".getBytes(StandardCharsets.UTF_8);
@@ -563,8 +565,8 @@ class KeyMaterialOperationsTest {
                 KeyMaterialPurpose.CONFIGURATION_CIPHER,
                 KeyMaterialAlgorithm.AES,
                 1);
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialContentStore(
-                new InMemoryKeyMaterialContentSource(),
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialRepository(
+                new InMemoryBlobStorage(),
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
             ConfigurationSecretEnvelope envelope = service.seal(cipher,
@@ -588,8 +590,8 @@ class KeyMaterialOperationsTest {
                 KeyMaterialPurpose.CONFIGURATION_CIPHER,
                 KeyMaterialAlgorithm.AES,
                 1);
-        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialContentStore(
-                new InMemoryKeyMaterialContentSource(),
+        try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialRepository(
+                new InMemoryBlobStorage(),
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
             ConfigurationSecretEnvelope envelope = service.seal(cipher,
@@ -674,8 +676,8 @@ class KeyMaterialOperationsTest {
     }
 
     private static OrionKeyMaterial service() throws Exception {
-        return OrionKeyMaterial.open(new KeyMaterialContentStore(
-                new InMemoryKeyMaterialContentSource(),
+        return OrionKeyMaterial.open(new KeyMaterialRepository(
+                new InMemoryBlobStorage(),
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()));
     }

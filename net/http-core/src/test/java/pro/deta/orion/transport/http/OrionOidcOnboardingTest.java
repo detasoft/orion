@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.storage.InMemoryBlobStorage;
+
 import pro.deta.orion.test.certificates.TestCertificateChain;
 
 import pro.deta.orion.config.OrionConfigurationEditor;
@@ -1410,8 +1412,8 @@ class OrionOidcOnboardingTest {
             KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor("signing",
                     Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
             try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
-                material = OrionKeyMaterial.open(new KeyMaterialContentStore(
-                        new InMemoryKeyMaterialContentSource(),
+                material = OrionKeyMaterial.open(new KeyMaterialRepository(
+                        new InMemoryBlobStorage(),
                         new KeyMaterialCodec(options),
                         testRuntime.unstartedEvents()));
                 material.withModification(material.revision(), modification -> {

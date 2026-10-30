@@ -1,6 +1,8 @@
-package pro.deta.orion.keymaterial;
+package pro.deta.orion.storage;
 
 import java.io.IOException;
+import java.util.function.Consumer;
+import pro.deta.orion.util.Subscription;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
@@ -17,19 +19,23 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.locks.ReentrantLock;
 
-public class LocalKeyMaterialContentSource implements KeyMaterialContentSource {
+/**
+ * Stores opaque bytes in an owner-only file with atomic, conditional publication.
+ * TODO Implement change subscriptions; subscriptions currently receive no notifications.
+ */
+public class LocalBlobStorage implements BlobStorage {
     private static final int JVM_LOCK_COUNT = 64;
     private static final ReentrantLock[] JVM_LOCKS = createJvmLocks();
 
     private final Path path;
 
-    public LocalKeyMaterialContentSource(Path path) {
+    public LocalBlobStorage(Path path) {
         if (path == null) {
-            throw new IllegalArgumentException("Key material path must not be null");
+            throw new IllegalArgumentException("Blob path must not be null");
         }
-        this.path = KeyMaterialFileSecurity.normalizeLocation(path);
+        this.path = ProtectedFiles.normalizeLocation(path);
         if (this.path.getFileName() == null) {
-            throw new IllegalArgumentException("Key material path must include a file name");
+            throw new IllegalArgumentException("Blob path must include a file name");
         }
     }
 
@@ -38,32 +44,40 @@ public class LocalKeyMaterialContentSource implements KeyMaterialContentSource {
     }
 
     @Override
+    public Subscription subscribe(Consumer<BlobChanged> subscriber) {
+        Objects.requireNonNull(subscriber, "subscriber");
+        return () -> {};
+    }
+
+    @Override
     public Content load() throws IOException {
         if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) return new Content(null, null);
-        KeyMaterialFileSecurity.validatePublicationDirectory(path.getParent());
-        byte[] bytes = KeyMaterialFileSecurity.readOwnerOnlyFile(path, "Key material location");
-        return new Content(KeyMaterialVersions.sha256(bytes), bytes);
+        ProtectedFiles.validatePublicationDirectory(path.getParent());
+        byte[] bytes = ProtectedFiles.readOwnerOnlyFile(path, "Blob location");
+        return new Content(BlobRevisions.sha256(bytes), bytes);
     }
 
     @Override
     public byte[] read(String revision) throws IOException {
         Objects.requireNonNull(revision, "revision");
-        KeyMaterialFileSecurity.validatePublicationDirectory(path.getParent());
-        byte[] bytes = KeyMaterialFileSecurity.readOwnerOnlyFile(path, "Key material location");
-        if (!revision.equals(KeyMaterialVersions.sha256(bytes))) {
+        ProtectedFiles.validatePublicationDirectory(path.getParent());
+        byte[] bytes = ProtectedFiles.readOwnerOnlyFile(path, "Blob location");
+        if (!revision.equals(BlobRevisions.sha256(bytes))) {
             Arrays.fill(bytes, (byte) 0);
-            throw new KeyMaterialStoreConflictException("Key material revision is no longer available: " + revision);
+            throw new BlobStorageConflictException("Blob revision is no longer available: " + revision);
         }
         return bytes;
     }
 
     @Override
-    public String write(byte[] bytes, String expectedVersion) throws IOException {
+    public String write(Modification modification) throws IOException {
+        byte[] bytes = modification.bytes();
+        String expectedVersion = modification.expectedRevision();
         if (bytes == null) {
-            throw new IllegalArgumentException("Key material bytes must not be null");
+            throw new IllegalArgumentException("Blob bytes must not be null");
         }
         Path parent = path.getParent();
-        KeyMaterialFileSecurity.createDirectories(parent);
+        ProtectedFiles.createDirectories(parent);
         ReentrantLock jvmLock = jvmLock();
         jvmLock.lock();
         try {
@@ -72,18 +86,18 @@ public class LocalKeyMaterialContentSource implements KeyMaterialContentSource {
                     FileLock ignored = lockChannel.lock()
             ) {
                 String currentVersion = Files.exists(path, LinkOption.NOFOLLOW_LINKS)
-                        ? KeyMaterialVersions.sha256(
-                                KeyMaterialFileSecurity.readOwnerOnlyFile(path, "Key material location"))
+                        ? BlobRevisions.sha256(
+                                ProtectedFiles.readOwnerOnlyFile(path, "Blob location"))
                         : null;
                 if (!matchesExpectedVersion(currentVersion, expectedVersion)) {
-                    throw new KeyMaterialStoreConflictException("Key material store changed before save");
+                    throw new BlobStorageConflictException("Blob store changed before save");
                 }
 
                 Path temp = tempPath(parent);
                 try {
                     writeDurably(temp, parent, bytes);
                     moveIntoPlace(temp);
-                    KeyMaterialFileSecurity.validateOwnerOnlyRegularFile(path, "Key material location");
+                    ProtectedFiles.validateOwnerOnlyRegularFile(path, "Blob location");
                     forceDirectory(parent);
                 } finally {
                     Files.deleteIfExists(temp);
@@ -92,7 +106,7 @@ public class LocalKeyMaterialContentSource implements KeyMaterialContentSource {
         } finally {
             jvmLock.unlock();
         }
-        return KeyMaterialVersions.sha256(bytes);
+        return BlobRevisions.sha256(bytes);
     }
 
     public int discardIncompleteWrites() throws IOException {
@@ -100,7 +114,7 @@ public class LocalKeyMaterialContentSource implements KeyMaterialContentSource {
         if (parent == null || !Files.exists(parent, LinkOption.NOFOLLOW_LINKS)) {
             return 0;
         }
-        KeyMaterialFileSecurity.validatePublicationDirectory(parent);
+        ProtectedFiles.validatePublicationDirectory(parent);
         ReentrantLock jvmLock = jvmLock();
         jvmLock.lock();
         try {
@@ -115,9 +129,9 @@ public class LocalKeyMaterialContentSource implements KeyMaterialContentSource {
                         if (!fileName.startsWith(tempFilePrefix()) || !fileName.endsWith(".tmp")) {
                             continue;
                         }
-                        KeyMaterialFileSecurity.validateOwnerOnlyRegularFile(
+                        ProtectedFiles.validateOwnerOnlyRegularFile(
                                 candidate,
-                                "Incomplete key material publication");
+                                "Incomplete blob publication");
                         Files.delete(candidate);
                         discarded++;
                     }
@@ -141,13 +155,13 @@ public class LocalKeyMaterialContentSource implements KeyMaterialContentSource {
         try (FileChannel created = FileChannel.open(
                 lock,
                 Set.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE),
-                KeyMaterialFileSecurity.ownerOnlyFileAttributes(parent))) {
+                ProtectedFiles.ownerOnlyFileAttributes(parent))) {
             created.force(true);
             forceDirectory(parent);
         } catch (FileAlreadyExistsException ignored) {
             // The persistent lock file coordinates every writer for this store.
         }
-        KeyMaterialFileSecurity.validateOwnerOnlyRegularFile(lock, "Key material lock");
+        ProtectedFiles.validateOwnerOnlyRegularFile(lock, "Blob lock");
         return FileChannel.open(lock, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
     }
 
@@ -155,7 +169,7 @@ public class LocalKeyMaterialContentSource implements KeyMaterialContentSource {
         try (FileChannel channel = FileChannel.open(
                 temp,
                 Set.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE),
-                KeyMaterialFileSecurity.ownerOnlyFileAttributes(parent))) {
+                ProtectedFiles.ownerOnlyFileAttributes(parent))) {
             ByteBuffer buffer = ByteBuffer.wrap(bytes);
             while (buffer.hasRemaining()) {
                 channel.write(buffer);
@@ -165,7 +179,7 @@ public class LocalKeyMaterialContentSource implements KeyMaterialContentSource {
     }
 
     private static void forceDirectory(Path parent) throws IOException {
-        if (parent == null || !KeyMaterialFileSecurity.supportsPosix(parent)) {
+        if (parent == null || !ProtectedFiles.supportsPosix(parent)) {
             return;
         }
         try (FileChannel directory = FileChannel.open(parent, StandardOpenOption.READ)) {

@@ -4,7 +4,7 @@ import pro.deta.orion.keymaterial.KeyMaterialModification;
 import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
-import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialRepository;
 
 import pro.deta.orion.event.OrionEventManager;
 
@@ -18,7 +18,7 @@ import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
+import pro.deta.orion.storage.InMemoryBlobStorage;
 
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
@@ -434,8 +434,8 @@ class JwtAccessTokenServiceTest {
 
         private TestIdentity(String activeKeyId, Map<String, KeyPair> keys) throws Exception {
             try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray())) {
-                material = OrionKeyMaterial.open(new KeyMaterialContentStore(
-                        new InMemoryKeyMaterialContentSource(),
+                material = OrionKeyMaterial.open(new KeyMaterialRepository(
+                        new InMemoryBlobStorage(),
                         new KeyMaterialCodec(options),
                         new OrionEventManager()));
             }

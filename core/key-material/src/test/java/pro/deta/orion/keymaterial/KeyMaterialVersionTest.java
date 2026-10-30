@@ -1,5 +1,8 @@
 package pro.deta.orion.keymaterial;
 
+import pro.deta.orion.storage.BlobStorage;
+import pro.deta.orion.storage.InMemoryBlobStorage;
+
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.event.OrionEventManager;
 
@@ -14,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class KeyMaterialVersionTest {
     @Test
     void retainsExactCertificateVersionsAcrossReloadAndBlocksDeletedHistory() throws Exception {
-        InMemoryKeyMaterialContentSource source = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage source = new InMemoryBlobStorage();
         KeyMaterialDescriptor root = new KeyMaterialDescriptor("root", Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
                 KeyMaterialAlgorithm.RSA, 1);
         X509Certificate first = TestCertificateChain.root("First").certificate();
@@ -53,7 +56,7 @@ class KeyMaterialVersionTest {
                 Set.of(KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialPurpose.SSH_HOST), KeyMaterialAlgorithm.RSA, 1);
         KeyMaterialDescriptor other = new KeyMaterialDescriptor("other",
                 signing.purposes(), signing.algorithm(), 1);
-        InMemoryKeyMaterialContentSource source = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage source = new InMemoryBlobStorage();
         byte[] payload = new byte[]{1, 2, 3};
         byte[] oldSignature;
         KeyMaterialId next;
@@ -87,9 +90,9 @@ class KeyMaterialVersionTest {
         }
     }
 
-    private static OrionKeyMaterial open(KeyMaterialContentSource source) throws Exception {
+    private static OrionKeyMaterial open(BlobStorage source) throws Exception {
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password())) {
-            return OrionKeyMaterial.open(new KeyMaterialContentStore(source,
+            return OrionKeyMaterial.open(new KeyMaterialRepository(source,
                     new KeyMaterialCodec(options), new OrionEventManager()));
         }
     }
