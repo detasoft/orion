@@ -1,5 +1,9 @@
 package pro.deta.orion.keymaterial;
 
+import pro.deta.orion.storage.BlobStorage;
+import pro.deta.orion.storage.InMemoryBlobStorage;
+import pro.deta.orion.storage.ReadOnlyBlobStorage;
+
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.event.OrionEventManager;
 
@@ -9,16 +13,16 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class KeyMaterialContentStoreTest {
+class KeyMaterialRepositoryTest {
     @Test
     void usesTheSourceRevisionAsTheModificationBase() throws Exception {
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password());
              KeyMaterialCodec codec = new KeyMaterialCodec(options)) {
             byte[] bytes = codec.encode(codec.create());
             try {
-                ReadOnlyKeyMaterialContentSource source = new ReadOnlyKeyMaterialContentSource(bytes, "test");
+                ReadOnlyBlobStorage source = new ReadOnlyBlobStorage(bytes, "test");
                 String revision = source.load().revision();
-                try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+                try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
                         source, new KeyMaterialCodec(options), new OrionEventManager()))) {
                     assertThat(material.revision()).isEqualTo(revision);
                     KeyMaterialModification modification = material.modify(material.revision());
@@ -34,15 +38,17 @@ class KeyMaterialContentStoreTest {
 
     @Test
     void observesAnUpdateBetweenInitialReadAndEventSubscription() throws Exception {
-        KeyMaterialDescriptor first = new KeyMaterialDescriptor("first", Set.of(KeyMaterialPurpose.SERVER_SIGNING),
+        KeyMaterialDescriptor first = new KeyMaterialDescriptor("first",
+                Set.of(KeyMaterialPurpose.SERVER_SIGNING),
                 KeyMaterialAlgorithm.RSA, 1);
-        KeyMaterialDescriptor second = new KeyMaterialDescriptor("second", Set.of(KeyMaterialPurpose.SERVER_SIGNING),
+        KeyMaterialDescriptor second = new KeyMaterialDescriptor("second",
+                Set.of(KeyMaterialPurpose.SERVER_SIGNING),
                 KeyMaterialAlgorithm.RSA, 1);
-        InMemoryKeyMaterialContentSource writerSource = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage writerSource = new InMemoryBlobStorage();
         byte[] initial = null;
         byte[] updated = null;
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password());
-             OrionKeyMaterial writer = OrionKeyMaterial.open(new KeyMaterialContentStore(
+             OrionKeyMaterial writer = OrionKeyMaterial.open(new KeyMaterialRepository(
                      writerSource, new KeyMaterialCodec(options), new OrionEventManager()))) {
             writer.withModification(writer.revision(), modification -> {
                 modification.generateKey(first, 2048);
@@ -55,7 +61,7 @@ class KeyMaterialContentStoreTest {
             });
             updated = writerSource.load().bytes();
             byte[] nextContent = updated;
-            InMemoryKeyMaterialContentSource readerSource = new InMemoryKeyMaterialContentSource() {
+            InMemoryBlobStorage readerSource = new InMemoryBlobStorage() {
                 private boolean updatedDuringRead;
 
                 @Override
@@ -63,13 +69,13 @@ class KeyMaterialContentStoreTest {
                     byte[] bytes = super.read(revision);
                     if (!updatedDuringRead) {
                         updatedDuringRead = true;
-                        super.write(nextContent, revision);
+                        super.write(new BlobStorage.Modification(revision, nextContent));
                     }
                     return bytes;
                 }
             };
-            readerSource.write(initial, null);
-            try (OrionKeyMaterial reader = OrionKeyMaterial.open(new KeyMaterialContentStore(
+            readerSource.write(new BlobStorage.Modification(null, initial));
+            try (OrionKeyMaterial reader = OrionKeyMaterial.open(new KeyMaterialRepository(
                     readerSource, new KeyMaterialCodec(options), new OrionEventManager()))) {
                 assertThat(reader.revision()).isEqualTo("2");
                 assertThat(reader.contains(first)).isTrue();

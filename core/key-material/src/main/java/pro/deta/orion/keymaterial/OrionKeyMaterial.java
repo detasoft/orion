@@ -1,5 +1,7 @@
 package pro.deta.orion.keymaterial;
 
+import pro.deta.orion.storage.BlobStorageConflictException;
+
 import java.util.Set;
 
 import com.google.gson.stream.JsonReader;
@@ -59,7 +61,7 @@ public class OrionKeyMaterial implements AutoCloseable {
         this.owner = owner;
     }
 
-    public static OrionKeyMaterial open(KeyMaterialContentStore store) {
+    public static OrionKeyMaterial open(KeyMaterialRepository store) {
         return new OrionKeyMaterial(new KeyMaterialService(store));
     }
 
@@ -86,7 +88,7 @@ public class OrionKeyMaterial implements AutoCloseable {
         return owner.revision();
     }
 
-    public KeyMaterialModification modify(String expectedRevision) throws KeyMaterialStoreConflictException {
+    public KeyMaterialModification modify(String expectedRevision) throws BlobStorageConflictException {
         requireAvailable();
         return owner.modify(expectedRevision);
     }

@@ -1,6 +1,6 @@
 package pro.deta.orion;
 
-import pro.deta.orion.keymaterial.KeyMaterialContentSource;
+import pro.deta.orion.storage.BlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 
 import org.junit.jupiter.api.Test;
@@ -55,15 +55,15 @@ class KeyMaterialResourceResolverTest {
         KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard(
                 Map.of("ORION_KEYSTORE_LOCATION", envPath.toString()));
 
-        KeyMaterialContentSource plainStore = resolver.resolveSource(plainPath.toString());
-        KeyMaterialContentSource fileStore =
+        BlobStorage plainStore = resolver.resolveSource(plainPath.toString());
+        BlobStorage fileStore =
                 resolver.resolveSource("file:" + filePath);
-        KeyMaterialContentSource envStore = resolver.resolveSource(
+        BlobStorage envStore = resolver.resolveSource(
                 "env:ORION_KEYSTORE_LOCATION");
 
-        String plainVersion = plainStore.write(bytes("plain"), null);
-        String fileVersion = fileStore.write(bytes("file"), null);
-        String envVersion = envStore.write(bytes("env"), null);
+        String plainVersion = plainStore.write(new BlobStorage.Modification(null, bytes("plain")));
+        String fileVersion = fileStore.write(new BlobStorage.Modification(null, bytes("file")));
+        String envVersion = envStore.write(new BlobStorage.Modification(null, bytes("env")));
 
         assertThat(Files.readAllBytes(plainPath)).isEqualTo(bytes("plain"));
         assertThat(Files.readAllBytes(filePath)).isEqualTo(bytes("file"));
@@ -78,10 +78,11 @@ class KeyMaterialResourceResolverTest {
         KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard();
         String reference = contentReference(bytes("inline"));
 
-        KeyMaterialContentSource store = resolver.resolveSource(reference);
+        BlobStorage store = resolver.resolveSource(reference);
 
         assertThat(store.load().bytes()).isEqualTo(bytes("inline"));
-        assertThatThrownBy(() -> store.write(bytes("update"), store.load().revision()))
+        assertThatThrownBy(() -> store.write(new BlobStorage.Modification(store.load().revision(),
+                bytes("update"))))
                 .isInstanceOf(java.io.IOException.class)
                 .hasMessageContaining("read-only")
                 .hasMessageNotContaining(reference);

@@ -1,8 +1,10 @@
 package pro.deta.orion;
 
+import pro.deta.orion.git.fileapi.GitBlobStorage;
+
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
-import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialRepository;
 
 import pro.deta.orion.event.OrionEventManager;
 
@@ -49,7 +51,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
+import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
@@ -415,13 +417,14 @@ class BootstrapContextTest {
                         KeyMaterialAlgorithm.RSA,
                         1);
                 try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("correct-password".toCharArray());
-                     OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
-                             new NativeGitKeyMaterialContentSource(new GitFileEvents(
+                     OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
+                             new GitBlobStorage(new GitFileEvents(
                                      new GitFile(
                                          backend,
                                          "orion",
                                          "refs/heads/main",
-                                         "material.p12"))),
+                                         "material.p12")), new GitCommitMetadata(GitCommitAuthor.EMPTY,
+                                                 "Update server identity material")),
                              new KeyMaterialCodec(options),
                              testRuntime.unstartedEvents()))) {
                     material.withModification(material.revision(), modification -> {
@@ -460,12 +463,13 @@ class BootstrapContextTest {
                     .hasMessage("Bootstrap inputs are unavailable or invalid")
                     .rootCause()
                     .hasMessageContaining("Bootstrap source path is unavailable: material");
-            assertThat(new NativeGitKeyMaterialContentSource(new GitFileEvents(
+            assertThat(new GitBlobStorage(new GitFileEvents(
                     new GitFile(
                         backend,
                         "orion",
                         "refs/heads/main",
-                        "material.p12"))).load().revision())
+                        "material.p12")), new GitCommitMetadata(GitCommitAuthor.EMPTY,
+                                "Update server identity material")).load().revision())
                     .isEqualTo(backend.retained("orion").refs().get("refs/heads/main"));
         }
     }
@@ -494,12 +498,13 @@ class BootstrapContextTest {
                 assertThatThrownBy(() -> openContext(configuration, ENVIRONMENT, borrow(incomplete)))
                         .isInstanceOf(IllegalStateException.class)
                         .hasMessage("Bootstrap inputs are unavailable or invalid");
-                assertThat(new NativeGitKeyMaterialContentSource(new GitFileEvents(
+                assertThat(new GitBlobStorage(new GitFileEvents(
                         new GitFile(
                             incomplete,
                             "orion",
                             "refs/heads/main",
-                            "material.p12"))).load().revision())
+                            "material.p12")), new GitCommitMetadata(GitCommitAuthor.EMPTY,
+                                    "Update server identity material")).load().revision())
                         .isEqualTo(incomplete.retained("orion").refs().get("refs/heads/main"));
 
                 try (NativeGitRepositoryProvider restored = repositoryWith(configuration, backup)) {
@@ -784,12 +789,13 @@ class BootstrapContextTest {
             assertThatThrownBy(() -> openContext(configuration, ENVIRONMENT, borrow(backend)))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessage("Bootstrap inputs are unavailable or invalid");
-            assertThat(new NativeGitKeyMaterialContentSource(new GitFileEvents(
+            assertThat(new GitBlobStorage(new GitFileEvents(
                     new GitFile(
                         backend,
                         "orion",
                         "refs/heads/main",
-                        "material.p12"))).load().revision())
+                        "material.p12")), new GitCommitMetadata(GitCommitAuthor.EMPTY,
+                                "Update server identity material")).load().revision())
                     .isEqualTo(backend.retained("orion").refs().get("refs/heads/main"));
         }
     }
@@ -1727,10 +1733,10 @@ class BootstrapContextTest {
 
     private static byte[] materialBytes(BootstrapConfiguration configuration,
             List<KeyMaterialDescriptor> descriptors) throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(
                 ENVIRONMENT.get(PASSWORD_ENV).toCharArray());
-             OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+             OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
                      store,
                      new KeyMaterialCodec(options),
                      new OrionEventManager()))) {

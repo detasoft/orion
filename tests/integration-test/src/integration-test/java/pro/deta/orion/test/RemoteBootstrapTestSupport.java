@@ -11,7 +11,7 @@ import pro.deta.orion.auth.SshCredentialListResult;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
+import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
@@ -110,7 +110,7 @@ final class RemoteBootstrapTestSupport {
 
     static byte[] materialBytes(BootstrapConfiguration configuration, Map<String, String> environment)
             throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         try (OrionKeyMaterial material = TestServerIdentityMaterial.openMaterial(
                 configuration, environment, store)) {
             material.withModification(material.revision(), modification -> {

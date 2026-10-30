@@ -1,10 +1,11 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.storage.BlobStorage;
 import java.security.cert.X509Certificate;
 import pro.deta.orion.test.certificates.TestCertificateChain;
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
-import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialRepository;
 
 import pro.deta.orion.event.OrionEventManager;
 
@@ -14,7 +15,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
+import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
@@ -40,7 +41,7 @@ class OrionAdminKeyMaterialRouteTest {
 
     @Test
     void exposesOnlyPublicInventoryToApplicationAdmins() throws Exception {
-        try (OrionKeyMaterial material = open(new InMemoryKeyMaterialContentSource())) {
+        try (OrionKeyMaterial material = open(new InMemoryBlobStorage())) {
             material.withModification(material.revision(), modification -> {
                 modification.generateKey(new KeyMaterialDescriptor("acme-identity",
                         Set.of(KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialPurpose.SERVER_SIGNING),
@@ -65,7 +66,7 @@ class OrionAdminKeyMaterialRouteTest {
 
     @Test
     void formatsTheSelectedCertificateVersionAsPublicMetadata() throws Exception {
-        try (OrionKeyMaterial material = open(new InMemoryKeyMaterialContentSource())) {
+        try (OrionKeyMaterial material = open(new InMemoryBlobStorage())) {
             KeyMaterialDescriptor identity = new KeyMaterialDescriptor("identity",
                     Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 1);
             material.withModification(material.revision(), modification -> {
@@ -95,17 +96,19 @@ class OrionAdminKeyMaterialRouteTest {
 
     @Test
     void publishesTheCreatedKeyOnlyAfterTheStoreAcceptsIt() throws Exception {
-        class ObservingStore extends InMemoryKeyMaterialContentSource {
+        class ObservingStore extends InMemoryBlobStorage {
             private OrionKeyMaterial material;
 
             @Override
-            public synchronized String write(byte[] bytes, String expectedVersion) throws IOException {
+            public synchronized String write(BlobStorage.Modification modification) throws IOException {
+                byte[] bytes = modification.bytes();
+                String expectedVersion = modification.expectedRevision();
                 try {
                     assertThat(material.contains(ACCOUNT)).isFalse();
                 } catch (GeneralSecurityException failure) {
                     throw new IOException(failure);
                 }
-                return super.write(bytes, expectedVersion);
+                return super.write(new BlobStorage.Modification(expectedVersion, bytes));
             }
         }
         ObservingStore store = new ObservingStore();
@@ -135,7 +138,7 @@ class OrionAdminKeyMaterialRouteTest {
                 + "\n-----END PRIVATE KEY-----\n";
         String body = new ObjectMapper().writeValueAsString(Map.of(
                 "alias", "account", "purpose", "ACME_ACCOUNT", "privateKeyPem", pem));
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         try (OrionKeyMaterial material = open(store)) {
             OrionHttpResponse response = post(material, body);
             assertThat(response.status()).isEqualTo(201);
@@ -151,7 +154,7 @@ class OrionAdminKeyMaterialRouteTest {
 
     @Test
     void rejectsAnExistingAliasRegardlessOfItsPurposeWithoutReplacingTheKey() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         try (OrionKeyMaterial material = open(store)) {
             assertThat(post(material, """
                     {"alias":"account","purpose":"ACME_ACCOUNT"}
@@ -174,7 +177,7 @@ class OrionAdminKeyMaterialRouteTest {
 
     @Test
     void rejectsInvalidNamesPurposesAndOversizedRequestsWithoutSaving() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         try (OrionKeyMaterial material = open(store)) {
             for (String body : List.of("null", "{", "{\"purpose\":\"UNKNOWN\"}",
                     "{\"purpose\":\"ACME_ACCOUNT\"}",
@@ -192,7 +195,7 @@ class OrionAdminKeyMaterialRouteTest {
 
     @Test
     void sanitizesMalformedImportFailuresWithoutSaving() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         try (OrionKeyMaterial material = open(store)) {
             OrionHttpResponse response = post(material, """
                     {"alias":"invalid","purpose":"ACME_ACCOUNT","privateKeyPem":"private-secret"}
@@ -207,10 +210,12 @@ class OrionAdminKeyMaterialRouteTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void reportsFailedPublicationAndReopensOnlyTheDurableKey(boolean committed) throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource() {
+        InMemoryBlobStorage store = new InMemoryBlobStorage() {
             @Override
-            public synchronized String write(byte[] bytes, String expectedVersion) throws IOException {
-                if (committed) super.write(bytes, expectedVersion);
+            public synchronized String write(BlobStorage.Modification modification) throws IOException {
+                byte[] bytes = modification.bytes();
+                String expectedVersion = modification.expectedRevision();
+                if (committed) super.write(new BlobStorage.Modification(expectedVersion, bytes));
                 throw new IOException("private-storage-detail");
             }
         };
@@ -241,9 +246,9 @@ class OrionAdminKeyMaterialRouteTest {
                 body, AcmeAdministrationTest.admin()));
     }
 
-    private static OrionKeyMaterial open(InMemoryKeyMaterialContentSource store) throws Exception {
+    private static OrionKeyMaterial open(InMemoryBlobStorage store) throws Exception {
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray())) {
-            return OrionKeyMaterial.open(new KeyMaterialContentStore(
+            return OrionKeyMaterial.open(new KeyMaterialRepository(
                     store,
                     new KeyMaterialCodec(options),
                     new OrionEventManager()));

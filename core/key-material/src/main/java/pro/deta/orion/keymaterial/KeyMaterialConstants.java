@@ -4,8 +4,6 @@ import java.time.Duration;
 
 public final class KeyMaterialConstants {
     public static final String DEFAULT_KEY_STORE_TYPE = "PKCS12";
-    public static final String SHA_256_DIGEST = "SHA-256";
-    public static final String SHA_256_VERSION_PREFIX = "sha256:";
     public static final String RSA_ALGORITHM = "RSA";
     public static final int RSA_KEY_SIZE_BITS = 2048;
     public static final String EC_ALGORITHM = "EC";

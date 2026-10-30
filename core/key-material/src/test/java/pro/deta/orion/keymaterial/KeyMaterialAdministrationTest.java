@@ -1,5 +1,8 @@
 package pro.deta.orion.keymaterial;
 
+import pro.deta.orion.storage.BlobStorage;
+import pro.deta.orion.storage.InMemoryBlobStorage;
+
 import pro.deta.orion.event.OrionEventManager;
 
 import java.util.Set;
@@ -23,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class KeyMaterialAdministrationTest {
     @Test
     void generatesAndPersistsSeparateAccountAndTlsKeys() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         byte[] publicKey;
         try (OrionKeyMaterial material = open(store)) {
             material.withModification(material.revision(), modification -> {
@@ -52,7 +55,7 @@ class KeyMaterialAdministrationTest {
                 .parsePrivateKey().toASN1Primitive().getEncoded();
         for (String pem : List.of(pem("PRIVATE KEY", original.getPrivate().getEncoded()),
                 pem("RSA PRIVATE KEY", pkcs1))) {
-            InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+            InMemoryBlobStorage store = new InMemoryBlobStorage();
             char[] input = pem.toCharArray();
             try (OrionKeyMaterial material = open(store)) {
                 material.withModification(material.revision(), modification -> {
@@ -75,7 +78,7 @@ class KeyMaterialAdministrationTest {
         KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
         generator.initialize(2048);
         KeyPair original = generator.generateKeyPair();
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         char[] input = (" \n" + jwk((RSAPrivateCrtKey) original.getPrivate())).toCharArray();
         try (OrionKeyMaterial material = open(store)) {
             material.withModification(material.revision(), modification -> {
@@ -108,7 +111,7 @@ class KeyMaterialAdministrationTest {
                 valid.replaceFirst("\"e\":\"[^\"]+\"", "\"e\":65537"),
                 valid.replace("\"kty\":\"RSA\"", "\"kty\":\"RSA\",\"oth\":[]"),
                 jwk((RSAPrivateCrtKey) generator.generateKeyPair().getPrivate()));
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         try (OrionKeyMaterial material = open(store)) {
             List<KeyMaterialId> before = material.inventory();
             for (String invalid : invalidKeys) {
@@ -148,7 +151,7 @@ class KeyMaterialAdministrationTest {
         rsa.initialize(1024);
         KeyPairGenerator ec = KeyPairGenerator.getInstance("EC");
         ec.initialize(256);
-        try (OrionKeyMaterial material = open(new InMemoryKeyMaterialContentSource())) {
+        try (OrionKeyMaterial material = open(new InMemoryBlobStorage())) {
             List<KeyMaterialId> before = material.inventory();
             for (String invalid : List.of("not a key", pem("PRIVATE KEY", rsa.generateKeyPair().getPrivate().getEncoded()),
                     pem("PRIVATE KEY", ec.generateKeyPair().getPrivate().getEncoded()))) {
@@ -166,11 +169,13 @@ class KeyMaterialAdministrationTest {
     @Test
     void aFailedSaveInvalidatesTheOwnerAndLeavesDurableMaterialUnchanged() throws Exception {
         AtomicBoolean failWrites = new AtomicBoolean();
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource() {
+        InMemoryBlobStorage store = new InMemoryBlobStorage() {
             @Override
-            public synchronized String write(byte[] bytes, String expectedVersion) throws IOException {
+            public synchronized String write(BlobStorage.Modification modification) throws IOException {
+                byte[] bytes = modification.bytes();
+                String expectedVersion = modification.expectedRevision();
                 if (failWrites.get()) throw new IOException("Storage unavailable");
-                return super.write(bytes, expectedVersion);
+                return super.write(new BlobStorage.Modification(expectedVersion, bytes));
             }
         };
         try (OrionKeyMaterial material = open(store)) {
@@ -193,9 +198,9 @@ class KeyMaterialAdministrationTest {
                 .encodeToString(bytes) + "\n-----END " + type + "-----\n";
     }
 
-    private static OrionKeyMaterial open(InMemoryKeyMaterialContentSource store) throws Exception {
+    private static OrionKeyMaterial open(InMemoryBlobStorage store) throws Exception {
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
-            return OrionKeyMaterial.open(new KeyMaterialContentStore(
+            return OrionKeyMaterial.open(new KeyMaterialRepository(
                     store,
                     new KeyMaterialCodec(options),
                     new OrionEventManager()));

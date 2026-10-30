@@ -1,5 +1,6 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.storage.BlobStorage;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
@@ -12,7 +13,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.bootstrap.config.location.BootstrapConfigurationReader;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
+import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.OrionXml;
 
@@ -101,8 +102,8 @@ class RemoteBootstrapConfigurationIT {
                 Files.writeString(credential, authorized);
             }
 
-            var materialStore = new InMemoryKeyMaterialContentSource();
-            materialStore.write(material, null);
+            var materialStore = new InMemoryBlobStorage();
+            materialStore.write(new BlobStorage.Modification(null, material));
             pro.deta.orion.event.OrionEventManager bootstrapEvents1 =
                     new pro.deta.orion.event.OrionEventManager();
             try (var seededMaterial = TestServerIdentityMaterial.openMaterial(

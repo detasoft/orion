@@ -2,7 +2,7 @@ package pro.deta.orion.git.proxy;
 
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
-import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialRepository;
 
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import ch.qos.logback.classic.Logger;
@@ -20,7 +20,7 @@ import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitClientService;
 import pro.deta.orion.git.client.GitClientTransportSession;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
+import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
@@ -157,8 +157,8 @@ class BootstrapSshTrustTest {
         KeyMaterialDescriptor signing = new KeyMaterialDescriptor("signing",
                 Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
-            OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
-                    new InMemoryKeyMaterialContentSource(),
+            OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
+                    new InMemoryBlobStorage(),
                     new KeyMaterialCodec(options),
                     testRuntime.unstartedEvents()));
             try {

@@ -2,7 +2,7 @@ package pro.deta.orion.git.sync;
 
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
-import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialRepository;
 
 import pro.deta.orion.event.OrionEventManager;
 
@@ -16,7 +16,7 @@ import pro.deta.orion.git.client.GitClientTransport;
 import pro.deta.orion.git.client.GitClientTransportException;
 import pro.deta.orion.git.client.GitClientTransportSession;
 import pro.deta.orion.git.client.GitCredentials;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
+import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -53,8 +53,8 @@ class GitHubRemoteProfileTest {
 
     @BeforeEach
     void configureStoredCredential() throws Exception {
-        material = OrionKeyMaterial.open(new KeyMaterialContentStore(
-                new InMemoryKeyMaterialContentSource(),
+        material = OrionKeyMaterial.open(new KeyMaterialRepository(
+                new InMemoryBlobStorage(),
                 new KeyMaterialCodec(KeyMaterialOptions.pkcs12("test-password".toCharArray())),
                 new OrionEventManager()));
         secrets = new ConfigurationSecrets(() -> {

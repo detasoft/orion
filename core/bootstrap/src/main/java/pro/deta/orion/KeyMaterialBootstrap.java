@@ -1,8 +1,12 @@
 package pro.deta.orion;
 
+import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.git.fileapi.GitBlobStorage;
+
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
-import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialRepository;
 
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.KeyMaterialConfig;
@@ -12,7 +16,7 @@ import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
-import pro.deta.orion.keymaterial.KeyMaterialContentSource;
+import pro.deta.orion.storage.BlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
@@ -54,12 +58,13 @@ public final class KeyMaterialBootstrap {
         try (KeyMaterialOptions options = resolver.pkcs12Options(password)) {
             boolean gitSource = repositories.resolveProvisional(
                     NativeGitRepositoryFactory.MATERIAL_SOURCE, material, creation.allowed()).isPresent();
-            KeyMaterialContentSource store = gitSource
-                    ? new NativeGitKeyMaterialContentSource(
-                            repositories.fileEvents(NativeGitRepositoryFactory.MATERIAL_SOURCE, material))
+            BlobStorage store = gitSource
+                    ? new GitBlobStorage(
+                            repositories.fileEvents(NativeGitRepositoryFactory.MATERIAL_SOURCE, material),
+                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "Update server identity material"))
                     : resolver.resolveSource(resolveAgainstBaseDirectory(
                             material.getLocation(), baseDirectory, "location"));
-            OrionKeyMaterial keys = OrionKeyMaterial.open(new KeyMaterialContentStore(
+            OrionKeyMaterial keys = OrionKeyMaterial.open(new KeyMaterialRepository(
                     store,
                     new KeyMaterialCodec(options),
                     events));

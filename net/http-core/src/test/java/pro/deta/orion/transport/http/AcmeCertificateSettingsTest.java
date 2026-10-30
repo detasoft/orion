@@ -2,7 +2,7 @@ package pro.deta.orion.transport.http;
 
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
-import pro.deta.orion.keymaterial.KeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialRepository;
 
 import pro.deta.orion.acme.AcmeCertificateService;
 import pro.deta.orion.acme.AcmeCertificateIssuer;
@@ -30,7 +30,7 @@ import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
+import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
@@ -51,7 +51,7 @@ class AcmeCertificateSettingsTest {
 
     @Test
     void selectsStoredAccountKeyPersistsItsReferenceAndReusesItForIssuance() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentSource())) {
+        try (OrionKeyMaterial owner = owner(new InMemoryBlobStorage())) {
             owner.withModification(owner.revision(), modification -> {
                 modification.generateKey(new KeyMaterialDescriptor("existing-account",
                         Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 1), 3072);
@@ -135,7 +135,7 @@ class AcmeCertificateSettingsTest {
 
     @Test
     void savesThroughTheConfigurationRepositoryAndRejectsStaleRevisions() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentSource())) {
+        try (OrionKeyMaterial owner = owner(new InMemoryBlobStorage())) {
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
             TestConfiguration desired = new TestConfiguration(events, bootstrap,
                     owner);
@@ -242,8 +242,8 @@ class AcmeCertificateSettingsTest {
         }
     }
 
-    private OrionKeyMaterial owner(InMemoryKeyMaterialContentSource store) throws Exception {
-        return OrionKeyMaterial.open(new KeyMaterialContentStore(
+    private OrionKeyMaterial owner(InMemoryBlobStorage store) throws Exception {
+        return OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(KeyMaterialOptions.pkcs12("password".toCharArray())),
                 events.unstartedEvents()));

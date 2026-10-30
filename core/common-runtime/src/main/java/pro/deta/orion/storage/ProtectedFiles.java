@@ -1,4 +1,4 @@
-package pro.deta.orion.keymaterial;
+package pro.deta.orion.storage;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -18,7 +18,7 @@ import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.Set;
 
-public final class KeyMaterialFileSecurity {
+public final class ProtectedFiles {
     private static final Set<PosixFilePermission> OWNER_FILE_PERMISSIONS =
             PosixFilePermissions.fromString("rw-------");
     private static final Set<PosixFilePermission> OWNER_DIRECTORY_PERMISSIONS =
@@ -34,7 +34,7 @@ public final class KeyMaterialFileSecurity {
             PosixFilePermission.GROUP_WRITE,
             PosixFilePermission.OTHERS_WRITE);
 
-    private KeyMaterialFileSecurity() {
+    private ProtectedFiles() {
     }
 
     public static byte[] readProtectedFile(Path location, String description) throws IOException {
@@ -58,7 +58,8 @@ public final class KeyMaterialFileSecurity {
             Path realParent = existing.toRealPath().resolve(existing.relativize(parent));
             return realParent.resolve(fileName).normalize();
         } catch (IOException e) {
-            throw new IllegalArgumentException("Key material parent location cannot be resolved: " + parent, e);
+            throw new IllegalArgumentException("Protected file parent location cannot be resolved: " + parent,
+                    e);
         }
     }
 
@@ -84,7 +85,7 @@ public final class KeyMaterialFileSecurity {
                 BasicFileAttributes.class,
                 LinkOption.NOFOLLOW_LINKS);
         if (!attributes.isDirectory()) {
-            throw new IOException("Key material parent location is not a directory: " + directory);
+            throw new IOException("Protected file parent location is not a directory: " + directory);
         }
         if (supportsPosix(directory)) {
             Set<PosixFilePermission> permissions = Files.readAttributes(
@@ -93,7 +94,7 @@ public final class KeyMaterialFileSecurity {
                     LinkOption.NOFOLLOW_LINKS).permissions();
             if (!disjoint(permissions, NON_OWNER_WRITE_PERMISSIONS)) {
                 throw new IOException(
-                        "Key material parent directory is writable by another user: " + directory);
+                        "Protected file parent directory is writable by another user: " + directory);
             }
         }
     }
@@ -176,7 +177,7 @@ public final class KeyMaterialFileSecurity {
         for (Path component : absolute) {
             current = current == null ? component : current.resolve(component);
             if (Files.exists(current, LinkOption.NOFOLLOW_LINKS) && Files.isSymbolicLink(current)) {
-                throw new IOException("Key material path must not contain symbolic links: " + path);
+                throw new IOException("Protected file path must not contain symbolic links: " + path);
             }
         }
     }

@@ -1,5 +1,7 @@
 package pro.deta.orion.keymaterial;
 
+import pro.deta.orion.storage.LocalBlobStorage;
+
 import pro.deta.orion.event.OrionEventManager;
 
 import org.junit.jupiter.api.Test;
@@ -61,8 +63,8 @@ class KeyMaterialToolCompatibilityTest {
 
     private Path createLocalPkcs12(String alias) throws Exception {
         Path keyStorePath = tempDir.resolve(alias + KeyMaterialTestConstants.PKCS12_EXTENSION);
-        LocalKeyMaterialContentSource store = new LocalKeyMaterialContentSource(keyStorePath);
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        LocalBlobStorage store = new LocalBlobStorage(keyStorePath);
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password())),
                 new OrionEventManager()))) {

@@ -14,7 +14,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
-import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentSource;
+import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.OrionXml;
@@ -84,7 +84,7 @@ class BootstrapProxyTransportIT {
                     "cache-isolation-probe", configuration.getBootstrap().getConfiguration());
             assertCacheIsNotRoutable(configuration, environment, upstreamCache);
             try (var probeMaterial = TestServerIdentityMaterial.openMaterial(
-                    configuration, environment, new InMemoryKeyMaterialContentSource())) {
+                    configuration, environment, new InMemoryBlobStorage())) {
                 var probeConfiguration = new AtomicReference<>(OrionXml.read(
                         new ByteArrayInputStream(originalConfiguration)));
                 var probeSecrets = new ConfigurationSecrets(probeConfiguration::get, probeMaterial);

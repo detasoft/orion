@@ -1,4 +1,4 @@
-package pro.deta.orion.keymaterial;
+package pro.deta.orion.storage;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -19,20 +19,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-class KeyMaterialContentSourceTest {
+class BlobStorageTest {
     @TempDir
     private Path tempDir;
 
     @Test
     void loadedContentKeepsItsRevisionAndBytesAfterTheSourceChanges() throws Exception {
-        InMemoryKeyMaterialContentSource source = new InMemoryKeyMaterialContentSource();
-        String first = source.write(bytes("first"), null);
-        KeyMaterialContentSource.Content loaded = source.load();
-        String second = source.write(bytes("second"), loaded.revision());
+        InMemoryBlobStorage source = new InMemoryBlobStorage();
+        String first = source.write(new BlobStorage.Modification(null, bytes("first")));
+        BlobStorage.Content loaded = source.load();
+        String second = source.write(new BlobStorage.Modification(loaded.revision(), bytes("second")));
 
         assertThat(loaded.revision()).isEqualTo(first).isNotEqualTo(second);
         assertThat(loaded.bytes()).isEqualTo(bytes("first"));
-        KeyMaterialContentSource.Content current = source.load();
+        BlobStorage.Content current = source.load();
         assertThat(current.revision()).isEqualTo(second);
         assertThat(current.bytes()).isEqualTo(bytes("second"));
         current.bytes()[0] = 0;
@@ -41,12 +41,12 @@ class KeyMaterialContentSourceTest {
 
     @Test
     void loadsAnAbsentSourceWithoutInventingARevision() throws Exception {
-        KeyMaterialContentSource[] sources = {
-                new InMemoryKeyMaterialContentSource(),
-                new LocalKeyMaterialContentSource(tempDir.resolve("absent.p12"))
+        BlobStorage[] sources = {
+                new InMemoryBlobStorage(),
+                new LocalBlobStorage(tempDir.resolve("absent.p12"))
         };
-        for (KeyMaterialContentSource source : sources) {
-            KeyMaterialContentSource.Content loaded = source.load();
+        for (BlobStorage source : sources) {
+            BlobStorage.Content loaded = source.load();
             assertThat(loaded.revision()).isNull();
             assertThat(loaded.bytes()).isNull();
         }
@@ -54,73 +54,73 @@ class KeyMaterialContentSourceTest {
 
     @Test
     void inMemoryStoreVersionsIncrementAndRejectStaleWrites() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
 
-        String firstVersion = store.write(bytes("first"), null);
-        KeyMaterialContentSource.Content first = store.load();
+        String firstVersion = store.write(new BlobStorage.Modification(null, bytes("first")));
+        BlobStorage.Content first = store.load();
         String firstRevision = first.revision();
         byte[] firstBytes = first.bytes();
 
         assertThat(firstRevision).isEqualTo(firstVersion);
         assertThat(firstBytes).isEqualTo(bytes("first"));
         assertThat(store.read(firstVersion)).isEqualTo(bytes("first"));
-        assertThatThrownBy(() -> store.write(bytes("stale"), "missing"))
-                .isInstanceOf(KeyMaterialStoreConflictException.class);
+        assertThatThrownBy(() -> store.write(new BlobStorage.Modification("missing", bytes("stale"))))
+                .isInstanceOf(BlobStorageConflictException.class);
 
-        String secondVersion = store.write(bytes("second"), firstVersion);
+        String secondVersion = store.write(new BlobStorage.Modification(firstVersion, bytes("second")));
 
         assertThat(secondVersion).isNotEqualTo(firstVersion);
-        assertThatThrownBy(() -> store.read(firstVersion)).isInstanceOf(KeyMaterialStoreConflictException.class);
+        assertThatThrownBy(() -> store.read(firstVersion)).isInstanceOf(BlobStorageConflictException.class);
         assertThat(store.read(secondVersion)).isEqualTo(bytes("second"));
         assertThat(store.load().bytes()).isEqualTo(bytes("second"));
     }
 
     @Test
     void localStoreVersionsTrackContentAndRejectSameSizeStaleWrites() throws Exception {
-        Path path = tempDir.resolve(KeyMaterialTestConstants.KEY_STORE_FILE_NAME);
-        LocalKeyMaterialContentSource store = new LocalKeyMaterialContentSource(path);
+        Path path = tempDir.resolve("orion.p12");
+        LocalBlobStorage store = new LocalBlobStorage(path);
 
-        String firstVersion = store.write(bytes("aaaa"), null);
-        KeyMaterialContentSource.Content first = store.load();
+        String firstVersion = store.write(new BlobStorage.Modification(null, bytes("aaaa")));
+        BlobStorage.Content first = store.load();
         String firstRevision = first.revision();
         assertThat(first.bytes()).isEqualTo(bytes("aaaa"));
 
         Files.writeString(path, "bbbb", StandardCharsets.UTF_8);
-        KeyMaterialContentSource.Content changed = store.load();
+        BlobStorage.Content changed = store.load();
         String changedRevision = changed.revision();
 
         assertThat(firstRevision).isEqualTo(firstVersion);
         assertThat(changedRevision).isNotEqualTo(firstRevision);
         assertThat(changed.bytes()).isEqualTo(bytes("bbbb"));
         assertThat(first.bytes()).isEqualTo(bytes("aaaa"));
-        assertThatThrownBy(() -> store.read(firstVersion)).isInstanceOf(KeyMaterialStoreConflictException.class);
+        assertThatThrownBy(() -> store.read(firstVersion)).isInstanceOf(BlobStorageConflictException.class);
         assertThat(store.read(changedRevision)).isEqualTo(bytes("bbbb"));
-        assertThatThrownBy(() -> store.write(bytes("cccc"), firstRevision))
-                .isInstanceOf(KeyMaterialStoreConflictException.class)
+        assertThatThrownBy(() -> store.write(new BlobStorage.Modification(firstRevision, bytes("cccc"))))
+                .isInstanceOf(BlobStorageConflictException.class)
                 .hasMessageContaining("changed before save");
     }
 
     @Test
     void localStoreRejectsStaleWritesAfterAnotherWriterSaves() throws Exception {
-        Path path = tempDir.resolve(KeyMaterialTestConstants.KEY_STORE_FILE_NAME);
-        LocalKeyMaterialContentSource first = new LocalKeyMaterialContentSource(path);
-        LocalKeyMaterialContentSource second = new LocalKeyMaterialContentSource(path);
+        Path path = tempDir.resolve("orion.p12");
+        LocalBlobStorage first = new LocalBlobStorage(path);
+        LocalBlobStorage second = new LocalBlobStorage(path);
 
-        String initialVersion = first.write(bytes("first"), null);
-        String secondVersion = second.write(bytes("second"), initialVersion);
+        String initialVersion = first.write(new BlobStorage.Modification(null, bytes("first")));
+        String secondVersion = second.write(new BlobStorage.Modification(initialVersion, bytes("second")));
 
-        assertThatThrownBy(() -> first.write(bytes("stale"), initialVersion))
-                .isInstanceOf(KeyMaterialStoreConflictException.class);
+        assertThatThrownBy(() -> first.write(new BlobStorage.Modification(initialVersion, bytes("stale"))))
+                .isInstanceOf(BlobStorageConflictException.class);
         assertThat(second.load().revision()).isEqualTo(secondVersion);
         assertThat(second.load().bytes()).isEqualTo(bytes("second"));
     }
 
     @Test
     void localStoreSerializesConcurrentWritersAndPreservesCompareAndSwap() throws Exception {
-        Path path = tempDir.resolve(KeyMaterialTestConstants.KEY_STORE_FILE_NAME);
-        LocalKeyMaterialContentSource first = new LocalKeyMaterialContentSource(path);
-        LocalKeyMaterialContentSource second = new LocalKeyMaterialContentSource(path);
-        String initialVersion = first.write(bytes("initial"), null);
+        Path path = tempDir.resolve("orion.p12");
+        LocalBlobStorage first = new LocalBlobStorage(path);
+        LocalBlobStorage second = new LocalBlobStorage(path);
+        String initialVersion = first.write(new BlobStorage.Modification(null, bytes("initial")));
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
         ExecutorService executor = Executors.newFixedThreadPool(2);
@@ -141,7 +141,7 @@ class KeyMaterialContentSourceTest {
             for (Throwable result : results) {
                 if (result == null) {
                     successful++;
-                } else if (result instanceof KeyMaterialStoreConflictException) {
+                } else if (result instanceof BlobStorageConflictException) {
                     conflicts++;
                 }
             }
@@ -156,11 +156,11 @@ class KeyMaterialContentSourceTest {
 
     @Test
     void localStoreCreatesOwnerOnlyFiles() throws Exception {
-        assumeTrue(KeyMaterialFileSecurity.supportsPosix(tempDir), "POSIX permissions are not available");
-        Path path = tempDir.resolve(KeyMaterialTestConstants.KEY_STORE_FILE_NAME);
-        LocalKeyMaterialContentSource store = new LocalKeyMaterialContentSource(path);
+        assumeTrue(ProtectedFiles.supportsPosix(tempDir), "POSIX permissions are not available");
+        Path path = tempDir.resolve("orion.p12");
+        LocalBlobStorage store = new LocalBlobStorage(path);
 
-        store.write(bytes("protected"), null);
+        store.write(new BlobStorage.Modification(null, bytes("protected")));
 
         assertThat(Files.getPosixFilePermissions(path))
                 .isEqualTo(PosixFilePermissions.fromString("rw-------"));
@@ -170,16 +170,16 @@ class KeyMaterialContentSourceTest {
 
     @Test
     void localStoreRejectsUnsafeExistingPermissions() throws Exception {
-        assumeTrue(KeyMaterialFileSecurity.supportsPosix(tempDir), "POSIX permissions are not available");
-        Path path = tempDir.resolve(KeyMaterialTestConstants.KEY_STORE_FILE_NAME);
+        assumeTrue(ProtectedFiles.supportsPosix(tempDir), "POSIX permissions are not available");
+        Path path = tempDir.resolve("orion.p12");
         Files.write(path, bytes("exposed"));
         Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rw-r--r--"));
-        LocalKeyMaterialContentSource store = new LocalKeyMaterialContentSource(path);
+        LocalBlobStorage store = new LocalBlobStorage(path);
 
         assertThatThrownBy(store::load)
                 .isInstanceOf(java.io.IOException.class)
                 .hasMessageContaining("readable only by its owner");
-        assertThatThrownBy(() -> store.write(bytes("replacement"), null))
+        assertThatThrownBy(() -> store.write(new BlobStorage.Modification(null, bytes("replacement"))))
                 .isInstanceOf(java.io.IOException.class)
                 .hasMessageContaining("readable only by its owner");
         assertThat(Files.readAllBytes(path)).isEqualTo(bytes("exposed"));
@@ -187,14 +187,14 @@ class KeyMaterialContentSourceTest {
 
     @Test
     void localStoreRejectsParentDirectoriesWritableByOtherUsers() throws Exception {
-        assumeTrue(KeyMaterialFileSecurity.supportsPosix(tempDir), "POSIX permissions are not available");
+        assumeTrue(ProtectedFiles.supportsPosix(tempDir), "POSIX permissions are not available");
         Path exposedDirectory = tempDir.resolve("exposed");
         Files.createDirectory(exposedDirectory);
         Files.setPosixFilePermissions(exposedDirectory, PosixFilePermissions.fromString("rwxrwxrwx"));
-        LocalKeyMaterialContentSource store = new LocalKeyMaterialContentSource(
-                exposedDirectory.resolve(KeyMaterialTestConstants.KEY_STORE_FILE_NAME));
+        LocalBlobStorage store = new LocalBlobStorage(
+                exposedDirectory.resolve("orion.p12"));
 
-        assertThatThrownBy(() -> store.write(bytes("protected"), null))
+        assertThatThrownBy(() -> store.write(new BlobStorage.Modification(null, bytes("protected"))))
                 .isInstanceOf(java.io.IOException.class)
                 .hasMessageContaining("writable by another user");
         assertThat(Files.exists(store.path())).isFalse();
@@ -202,18 +202,18 @@ class KeyMaterialContentSourceTest {
 
     @Test
     void localStoreRejectsSymbolicLinkLocations() throws Exception {
-        assumeTrue(KeyMaterialFileSecurity.supportsPosix(tempDir), "Symbolic links are not available");
+        assumeTrue(ProtectedFiles.supportsPosix(tempDir), "Symbolic links are not available");
         Path target = tempDir.resolve("actual.p12");
         Files.write(target, bytes("protected"));
         setOwnerOnly(target);
-        Path link = tempDir.resolve(KeyMaterialTestConstants.KEY_STORE_FILE_NAME);
+        Path link = tempDir.resolve("orion.p12");
         Files.createSymbolicLink(link, target.getFileName());
-        LocalKeyMaterialContentSource store = new LocalKeyMaterialContentSource(link);
+        LocalBlobStorage store = new LocalBlobStorage(link);
 
         assertThatThrownBy(store::load)
                 .isInstanceOf(java.io.IOException.class)
                 .hasMessageContaining("must not contain symbolic links");
-        assertThatThrownBy(() -> store.write(bytes("replacement"), null))
+        assertThatThrownBy(() -> store.write(new BlobStorage.Modification(null, bytes("replacement"))))
                 .isInstanceOf(java.io.IOException.class)
                 .hasMessageContaining("must not contain symbolic links");
         assertThat(Files.readAllBytes(target)).isEqualTo(bytes("protected"));
@@ -221,9 +221,9 @@ class KeyMaterialContentSourceTest {
 
     @Test
     void incompletePublicationRequiresExplicitDiscardAndNeverReplacesCurrentStore() throws Exception {
-        Path path = tempDir.resolve(KeyMaterialTestConstants.KEY_STORE_FILE_NAME);
-        LocalKeyMaterialContentSource store = new LocalKeyMaterialContentSource(path);
-        store.write(bytes("published"), null);
+        Path path = tempDir.resolve("orion.p12");
+        LocalBlobStorage store = new LocalBlobStorage(path);
+        store.write(new BlobStorage.Modification(null, bytes("published")));
         Path incomplete = tempDir.resolve(".orion.p12.interrupted.tmp");
         Files.write(incomplete, bytes("incomplete"));
         setOwnerOnly(incomplete);
@@ -238,7 +238,7 @@ class KeyMaterialContentSourceTest {
     }
 
     private static Throwable concurrentWrite(
-            LocalKeyMaterialContentSource store,
+            LocalBlobStorage store,
             String value,
             String expectedVersion,
             CountDownLatch ready,
@@ -246,7 +246,7 @@ class KeyMaterialContentSourceTest {
         ready.countDown();
         try {
             start.await();
-            store.write(bytes(value), expectedVersion);
+            store.write(new BlobStorage.Modification(expectedVersion, bytes(value)));
             return null;
         } catch (Throwable failure) {
             return failure;
@@ -254,7 +254,7 @@ class KeyMaterialContentSourceTest {
     }
 
     private static void setOwnerOnly(Path path) throws Exception {
-        if (KeyMaterialFileSecurity.supportsPosix(path)) {
+        if (ProtectedFiles.supportsPosix(path)) {
             Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rw-------"));
         }
     }

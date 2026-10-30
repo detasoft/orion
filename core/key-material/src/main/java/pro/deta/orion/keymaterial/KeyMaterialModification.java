@@ -1,7 +1,7 @@
 package pro.deta.orion.keymaterial;
 
 import pro.deta.orion.util.Modification;
-import pro.deta.orion.keymaterial.KeyMaterialContentStore.Entry;
+import pro.deta.orion.keymaterial.KeyMaterialRepository.Entry;
 
 import javax.crypto.SecretKey;
 import java.io.IOException;

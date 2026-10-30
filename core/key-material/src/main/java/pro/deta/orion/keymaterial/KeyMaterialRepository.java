@@ -1,7 +1,10 @@
 package pro.deta.orion.keymaterial;
 
+import pro.deta.orion.storage.BlobStorage;
+import pro.deta.orion.storage.BlobStorageConflictException;
+
 import pro.deta.orion.event.OrionEventManager;
-import pro.deta.orion.keymaterial.KeyMaterialContentSource.Content;
+import pro.deta.orion.storage.BlobStorage.Content;
 import pro.deta.orion.util.Subscription;
 
 import java.io.IOException;
@@ -32,11 +35,11 @@ import java.util.concurrent.locks.ReentrantLock;
  * The addition attribute stores logical aliases, per-alias entry versions and deletion markers.
  * The content source alone supplies the whole-store revision; it is not stored in individual entries.
  */
-public final class KeyMaterialContentStore implements AutoCloseable {
+public final class KeyMaterialRepository implements AutoCloseable {
     private static final String LOCAL_KEY_ID_ATTRIBUTE_OID = "1.2.840.113549.1.9.21";
     private static final String ADDITION_ATTRIBUTE_OID = "2.25.260349814076539099691640886169327826429";
     private final ReentrantLock writes = new ReentrantLock();
-    private final KeyMaterialContentSource source;
+    private final BlobStorage source;
     private final KeyMaterialCodec codec;
     private final OrionEventManager events;
     private final Subscription changes;
@@ -45,7 +48,7 @@ public final class KeyMaterialContentStore implements AutoCloseable {
     private boolean sourceChangePending;
     private boolean durableSnapshot;
 
-    public KeyMaterialContentStore(KeyMaterialContentSource source, KeyMaterialCodec codec,
+    public KeyMaterialRepository(BlobStorage source, KeyMaterialCodec codec,
             OrionEventManager events) throws IOException, GeneralSecurityException {
         this.source = Objects.requireNonNull(source, "source");
         this.codec = Objects.requireNonNull(codec, "codec");
@@ -63,15 +66,13 @@ public final class KeyMaterialContentStore implements AutoCloseable {
                 if (bytes != null) Arrays.fill(bytes, (byte) 0);
             }
             for (String physical : physicalAliases()) entryVersion(physical);
-            subscribed = events.subscribe(KeyMaterialSourceChanged.class, event -> {
-                if (event.source() == source) reloadChangedSource(event.revision());
-            });
+            subscribed = source.subscribe(event -> reloadChangedSource(event.revision()));
             changes = subscribed;
             Content current = source.load();
             try {
                 reload(current);
             } catch (IOException | GeneralSecurityException | RuntimeException failure) {
-                System.getLogger(KeyMaterialContentStore.class.getName()).log(System.Logger.Level.WARNING,
+                System.getLogger(KeyMaterialRepository.class.getName()).log(System.Logger.Level.WARNING,
                         "Cannot reload key material; retaining the last valid state", failure);
             }
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {
@@ -96,7 +97,7 @@ public final class KeyMaterialContentStore implements AutoCloseable {
         try {
             reload(sourceRevision);
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {
-            System.getLogger(KeyMaterialContentStore.class.getName()).log(System.Logger.Level.WARNING,
+            System.getLogger(KeyMaterialRepository.class.getName()).log(System.Logger.Level.WARNING,
                     "Cannot reload key material; retaining the last valid state", failure);
         }
     }
@@ -178,7 +179,8 @@ public final class KeyMaterialContentStore implements AutoCloseable {
         KeyStore.Entry entry = switch (addition.entry()) {
             case KeyStore.PrivateKeyEntry key -> new KeyStore.PrivateKeyEntry(
                     key.getPrivateKey(), key.getCertificateChain(), attributes);
-            case KeyStore.SecretKeyEntry secret -> new KeyStore.SecretKeyEntry(secret.getSecretKey(), attributes);
+            case KeyStore.SecretKeyEntry secret -> new KeyStore.SecretKeyEntry(secret.getSecretKey(),
+                    attributes);
             case KeyStore.TrustedCertificateEntry trusted -> new KeyStore.TrustedCertificateEntry(
                     trusted.getTrustedCertificate(), attributes);
             default -> throw new GeneralSecurityException("Unknown key material entry type");
@@ -269,7 +271,7 @@ public final class KeyMaterialContentStore implements AutoCloseable {
         try {
             reload(source.load());
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {
-            System.getLogger(KeyMaterialContentStore.class.getName()).log(System.Logger.Level.WARNING,
+            System.getLogger(KeyMaterialRepository.class.getName()).log(System.Logger.Level.WARNING,
                     "Cannot refresh material source after save; retaining the committed state", failure);
         }
     }
@@ -283,7 +285,7 @@ public final class KeyMaterialContentStore implements AutoCloseable {
             synchronized (this) {
                 requireOpen();
                 if (!Objects.equals(sourceRevision, expectedRevision)) {
-                    throw new KeyMaterialStoreConflictException("Key material changed before apply");
+                    throw new BlobStorageConflictException("Key material changed before apply");
                 }
                 if (additions.isEmpty()) return Set.of();
                 try {
@@ -301,7 +303,7 @@ public final class KeyMaterialContentStore implements AutoCloseable {
             try {
                 String saved;
                 try {
-                    saved = source.write(serialized, expectedRevision);
+                    saved = source.write(new BlobStorage.Modification(expectedRevision, serialized));
                 } finally {
                     Arrays.fill(serialized, (byte) 0);
                 }
@@ -317,7 +319,8 @@ public final class KeyMaterialContentStore implements AutoCloseable {
                     } else {
                         for (String physical : physicalAliases(publication)) {
                             if (!keyStore.containsAlias(physical)
-                                    || !sameEntry(readEntry(keyStore, physical), readEntry(publication, physical))) {
+                                    || !sameEntry(readEntry(keyStore, physical), readEntry(publication,
+                                            physical))) {
                                 throw new GeneralSecurityException("Reloaded material does not contain saved history");
                             }
                         }
@@ -445,7 +448,7 @@ public final class KeyMaterialContentStore implements AutoCloseable {
         try {
             events.publishIfRunning(new KeyMaterialChanged(Set.copyOf(resources)));
         } catch (RuntimeException failure) {
-            System.getLogger(KeyMaterialContentStore.class.getName()).log(System.Logger.Level.WARNING,
+            System.getLogger(KeyMaterialRepository.class.getName()).log(System.Logger.Level.WARNING,
                     "Could not publish key material change event", failure);
         }
     }

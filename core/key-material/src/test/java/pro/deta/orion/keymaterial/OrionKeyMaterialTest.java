@@ -1,5 +1,8 @@
 package pro.deta.orion.keymaterial;
 
+import pro.deta.orion.storage.BlobStorage;
+import pro.deta.orion.storage.InMemoryBlobStorage;
+
 import pro.deta.orion.event.OrionEventManager;
 
 import java.util.Set;
@@ -21,11 +24,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class OrionKeyMaterialTest {
     @Test
     void opensAnEmptyStoreWithoutCreatingKeysAndPersistsAnExplicitModification() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         KeyMaterialDescriptor signing = rsa("server-signing-v1", 1);
         byte[] payload = "jwt-input".getBytes(StandardCharsets.UTF_8);
         byte[] signature;
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -41,7 +44,7 @@ class OrionKeyMaterialTest {
             signature = material.sign(signing, payload);
             assertThat(material.revision()).isEqualTo("1");
         }
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -51,12 +54,12 @@ class OrionKeyMaterialTest {
 
     @Test
     void retainsSigningKeysAcrossReload() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         KeyMaterialDescriptor old = rsa("server-signing-v1", 1);
         KeyMaterialDescriptor active = rsa("server-signing-v2", 1);
         byte[] payload = "retained-jwt".getBytes(StandardCharsets.UTF_8);
         byte[] oldSignature;
-        try (KeyMaterialService service = new KeyMaterialService(new KeyMaterialContentStore(
+        try (KeyMaterialService service = new KeyMaterialService(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -69,14 +72,14 @@ class OrionKeyMaterialTest {
                 modification.discard();
             }
         }
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
             oldSignature = material.sign(old, payload);
         }
 
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -86,7 +89,7 @@ class OrionKeyMaterialTest {
             assertThat(material.verify(active, payload, activeSignature)).isTrue();
             assertThat(material.verify(old, payload, activeSignature)).isFalse();
         }
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -145,25 +148,27 @@ class OrionKeyMaterialTest {
 
     @Test
     void publishesTheLazyCipherKeyOnlyAfterTheStoreAcceptsIt() throws Exception {
-        class ObservingStore extends InMemoryKeyMaterialContentSource {
+        class ObservingStore extends InMemoryBlobStorage {
             private OrionKeyMaterial material;
             private int writes;
 
             @Override
-            public synchronized String write(byte[] bytes, String expectedVersion) throws IOException {
+            public synchronized String write(BlobStorage.Modification modification) throws IOException {
+                byte[] bytes = modification.bytes();
+                String expectedVersion = modification.expectedRevision();
                 try {
                     assertThat(material.contains(material.configurationCipherKey())).isFalse();
                 } catch (GeneralSecurityException failure) {
                     throw new IOException(failure);
                 }
                 writes++;
-                return super.write(bytes, expectedVersion);
+                return super.write(new BlobStorage.Modification(expectedVersion, bytes));
             }
         }
         ObservingStore store = new ObservingStore();
         ConfigurationSecretContext context = new ConfigurationSecretContext("system/token", "credential");
         try (KeyMaterialOptions options = options(); OrionKeyMaterial material = OrionKeyMaterial.open(
-                new KeyMaterialContentStore(
+                new KeyMaterialRepository(
                         store,
                         new KeyMaterialCodec(options),
                         new OrionEventManager()))) {
@@ -180,7 +185,7 @@ class OrionKeyMaterialTest {
 
     @Test
     void persistsConfigurationCipherBeforeReturningAnEnvelopeAndReusesItAfterRestart() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         KeyMaterialDescriptor signing = rsa("server-signing-v1", 1);
         ConfigurationSecretContext context = new ConfigurationSecretContext("system/proxy-token", "credential");
         ConfigurationSecretEnvelope envelope;
@@ -198,7 +203,7 @@ class OrionKeyMaterialTest {
             assertThat(material.open(material.configurationCipherKey(), envelope, context))
                     .isEqualTo("git-token".getBytes(StandardCharsets.UTF_8));
         }
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -211,8 +216,8 @@ class OrionKeyMaterialTest {
 
     @Test
     void doesNotCreateAMissingCipherWhileOpeningAnExistingEnvelope() throws Exception {
-        InMemoryKeyMaterialContentSource source = new InMemoryKeyMaterialContentSource();
-        InMemoryKeyMaterialContentSource destination = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage source = new InMemoryBlobStorage();
+        InMemoryBlobStorage destination = new InMemoryBlobStorage();
         KeyMaterialDescriptor signing = rsa("server-signing-v1", 1);
         ConfigurationSecretContext context = new ConfigurationSecretContext("system/proxy-token", "credential");
         ConfigurationSecretEnvelope envelope;
@@ -229,15 +234,17 @@ class OrionKeyMaterialTest {
 
     @Test
     void rejectsUseOfAnUncommittedCipherAfterItsMaterialSaveFails() throws Exception {
-        class FailingStore extends InMemoryKeyMaterialContentSource {
+        class FailingStore extends InMemoryBlobStorage {
             private boolean fail;
 
             @Override
-            public synchronized String write(byte[] bytes, String expectedVersion) throws IOException {
+            public synchronized String write(BlobStorage.Modification modification) throws IOException {
+                byte[] bytes = modification.bytes();
+                String expectedVersion = modification.expectedRevision();
                 if (fail) {
                     throw new IOException("save failed");
                 }
-                return super.write(bytes, expectedVersion);
+                return super.write(new BlobStorage.Modification(expectedVersion, bytes));
             }
         }
         FailingStore store = new FailingStore();
@@ -253,7 +260,7 @@ class OrionKeyMaterialTest {
             assertThatThrownBy(() -> material.seal(material.configurationCipherKey(), new byte[]{2}, context))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
         }
-        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -284,7 +291,7 @@ class OrionKeyMaterialTest {
             assertThatThrownBy(() -> material.certificateIdentity(configuration).issuedCertificateChain())
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
         }
-        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -329,7 +336,7 @@ class OrionKeyMaterialTest {
             expected = committed ? replacement : original;
         }
         String durableVersion = store.load().revision();
-        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -360,7 +367,7 @@ class OrionKeyMaterialTest {
         });
     }
 
-    private static final class FailingStore extends InMemoryKeyMaterialContentSource {
+    private static final class FailingStore extends InMemoryBlobStorage {
         private final boolean committed;
         private boolean fail;
 
@@ -369,12 +376,14 @@ class OrionKeyMaterialTest {
         }
 
         @Override
-        public synchronized String write(byte[] bytes, String expectedVersion) throws IOException {
+        public synchronized String write(BlobStorage.Modification modification) throws IOException {
+            byte[] bytes = modification.bytes();
+            String expectedVersion = modification.expectedRevision();
             if (!fail) {
-                return super.write(bytes, expectedVersion);
+                return super.write(new BlobStorage.Modification(expectedVersion, bytes));
             }
             if (committed) {
-                super.write(bytes, expectedVersion);
+                super.write(new BlobStorage.Modification(expectedVersion, bytes));
             }
             throw new IOException("Material save failed");
         }
@@ -394,7 +403,7 @@ class OrionKeyMaterialTest {
 
     @Test
     void doesNotReplaceAnAliasOwnedByAnotherMaterialPurpose() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         KeyMaterialDescriptor signing = rsa("configuration-v1", 1);
         try (OrionKeyMaterial material = openWithKey(store, signing)) {
             String before = store.load().revision();
@@ -408,11 +417,11 @@ class OrionKeyMaterialTest {
 
     @Test
     void reopensAConcurrentCipherWinnerWithoutOverwritingItsKey() throws Exception {
-        InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
+        InMemoryBlobStorage store = new InMemoryBlobStorage();
         KeyMaterialDescriptor signing = rsa("server-signing-v1", 1);
         ConfigurationSecretContext context = new ConfigurationSecretContext("system/token", "credential");
         try (OrionKeyMaterial first = openWithKey(store, signing);
-             OrionKeyMaterial second = OrionKeyMaterial.open(new KeyMaterialContentStore(
+             OrionKeyMaterial second = OrionKeyMaterial.open(new KeyMaterialRepository(
                      store,
                      new KeyMaterialCodec(options()),
                      new OrionEventManager()))) {
@@ -421,7 +430,7 @@ class OrionKeyMaterialTest {
             assertThatThrownBy(() -> second.seal(second.configurationCipherKey(), new byte[]{2}, context))
                     .isInstanceOf(GeneralSecurityException.class);
             assertThat(store.load().revision()).isEqualTo(winnerVersion);
-            try (OrionKeyMaterial reopened = OrionKeyMaterial.open(new KeyMaterialContentStore(
+            try (OrionKeyMaterial reopened = OrionKeyMaterial.open(new KeyMaterialRepository(
                     store,
                     new KeyMaterialCodec(options()),
                     new OrionEventManager()))) {
@@ -432,12 +441,14 @@ class OrionKeyMaterialTest {
 
     @Test
     void reusesThePersistedCipherWhenItsFirstSaveResponseWasLost() throws Exception {
-        class LostResponseStore extends InMemoryKeyMaterialContentSource {
+        class LostResponseStore extends InMemoryBlobStorage {
             private boolean loseResponse;
 
             @Override
-            public synchronized String write(byte[] bytes, String expectedVersion) throws IOException {
-                String saved = super.write(bytes, expectedVersion);
+            public synchronized String write(BlobStorage.Modification modification) throws IOException {
+                byte[] bytes = modification.bytes();
+                String expectedVersion = modification.expectedRevision();
+                String saved = super.write(new BlobStorage.Modification(expectedVersion, bytes));
                 if (loseResponse) {
                     throw new IOException("response lost");
                 }
@@ -454,7 +465,7 @@ class OrionKeyMaterialTest {
         }
         String savedVersion = store.load().revision();
         store.loseResponse = false;
-        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
@@ -464,9 +475,9 @@ class OrionKeyMaterialTest {
         }
     }
 
-    private static OrionKeyMaterial openWithKey(KeyMaterialContentSource store, KeyMaterialDescriptor key)
+    private static OrionKeyMaterial openWithKey(BlobStorage store, KeyMaterialDescriptor key)
             throws Exception {
-        OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
+        OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()));
@@ -486,9 +497,15 @@ class OrionKeyMaterialTest {
         return KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password());
     }
 
-    private static final class CountingStore implements KeyMaterialContentSource {
-        private final InMemoryKeyMaterialContentSource delegate = new InMemoryKeyMaterialContentSource();
+    private static final class CountingStore implements BlobStorage {
+        private final InMemoryBlobStorage delegate = new InMemoryBlobStorage();
         private int readCalls;
+
+        @Override
+        public pro.deta.orion.util.Subscription subscribe(
+                java.util.function.Consumer<pro.deta.orion.storage.BlobChanged> subscriber) {
+            return delegate.subscribe(subscriber);
+        }
 
         @Override
         public Content load() throws IOException {
@@ -503,8 +520,10 @@ class OrionKeyMaterialTest {
         }
 
         @Override
-        public String write(byte[] bytes, String expectedVersion) throws IOException {
-            return delegate.write(bytes, expectedVersion);
+        public String write(BlobStorage.Modification modification) throws IOException {
+            byte[] bytes = modification.bytes();
+            String expectedVersion = modification.expectedRevision();
+            return delegate.write(new BlobStorage.Modification(expectedVersion, bytes));
         }
     }
 }
