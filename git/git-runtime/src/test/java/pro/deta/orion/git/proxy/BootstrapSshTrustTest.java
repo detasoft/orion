@@ -22,7 +22,7 @@ import pro.deta.orion.git.client.GitClientService;
 import pro.deta.orion.git.client.GitClientTransportSession;
 import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
@@ -154,8 +154,7 @@ class BootstrapSshTrustTest {
     }
 
     private OrionKeyMaterial material() throws Exception {
-        KeyMaterialDescriptor signing = new KeyMaterialDescriptor("signing",
-                Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
+        KeyMaterialId signing = new KeyMaterialId("signing", 1);
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
             OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
                     new InMemoryBlobStorage(),
@@ -163,7 +162,7 @@ class BootstrapSshTrustTest {
                     testRuntime.unstartedEvents()));
             try {
                 material.withModification(material.revision(), modification -> {
-                    modification.generateKey(signing, 2048);
+                    modification.generateKey("signing", Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
                     modification.apply();
                 });
                 return material;

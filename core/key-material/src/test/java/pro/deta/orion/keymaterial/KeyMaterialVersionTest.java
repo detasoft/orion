@@ -18,15 +18,14 @@ class KeyMaterialVersionTest {
     @Test
     void retainsExactCertificateVersionsAcrossReloadAndBlocksDeletedHistory() throws Exception {
         InMemoryBlobStorage source = new InMemoryBlobStorage();
-        KeyMaterialDescriptor root = new KeyMaterialDescriptor("root", Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
-                KeyMaterialAlgorithm.RSA, 1);
+        KeyMaterialId root = new KeyMaterialId("root", 1);
         X509Certificate first = TestCertificateChain.root("First").certificate();
         X509Certificate second = TestCertificateChain.root("Second").certificate();
         KeyMaterialId firstId;
         KeyMaterialId secondId;
         try (OrionKeyMaterial material = open(source)) {
             KeyMaterialModification initial = material.modify(material.revision());
-            firstId = initial.setTrustedCertificate(root, first);
+            firstId = initial.setTrustedCertificate("root", Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, first);
             initial.apply();
             String revision = material.revision();
             KeyMaterialModification renewal = material.modify(revision);
@@ -52,41 +51,38 @@ class KeyMaterialVersionTest {
 
     @Test
     void rotatesOneSigningAliasWithoutChangingOtherEntryIds() throws Exception {
-        KeyMaterialDescriptor signing = new KeyMaterialDescriptor("signing",
-                Set.of(KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialPurpose.SSH_HOST), KeyMaterialAlgorithm.RSA, 1);
-        KeyMaterialDescriptor other = new KeyMaterialDescriptor("other",
-                signing.purposes(), signing.algorithm(), 1);
+        KeyMaterialId signing = new KeyMaterialId("signing", 1);
+        KeyMaterialId other = new KeyMaterialId("other", 1);
         InMemoryBlobStorage source = new InMemoryBlobStorage();
         byte[] payload = new byte[]{1, 2, 3};
         byte[] oldSignature;
         KeyMaterialId next;
         try (OrionKeyMaterial material = open(source)) {
             KeyMaterialModification initial = material.modify(material.revision());
-            initial.generateKey(signing, 2048);
-            initial.generateKey(other, 2048);
+            initial.generateKey("signing", Set.of(KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialPurpose.SSH_HOST), KeyMaterialAlgorithm.RSA, 2048);
+            initial.generateKey("other", Set.of(KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialPurpose.SSH_HOST), KeyMaterialAlgorithm.RSA, 2048);
             initial.apply();
             oldSignature = material.sign(signing, payload);
             KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
             generator.initialize(2048);
             KeyMaterialModification rotation = material.modify(material.revision());
-            KeyMaterialDescriptor subset = new KeyMaterialDescriptor(signing.alias(),
-                    Set.of(KeyMaterialPurpose.SERVER_SIGNING), signing.algorithm(), signing.version());
+            KeyMaterialId subset = new KeyMaterialId(signing.alias(), signing.version());
             next = rotation.importKey(subset, generator.generateKeyPair());
             rotation.apply();
-            KeyMaterialDescriptor active = material.read(next).descriptor();
+            KeyMaterialId active = material.read(next).id();
             assertThat(next).isEqualTo(new KeyMaterialId("signing", 2));
-            assertThat(material.read(next).purposes()).isEqualTo(signing.purposes());
-            assertThat(material.read(other.id()).id()).isEqualTo(other.id());
+            assertThat(material.read(next).purposes()).isEqualTo(Set.of(KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialPurpose.SSH_HOST));
+            assertThat(material.read(other).id()).isEqualTo(other);
             assertThat(material.verify(signing, payload, oldSignature)).isTrue();
             assertThat(material.verify(active, payload, oldSignature)).isFalse();
             assertThat(new SigningMaterialSet(active, java.util.List.of(signing)).verification())
                     .containsExactly(signing);
         }
         try (OrionKeyMaterial material = open(source)) {
-            assertThat(material.read(next).purposes()).isEqualTo(signing.purposes());
-            assertThat(material.inventory()).containsExactlyInAnyOrder(next, other.id());
+            assertThat(material.read(next).purposes()).isEqualTo(Set.of(KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialPurpose.SSH_HOST));
+            assertThat(material.inventory()).containsExactlyInAnyOrder(next, other);
             assertThat(material.verify(signing, payload, oldSignature)).isTrue();
-            assertThat(material.verify(material.read(next).descriptor(), payload, oldSignature)).isFalse();
+            assertThat(material.verify(material.read(next).id(), payload, oldSignature)).isFalse();
         }
     }
 

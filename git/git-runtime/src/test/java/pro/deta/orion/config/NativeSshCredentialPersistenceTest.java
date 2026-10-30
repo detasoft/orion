@@ -4,8 +4,6 @@ import pro.deta.orion.git.fileapi.GitFile;
 
 import pro.deta.orion.git.fileapi.GitFileEvents;
 
-import java.util.Set;
-
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 
 import pro.deta.orion.git.fileapi.GitCommitMetadata;
@@ -25,9 +23,7 @@ import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
-import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.User;
@@ -142,9 +138,7 @@ class NativeSshCredentialPersistenceTest {
                 new OrionPasswordHashingService(),
                 new RootPasswordReset(false),
                 OrionKeyMaterial.unavailable(),
-                new SigningMaterialSet(new KeyMaterialDescriptor("signing",
-                        Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA,
-                        1), List.of()),
+                new SigningMaterialSet(new KeyMaterialId("signing", 1), List.of()),
                 new BootstrapConfiguration(),
                 editor);
     }

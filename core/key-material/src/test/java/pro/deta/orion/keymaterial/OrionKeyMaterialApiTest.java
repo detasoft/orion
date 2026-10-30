@@ -41,12 +41,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionKeyMaterialApiTest {
 
-    private static final KeyMaterialDescriptor SIGNING =
-            descriptor("signing", KeyMaterialPurpose.SERVER_SIGNING);
-    private static final KeyMaterialDescriptor OTHER = descriptor("other", KeyMaterialPurpose.SERVER_SIGNING);
-    private static final KeyMaterialDescriptor IDENTITY = descriptor("https", KeyMaterialPurpose.TLS_IDENTITY);
-    private static final KeyMaterialDescriptor ROOT = new KeyMaterialDescriptor(
-            "root", Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, 1);
+    private static final KeyMaterialId SIGNING =
+            new KeyMaterialId("signing", 1);
+    private static final KeyMaterialId OTHER = new KeyMaterialId("other", 1);
+    private static final KeyMaterialId IDENTITY = new KeyMaterialId("https", 1);
+    private static final KeyMaterialId ROOT = new KeyMaterialId("root", 1);
 
     @Test
     void releasesStateMonitorDuringStoreWriteAndChangePublication() throws Exception {
@@ -70,7 +69,7 @@ class OrionKeyMaterialApiTest {
             })) {
                 materialRef.set(material);
                 material.withModification(material.revision(), modification -> {
-                    modification.generateKey(SIGNING, 2048);
+                    modification.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
                     modification.apply();
                 });
                 assertThat(material.revision()).isEqualTo("1");
@@ -94,7 +93,7 @@ class OrionKeyMaterialApiTest {
                 OrionKeyMaterial writer = open(store)) {
             readerRef.set(reader);
             writer.withModification(writer.revision(), modification -> {
-                modification.generateKey(SIGNING, 2048);
+                modification.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
             reader.reload(store.load().revision());
@@ -127,7 +126,7 @@ class OrionKeyMaterialApiTest {
         try (OrionKeyMaterial material = open(store, events)) {
             materialRef.set(material);
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(SIGNING, 2048);
+                modification.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
             assertThat(material.revision()).isEqualTo("1");
@@ -167,13 +166,13 @@ class OrionKeyMaterialApiTest {
         events.subscribe(KeyMaterialChanged.class, event -> changes.add(event.resources()));
         try (OrionKeyMaterial material = open(store, events)) {
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(SIGNING, 2048);
+                modification.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
             assertThat(changes).isEmpty();
             events.onStart();
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(OTHER, 2048);
+                modification.generateKey(("other"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
             events.publishAndWait(new OrionEvent() {});
@@ -195,23 +194,22 @@ class OrionKeyMaterialApiTest {
     @Test
     void inventoriesKeysAndTrustAnchorsByExactIdAfterReopening() throws Exception {
         InMemoryBlobStorage store = new InMemoryBlobStorage();
-        KeyMaterialDescriptor cipher = new KeyMaterialDescriptor("cipher",
-                Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES, 1);
+        KeyMaterialId cipher = new KeyMaterialId("cipher", 1);
         TestCertificateChain.Authority root = TestCertificateChain.root("Inventory root");
         try (OrionKeyMaterial material = open(store)) {
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(SIGNING, 2048);
-                modification.generateKey(cipher, 256);
-                modification.setTrustedCertificate(ROOT, root.certificate());
+                modification.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
+                modification.generateKey("cipher", Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES, 256);
+                modification.setTrustedCertificate("root", Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, root.certificate());
                 modification.apply();
             });
         }
         try (OrionKeyMaterial material = open(store)) {
-            assertThat(material.inventory()).containsExactlyInAnyOrder(SIGNING.id(), cipher.id(), ROOT.id());
+            assertThat(material.inventory()).containsExactlyInAnyOrder(SIGNING, cipher, ROOT);
             assertThat(material.contains(ROOT)).isTrue();
-            assertThat(material.read(ROOT.id()).trustedCertificate()).isEqualTo(root.certificate());
-            assertThat(material.read(SIGNING.id()).keyPair().getPrivate()).isNotNull();
-            assertThat(material.read(cipher.id()).content()).isInstanceOf(KeyStore.SecretKeyEntry.class);
+            assertThat(material.read(ROOT).trustedCertificate()).isEqualTo(root.certificate());
+            assertThat(material.read(SIGNING).keyPair().getPrivate()).isNotNull();
+            assertThat(material.read(cipher).content()).isInstanceOf(KeyStore.SecretKeyEntry.class);
         }
     }
 
@@ -219,30 +217,28 @@ class OrionKeyMaterialApiTest {
     void enforcesEntryKindsAtOperationsUsingTheCommonDescriptor() throws Exception {
         InMemoryBlobStorage store = new InMemoryBlobStorage();
         TestCertificateChain.Authority root = TestCertificateChain.root("Operation root");
-        KeyMaterialDescriptor trustedIdentity = new KeyMaterialDescriptor("root",
-                Set.of(KeyMaterialPurpose.TRUST_ANCHOR, KeyMaterialPurpose.TLS_IDENTITY),
-                KeyMaterialAlgorithm.RSA, 1);
+        KeyMaterialId trustedIdentity = new KeyMaterialId("root", 1);
         try (OrionKeyMaterial material = open(store)) {
             material.withModification(material.revision(), modification -> {
-                assertThatThrownBy(() -> modification.generateKey(ROOT, 2048))
+                assertThatThrownBy(() -> modification.generateKey("root", Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, 2048))
                         .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Trust anchors");
-                assertThatThrownBy(() -> modification.importKey(ROOT, root.keyPair()))
+                assertThatThrownBy(() -> modification.importKey("root", Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, root.keyPair()))
                         .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Trust anchors");
-                assertThatThrownBy(() -> modification.setTrustedCertificate(SIGNING, root.certificate()))
+                assertThatThrownBy(() -> modification.setTrustedCertificate(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, root.certificate()))
                         .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("TRUST_ANCHOR");
-                modification.generateKey(IDENTITY, 2048);
+                modification.generateKey(("https"), Set.of((KeyMaterialPurpose.TLS_IDENTITY)), KeyMaterialAlgorithm.RSA, 2048);
                 assertThatThrownBy(() -> modification.installCertificateChain(IDENTITY,
                         List.of(root.certificate()), Optional.of(IDENTITY)))
                         .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("TRUST_ANCHOR");
                 assertThatThrownBy(() -> modification.installCertificateChain(trustedIdentity,
                         List.of(root.certificate()), Optional.empty()))
                         .isInstanceOf(IllegalArgumentException.class);
-                modification.setTrustedCertificate(ROOT, root.certificate());
+                modification.setTrustedCertificate("root", Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, root.certificate());
                 modification.apply();
             });
-            assertThatThrownBy(() -> material.read(ROOT.id())
+            assertThatThrownBy(() -> material.read(ROOT)
                     .keyPair()).isInstanceOf(GeneralSecurityException.class);
-            assertThatThrownBy(() -> material.read(IDENTITY.id()).trustedCertificate())
+            assertThatThrownBy(() -> material.read(IDENTITY).trustedCertificate())
                     .isInstanceOf(GeneralSecurityException.class).hasMessageContaining("Trusted certificate");
             assertThatThrownBy(() -> new TlsMaterialConfiguration(trustedIdentity, Optional.empty(),
                     List.of(), TlsClientAuthentication.DISABLED)).isInstanceOf(IllegalArgumentException.class);
@@ -260,28 +256,25 @@ class OrionKeyMaterialApiTest {
                 Set.of(KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialPurpose.SSH_HOST);
         Set<KeyMaterialPurpose> trustAndCa =
                 Set.of(KeyMaterialPurpose.TRUST_ANCHOR, KeyMaterialPurpose.CERTIFICATE_AUTHORITY);
-        KeyMaterialDescriptor shared = new KeyMaterialDescriptor("shared", signingAndHost,
-                KeyMaterialAlgorithm.RSA, 1);
-        KeyMaterialDescriptor trusted = new KeyMaterialDescriptor("shared-root", trustAndCa,
-                KeyMaterialAlgorithm.RSA, 1);
+        KeyMaterialId shared = new KeyMaterialId("shared", 1);
+        KeyMaterialId trusted = new KeyMaterialId("shared-root", 1);
         TestCertificateChain.Authority root = TestCertificateChain.root("Shared root");
         try (OrionKeyMaterial material = open(store)) {
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(shared, 2048);
-                modification.generateKey(OTHER, 2048);
-                modification.setTrustedCertificate(trusted, root.certificate());
+                modification.generateKey("shared", signingAndHost, KeyMaterialAlgorithm.RSA, 2048);
+                modification.generateKey(("other"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
+                modification.setTrustedCertificate("shared-root", trustAndCa, KeyMaterialAlgorithm.RSA, root.certificate());
                 modification.apply();
             });
         }
         try (OrionKeyMaterial material = open(store)) {
 
-            assertThat(material.read(trusted.id()).purposes()).containsAll(trustAndCa);
-            assertThat(material.read(shared.id()).purposes()).containsAll(signingAndHost);
+            assertThat(material.read(trusted).purposes()).containsAll(trustAndCa);
+            assertThat(material.read(shared).purposes()).containsAll(signingAndHost);
             assertThat(material.contains("shared", signingAndHost)).isTrue();
             assertThat(material.contains("shared", trustAndCa)).isFalse();
             assertThat(material.contains("missing", signingAndHost)).isFalse();
-            KeyMaterialDescriptor signing = new KeyMaterialDescriptor("shared",
-                    Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
+            KeyMaterialId signing = new KeyMaterialId("shared", 1);
             byte[] payload = "multi-purpose key".getBytes(StandardCharsets.UTF_8);
             assertThat(material.verify(signing, payload, material.sign(signing, payload))).isTrue();
             material.withModification(material.revision(), modification -> {
@@ -290,7 +283,7 @@ class OrionKeyMaterialApiTest {
             });
             assertThat(material.contains("shared", Set.of())).isFalse();
 
-            assertThat(material.inventory()).doesNotContain(shared.id()).hasSize(2);
+            assertThat(material.inventory()).doesNotContain(shared).hasSize(2);
         }
     }
 
@@ -301,21 +294,19 @@ class OrionKeyMaterialApiTest {
                 Set.of(KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialPurpose.SERVER_SIGNING);
         Set<KeyMaterialPurpose> rootPurposes =
                 Set.of(KeyMaterialPurpose.TRUST_ANCHOR, KeyMaterialPurpose.CERTIFICATE_AUTHORITY);
-        KeyMaterialDescriptor fullIdentity = new KeyMaterialDescriptor(IDENTITY.alias(), identityPurposes,
-                IDENTITY.algorithm(), IDENTITY.version());
-        KeyMaterialDescriptor fullRoot = new KeyMaterialDescriptor(ROOT.alias(), rootPurposes,
-                ROOT.algorithm(), ROOT.version());
+        KeyMaterialId fullIdentity = new KeyMaterialId(IDENTITY.alias(), IDENTITY.version());
+        KeyMaterialId fullRoot = new KeyMaterialId(ROOT.alias(), ROOT.version());
         TestCertificateChain.Authority root = TestCertificateChain.root("Root");
         try (OrionKeyMaterial material = open(store)) {
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(fullIdentity, 2048);
-                modification.setTrustedCertificate(fullRoot, root.certificate());
+                modification.generateKey(IDENTITY.alias(), identityPurposes, KeyMaterialAlgorithm.RSA, 2048);
+                modification.setTrustedCertificate(ROOT.alias(), rootPurposes, KeyMaterialAlgorithm.RSA, root.certificate());
                 modification.apply();
             });
             X509Certificate leaf =
-                    TestCertificateChain.leaf("example.test", material.read(IDENTITY.id()).keyPair(), root);
+                    TestCertificateChain.leaf("example.test", material.read(IDENTITY).keyPair(), root);
             material.withModification(material.revision(), modification -> {
-                modification.setTrustedCertificate(ROOT, root.certificate());
+                modification.setTrustedCertificate("root", Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, root.certificate());
                 modification.installCertificateChain(IDENTITY, List.of(leaf), Optional.of(ROOT));
                 modification.apply();
             });
@@ -325,10 +316,10 @@ class OrionKeyMaterialApiTest {
                     .isEqualTo(identityPurposes);
             assertThat(material.read(new KeyMaterialId(fullRoot.alias(),
                     2)).purposes()).isEqualTo(rootPurposes);
-            assertThat(material.read(fullIdentity.id()).certificateChain()).hasSize(1);
-            assertThat(material.read(fullRoot.id()).trustedCertificate()).isEqualTo(root.certificate());
+            assertThat(material.read(fullIdentity).certificateChain()).hasSize(1);
+            assertThat(material.read(fullRoot).trustedCertificate()).isEqualTo(root.certificate());
             assertThat(material.createTlsContext(new TlsMaterialConfiguration(
-                    material.read(new KeyMaterialId(IDENTITY.alias(), 2)).descriptor(), Optional.of(ROOT),
+                    material.read(new KeyMaterialId(IDENTITY.alias(), 2)).id(), Optional.of(ROOT),
                     List.of(fullRoot), TlsClientAuthentication.WANT)).getProtocol()).isEqualTo("TLS");
         }
     }
@@ -336,14 +327,14 @@ class OrionKeyMaterialApiTest {
     @Test
     void publishesGeneratedKeysTogetherAndSignsAfterReload() throws Exception {
         InMemoryBlobStorage store = new InMemoryBlobStorage();
-        KeyMaterialDescriptor host = descriptor("ssh", KeyMaterialPurpose.SSH_HOST);
+        KeyMaterialId host = new KeyMaterialId("ssh", 1);
         byte[] payload = "token".getBytes(StandardCharsets.UTF_8);
         byte[] signature;
         byte[] publicKey;
         try (OrionKeyMaterial material = open(store)) {
             KeyMaterialModification modification = material.modify(material.revision());
-            modification.generateKey(SIGNING, 2048);
-            modification.generateKey(host, 2048);
+            modification.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
+            modification.generateKey(("ssh"), Set.of((KeyMaterialPurpose.SSH_HOST)), KeyMaterialAlgorithm.RSA, 2048);
 
             assertThat(material.hasDurableSnapshot()).isFalse();
             assertThat(material.revision()).isNull();
@@ -360,7 +351,7 @@ class OrionKeyMaterialApiTest {
 
             assertThat(material.sshHostKeyPairs(List.of())).hasSize(1);
             signature = material.sign(SIGNING, payload);
-            publicKey = material.read(SIGNING.id()).publicKey().getEncoded();
+            publicKey = material.read(SIGNING).publicKey().getEncoded();
             modification.discard();
             assertThatThrownBy(modification::apply).isInstanceOf(IllegalStateException.class);
         }
@@ -368,7 +359,7 @@ class OrionKeyMaterialApiTest {
         try (OrionKeyMaterial reloaded = open(store)) {
             assertThat(reloaded.hasDurableSnapshot()).isTrue();
             assertThat(reloaded.revision()).isEqualTo("1");
-            assertThat(reloaded.read(SIGNING.id()).publicKey().getEncoded()).isEqualTo(publicKey);
+            assertThat(reloaded.read(SIGNING).publicKey().getEncoded()).isEqualTo(publicKey);
             assertThat(reloaded.verify(SIGNING, payload, signature)).isTrue();
             assertThat(reloaded.verify(SIGNING, new byte[]{1}, signature)).isFalse();
         }
@@ -383,7 +374,7 @@ class OrionKeyMaterialApiTest {
         events.onStart();
         try (OrionKeyMaterial material = open(store, events)) {
             KeyMaterialModification discarded = material.modify(material.revision());
-            discarded.generateKey(SIGNING, 2048);
+            discarded.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
             discarded.discard();
             material.modify(material.revision()).apply();
             events.publishAndWait(new OrionEvent() {});
@@ -391,8 +382,8 @@ class OrionKeyMaterialApiTest {
             X509Certificate root = TestCertificateChain.root("Root").certificate();
 
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(SIGNING, 2048);
-                modification.setTrustedCertificate(ROOT, root);
+                modification.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
+                modification.setTrustedCertificate("root", Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, root);
                 modification.apply();
             });
 
@@ -409,14 +400,14 @@ class OrionKeyMaterialApiTest {
         InMemoryBlobStorage store = new InMemoryBlobStorage();
         ConfigurationSecretContext context = new ConfigurationSecretContext("github-token", "access-token");
         byte[] plaintext = "password".getBytes(StandardCharsets.UTF_8);
-        KeyMaterialDescriptor cipher;
+        KeyMaterialId cipher;
         ConfigurationSecretEnvelope envelope;
         try (OrionKeyMaterial material = open(store)) {
             cipher = material.configurationCipherKey();
             KeyGenerator generator = KeyGenerator.getInstance("AES");
             generator.init(256);
             KeyMaterialModification modification = material.modify(material.revision());
-            modification.importSecretKey(cipher, generator.generateKey());
+            modification.importSecretKey("cipher", Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES, generator.generateKey());
             modification.apply();
             envelope = material.seal(cipher, plaintext, context);
             assertThat(material.revision()).isEqualTo("1");
@@ -442,16 +433,16 @@ class OrionKeyMaterialApiTest {
         char[] rejected = "invalid private key".toCharArray();
         try (OrionKeyMaterial material = open(store)) {
             KeyMaterialModification modification = material.modify(material.revision());
-            assertThatThrownBy(() -> modification.importKey(OTHER, rejected))
+            assertThatThrownBy(() -> modification.importKey(("other"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, rejected))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThat(rejected).containsOnly('\0');
-            modification.importKey(SIGNING, pem);
+            modification.importKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, pem);
             assertThat(pem).containsOnly('\0');
             modification.apply();
         }
 
         try (OrionKeyMaterial reloaded = open(store)) {
-            assertThat(reloaded.read(SIGNING.id()).publicKey().getEncoded())
+            assertThat(reloaded.read(SIGNING).publicKey().getEncoded())
                     .isEqualTo(imported.getPublic().getEncoded());
             assertThat(reloaded.contains(OTHER)).isFalse();
         }
@@ -469,8 +460,8 @@ class OrionKeyMaterialApiTest {
         List<X509Certificate> chain = List.of(leaf, intermediate.certificate());
         try (OrionKeyMaterial material = open(store)) {
             KeyMaterialModification modification = material.modify(material.revision());
-            modification.importKey(IDENTITY, keyPair);
-            modification.setTrustedCertificate(ROOT, root.certificate());
+            modification.importKey(("https"), Set.of((KeyMaterialPurpose.TLS_IDENTITY)), KeyMaterialAlgorithm.RSA, keyPair);
+            modification.setTrustedCertificate("root", Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, root.certificate());
             assertThatThrownBy(() -> modification.installCertificateChain(
                     IDENTITY, List.of(wrongLeaf, intermediate.certificate()), Optional.of(ROOT)))
                     .isInstanceOf(GeneralSecurityException.class).hasMessageContaining("public key");
@@ -487,9 +478,9 @@ class OrionKeyMaterialApiTest {
         try (OrionKeyMaterial reloaded = open(store)) {
             assertThat(reloaded.read(new KeyMaterialId(IDENTITY.alias(),
                     2)).certificateChain()).containsExactlyElementsOf(chain);
-            assertThat(reloaded.read(ROOT.id()).trustedCertificate()).isEqualTo(root.certificate());
+            assertThat(reloaded.read(ROOT).trustedCertificate()).isEqualTo(root.certificate());
             TlsMaterialConfiguration tls = new TlsMaterialConfiguration(
-                    reloaded.read(new KeyMaterialId(IDENTITY.alias(), 2)).descriptor(),
+                    reloaded.read(new KeyMaterialId(IDENTITY.alias(), 2)).id(),
                     Optional.of(ROOT), List.of(), TlsClientAuthentication.DISABLED);
             assertThat(reloaded.createTlsContext(tls).getSocketFactory().getSupportedCipherSuites())
                     .isNotEmpty();
@@ -501,19 +492,19 @@ class OrionKeyMaterialApiTest {
         InMemoryBlobStorage store = new InMemoryBlobStorage();
         try (OrionKeyMaterial material = open(store)) {
             KeyMaterialModification discarded = material.modify(material.revision());
-            discarded.generateKey(SIGNING, 2048);
+            discarded.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
             discarded.discard();
             discarded.discard();
 
             assertThatThrownBy(discarded::apply).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> discarded.generateKey(SIGNING, 2048))
+            assertThatThrownBy(() -> discarded.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048))
                     .isInstanceOf(IllegalStateException.class);
             assertThat(material.contains(SIGNING)).isFalse();
             assertThat(material.revision()).isNull();
             assertThat(store.load().bytes()).isNull();
 
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(OTHER, 2048);
+                modification.generateKey(("other"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
             assertThat(material.contains(OTHER)).isTrue();
@@ -530,7 +521,7 @@ class OrionKeyMaterialApiTest {
             List<KeyMaterialModification> retained = new ArrayList<>();
             KeyMaterialModification.Operation operation = modification -> {
                 retained.add(modification);
-                modification.generateKey(SIGNING, 2048);
+                modification.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
                 if (fail) throw new IOException("callback failed");
             };
             if (fail) {
@@ -554,13 +545,13 @@ class OrionKeyMaterialApiTest {
             assertThat(store.load().bytes()).isNull();
             assertThat(material.revision()).isNull();
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(SIGNING, 2048);
+                modification.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
             String beforeRevision = store.load().revision();
             byte[] beforeBytes = store.read(beforeRevision);
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(SIGNING, 2048);
+                modification.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
             assertThat(material.revision()).isEqualTo("1");
@@ -575,8 +566,8 @@ class OrionKeyMaterialApiTest {
         try (OrionKeyMaterial material = open(store)) {
             KeyMaterialModification first = material.modify(material.revision());
             KeyMaterialModification second = material.modify(material.revision());
-            first.generateKey(SIGNING, 2048);
-            second.generateKey(OTHER, 2048);
+            first.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
+            second.generateKey(("other"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
             CyclicBarrier start = new CyclicBarrier(2);
             try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
                 Future<Boolean> firstApplied = executor.submit(() -> applyTogether(first, start));
@@ -606,7 +597,7 @@ class OrionKeyMaterialApiTest {
             String previous = material.revision();
             KeyMaterialModification pending = material.modify(previous);
             material.withModification(previous, modification -> {
-                modification.generateKey(SIGNING, 2048);
+                modification.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
             AtomicInteger calls = new AtomicInteger();
@@ -638,7 +629,7 @@ class OrionKeyMaterialApiTest {
             assertThat(source.load().revision()).isEqualTo("2");
             assertThat(material.revision()).isEqualTo("2");
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(SIGNING, 2048);
+                modification.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
             assertThat(material.revision()).isEqualTo("3");
@@ -672,7 +663,7 @@ class OrionKeyMaterialApiTest {
         };
         try (OrionKeyMaterial material = open(source, events)) {
             KeyMaterialModification modification = material.modify(material.revision());
-            modification.generateKey(SIGNING, 2048);
+            modification.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
             if (responseLost) {
                 assertThatThrownBy(modification::apply)
                         .isInstanceOf(IOException.class).hasMessage("Write response lost");
@@ -699,8 +690,8 @@ class OrionKeyMaterialApiTest {
         try (OrionKeyMaterial first = open(store); OrionKeyMaterial second = open(store)) {
             KeyMaterialModification winner = first.modify(first.revision());
             KeyMaterialModification loser = second.modify(second.revision());
-            winner.generateKey(SIGNING, 2048);
-            loser.generateKey(OTHER, 2048);
+            winner.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
+            loser.generateKey(("other"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
             winner.apply();
             String beforeRevision = store.load().revision();
             byte[] beforeBytes = store.read(beforeRevision);
@@ -726,13 +717,13 @@ class OrionKeyMaterialApiTest {
         byte[] publicKey;
         try (OrionKeyMaterial material = open(store)) {
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(SIGNING, 2048);
-                modification.setTrustedCertificate(ROOT, original);
+                modification.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
+                modification.setTrustedCertificate("root", Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, original);
                 modification.apply();
             });
-            publicKey = material.read(SIGNING.id()).publicKey().getEncoded();
+            publicKey = material.read(SIGNING).publicKey().getEncoded();
             material.withModification(material.revision(), modification -> {
-                modification.setTrustedCertificate(ROOT, replacement);
+                modification.setTrustedCertificate("root", Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, replacement);
                 modification.apply();
             });
             assertThat(material.read(new KeyMaterialId(ROOT.alias(),
@@ -760,7 +751,7 @@ class OrionKeyMaterialApiTest {
             assertThat(reloaded.contains(SIGNING)).isFalse();
             assertThat(reloaded.contains(ROOT)).isFalse();
             assertThat(reloaded.inventory()).isEmpty();
-            assertThatThrownBy(() -> reloaded.read(ROOT.id()).trustedCertificate())
+            assertThatThrownBy(() -> reloaded.read(ROOT).trustedCertificate())
                     .isInstanceOf(GeneralSecurityException.class);
         }
 
@@ -783,11 +774,11 @@ class OrionKeyMaterialApiTest {
         FailingStore store = new FailingStore(committed);
         try (OrionKeyMaterial material = open(store)) {
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(SIGNING, 2048);
+                modification.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
             KeyMaterialModification modification = material.modify(material.revision());
-            modification.generateKey(OTHER, 2048);
+            modification.generateKey(("other"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
             modification.delete(SIGNING);
             store.fail = true;
 
@@ -802,7 +793,7 @@ class OrionKeyMaterialApiTest {
             assertThat(reloaded.revision()).isEqualTo(committed ? "2" : "1");
             assertThat(reloaded.contains(SIGNING)).isEqualTo(!committed);
             assertThat(reloaded.contains(OTHER)).isEqualTo(committed);
-            KeyMaterialDescriptor available = committed ? OTHER : SIGNING;
+            KeyMaterialId available = committed ? OTHER : SIGNING;
             byte[] payload = new byte[]{1};
             assertThat(reloaded.verify(available, payload, reloaded.sign(available, payload))).isTrue();
             assertThat(store.load().bytes()).isEqualTo(durableBytes);
@@ -815,14 +806,14 @@ class OrionKeyMaterialApiTest {
         InMemoryBlobStorage store = new InMemoryBlobStorage();
         try (OrionKeyMaterial material = open(store)) {
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(SIGNING, 2048);
+                modification.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
             String beforeRevision = store.load().revision();
             byte[] beforeBytes = store.read(beforeRevision);
-            KeyMaterialDescriptor otherPurpose = descriptor("signing", KeyMaterialPurpose.TLS_IDENTITY);
+            KeyMaterialId otherPurpose = new KeyMaterialId("signing", 1);
             KeyMaterialModification modification = material.modify(material.revision());
-            assertThatThrownBy(() -> modification.generateKey(otherPurpose, 2048))
+            assertThatThrownBy(() -> modification.generateKey(("signing"), Set.of((KeyMaterialPurpose.TLS_IDENTITY)), KeyMaterialAlgorithm.RSA, 2048))
                     .isInstanceOf(GeneralSecurityException.class).hasMessageContaining("purpose");
             assertThatThrownBy(() -> material.contains(otherPurpose))
                     .isInstanceOf(GeneralSecurityException.class).hasMessageContaining("purpose");
@@ -838,8 +829,7 @@ class OrionKeyMaterialApiTest {
     @Test
     void reloadsTheRequestedRevisionAndInvalidatesPreparedModifications() throws Exception {
         VersionedStore store = new VersionedStore();
-        KeyMaterialDescriptor secret = new KeyMaterialDescriptor("wrapping",
-                Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES, 1);
+        KeyMaterialId secret = new KeyMaterialId("wrapping", 1);
         X509Certificate root = TestCertificateChain.root("Reload root").certificate();
         List<KeyMaterialChanged> changes = new ArrayList<>();
         OrionEventManager events = new OrionEventManager();
@@ -848,17 +838,17 @@ class OrionKeyMaterialApiTest {
         try (OrionKeyMaterial reader = open(store, events);
              OrionKeyMaterial writer = open(store)) {
             writer.withModification(writer.revision(), modification -> {
-                modification.generateKey(SIGNING, 2048);
-                modification.generateKey(secret, 256);
-                modification.setTrustedCertificate(ROOT, root);
+                modification.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
+                modification.generateKey("wrapping", Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES, 256);
+                modification.setTrustedCertificate("root", Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, root);
                 modification.apply();
             });
             reader.reload(store.load().revision());
             KeyMaterialModification stale = reader.modify(reader.revision());
-            stale.generateKey(descriptor("stale", KeyMaterialPurpose.SERVER_SIGNING), 2048);
+            stale.generateKey(("stale"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
             try {
                 writer.withModification(writer.revision(), modification -> {
-                    modification.generateKey(OTHER, 2048);
+                    modification.generateKey(("other"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
                     modification.apply();
                 });
                 String added = store.load().revision();
@@ -884,7 +874,7 @@ class OrionKeyMaterialApiTest {
                 assertThatThrownBy(() -> reader.reload(added)).isInstanceOf(GeneralSecurityException.class);
                 assertThat(reader.revision()).isEqualTo("3");
                 reader.withModification(reader.revision(), modification -> {
-                    modification.generateKey(descriptor("after-reload", KeyMaterialPurpose.SERVER_SIGNING), 2048);
+                    modification.generateKey(("after-reload"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
                     modification.apply();
                 });
                 assertThat(reader.revision()).isEqualTo("4");
@@ -902,7 +892,7 @@ class OrionKeyMaterialApiTest {
         VersionedStore store = new VersionedStore();
         try (OrionKeyMaterial reader = open(store)) {
             reader.withModification(reader.revision(), modification -> {
-                modification.generateKey(SIGNING, 2048);
+                modification.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
             byte[] payload = new byte[]{1, 2, 3};
@@ -911,7 +901,7 @@ class OrionKeyMaterialApiTest {
             InMemoryBlobStorage otherStore = new InMemoryBlobStorage();
             try (OrionKeyMaterial other = open(otherStore)) {
                 other.withModification(other.revision(), modification -> {
-                    modification.generateKey(SIGNING, 2048);
+                    modification.generateKey(("signing"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
                     modification.apply();
                 });
                 replacement = otherStore.load().bytes();
@@ -1008,10 +998,7 @@ class OrionKeyMaterialApiTest {
         }
     }
 
-    private static KeyMaterialDescriptor descriptor(String alias, KeyMaterialPurpose purpose) {
-        return new KeyMaterialDescriptor(alias, Set.of(purpose),
-                KeyMaterialAlgorithm.RSA, 1);
-    }
+
 
     private static OrionKeyMaterial open(BlobStorage store) throws Exception {
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password())) {

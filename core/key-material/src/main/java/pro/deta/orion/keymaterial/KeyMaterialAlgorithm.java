@@ -22,6 +22,13 @@ public enum KeyMaterialAlgorithm {
         return keyAlgorithm;
     }
 
+    static KeyMaterialAlgorithm fromKeyAlgorithm(String actual) {
+        for (KeyMaterialAlgorithm algorithm : values()) {
+            if (algorithm.acceptsKeyAlgorithm(actual)) return algorithm;
+        }
+        throw new IllegalArgumentException("Unsupported key material algorithm: " + actual);
+    }
+
     boolean acceptsKeyAlgorithm(String actual) {
         for (String accepted : acceptedKeyAlgorithms) {
             if (accepted.equalsIgnoreCase(actual)) {

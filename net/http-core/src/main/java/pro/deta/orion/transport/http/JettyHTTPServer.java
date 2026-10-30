@@ -20,7 +20,6 @@ import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
 import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.TlsClientAuthentication;
@@ -138,7 +137,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
             Optional<OrionHttpsConfiguration> configured = httpsConfiguration();
             if (configured.isEmpty() || !configured.orElseThrow().enabled()) return;
             TlsMaterialConfiguration selected = tlsMaterial(configured.orElseThrow());
-            List<X509Certificate> chain = keyMaterial.read(selected.identity().id()).certificateChain();
+            List<X509Certificate> chain = keyMaterial.read(selected.identity()).certificateChain();
             if (selected.equals(current.material()) && chain.equals(current.chain())) {
                 certificateActivationError = "";
                 return;
@@ -238,7 +237,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
         OrionHttpsConfiguration https = configured.orElseThrow();
         TlsMaterialConfiguration material = tlsMaterial(https);
         SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
-        List<X509Certificate> chain = keyMaterial.read(material.identity().id()).certificateChain();
+        List<X509Certificate> chain = keyMaterial.read(material.identity()).certificateChain();
         sslContextFactory.setSslContext(keyMaterial.createTlsContext(material));
         activeTls = new ActiveTls(material, sslContextFactory, List.copyOf(chain));
         sslContextFactory.setWantClientAuth(
@@ -353,38 +352,18 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
                 .system().https();
     }
 
-    private TlsMaterialConfiguration tlsMaterial(OrionHttpsConfiguration https) {
-        KeyMaterialDescriptor identity = descriptor(
-                https.identity().orElseThrow(
-                        () -> new IllegalStateException("Enabled HTTPS requires identity material")),
-                KeyMaterialPurpose.TLS_IDENTITY);
-        Optional<KeyMaterialDescriptor> issuer = https.serverIssuerTrustAnchor()
-                .map(this::trustedCertificate);
-        List<KeyMaterialDescriptor> clientRoots = new ArrayList<>();
+    private TlsMaterialConfiguration tlsMaterial(OrionHttpsConfiguration https) throws GeneralSecurityException {
+        KeyMaterialId identity = https.identity().orElseThrow(
+                () -> new IllegalStateException("Enabled HTTPS requires identity material"));
+        keyMaterial.require(identity, Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA);
         for (KeyMaterialId root : https.clientTrustAnchors()) {
-            clientRoots.add(trustedCertificate(root));
+            keyMaterial.require(root, Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA);
         }
-        return new TlsMaterialConfiguration(
-                identity,
-                issuer,
-                clientRoots,
+        if (https.serverIssuerTrustAnchor().isPresent()) {
+            keyMaterial.require(https.serverIssuerTrustAnchor().orElseThrow(),
+                    Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA);
+        }
+        return new TlsMaterialConfiguration(identity, https.serverIssuerTrustAnchor(), https.clientTrustAnchors(),
                 TlsClientAuthentication.valueOf(https.clientAuthentication().name()));
-    }
-
-    private KeyMaterialDescriptor descriptor(
-            KeyMaterialId reference,
-            KeyMaterialPurpose purpose) {
-        return new KeyMaterialDescriptor(
-                reference.alias(),
-                Set.of(purpose),
-                KeyMaterialAlgorithm.RSA,
-                reference.version());
-    }
-
-    private KeyMaterialDescriptor trustedCertificate(KeyMaterialId reference) {
-        return new KeyMaterialDescriptor(
-                reference.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
-                KeyMaterialAlgorithm.RSA,
-                reference.version());
     }
 }

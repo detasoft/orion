@@ -47,7 +47,7 @@ import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
@@ -154,8 +154,7 @@ class OrionAccessControlServiceImplTest {
     }
 
     private static final SigningMaterialSet SIGNING = new SigningMaterialSet(
-            new KeyMaterialDescriptor("test-signing-key", Set.of(KeyMaterialPurpose.SERVER_SIGNING),
-                    KeyMaterialAlgorithm.RSA, 1), List.of());
+            new KeyMaterialId("test-signing-key", 1), List.of());
     private static final KeyPair KEY_ONE = keyPair("RSA", 2048);
     private static final KeyPair KEY_TWO = keyPair("EC", 256);
     private static final KeyPair KEY_THREE = keyPair("RSA", 2048);
@@ -1709,13 +1708,13 @@ class OrionAccessControlServiceImplTest {
     private static OrionKeyMaterial testMaterial() {
         return new OrionKeyMaterial() {
             @Override
-            public byte[] open(KeyMaterialDescriptor descriptor, ConfigurationSecretEnvelope envelope,
+            public byte[] open(KeyMaterialId descriptor, ConfigurationSecretEnvelope envelope,
                     ConfigurationSecretContext context) {
                 return new byte[]{'x'};
             }
 
             @Override
-            public void require(KeyMaterialDescriptor descriptor) {
+            public void require(KeyMaterialId descriptor, Set<KeyMaterialPurpose> purposes, KeyMaterialAlgorithm algorithm) {
             }
         };
     }
@@ -1723,7 +1722,7 @@ class OrionAccessControlServiceImplTest {
     private static OrionKeyMaterial testServerIdentity() {
         return new OrionKeyMaterial() {
             @Override
-            public byte[] sign(KeyMaterialDescriptor descriptor, byte[] payload)
+            public byte[] sign(KeyMaterialId descriptor, byte[] payload)
                     throws java.security.GeneralSecurityException {
                 Signature signature = Signature.getInstance("SHA256withRSA");
                 signature.initSign(KEY_THREE.getPrivate());
@@ -1732,7 +1731,7 @@ class OrionAccessControlServiceImplTest {
             }
 
             @Override
-            public boolean verify(KeyMaterialDescriptor descriptor, byte[] payload, byte[] signatureBytes)
+            public boolean verify(KeyMaterialId descriptor, byte[] payload, byte[] signatureBytes)
                     throws java.security.GeneralSecurityException {
                 Signature signature = Signature.getInstance("SHA256withRSA");
                 signature.initVerify(KEY_THREE.getPublic());

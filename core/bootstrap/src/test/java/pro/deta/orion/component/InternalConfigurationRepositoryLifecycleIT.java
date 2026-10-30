@@ -1109,7 +1109,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         }
 
         @Override
-        public byte[] sign(pro.deta.orion.keymaterial.KeyMaterialDescriptor descriptor, byte[] payload)
+        public byte[] sign(pro.deta.orion.keymaterial.KeyMaterialId descriptor, byte[] payload)
                 throws GeneralSecurityException {
             Signature signature = Signature.getInstance("SHA256withRSA");
             signature.initSign(active.getPrivate());
@@ -1118,7 +1118,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         }
 
         @Override
-        public boolean verify(pro.deta.orion.keymaterial.KeyMaterialDescriptor descriptor,
+        public boolean verify(pro.deta.orion.keymaterial.KeyMaterialId descriptor,
                 byte[] payload, byte[] signatureBytes) throws GeneralSecurityException {
             Signature signature = Signature.getInstance("SHA256withRSA");
             signature.initVerify(active.getPublic());

@@ -2,7 +2,7 @@ package pro.deta.orion.acl;
 
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 
 import java.nio.charset.StandardCharsets;
@@ -132,7 +132,7 @@ final class JwtAccessTokenService {
             return VerificationResult.failure("JWT key id is required");
         }
 
-        KeyMaterialDescriptor verificationKey = verificationKey(keyId);
+        KeyMaterialId verificationKey = verificationKey(keyId);
         if (verificationKey == null) {
             return VerificationResult.failure("JWT signing key is unknown");
         }
@@ -218,19 +218,19 @@ final class JwtAccessTokenService {
         }
     }
 
-    private KeyMaterialDescriptor verificationKey(String keyId) {
+    private KeyMaterialId verificationKey(String keyId) {
         if (keyId(signing.active()).equals(keyId)) return signing.active();
-        for (KeyMaterialDescriptor descriptor : signing.verification()) {
+        for (KeyMaterialId descriptor : signing.verification()) {
             if (keyId(descriptor).equals(keyId)) return descriptor;
         }
         return null;
     }
 
-    private static String keyId(KeyMaterialDescriptor descriptor) {
+    private static String keyId(KeyMaterialId descriptor) {
         return descriptor.alias() + ":" + descriptor.version();
     }
 
-    private boolean verify(KeyMaterialDescriptor descriptor, String signingInput, byte[] signatureBytes) {
+    private boolean verify(KeyMaterialId descriptor, String signingInput, byte[] signatureBytes) {
         try {
             return keyMaterial.verify(
                     descriptor,

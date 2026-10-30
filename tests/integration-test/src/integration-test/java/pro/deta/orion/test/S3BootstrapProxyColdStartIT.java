@@ -20,7 +20,7 @@ import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.S3NativeGitRepositoryFactory;
 import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -94,7 +94,7 @@ class S3BootstrapProxyColdStartIT {
                 byte[] xml;
                 try (OrionKeyMaterial seeded = TestServerIdentityMaterial.openMaterial(
                         configuration, environment, materialStore)) {
-                    KeyMaterialDescriptor active = KeyMaterialBootstrap.signingMaterial(
+                    KeyMaterialId active = KeyMaterialBootstrap.signingMaterial(
                             configuration.getBootstrap().getKeyMaterial()).active();
                     signingKeyId = active.alias();
                     signature = seeded.sign(active, payload);

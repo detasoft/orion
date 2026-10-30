@@ -39,7 +39,7 @@ import java.util.concurrent.ScheduledFuture;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -77,12 +77,9 @@ class AcmeCertificateServiceTest {
     final pro.deta.orion.test.util.OrionTestRuntime events =
             new pro.deta.orion.test.util.OrionTestRuntime();
 
-    private static final KeyMaterialDescriptor ACCOUNT = descriptor(
-            "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT);
-    private static final KeyMaterialDescriptor IDENTITY = descriptor(
-            "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY);
-    private static final KeyMaterialDescriptor ROOT = new KeyMaterialDescriptor(
-            "issuer-root-v1", Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, 1);
+    private static final KeyMaterialId ACCOUNT = new KeyMaterialId("acme-account-v1", 1);
+    private static final KeyMaterialId IDENTITY = new KeyMaterialId("https-identity-v1", 1);
+    private static final KeyMaterialId ROOT = new KeyMaterialId("issuer-root-v1", 1);
 
     @TempDir
     private Path tempDir;
@@ -134,7 +131,7 @@ class AcmeCertificateServiceTest {
                 String expectedVersion = modification.expectedRevision();
                 if (material != null) {
                     try {
-                        assertThat(material.read(IDENTITY.id()).issuedCertificateChain()).isEmpty();
+                        assertThat(material.read(IDENTITY).issuedCertificateChain()).isEmpty();
                         assertThat(material.contains(ROOT)).isFalse();
                     } catch (GeneralSecurityException failure) {
                         throw new IOException(failure);
@@ -160,7 +157,7 @@ class AcmeCertificateServiceTest {
             assertThat(issued.certificateChain()).hasSize(1);
             assertThat(material.read(new KeyMaterialId(IDENTITY.alias(), 2)).certificateChain())
                     .containsExactlyElementsOf(issued.certificateChain());
-            assertThat(material.read(ROOT.id()).trustedCertificate()).isEqualTo(issuer.root.certificate());
+            assertThat(material.read(ROOT).trustedCertificate()).isEqualTo(issuer.root.certificate());
             assertThat(material.revision()).isEqualTo("2");
             accountPublic = issuer.lastRequest.accountKeyPair().getPublic().getEncoded();
             identityPublic = issuer.lastRequest.domainKeyPair().getPublic().getEncoded();
@@ -212,7 +209,7 @@ class AcmeCertificateServiceTest {
             assertThatThrownBy(() -> issue(service, AcmeCertificateService.IssueRequest.EMPTY))
                     .isInstanceOf(AcmeCertificateIssueException.class)
                     .hasMessage("Cannot store issued ACME certificate");
-            assertThatThrownBy(() -> material.read(IDENTITY.id()).certificateChain())
+            assertThatThrownBy(() -> material.read(IDENTITY).certificateChain())
                     .isInstanceOf(IllegalStateException.class);
         }
         store.fail = false;
@@ -234,7 +231,7 @@ class AcmeCertificateServiceTest {
     void savesTheCertificateAfterAnIndependentMaterialChangeDuringIssuance() throws Exception {
         InMemoryBlobStorage store = new InMemoryBlobStorage();
         try (OrionKeyMaterial material = owner(store)) {
-            KeyMaterialDescriptor other = descriptor("other-account", KeyMaterialPurpose.ACME_ACCOUNT);
+            KeyMaterialId other = new KeyMaterialId("other-account", 1);
             AcmeCertificateIssuer issuer = new AcmeCertificateIssuer(new AcmeHttpChallengeService()) {
                 @Override
                 public IssuedAcmeCertificate issue(AcmeCertificateIssueRequest request) {
@@ -242,7 +239,7 @@ class AcmeCertificateServiceTest {
                         assertThat(material.contains(ACCOUNT)).isTrue();
                         assertThat(material.contains(IDENTITY)).isTrue();
                         material.withModification(material.revision(), modification -> {
-                            modification.generateKey(other, 2048);
+                            modification.generateKey(("other-account"), Set.of((KeyMaterialPurpose.ACME_ACCOUNT)), KeyMaterialAlgorithm.RSA, 2048);
                             modification.apply();
                         });
                     } catch (IOException | GeneralSecurityException failure) {
@@ -263,9 +260,9 @@ class AcmeCertificateServiceTest {
     @Test
     void rejectsAnAccountAliasOwnedByAnotherPurposeBeforeContactingTheCa() throws Exception {
         try (OrionKeyMaterial material = owner(new InMemoryBlobStorage())) {
-            KeyMaterialDescriptor signing = descriptor(ACCOUNT.alias(), KeyMaterialPurpose.SERVER_SIGNING);
+            KeyMaterialId signing = new KeyMaterialId((ACCOUNT.alias()), 1);
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(signing, 2048);
+                modification.generateKey((ACCOUNT.alias()), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
             String version = material.revision();
@@ -289,9 +286,8 @@ class AcmeCertificateServiceTest {
         issuer.root = TestCertificateChain.root("Root");
         try (OrionKeyMaterial material = owner(store)) {
             material.withModification(material.revision(), modification -> {
-                KeyMaterialDescriptor mismatched = new KeyMaterialDescriptor(
-                        ROOT.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR), ROOT.algorithm(), 1);
-                modification.setTrustedCertificate(mismatched, issuer.root.certificate());
+                KeyMaterialId mismatched = new KeyMaterialId(ROOT.alias(), 1);
+                modification.setTrustedCertificate(ROOT.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, issuer.root.certificate());
                 modification.apply();
             });
             AcmeCertificateService service = new AcmeCertificateService(desiredState(false,
@@ -925,13 +921,7 @@ class AcmeCertificateServiceTest {
         }
     }
 
-    private static KeyMaterialDescriptor descriptor(String alias, KeyMaterialPurpose purpose) {
-        return new KeyMaterialDescriptor(
-                alias,
-                Set.of(purpose),
-                KeyMaterialAlgorithm.RSA,
-                1);
-    }
+
 
     private static final class RecordingIssuer extends AcmeCertificateIssuer {
         private final boolean wrongKey;

@@ -38,12 +38,8 @@ class KeyMaterialRepositoryTest {
 
     @Test
     void observesAnUpdateBetweenInitialReadAndEventSubscription() throws Exception {
-        KeyMaterialDescriptor first = new KeyMaterialDescriptor("first",
-                Set.of(KeyMaterialPurpose.SERVER_SIGNING),
-                KeyMaterialAlgorithm.RSA, 1);
-        KeyMaterialDescriptor second = new KeyMaterialDescriptor("second",
-                Set.of(KeyMaterialPurpose.SERVER_SIGNING),
-                KeyMaterialAlgorithm.RSA, 1);
+        KeyMaterialId first = new KeyMaterialId("first", 1);
+        KeyMaterialId second = new KeyMaterialId("second", 1);
         InMemoryBlobStorage writerSource = new InMemoryBlobStorage();
         byte[] initial = null;
         byte[] updated = null;
@@ -51,12 +47,12 @@ class KeyMaterialRepositoryTest {
              OrionKeyMaterial writer = OrionKeyMaterial.open(new KeyMaterialRepository(
                      writerSource, new KeyMaterialCodec(options), new OrionEventManager()))) {
             writer.withModification(writer.revision(), modification -> {
-                modification.generateKey(first, 2048);
+                modification.generateKey("first", Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
             initial = writerSource.load().bytes();
             writer.withModification(writer.revision(), modification -> {
-                modification.generateKey(second, 2048);
+                modification.generateKey("second", Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
             updated = writerSource.load().bytes();

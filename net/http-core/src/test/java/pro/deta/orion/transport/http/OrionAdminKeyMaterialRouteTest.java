@@ -17,7 +17,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
@@ -35,18 +35,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Authorization.APPLICATION_ADMIN;
 
 class OrionAdminKeyMaterialRouteTest {
-    private static final KeyMaterialDescriptor ACCOUNT = new KeyMaterialDescriptor(
-            "account", Set.of(KeyMaterialPurpose.ACME_ACCOUNT),
-            KeyMaterialAlgorithm.RSA, 1);
+    private static final KeyMaterialId ACCOUNT = new KeyMaterialId("account", 1);
 
     @Test
     void exposesOnlyPublicInventoryToApplicationAdmins() throws Exception {
         try (OrionKeyMaterial material = open(new InMemoryBlobStorage())) {
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(new KeyMaterialDescriptor("acme-identity",
-                        Set.of(KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialPurpose.SERVER_SIGNING),
-                        KeyMaterialAlgorithm.RSA, 1), 2048);
-                modification.generateKey(material.configurationCipherKey(), 256);
+                modification.generateKey("acme-identity", Set.of(KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
+                modification.generateKey(material.configurationCipherKey().alias(), Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES, 256);
                 modification.apply();
             });
             OrionAdminKeyMaterialRoute route = new OrionAdminKeyMaterialRoute(material, new ObjectMapper());
@@ -67,16 +63,15 @@ class OrionAdminKeyMaterialRouteTest {
     @Test
     void formatsTheSelectedCertificateVersionAsPublicMetadata() throws Exception {
         try (OrionKeyMaterial material = open(new InMemoryBlobStorage())) {
-            KeyMaterialDescriptor identity = new KeyMaterialDescriptor("identity",
-                    Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 1);
+            KeyMaterialId identity = new KeyMaterialId("identity", 1);
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(identity, 2048);
+                modification.generateKey("identity", Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
             TestCertificateChain.Authority root =
                     TestCertificateChain.root("Public root");
             X509Certificate leaf = TestCertificateChain.leaf(
-                    "orion.test", material.read(identity.id()).keyPair(), root);
+                    "orion.test", material.read(identity).keyPair(), root);
             material.withModification(material.revision(), modification -> {
                 modification.installCertificateChain(identity, List.of(leaf), java.util.Optional.empty());
                 modification.apply();
@@ -145,9 +140,9 @@ class OrionAdminKeyMaterialRouteTest {
             assertThat(response.body()).isNull();
         }
         try (OrionKeyMaterial reloaded = open(store)) {
-            assertThat(reloaded.read(ACCOUNT.id()).keyPair().getPrivate().getEncoded())
+            assertThat(reloaded.read(ACCOUNT).keyPair().getPrivate().getEncoded())
                     .isEqualTo(original.getPrivate().getEncoded());
-            assertThat(reloaded.read(ACCOUNT.id()).publicKey().getEncoded())
+            assertThat(reloaded.read(ACCOUNT).publicKey().getEncoded())
                     .isEqualTo(original.getPublic().getEncoded());
         }
     }
@@ -159,7 +154,7 @@ class OrionAdminKeyMaterialRouteTest {
             assertThat(post(material, """
                     {"alias":"account","purpose":"ACME_ACCOUNT"}
                     """).status()).isEqualTo(201);
-            byte[] publicKey = material.read(ACCOUNT.id()).publicKey().getEncoded();
+            byte[] publicKey = material.read(ACCOUNT).publicKey().getEncoded();
             String beforeRevision = store.load().revision();
             byte[] beforeBytes = store.read(beforeRevision);
 
@@ -168,7 +163,7 @@ class OrionAdminKeyMaterialRouteTest {
                         Map.of("alias", "account", "purpose", purpose));
                 assertThat(post(material, body).status()).isEqualTo(400);
             }
-            assertThat(material.read(ACCOUNT.id()).publicKey().getEncoded()).isEqualTo(publicKey);
+            assertThat(material.read(ACCOUNT).publicKey().getEncoded()).isEqualTo(publicKey);
             assertThat(material.revision()).isEqualTo("1");
             assertThat(store.load().bytes()).isEqualTo(beforeBytes);
             assertThat(store.load().revision()).isEqualTo(beforeRevision);

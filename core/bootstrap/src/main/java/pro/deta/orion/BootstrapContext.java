@@ -27,7 +27,6 @@ import pro.deta.orion.util.Result;
 import java.io.IOException;
 import java.security.GeneralSecurityException;
 import org.apache.sshd.common.keyprovider.KeyPairProvider;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
@@ -225,27 +224,16 @@ public final class BootstrapContext implements AutoCloseable {
         List<String> selected = List.copyOf(references);
         if (selected.isEmpty()
                 && keyMaterial.sshHostKeyPairs(List.of()).isEmpty()) {
-            KeyMaterialDescriptor rsa = defaultSshHostKey("ssh-host-rsa", KeyMaterialAlgorithm.RSA);
-            KeyMaterialDescriptor ec = defaultSshHostKey("ssh-host-ec", KeyMaterialAlgorithm.EC);
-            for (KeyMaterialDescriptor descriptor : List.of(rsa, ec)) {
-                if (keyMaterial.contains(descriptor.alias(), Set.of())) {
-                    keyMaterial.require(descriptor);
-                }
-            }
             keyMaterial.withModification(keyMaterial.revision(), modification -> {
-                modification.generateKey(rsa, KeyMaterialConstants.RSA_KEY_SIZE_BITS);
-                modification.generateKey(ec, KeyMaterialConstants.EC_KEY_SIZE_BITS);
+                modification.generateKey("ssh-host-rsa-v1", Set.of(KeyMaterialPurpose.SSH_HOST),
+                        KeyMaterialAlgorithm.RSA, KeyMaterialConstants.RSA_KEY_SIZE_BITS);
+                modification.generateKey("ssh-host-ec-v1", Set.of(KeyMaterialPurpose.SSH_HOST),
+                        KeyMaterialAlgorithm.EC, KeyMaterialConstants.EC_KEY_SIZE_BITS);
                 modification.apply();
             });
         }
         keyMaterial.sshHostKeyPairs(selected);
         return session -> keyMaterial.sshHostKeyPairs(selected);
-    }
-
-    private KeyMaterialDescriptor defaultSshHostKey(String logicalAlias, KeyMaterialAlgorithm algorithm) {
-        long version = 1;
-        return new KeyMaterialDescriptor(logicalAlias + "-v" + version,
-                Set.of(KeyMaterialPurpose.SSH_HOST), algorithm, version);
     }
 
     @Override

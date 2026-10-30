@@ -1409,15 +1409,14 @@ class OrionOidcOnboardingTest {
                 } finally { exchange.close(); }
             });
             provider.start();
-            KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor("signing",
-                    Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
+            KeyMaterialId descriptor = new KeyMaterialId("signing", 1);
             try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
                 material = OrionKeyMaterial.open(new KeyMaterialRepository(
                         new InMemoryBlobStorage(),
                         new KeyMaterialCodec(options),
                         testRuntime.unstartedEvents()));
                 material.withModification(material.revision(), modification -> {
-                    modification.generateKey(descriptor, 2048);
+                    modification.generateKey("signing", Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
                     modification.apply();
                 });
             }

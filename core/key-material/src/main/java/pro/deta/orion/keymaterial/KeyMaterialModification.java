@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /** Collects append-only additions against a captured source revision; deletion appends a marked entry. */
 public final class KeyMaterialModification implements Modification {
@@ -31,114 +32,115 @@ public final class KeyMaterialModification implements Modification {
         return expectedRevision;
     }
 
-    public synchronized KeyMaterialId generateKey(KeyMaterialDescriptor descriptor, int keySize)
-            throws GeneralSecurityException {
+    public synchronized KeyMaterialId generateKey(String alias, Set<KeyMaterialPurpose> purposes,
+            KeyMaterialAlgorithm algorithm, int keySize) throws GeneralSecurityException {
         requireOpen();
-        requireDescriptor(descriptor);
-        Entry existing = find(descriptor.alias());
-        if (existing != null) {
-            requireAvailable(existing);
-            Entry selected = requireEntry(descriptor.id());
-            owner.validatePrepared(selected.entry(), descriptor);
-            return descriptor.id();
+        KeyMaterialId id = new KeyMaterialId(alias, 1);
+        if (find(id.alias()) != null) {
+            Entry selected = requireEntry(id);
+            owner.validatePrepared(id.alias(), selected.entry(), purposes, algorithm);
+            return id;
         }
-        requireFirstVersion(descriptor);
-        return add(descriptor.alias(), owner.prepareKey(descriptor, keySize), false);
+        return add(id.alias(), owner.prepareKey(id.alias(), purposes, algorithm, keySize), false);
     }
 
-    public synchronized KeyMaterialId importKey(KeyMaterialDescriptor descriptor, KeyPair keyPair)
-            throws GeneralSecurityException {
+    public synchronized KeyMaterialId importKey(String alias, Set<KeyMaterialPurpose> purposes,
+            KeyMaterialAlgorithm algorithm, KeyPair keyPair) throws GeneralSecurityException {
         requireOpen();
-        requireDescriptor(descriptor);
-        Entry existing = validateTarget(descriptor);
-        KeyStore.PrivateKeyEntry prepared = owner.preparePrivateKey(descriptor, keyPair);
-        if (existing != null) {
-            prepared = new KeyStore.PrivateKeyEntry(prepared.getPrivateKey(), prepared.getCertificateChain(),
-                    existing.entry().getAttributes());
-        }
-        return add(descriptor.alias(), prepared, false);
+        alias = requireNewAlias(alias);
+        return add(alias, owner.preparePrivateKey(alias, purposes, algorithm, keyPair), false);
     }
 
-    public synchronized KeyMaterialId importKey(KeyMaterialDescriptor descriptor, char[] privateKeyPem)
+    public synchronized KeyMaterialId importKey(KeyMaterialId id, KeyPair keyPair)
             throws GeneralSecurityException {
+        requireOpen();
+        KeyMaterialEntry existing = owner.describe(requireEntry(id));
+        KeyStore.PrivateKeyEntry prepared = owner.preparePrivateKey(id.alias(), existing.purposes(),
+                existing.algorithm(), keyPair);
+        return add(id.alias(), new KeyStore.PrivateKeyEntry(prepared.getPrivateKey(),
+                prepared.getCertificateChain(), existing.content().getAttributes()), false);
+    }
+
+    public synchronized KeyMaterialId importKey(String alias, Set<KeyMaterialPurpose> purposes,
+            KeyMaterialAlgorithm algorithm, char[] privateKeyPem) throws GeneralSecurityException {
         try {
             requireOpen();
-            requireDescriptor(descriptor);
             if (privateKeyPem == null || privateKeyPem.length == 0) {
                 throw new IllegalArgumentException("Private key input must not be empty");
             }
-            if (descriptor.algorithm() != KeyMaterialAlgorithm.RSA) {
-                throw new IllegalArgumentException("PEM and JWK import requires an RSA descriptor");
+            if (algorithm != KeyMaterialAlgorithm.RSA) {
+                throw new IllegalArgumentException("PEM and JWK import requires RSA material");
             }
-            return importKey(descriptor, OrionKeyMaterial.readRsaPrivateKey(privateKeyPem));
+            return importKey(alias, purposes, algorithm, OrionKeyMaterial.readRsaPrivateKey(privateKeyPem));
         } finally {
             if (privateKeyPem != null) Arrays.fill(privateKeyPem, '\0');
         }
     }
 
-    public synchronized KeyMaterialId importSecretKey(KeyMaterialDescriptor descriptor, SecretKey key)
-            throws GeneralSecurityException {
+    public synchronized KeyMaterialId importSecretKey(String alias, Set<KeyMaterialPurpose> purposes,
+            KeyMaterialAlgorithm algorithm, SecretKey key) throws GeneralSecurityException {
         requireOpen();
-        requireDescriptor(descriptor);
-        Entry existing = validateTarget(descriptor);
-        KeyStore.SecretKeyEntry prepared = owner.prepareSecretKey(descriptor, key);
-        if (existing != null) {
-            prepared = new KeyStore.SecretKeyEntry(prepared.getSecretKey(), existing.entry().getAttributes());
-        }
-        return add(descriptor.alias(), prepared, false);
+        alias = requireNewAlias(alias);
+        return add(alias, owner.prepareSecretKey(alias, purposes, algorithm, key), false);
     }
 
-    public synchronized KeyMaterialId setTrustedCertificate(KeyMaterialDescriptor descriptor,
-            X509Certificate certificate) throws GeneralSecurityException {
-        requireOpen();
-        requireDescriptor(descriptor);
-        Entry existing = validateTarget(descriptor);
-        KeyStore.TrustedCertificateEntry prepared = owner.prepareTrustedCertificate(descriptor, certificate);
-        if (existing != null) {
-            prepared = new KeyStore.TrustedCertificateEntry(certificate, existing.entry().getAttributes());
-        }
-        return add(descriptor.alias(), prepared, false);
-    }
-
-    public synchronized KeyMaterialId installCertificateChain(KeyMaterialDescriptor identity,
-            List<? extends Certificate> chain, Optional<KeyMaterialDescriptor> issuer)
+    public synchronized KeyMaterialId importSecretKey(KeyMaterialId id, SecretKey key)
             throws GeneralSecurityException {
         requireOpen();
-        requireDescriptor(identity);
-        if (identity.purposes().contains(KeyMaterialPurpose.TRUST_ANCHOR)
-                || (!identity.purposes().contains(KeyMaterialPurpose.TLS_IDENTITY)
-                        && !identity.purposes().contains(KeyMaterialPurpose.CERTIFICATE_AUTHORITY))) {
+        KeyMaterialEntry existing = owner.describe(requireEntry(id));
+        KeyStore.SecretKeyEntry prepared = owner.prepareSecretKey(id.alias(), existing.purposes(),
+                existing.algorithm(), key);
+        return add(id.alias(), new KeyStore.SecretKeyEntry(prepared.getSecretKey(),
+                existing.content().getAttributes()), false);
+    }
+
+    public synchronized KeyMaterialId setTrustedCertificate(String alias, Set<KeyMaterialPurpose> purposes,
+            KeyMaterialAlgorithm algorithm, X509Certificate certificate) throws GeneralSecurityException {
+        requireOpen();
+        alias = requireNewAlias(alias);
+        return add(alias, owner.prepareTrustedCertificate(alias, purposes, algorithm, certificate), false);
+    }
+
+    public synchronized KeyMaterialId setTrustedCertificate(KeyMaterialId id, X509Certificate certificate)
+            throws GeneralSecurityException {
+        requireOpen();
+        KeyMaterialEntry existing = owner.describe(requireEntry(id));
+        owner.prepareTrustedCertificate(id.alias(), existing.purposes(), existing.algorithm(), certificate);
+        return add(id.alias(), new KeyStore.TrustedCertificateEntry(certificate,
+                existing.content().getAttributes()), false);
+    }
+
+    public synchronized KeyMaterialId installCertificateChain(KeyMaterialId identity,
+            List<? extends Certificate> chain, Optional<KeyMaterialId> issuer) throws GeneralSecurityException {
+        requireOpen();
+        KeyMaterialEntry existing = owner.describe(requireEntry(identity));
+        if (existing.purposes().contains(KeyMaterialPurpose.TRUST_ANCHOR)
+                || (!existing.purposes().contains(KeyMaterialPurpose.TLS_IDENTITY)
+                        && !existing.purposes().contains(KeyMaterialPurpose.CERTIFICATE_AUTHORITY))) {
             throw new IllegalArgumentException("Certificate chains require TLS identity or CA material");
         }
         if (issuer == null) throw new IllegalArgumentException("Issuer optional must not be null");
-        Entry existing = requireEntry(identity.id());
-        owner.validatePrepared(existing.entry(), identity);
-        KeyStore.PrivateKeyEntry entry = (KeyStore.PrivateKeyEntry) existing.entry();
         Optional<X509Certificate> root = Optional.empty();
         if (issuer.isPresent()) {
-            KeyMaterialDescriptor descriptor = issuer.orElseThrow();
-            requireDescriptor(descriptor);
-            if (!descriptor.purposes().contains(KeyMaterialPurpose.TRUST_ANCHOR)) {
+            KeyMaterialEntry trusted = owner.describe(requireEntry(issuer.orElseThrow()));
+            if (!trusted.purposes().contains(KeyMaterialPurpose.TRUST_ANCHOR)) {
                 throw new IllegalArgumentException("Issuer must have TRUST_ANCHOR purpose");
             }
-            Entry trusted = requireEntry(descriptor.id());
-            owner.validatePrepared(trusted.entry(), descriptor);
-            root = Optional.of((X509Certificate) ((KeyStore.TrustedCertificateEntry) trusted.entry())
-                    .getTrustedCertificate());
+            root = Optional.of(trusted.trustedCertificate());
         }
         List<X509Certificate> certificates = CertificateIdentity.requireX509Chain(chain);
-        KeyPair keyPair = new KeyPair(entry.getCertificate().getPublicKey(), entry.getPrivateKey());
+        KeyPair keyPair = existing.keyPair();
         CertificateIdentity.validateCertificateChain(certificates, keyPair.getPublic(), root);
-        KeyStore.PrivateKeyEntry prepared = owner.prepareCertificateChain(identity, keyPair, certificates);
+        KeyStore.PrivateKeyEntry prepared = owner.prepareCertificateChain(identity.alias(), existing.purposes(),
+                existing.algorithm(), keyPair, certificates);
         return add(identity.alias(), new KeyStore.PrivateKeyEntry(prepared.getPrivateKey(),
-                prepared.getCertificateChain(), entry.getAttributes()), false);
+                prepared.getCertificateChain(), existing.content().getAttributes()), false);
     }
 
-    public synchronized KeyMaterialId delete(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
+    public synchronized KeyMaterialId delete(KeyMaterialId id) throws GeneralSecurityException {
         requireOpen();
-        requireDescriptor(descriptor);
-        Entry existing = requireEntry(descriptor.id());
-        owner.validatePrepared(existing.entry(), descriptor);
+        Entry existing = requireEntry(id);
+        owner.describe(existing);
         return add(existing.alias(), existing.entry(), true);
     }
 
@@ -179,20 +181,10 @@ public final class KeyMaterialModification implements Modification {
         return entry;
     }
 
-    private Entry validateTarget(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
-        if (find(descriptor.alias()) == null) {
-            requireFirstVersion(descriptor);
-            return null;
-        }
-        Entry existing = requireEntry(descriptor.id());
-        owner.validatePrepared(existing.entry(), descriptor);
-        return existing;
-    }
-
-    private void requireFirstVersion(KeyMaterialDescriptor descriptor) {
-        if (descriptor.version() != 1) {
-            throw new IllegalArgumentException("New key material must start at version 1");
-        }
+    private String requireNewAlias(String alias) throws GeneralSecurityException {
+        String normalized = new KeyMaterialId(alias, 1).alias();
+        if (find(normalized) != null) throw new IllegalArgumentException("Key material name already exists");
+        return normalized;
     }
 
     private void requireAvailable(Entry addition) throws GeneralSecurityException {
@@ -210,10 +202,6 @@ public final class KeyMaterialModification implements Modification {
     private void requireOpen() {
         if (finished) throw new IllegalStateException("Key material modification is already finished");
         owner.requireOpen();
-    }
-
-    private void requireDescriptor(KeyMaterialDescriptor descriptor) {
-        if (descriptor == null) throw new IllegalArgumentException("Key material descriptor must not be null");
     }
 
     @FunctionalInterface

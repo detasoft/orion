@@ -195,14 +195,11 @@ public final class OrionConfigurationEditor implements ServiceLifecycleStateMach
 
     private void requireKey(KeyMaterialId reference, KeyMaterialPurpose purpose)
             throws GeneralSecurityException {
-        configurationMaterial.require(new KeyMaterialDescriptor(
-                reference.alias(), Set.of(purpose), KeyMaterialAlgorithm.RSA,
-                reference.version()));
+        configurationMaterial.require(reference, Set.of(purpose), KeyMaterialAlgorithm.RSA);
     }
 
     private void requireTrust(KeyMaterialId reference) throws GeneralSecurityException {
-        configurationMaterial.require(new KeyMaterialDescriptor(reference.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
-                KeyMaterialAlgorithm.RSA, reference.version()));
+        configurationMaterial.require(reference, Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA);
     }
 
     public void withAccess(ChangeMetadata metadata, OrionRevision expectedRevision,

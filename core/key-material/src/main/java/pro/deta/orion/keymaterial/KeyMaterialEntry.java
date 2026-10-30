@@ -16,13 +16,26 @@ public record KeyMaterialEntry(KeyMaterialId id, Set<KeyMaterialPurpose> purpose
         KeyMaterialAlgorithm algorithm, KeyStore.Entry content) {
     public KeyMaterialEntry {
         Objects.requireNonNull(id, "id");
+        validateMetadata(purposes, algorithm);
         purposes = Set.copyOf(purposes);
-        Objects.requireNonNull(algorithm, "algorithm");
         Objects.requireNonNull(content, "content");
     }
 
-    public KeyMaterialDescriptor descriptor() {
-        return new KeyMaterialDescriptor(id.alias(), purposes, algorithm, id.version());
+    static void validateMetadata(Set<KeyMaterialPurpose> purposes, KeyMaterialAlgorithm algorithm) {
+        if (purposes == null || purposes.isEmpty()) {
+            throw new IllegalArgumentException("Key material purposes must not be empty");
+        }
+        if (algorithm == null) throw new IllegalArgumentException("Key material algorithm must not be null");
+        if (purposes.contains(KeyMaterialPurpose.ACME_ACCOUNT) && purposes.size() != 1) {
+            throw new IllegalArgumentException("ACME account keys must have only ACME_ACCOUNT purpose");
+        }
+        if (purposes.contains(KeyMaterialPurpose.CONFIGURATION_CIPHER) && algorithm != KeyMaterialAlgorithm.AES) {
+            throw new IllegalArgumentException("Configuration cipher material must use AES");
+        }
+        if (algorithm == KeyMaterialAlgorithm.AES
+                && !purposes.equals(Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER))) {
+            throw new IllegalArgumentException("AES material is only valid for configuration ciphers");
+        }
     }
 
     public KeyPair keyPair() throws GeneralSecurityException {
