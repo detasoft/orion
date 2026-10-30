@@ -50,7 +50,6 @@ import pro.deta.orion.git.fileapi.GitFileChanged;
 import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import java.util.Set;
@@ -157,18 +156,14 @@ class GitBlobStorageTest {
 
     @Test
     void activatesAnIssuedCertificateWhenConfigurationAndMaterialShareTheGitBranch() throws Exception {
-        KeyMaterialDescriptor account = new KeyMaterialDescriptor("account",
-                Set.of(KeyMaterialPurpose.ACME_ACCOUNT),
-                KeyMaterialAlgorithm.RSA, 1);
-        KeyMaterialDescriptor identity = new KeyMaterialDescriptor("identity",
-                Set.of(KeyMaterialPurpose.TLS_IDENTITY),
-                KeyMaterialAlgorithm.RSA, 1);
+        KeyMaterialId account = new KeyMaterialId("account", 1);
+        KeyMaterialId identity = new KeyMaterialId("identity", 1);
         OrionAcmeConfiguration acme = new OrionAcmeConfiguration(true,
                 URI.create("acme://letsencrypt.org/staging"),
-                "admin@example.test", List.of("example.test"), "ORION", Optional.of(account.id()),
+                "admin@example.test", List.of("example.test"), "ORION", Optional.of(account),
                 30, 40, true, false, Optional.empty(), Optional.empty());
         OrionHttpsConfiguration https = new OrionHttpsConfiguration(false, "localhost", 8443, null,
-                Optional.of(identity.id()), Optional.empty(),
+                Optional.of(identity), Optional.empty(),
                         OrionHttpsConfiguration.ClientAuthentication.DISABLED,
                 List.of(), Optional.of(acme));
         OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
@@ -183,8 +178,8 @@ class GitBlobStorageTest {
              NativeGitOrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(new GitFileEvents(
                      new GitFile(provider, REPOSITORY, REF, "orion.xml")))) {
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(account, 2048);
-                modification.generateKey(identity, 2048);
+                modification.generateKey("account", Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 2048);
+                modification.generateKey("identity", Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
             OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, material,
@@ -281,12 +276,11 @@ class GitBlobStorageTest {
                      source, new KeyMaterialCodec(options), testRuntime.events()))) {
             assertThat(material.revision()).isEqualTo(base);
             assertThat(material.hasDurableSnapshot()).isFalse();
-            KeyMaterialDescriptor signing = new KeyMaterialDescriptor("signing",
-                    Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
+            KeyMaterialId signing = new KeyMaterialId("signing", 1);
             pro.deta.orion.keymaterial.KeyMaterialModification modification =
                     material.modify(material.revision());
             assertThat(modification.version()).isEqualTo(base);
-            modification.generateKey(signing, 2048);
+            modification.generateKey("signing", Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
             modification.apply();
             assertThat(material.revision()).isEqualTo(source.load().revision()).isNotEqualTo(base);
             assertThat(material.hasDurableSnapshot()).isTrue();
@@ -504,19 +498,16 @@ class GitBlobStorageTest {
     void retainsRunningMaterialWhenAnExternalUpdateReplacesItsHistory() throws Exception {
         char[] password = "test-password".toCharArray();
         InMemoryBlobStorage external = new InMemoryBlobStorage();
-        KeyMaterialDescriptor original = new KeyMaterialDescriptor("original",
-                Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
-        KeyMaterialDescriptor local = new KeyMaterialDescriptor("local",
-                Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
-        KeyMaterialDescriptor added = new KeyMaterialDescriptor("added",
-                Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
+        KeyMaterialId original = new KeyMaterialId("original", 1);
+        KeyMaterialId local = new KeyMaterialId("local", 1);
+        KeyMaterialId added = new KeyMaterialId("added", 1);
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(password);
              OrionKeyMaterial writer = OrionKeyMaterial.open(new KeyMaterialRepository(
                      external,
                      new KeyMaterialCodec(options),
                      testRuntime.unstartedEvents()))) {
             writer.withModification(writer.revision(), modification -> {
-                modification.generateKey(original, 2048);
+                modification.generateKey("original", Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
             Fixture fixture = fixture(Map.of(MATERIAL_PATH, external.load().bytes()));
@@ -525,13 +516,13 @@ class GitBlobStorageTest {
                     new KeyMaterialCodec(options),
                     testRuntime.events()))) {
                 running.withModification(running.revision(), modification -> {
-                    modification.generateKey(local, 2048);
+                    modification.generateKey("local", Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
                     modification.apply();
                 });
                 testRuntime.awaitEvents();
                 String localRevision = running.revision();
                 writer.withModification(writer.revision(), modification -> {
-                    modification.generateKey(added, 2048);
+                    modification.generateKey("added", Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
                     modification.apply();
                 });
                 fixture.repository().files().withAccess(REF,
@@ -560,16 +551,14 @@ class GitBlobStorageTest {
 
     @Test
     void reloadsCommittedMaterialAndRetainsItWhenTheNextUpdateIsCorrupt() throws Exception {
-        KeyMaterialDescriptor original = new KeyMaterialDescriptor("original",
-                Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
-        KeyMaterialDescriptor added = new KeyMaterialDescriptor("added",
-                Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
+        KeyMaterialId original = new KeyMaterialId("original", 1);
+        KeyMaterialId added = new KeyMaterialId("added", 1);
         InMemoryBlobStorage external = new InMemoryBlobStorage();
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray());
              OrionKeyMaterial writer = OrionKeyMaterial.open(new KeyMaterialRepository(
                      external, new KeyMaterialCodec(options), testRuntime.unstartedEvents()))) {
             writer.withModification(writer.revision(), modification -> {
-                modification.generateKey(original, 2048);
+                modification.generateKey("original", Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
             Fixture fixture = fixture(Map.of(MATERIAL_PATH, external.load().bytes()));
@@ -577,7 +566,7 @@ class GitBlobStorageTest {
                     fixture.store(), new KeyMaterialCodec(options), testRuntime.events()))) {
                 pro.deta.orion.keymaterial.KeyMaterialModification stale = running.modify(running.revision());
                 writer.withModification(writer.revision(), modification -> {
-                    modification.generateKey(added, 2048);
+                    modification.generateKey("added", Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
                     modification.apply();
                 });
                 fixture.repository().files().withAccess(REF,

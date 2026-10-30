@@ -25,7 +25,7 @@ import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
 import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
@@ -51,8 +51,7 @@ public final class TestConfiguration implements AutoCloseable {
         this.material = material;
         editor = new OrionConfigurationEditor(storage, material, events.events());
         SigningMaterialSet signing = new SigningMaterialSet(
-                new KeyMaterialDescriptor("signing", Set.of(KeyMaterialPurpose.SERVER_SIGNING),
-                        KeyMaterialAlgorithm.RSA, 1), List.of());
+                new KeyMaterialId("signing", 1), List.of());
         acl = new OrionAccessControlServiceImpl(new OrionPasswordHashingService(), new RootPasswordReset(false),
                 material, signing, bootstrap, editor);
         events.own(this);
@@ -86,18 +85,18 @@ public final class TestConfiguration implements AutoCloseable {
             events.own(material);
             return new OrionKeyMaterial() {
                 @Override
-                public void require(KeyMaterialDescriptor descriptor) {}
+                public void require(KeyMaterialId descriptor, Set<KeyMaterialPurpose> purposes, KeyMaterialAlgorithm algorithm) {}
 
                 @Override
                 public ConfigurationSecretEnvelope seal(
-                        KeyMaterialDescriptor descriptor, byte[] plaintext,
+                        KeyMaterialId descriptor, byte[] plaintext,
                         ConfigurationSecretContext context)
                         throws java.security.GeneralSecurityException {
                     return material.seal(descriptor, plaintext, context);
                 }
 
                 @Override
-                public byte[] open(KeyMaterialDescriptor descriptor,
+                public byte[] open(KeyMaterialId descriptor,
                         ConfigurationSecretEnvelope envelope,
                         ConfigurationSecretContext context)
                         throws java.security.GeneralSecurityException {

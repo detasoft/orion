@@ -37,28 +37,23 @@ class KeyMaterialOperationsTest {
     @Test
     void reusesStoredKeyForItsRequestedPurposesWithoutGrantingMissingPurposes() throws Exception {
         InMemoryBlobStorage store = new InMemoryBlobStorage();
-        KeyMaterialDescriptor stored = new KeyMaterialDescriptor("shared",
-                Set.of(KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialPurpose.SSH_HOST),
-                KeyMaterialAlgorithm.RSA, 1);
-        KeyMaterialDescriptor signing = new KeyMaterialDescriptor("shared",
-                Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
-        KeyMaterialDescriptor host = new KeyMaterialDescriptor("shared",
-                Set.of(KeyMaterialPurpose.SSH_HOST), KeyMaterialAlgorithm.RSA, 1);
+        KeyMaterialId stored = new KeyMaterialId("shared", 1);
+        KeyMaterialId signing = new KeyMaterialId("shared", 1);
+        KeyMaterialId host = new KeyMaterialId("shared", 1);
         try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
             KeyMaterialModification modification = service.modify(service.revision());
-            modification.generateKey(stored, 2048);
+            modification.generateKey("shared", Set.of(KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialPurpose.SSH_HOST), KeyMaterialAlgorithm.RSA, 2048);
             modification.apply();
 
             byte[] payload = new byte[]{1, 2, 3};
             byte[] signature = service.sign(signing, payload);
             assertThat(service.verify(signing, payload, signature)).isTrue();
-            service.require(host);
-            KeyMaterialDescriptor missingRole = new KeyMaterialDescriptor("shared",
-                    Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 1);
-            assertThatThrownBy(() -> service.require(missingRole))
+            service.require(host, Set.of(KeyMaterialPurpose.SSH_HOST), KeyMaterialAlgorithm.RSA);
+            KeyMaterialId missingRole = new KeyMaterialId("shared", 1);
+            assertThatThrownBy(() -> service.require(missingRole, Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA))
                     .isInstanceOf(GeneralSecurityException.class).hasMessageContaining("purpose");
         }
     }
@@ -66,12 +61,8 @@ class KeyMaterialOperationsTest {
     @Test
     void signsAndVerifiesWithoutExposingPrivateKey() throws Exception {
         try (OrionKeyMaterial service = service()) {
-            KeyMaterialDescriptor signing = descriptor(
-                    "server-signing-v1",
-                    KeyMaterialPurpose.SERVER_SIGNING,
-                    KeyMaterialAlgorithm.RSA,
-                    1);
-            generateKey(service, signing, 2048);
+            KeyMaterialId signing = new KeyMaterialId("server-signing-v1", 1);
+            generateKey(service, signing, Set.of((KeyMaterialPurpose.SERVER_SIGNING)), (KeyMaterialAlgorithm.RSA), 2048);
 
             byte[] payload = "short-lived-token".getBytes(StandardCharsets.UTF_8);
             byte[] signature = service.sign(signing, payload);
@@ -85,16 +76,12 @@ class KeyMaterialOperationsTest {
     @Test
     void reloadsAndUsesGeneratedEd25519SigningMaterial() throws Exception {
         InMemoryBlobStorage store = new InMemoryBlobStorage();
-        KeyMaterialDescriptor signing = descriptor(
-                "server-signing-ed25519-v1",
-                KeyMaterialPurpose.SERVER_SIGNING,
-                KeyMaterialAlgorithm.ED25519,
-                1);
+        KeyMaterialId signing = new KeyMaterialId("server-signing-ed25519-v1", 1);
         try (OrionKeyMaterial initial = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
-            generateKey(initial, signing, 0);
+            generateKey(initial, signing, Set.of((KeyMaterialPurpose.SERVER_SIGNING)), (KeyMaterialAlgorithm.ED25519), 0);
         }
 
         try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(new KeyMaterialRepository(
@@ -112,30 +99,18 @@ class KeyMaterialOperationsTest {
     @Test
     void reloadsSshClientKeyMaterialAndRejectsWrongDescriptorMetadata() throws Exception {
         InMemoryBlobStorage store = new InMemoryBlobStorage();
-        KeyMaterialDescriptor rsaClient = descriptor(
-                "provisioning-client-v1",
-                KeyMaterialPurpose.SSH_CLIENT,
-                KeyMaterialAlgorithm.RSA,
-                1);
-        KeyMaterialDescriptor ed25519Client = descriptor(
-                "provisioning-client-ed25519-v1",
-                KeyMaterialPurpose.SSH_CLIENT,
-                KeyMaterialAlgorithm.ED25519,
-                1);
-        KeyMaterialDescriptor host = descriptor(
-                "provisioning-host-v1",
-                KeyMaterialPurpose.SSH_HOST,
-                KeyMaterialAlgorithm.RSA,
-                1);
+        KeyMaterialId rsaClient = new KeyMaterialId("provisioning-client-v1", 1);
+        KeyMaterialId ed25519Client = new KeyMaterialId("provisioning-client-ed25519-v1", 1);
+        KeyMaterialId host = new KeyMaterialId("provisioning-host-v1", 1);
         KeyPair generatedRsa;
         KeyPair generatedEd25519;
         try (OrionKeyMaterial initial = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
-            generatedRsa = generateKey(initial, rsaClient, 2048);
-            generatedEd25519 = generateKey(initial, ed25519Client, 0);
-            generateKey(initial, host, 2048);
+            generatedRsa = generateKey(initial, rsaClient, Set.of((KeyMaterialPurpose.SSH_CLIENT)), (KeyMaterialAlgorithm.RSA), 2048);
+            generatedEd25519 = generateKey(initial, ed25519Client, Set.of((KeyMaterialPurpose.SSH_CLIENT)), (KeyMaterialAlgorithm.ED25519), 0);
+            generateKey(initial, host, Set.of((KeyMaterialPurpose.SSH_HOST)), (KeyMaterialAlgorithm.RSA), 2048);
         }
 
         try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(new KeyMaterialRepository(
@@ -143,8 +118,8 @@ class KeyMaterialOperationsTest {
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
 
-            KeyPair selectedRsa = reloaded.read(rsaClient.id()).keyPair();
-            KeyPair selectedEd25519 = reloaded.read(ed25519Client.id()).keyPair();
+            KeyPair selectedRsa = reloaded.read(rsaClient).keyPair();
+            KeyPair selectedEd25519 = reloaded.read(ed25519Client).keyPair();
 
             assertThat(selectedRsa.getPublic().getEncoded())
                     .isEqualTo(generatedRsa.getPublic().getEncoded());
@@ -155,49 +130,32 @@ class KeyMaterialOperationsTest {
             assertThat(selectedEd25519.getPrivate().getEncoded())
                     .isEqualTo(generatedEd25519.getPrivate().getEncoded());
 
-            KeyMaterialDescriptor wrongPurpose = descriptor(
-                    rsaClient.alias(),
-                    KeyMaterialPurpose.SSH_HOST,
-                    rsaClient.algorithm(),
-                    rsaClient.version());
-            KeyMaterialDescriptor wrongAlgorithm = new KeyMaterialDescriptor(
-                    rsaClient.alias(),
-                    rsaClient.purposes(),
-                    KeyMaterialAlgorithm.EC,
-                    rsaClient.version());
+            KeyMaterialId wrongPurpose = new KeyMaterialId((rsaClient.alias()), (rsaClient.version()));
+            KeyMaterialId wrongAlgorithm = new KeyMaterialId(rsaClient.alias(), rsaClient.version());
 
-            assertThatThrownBy(() -> reloaded.require(wrongPurpose))
+            assertThatThrownBy(() -> reloaded.require(wrongPurpose, Set.of((KeyMaterialPurpose.SSH_HOST)), ((KeyMaterialAlgorithm.RSA))))
                     .isInstanceOf(GeneralSecurityException.class)
                     .hasMessageContaining("purpose");
-            assertThatThrownBy(() -> reloaded.require(wrongAlgorithm))
+            assertThatThrownBy(() -> reloaded.require(wrongAlgorithm, Set.of((KeyMaterialPurpose.SSH_CLIENT)), KeyMaterialAlgorithm.EC))
                     .isInstanceOf(GeneralSecurityException.class)
                     .hasMessageContaining("algorithm");
-            assertThat(reloaded.read(host.id()).keyPair().getPublic().getAlgorithm()).isEqualTo("RSA");
-            assertThatThrownBy(() -> descriptor(
-                    "invalid-client-v1",
-                    KeyMaterialPurpose.SSH_CLIENT,
-                    KeyMaterialAlgorithm.AES,
-                    1))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("AES")
-                    .hasMessageContaining("configuration ciphers");
+            assertThat(reloaded.read(host).keyPair().getPublic().getAlgorithm()).isEqualTo("RSA");
+
         }
     }
 
     @Test
     void validatesExistingEntriesBeforeReuseOrActivation() throws Exception {
         try (OrionKeyMaterial service = service()) {
-            KeyMaterialDescriptor rsa = descriptor(
-                    "host-key-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.RSA, 1);
-            generateKey(service, rsa, 2048);
-            KeyMaterialDescriptor incompatible = descriptor(
-                    "host-key-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.EC, 1);
+            KeyMaterialId rsa = new KeyMaterialId("host-key-v1", 1);
+            generateKey(service, rsa, Set.of((KeyMaterialPurpose.SSH_HOST)), (KeyMaterialAlgorithm.RSA), 2048);
+            KeyMaterialId incompatible = new KeyMaterialId("host-key-v1", 1);
 
-            assertThatThrownBy(() -> generateKey(service, incompatible, 256))
+            assertThatThrownBy(() -> generateKey(service, incompatible, Set.of((KeyMaterialPurpose.SSH_HOST)), (KeyMaterialAlgorithm.EC), 256))
                     .isInstanceOf(Exception.class)
                     .hasMessageContaining("algorithm")
                     .hasMessageContaining("host-key-v1");
-            assertThatThrownBy(() -> service.require(incompatible))
+            assertThatThrownBy(() -> service.require(incompatible, Set.of((KeyMaterialPurpose.SSH_HOST)), (KeyMaterialAlgorithm.EC)))
                     .isInstanceOf(Exception.class)
                     .hasMessageContaining("algorithm")
                     .hasMessageContaining("host-key-v1");
@@ -207,29 +165,21 @@ class KeyMaterialOperationsTest {
     @Test
     void rejectsReusingExistingAliasWithDifferentVersionAfterReload() throws Exception {
         InMemoryBlobStorage store = new InMemoryBlobStorage();
-        KeyMaterialDescriptor original = descriptor(
-                "server-signing-v1",
-                KeyMaterialPurpose.SERVER_SIGNING,
-                KeyMaterialAlgorithm.RSA,
-                1);
+        KeyMaterialId original = new KeyMaterialId("server-signing-v1", 1);
         try (OrionKeyMaterial initial = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
-            generateKey(initial, original, 2048);
+            generateKey(initial, original, Set.of((KeyMaterialPurpose.SERVER_SIGNING)), (KeyMaterialAlgorithm.RSA), 2048);
         }
 
         try (OrionKeyMaterial reloaded = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
-            KeyMaterialDescriptor changedVersion = descriptor(
-                    "server-signing-v1",
-                    KeyMaterialPurpose.SERVER_SIGNING,
-                    KeyMaterialAlgorithm.RSA,
-                    2);
+            KeyMaterialId changedVersion = new KeyMaterialId("server-signing-v1", 2);
 
-            assertThatThrownBy(() -> generateKey(reloaded, changedVersion, 2048))
+            assertThatThrownBy(() -> generateKey(reloaded, changedVersion, Set.of((KeyMaterialPurpose.SERVER_SIGNING)), (KeyMaterialAlgorithm.RSA), 2048))
                     .isInstanceOf(Exception.class)
                     .hasMessageContaining("version");
         }
@@ -238,46 +188,38 @@ class KeyMaterialOperationsTest {
     @Test
     void exposesTlsSshAndCaThroughDirectMaterialOperations() throws Exception {
         try (OrionKeyMaterial service = service()) {
-            KeyMaterialDescriptor tls = descriptor(
-                    "https-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
-            KeyMaterialDescriptor ssh = descriptor(
-                    "ssh-host-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.RSA, 1);
-            KeyMaterialDescriptor ca = descriptor(
-                    "orion-ca-v1",
-                    KeyMaterialPurpose.CERTIFICATE_AUTHORITY,
-                    KeyMaterialAlgorithm.RSA,
-                    1);
-            generateKey(service, tls, 2048);
-            generateKey(service, ssh, 2048);
-            generateKey(service, ca, 2048);
+            KeyMaterialId tls = new KeyMaterialId("https-v1", 1);
+            KeyMaterialId ssh = new KeyMaterialId("ssh-host-v1", 1);
+            KeyMaterialId ca = new KeyMaterialId("orion-ca-v1", 1);
+            generateKey(service, tls, Set.of((KeyMaterialPurpose.TLS_IDENTITY)), (KeyMaterialAlgorithm.RSA), 2048);
+            generateKey(service, ssh, Set.of((KeyMaterialPurpose.SSH_HOST)), (KeyMaterialAlgorithm.RSA), 2048);
+            generateKey(service, ca, Set.of((KeyMaterialPurpose.CERTIFICATE_AUTHORITY)), (KeyMaterialAlgorithm.RSA), 2048);
 
             TestCertificateChain.Authority authority = TestCertificateChain.root("tls-root");
             X509Certificate leaf = TestCertificateChain.leaf(
-                    "localhost", service.read(tls.id()).keyPair(), authority);
+                    "localhost", service.read(tls).keyPair(), authority);
             tls = installCertificateChain(service, tls, List.of(leaf), Optional.empty(), Optional.empty());
             SSLContext context = service.certificateIdentity(new TlsMaterialConfiguration(
                     tls,
                     Optional.empty(),
                     List.of(),
                     TlsClientAuthentication.DISABLED)).createContext();
-            KeyPair sshHostKey = service.read(ssh.id()).keyPair();
+            KeyPair sshHostKey = service.read(ssh).keyPair();
             byte[] payload = "certificate-body".getBytes(StandardCharsets.UTF_8);
             byte[] signature = service.sign(ca, payload);
 
             assertThat(context.getProtocol()).isEqualTo("TLS");
             assertThat(sshHostKey.getPrivate().getAlgorithm()).isEqualTo("RSA");
             assertThat(service.verify(ca, payload, signature)).isTrue();
-            assertThat(service.read(ca.id()).certificateChain()).hasSize(1);
+            assertThat(service.read(ca).certificateChain()).hasSize(1);
         }
     }
 
     @Test
     void lazilyCreatesAndDurablyReusesKeysTogether() throws Exception {
         InMemoryBlobStorage store = new InMemoryBlobStorage();
-        KeyMaterialDescriptor account = descriptor(
-                "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1);
-        KeyMaterialDescriptor identity = descriptor(
-                "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
+        KeyMaterialId account = new KeyMaterialId("acme-account-v1", 1);
+        KeyMaterialId identity = new KeyMaterialId("https-identity-v1", 1);
         byte[] accountPublic;
         byte[] identityPublic;
         try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialRepository(
@@ -285,12 +227,12 @@ class KeyMaterialOperationsTest {
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
             generateKeys(service, account, identity);
-            accountPublic = service.read(account.id()).keyPair().getPublic().getEncoded();
-            identityPublic = service.read(identity.id()).keyPair().getPublic().getEncoded();
+            accountPublic = service.read(account).keyPair().getPublic().getEncoded();
+            identityPublic = service.read(identity).keyPair().getPublic().getEncoded();
 
             assertThat(store.load().revision()).isEqualTo("1");
             generateKeys(service, account, identity);
-            assertThat(service.read(account.id()).keyPair().getPublic().getEncoded())
+            assertThat(service.read(account).keyPair().getPublic().getEncoded())
                     .isEqualTo(accountPublic);
             assertThat(store.load().revision()).isEqualTo("1");
         }
@@ -300,8 +242,8 @@ class KeyMaterialOperationsTest {
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
             generateKeys(service, account, identity);
-            assertThat(service.read(account.id()).keyPair().getPublic().getEncoded()).isEqualTo(accountPublic);
-            assertThat(service.read(identity.id()).keyPair().getPublic().getEncoded())
+            assertThat(service.read(account).keyPair().getPublic().getEncoded()).isEqualTo(accountPublic);
+            assertThat(service.read(identity).keyPair().getPublic().getEncoded())
                     .isEqualTo(identityPublic);
             assertThat(store.load().revision()).isEqualTo("1");
         }
@@ -310,10 +252,8 @@ class KeyMaterialOperationsTest {
     @Test
     void doesNotDurablySaveOnlyOneKeyWhenGenerationFails() throws Exception {
         InMemoryBlobStorage store = new InMemoryBlobStorage();
-        KeyMaterialDescriptor account = descriptor(
-                "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1);
-        KeyMaterialDescriptor identity = descriptor(
-                "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.EC, 1);
+        KeyMaterialId account = new KeyMaterialId("acme-account-v1", 1);
+        KeyMaterialId identity = new KeyMaterialId("https-identity-v1", 1);
         try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(options()),
@@ -327,9 +267,8 @@ class KeyMaterialOperationsTest {
     @Test
     void rejectsNonTlsDescriptorsForCertificateIdentity() throws Exception {
         try (OrionKeyMaterial service = service()) {
-            KeyMaterialDescriptor signing = descriptor(
-                    "signing-v1", KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, 1);
-            generateKey(service, signing, 2048);
+            KeyMaterialId signing = new KeyMaterialId("signing-v1", 1);
+            generateKey(service, signing, Set.of((KeyMaterialPurpose.SERVER_SIGNING)), (KeyMaterialAlgorithm.RSA), 2048);
 
             assertThatThrownBy(() -> service.certificateIdentity(new TlsMaterialConfiguration(
                     signing, Optional.empty(), List.of(), TlsClientAuthentication.DISABLED)))
@@ -341,9 +280,8 @@ class KeyMaterialOperationsTest {
     @Test
     void validatesInstallsAndReloadsCertificateChainWithoutRootInIdentity() throws Exception {
         InMemoryBlobStorage store = new InMemoryBlobStorage();
-        KeyMaterialDescriptor identity = descriptor(
-                "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
-        KeyMaterialDescriptor rootDescriptor = trustedCertificate("public-root-v1");
+        KeyMaterialId identity = new KeyMaterialId("https-identity-v1", 1);
+        KeyMaterialId rootDescriptor = new KeyMaterialId("public-root-v1", 1);
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
         TestCertificateChain.Authority intermediate = TestCertificateChain.intermediate("Intermediate", root);
 
@@ -354,8 +292,8 @@ class KeyMaterialOperationsTest {
 
             CertificateIdentity certificate = service.certificateIdentity(new TlsMaterialConfiguration(identity,
                     Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED));
-            generateKey(service, identity, 2048);
-            KeyPair domainKey = service.read(identity.id()).keyPair();
+            generateKey(service, identity, Set.of((KeyMaterialPurpose.TLS_IDENTITY)), (KeyMaterialAlgorithm.RSA), 2048);
+            KeyPair domainKey = service.read(identity).keyPair();
             X509Certificate leaf = TestCertificateChain.leaf("orion.example", domainKey, intermediate);
 
             certificate = certificate.installCertificateChain(
@@ -372,7 +310,7 @@ class KeyMaterialOperationsTest {
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
             CertificateIdentity certificate = service.certificateIdentity(new TlsMaterialConfiguration(
-                    service.read(new KeyMaterialId(identity.alias(), 2)).descriptor(),
+                    service.read(new KeyMaterialId(identity.alias(), 2)).id(),
                     Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED));
             assertThat(certificate.certificateChain()).hasSize(2);
             assertThat(certificate.issuerTrustAnchor()).contains(root.certificate());
@@ -383,9 +321,8 @@ class KeyMaterialOperationsTest {
     @Test
     void rejectsInvalidCertificateChainsBeforeSaving() throws Exception {
         InMemoryBlobStorage store = new InMemoryBlobStorage();
-        KeyMaterialDescriptor identity = descriptor(
-                "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
-        KeyMaterialDescriptor rootDescriptor = trustedCertificate("public-root-v1");
+        KeyMaterialId identity = new KeyMaterialId("https-identity-v1", 1);
+        KeyMaterialId rootDescriptor = new KeyMaterialId("public-root-v1", 1);
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
         TestCertificateChain.Authority otherRoot = TestCertificateChain.root("Other Root");
         TestCertificateChain.Authority intermediate = TestCertificateChain.intermediate("Intermediate", root);
@@ -396,8 +333,8 @@ class KeyMaterialOperationsTest {
 
             CertificateIdentity certificate = service.certificateIdentity(new TlsMaterialConfiguration(identity,
                     Optional.of(rootDescriptor), List.of(), TlsClientAuthentication.DISABLED));
-            generateKey(service, identity, 2048);
-            KeyPair domainKey = service.read(identity.id()).keyPair();
+            generateKey(service, identity, Set.of((KeyMaterialPurpose.TLS_IDENTITY)), (KeyMaterialAlgorithm.RSA), 2048);
+            KeyPair domainKey = service.read(identity).keyPair();
             KeyPair otherKey = KeyPairGenerator.getInstance("RSA").generateKeyPair();
             X509Certificate validLeaf = TestCertificateChain.leaf("orion.example", domainKey, intermediate);
             X509Certificate wrongLeaf = TestCertificateChain.leaf("other.example", otherKey, intermediate);
@@ -430,10 +367,9 @@ class KeyMaterialOperationsTest {
     @Test
     void keepsServerIssuerAndClientTrustRolesSeparate() throws Exception {
         InMemoryBlobStorage store = new InMemoryBlobStorage();
-        KeyMaterialDescriptor identity = descriptor(
-                "https-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1);
-        KeyMaterialDescriptor serverRoot = trustedCertificate("server-root-v1");
-        KeyMaterialDescriptor clientRoot = trustedCertificate("client-root-v1");
+        KeyMaterialId identity = new KeyMaterialId("https-v1", 1);
+        KeyMaterialId serverRoot = new KeyMaterialId("server-root-v1", 1);
+        KeyMaterialId clientRoot = new KeyMaterialId("client-root-v1", 1);
         TestCertificateChain.Authority serverAuthority = TestCertificateChain.root("Server Root");
         TestCertificateChain.Authority clientAuthority = TestCertificateChain.root("Client Root");
         KeyPair trustedClientKey = TestCertificateChain.keyPair();
@@ -446,12 +382,12 @@ class KeyMaterialOperationsTest {
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
-            KeyPair domainKey = generateKey(service, identity, 2048);
-            KeyMaterialDescriptor installedIdentity = installCertificateChain(service, identity,
+            KeyPair domainKey = generateKey(service, identity, Set.of((KeyMaterialPurpose.TLS_IDENTITY)), (KeyMaterialAlgorithm.RSA), 2048);
+            KeyMaterialId installedIdentity = installCertificateChain(service, identity,
                     List.of(TestCertificateChain.leaf("orion.example", domainKey, serverAuthority)),
                     Optional.empty(), Optional.empty());
-            setTrustedCertificate(service, serverRoot, serverAuthority.certificate());
-            setTrustedCertificate(service, clientRoot, clientAuthority.certificate());
+            setTrustedCertificate(service, serverRoot, Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, serverAuthority.certificate());
+            setTrustedCertificate(service, clientRoot, Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, clientAuthority.certificate());
 
             CertificateIdentity disabled = service.certificateIdentity(new TlsMaterialConfiguration(
                     installedIdentity,
@@ -500,11 +436,7 @@ class KeyMaterialOperationsTest {
     @Test
     void sealsConfigurationEnvelopeAcrossMaterialReload() throws Exception {
         InMemoryBlobStorage store = new InMemoryBlobStorage();
-        KeyMaterialDescriptor cipher = descriptor(
-                "configuration-v1",
-                KeyMaterialPurpose.CONFIGURATION_CIPHER,
-                KeyMaterialAlgorithm.AES,
-                1);
+        KeyMaterialId cipher = new KeyMaterialId("configuration-v1", 1);
         ConfigurationSecretContext context = new ConfigurationSecretContext("github-token", "access-token");
         byte[] plaintext = "database-password".getBytes(StandardCharsets.UTF_8);
         ConfigurationSecretEnvelopeCodec codec = new ConfigurationSecretEnvelopeCodec();
@@ -536,11 +468,7 @@ class KeyMaterialOperationsTest {
 
     @Test
     void usesFreshDataKeyNonceAndCiphertextForEverySeal() throws Exception {
-        KeyMaterialDescriptor cipher = descriptor(
-                "configuration-v1",
-                KeyMaterialPurpose.CONFIGURATION_CIPHER,
-                KeyMaterialAlgorithm.AES,
-                1);
+        KeyMaterialId cipher = new KeyMaterialId("configuration-v1", 1);
         try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialRepository(
                 new InMemoryBlobStorage(),
                 new KeyMaterialCodec(options()),
@@ -560,11 +488,7 @@ class KeyMaterialOperationsTest {
 
     @Test
     void rejectsEveryChangedContextWithTypedAuthenticationFailure() throws Exception {
-        KeyMaterialDescriptor cipher = descriptor(
-                "configuration-v1",
-                KeyMaterialPurpose.CONFIGURATION_CIPHER,
-                KeyMaterialAlgorithm.AES,
-                1);
+        KeyMaterialId cipher = new KeyMaterialId("configuration-v1", 1);
         try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialRepository(
                 new InMemoryBlobStorage(),
                 new KeyMaterialCodec(options()),
@@ -585,11 +509,7 @@ class KeyMaterialOperationsTest {
 
     @Test
     void rejectsTamperedEnvelopeAndMismatchedMaterialWithoutSecretValues() throws Exception {
-        KeyMaterialDescriptor cipher = descriptor(
-                "configuration-v1",
-                KeyMaterialPurpose.CONFIGURATION_CIPHER,
-                KeyMaterialAlgorithm.AES,
-                1);
+        KeyMaterialId cipher = new KeyMaterialId("configuration-v1", 1);
         try (OrionKeyMaterial service = OrionKeyMaterial.open(new KeyMaterialRepository(
                 new InMemoryBlobStorage(),
                 new KeyMaterialCodec(options()),
@@ -622,9 +542,8 @@ class KeyMaterialOperationsTest {
     @Test
     void rejectsSigningWithSshOnlyMaterial() throws Exception {
         try (OrionKeyMaterial service = service()) {
-            KeyMaterialDescriptor ssh = descriptor(
-                    "ssh-host-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.RSA, 1);
-            generateKey(service, ssh, 2048);
+            KeyMaterialId ssh = new KeyMaterialId("ssh-host-v1", 1);
+            generateKey(service, ssh, Set.of((KeyMaterialPurpose.SSH_HOST)), (KeyMaterialAlgorithm.RSA), 2048);
 
             assertThatThrownBy(() -> service.sign(ssh, new byte[]{1}))
                     .isInstanceOf(IllegalArgumentException.class)
@@ -632,43 +551,51 @@ class KeyMaterialOperationsTest {
         }
     }
 
-    private static KeyPair generateKey(OrionKeyMaterial material, KeyMaterialDescriptor descriptor,
-            int keySize) throws Exception {
+    private static KeyPair generateKey(OrionKeyMaterial material, KeyMaterialId descriptor, Set<KeyMaterialPurpose> purposes,
+            KeyMaterialAlgorithm algorithm, int keySize) throws Exception {
         material.withModification(material.revision(), modification -> {
-            modification.generateKey(descriptor, keySize);
+            modification.generateKey(descriptor.alias(), purposes, algorithm, keySize);
             modification.apply();
         });
-        return material.read(descriptor.id()).keyPair();
+        return material.read(descriptor).keyPair();
     }
 
-    private static void setTrustedCertificate(OrionKeyMaterial material, KeyMaterialDescriptor descriptor,
-            X509Certificate certificate) throws Exception {
+    private static void setTrustedCertificate(OrionKeyMaterial material, KeyMaterialId descriptor, Set<KeyMaterialPurpose> purposes,
+            KeyMaterialAlgorithm algorithm, X509Certificate certificate) throws Exception {
         material.withModification(material.revision(), modification -> {
-            modification.setTrustedCertificate(descriptor, certificate);
+            modification.setTrustedCertificate(descriptor.alias(), purposes, algorithm, certificate);
             modification.apply();
         });
     }
 
-    private static KeyMaterialDescriptor installCertificateChain(OrionKeyMaterial material,
-            KeyMaterialDescriptor identity, List<X509Certificate> chain, Optional<KeyMaterialDescriptor> issuer,
+    private static KeyMaterialId installCertificateChain(OrionKeyMaterial material,
+            KeyMaterialId identity, List<X509Certificate> chain, Optional<KeyMaterialId> issuer,
             Optional<X509Certificate> root) throws Exception {
         KeyMaterialModification modification = material.modify(material.revision());
         try {
-            if (root.isPresent()) modification.setTrustedCertificate(issuer.orElseThrow(), root.orElseThrow());
+            if (root.isPresent()) {
+                KeyMaterialId rootId = issuer.orElseThrow();
+                if (material.contains(rootId.alias(), Set.of())) {
+                    modification.setTrustedCertificate(rootId, root.orElseThrow());
+                } else {
+                    modification.setTrustedCertificate(rootId.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
+                            KeyMaterialAlgorithm.RSA, root.orElseThrow());
+                }
+            }
             KeyMaterialId id = modification.installCertificateChain(identity, chain, issuer);
             modification.apply();
-            return material.read(id).descriptor();
+            return material.read(id).id();
         } finally {
             modification.discard();
         }
     }
 
-    private static void generateKeys(OrionKeyMaterial service, KeyMaterialDescriptor first,
-            KeyMaterialDescriptor second) throws Exception {
+    private static void generateKeys(OrionKeyMaterial service, KeyMaterialId first,
+            KeyMaterialId second) throws Exception {
         KeyMaterialModification modification = service.modify(service.revision());
         try {
-            modification.generateKey(first, 2048);
-            modification.generateKey(second, 2048);
+            modification.generateKey(first.alias(), Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 2048);
+            modification.generateKey(second.alias(), Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 2048);
             modification.apply();
         } finally {
             modification.discard();
@@ -761,19 +688,9 @@ class KeyMaterialOperationsTest {
         return KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password());
     }
 
-    private static KeyMaterialDescriptor descriptor(
-            String alias,
-            KeyMaterialPurpose purpose,
-            KeyMaterialAlgorithm algorithm,
-            long version) {
-        return new KeyMaterialDescriptor(
-                alias, Set.of(purpose), algorithm, version);
-    }
 
-    private static KeyMaterialDescriptor trustedCertificate(String alias) {
-        return new KeyMaterialDescriptor(
-                alias, Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, 1);
-    }
+
+
 
     private static Certificate nonX509Certificate() {
         return new Certificate("test") {

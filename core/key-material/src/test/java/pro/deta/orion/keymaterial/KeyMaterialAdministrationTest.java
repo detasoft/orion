@@ -25,20 +25,47 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class KeyMaterialAdministrationTest {
     @Test
+    void rejectsInvalidCreationMetadataWithoutPublishingMaterial() throws Exception {
+        InMemoryBlobStorage source = new InMemoryBlobStorage();
+        try (OrionKeyMaterial material = open(source)) {
+            KeyMaterialModification modification = material.modify(material.revision());
+            try {
+                assertThatThrownBy(() -> modification.generateKey("account",
+                        Set.of(KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialPurpose.TLS_IDENTITY),
+                        KeyMaterialAlgorithm.RSA, 2048)).isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("ACME_ACCOUNT");
+                assertThatThrownBy(() -> modification.generateKey("cipher",
+                        Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.RSA, 2048))
+                        .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("AES");
+                assertThatThrownBy(() -> modification.generateKey("signing",
+                        Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.AES, 256))
+                        .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("AES");
+                assertThatThrownBy(() -> modification.generateKey("empty", Set.of(), KeyMaterialAlgorithm.RSA, 2048))
+                        .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("purposes");
+                modification.apply();
+                assertThat(material.inventory()).isEmpty();
+                assertThat(source.load().revision()).isNull();
+            } finally {
+                modification.discard();
+            }
+        }
+    }
+
+    @Test
     void generatesAndPersistsSeparateAccountAndTlsKeys() throws Exception {
         InMemoryBlobStorage store = new InMemoryBlobStorage();
         byte[] publicKey;
         try (OrionKeyMaterial material = open(store)) {
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(descriptor("account", KeyMaterialPurpose.ACME_ACCOUNT), 3072);
-                modification.generateKey(descriptor("identity", KeyMaterialPurpose.TLS_IDENTITY), 3072);
+                modification.generateKey(("account"), Set.of((KeyMaterialPurpose.ACME_ACCOUNT)), KeyMaterialAlgorithm.RSA, 3072);
+                modification.generateKey(("identity"), Set.of((KeyMaterialPurpose.TLS_IDENTITY)), KeyMaterialAlgorithm.RSA, 3072);
                 modification.apply();
             });
             publicKey = material.read(new KeyMaterialId("account", 1)).publicKey().getEncoded();
         }
         try (OrionKeyMaterial material = open(store)) {
-            material.require(descriptor("account", KeyMaterialPurpose.ACME_ACCOUNT));
-            material.require(descriptor("identity", KeyMaterialPurpose.TLS_IDENTITY));
+            material.require(new KeyMaterialId("account", 1), Set.of((KeyMaterialPurpose.ACME_ACCOUNT)), KeyMaterialAlgorithm.RSA);
+            material.require(new KeyMaterialId("identity", 1), Set.of((KeyMaterialPurpose.TLS_IDENTITY)), KeyMaterialAlgorithm.RSA);
             assertThat(material.read(new KeyMaterialId("account",
                     1)).publicKey().getEncoded()).isEqualTo(publicKey);
             assertThat(material.inventory()).containsExactly(new KeyMaterialId("account", 1),
@@ -59,14 +86,14 @@ class KeyMaterialAdministrationTest {
             char[] input = pem.toCharArray();
             try (OrionKeyMaterial material = open(store)) {
                 material.withModification(material.revision(), modification -> {
-                    modification.importKey(descriptor("imported", KeyMaterialPurpose.ACME_ACCOUNT), input);
+                    modification.importKey(("imported"), Set.of((KeyMaterialPurpose.ACME_ACCOUNT)), KeyMaterialAlgorithm.RSA, input);
                     modification.apply();
                 });
                 assertThat(input).containsOnly('\0');
             }
             try (OrionKeyMaterial material = open(store)) {
                 KeyPair loaded =
-                        material.read(descriptor("imported", KeyMaterialPurpose.ACME_ACCOUNT).id()).keyPair();
+                        material.read(new KeyMaterialId("imported", 1)).keyPair();
                 assertThat(loaded.getPrivate().getEncoded()).isEqualTo(original.getPrivate().getEncoded());
                 assertThat(loaded.getPublic().getEncoded()).isEqualTo(original.getPublic().getEncoded());
             }
@@ -82,14 +109,14 @@ class KeyMaterialAdministrationTest {
         char[] input = (" \n" + jwk((RSAPrivateCrtKey) original.getPrivate())).toCharArray();
         try (OrionKeyMaterial material = open(store)) {
             material.withModification(material.revision(), modification -> {
-                modification.importKey(descriptor("certbot", KeyMaterialPurpose.ACME_ACCOUNT), input);
+                modification.importKey(("certbot"), Set.of((KeyMaterialPurpose.ACME_ACCOUNT)), KeyMaterialAlgorithm.RSA, input);
                 modification.apply();
             });
             assertThat(input).containsOnly('\0');
         }
         try (OrionKeyMaterial material = open(store)) {
             KeyPair loaded =
-                    material.read(descriptor("certbot", KeyMaterialPurpose.ACME_ACCOUNT).id()).keyPair();
+                    material.read(new KeyMaterialId("certbot", 1)).keyPair();
             assertThat(loaded.getPrivate().getEncoded()).isEqualTo(original.getPrivate().getEncoded());
             assertThat(loaded.getPublic().getEncoded()).isEqualTo(original.getPublic().getEncoded());
         }
@@ -117,7 +144,7 @@ class KeyMaterialAdministrationTest {
             for (String invalid : invalidKeys) {
                 char[] input = invalid.toCharArray();
                 assertThatThrownBy(() -> material.withModification(material.revision(), modification -> {
-                    modification.importKey(descriptor("invalid", KeyMaterialPurpose.ACME_ACCOUNT), input);
+                    modification.importKey(("invalid"), Set.of((KeyMaterialPurpose.ACME_ACCOUNT)), KeyMaterialAlgorithm.RSA, input);
                     modification.apply();
                 })).isInstanceOf(IllegalArgumentException.class)
                         .hasMessage("Invalid RSA private key").hasNoCause();
@@ -157,7 +184,7 @@ class KeyMaterialAdministrationTest {
                     pem("PRIVATE KEY", ec.generateKeyPair().getPrivate().getEncoded()))) {
                 char[] input = invalid.toCharArray();
                 assertThatThrownBy(() -> material.withModification(material.revision(), modification -> {
-                    modification.importKey(descriptor("invalid", KeyMaterialPurpose.ACME_ACCOUNT), input);
+                    modification.importKey(("invalid"), Set.of((KeyMaterialPurpose.ACME_ACCOUNT)), KeyMaterialAlgorithm.RSA, input);
                     modification.apply();
                 })).isInstanceOf(IllegalArgumentException.class);
                 assertThat(input).containsOnly('\0');
@@ -181,7 +208,7 @@ class KeyMaterialAdministrationTest {
         try (OrionKeyMaterial material = open(store)) {
             failWrites.set(true);
             assertThatThrownBy(() -> material.withModification(material.revision(), modification -> {
-                modification.generateKey(descriptor("unsaved", KeyMaterialPurpose.ACME_ACCOUNT), 3072);
+                modification.generateKey(("unsaved"), Set.of((KeyMaterialPurpose.ACME_ACCOUNT)), KeyMaterialAlgorithm.RSA, 3072);
                 modification.apply();
             })).isInstanceOf(IOException.class);
             assertThatThrownBy(() -> material.inventory())
@@ -207,8 +234,5 @@ class KeyMaterialAdministrationTest {
         }
     }
 
-    private static KeyMaterialDescriptor descriptor(String alias, KeyMaterialPurpose purpose) {
-        return new KeyMaterialDescriptor(alias, Set.of(purpose), KeyMaterialAlgorithm.RSA,
-                1);
-    }
+
 }

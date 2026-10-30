@@ -69,8 +69,7 @@ class KeyMaterialToolCompatibilityTest {
                 new KeyMaterialCodec(KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password())),
                 new OrionEventManager()))) {
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(new KeyMaterialDescriptor(alias,
-                        java.util.Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 1), 2048);
+                modification.generateKey(alias, java.util.Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
         }

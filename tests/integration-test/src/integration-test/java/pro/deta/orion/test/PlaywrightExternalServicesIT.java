@@ -10,7 +10,7 @@ import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.internal.UserEmail;
@@ -61,14 +61,12 @@ class PlaywrightExternalServicesIT {
 
         BootstrapConfiguration configuration = serverConfiguration(tempDir.resolve("orion"));
         KeyPair rootKey = KeyUtils.generateRSAKeyPair().valueOrFailure("test root key");
-        KeyMaterialDescriptor account = new KeyMaterialDescriptor("acme-account",
-                Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 1);
-        KeyMaterialDescriptor certificateIdentity = new KeyMaterialDescriptor("acme-identity",
-                Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 1);
+        KeyMaterialId account = new KeyMaterialId("acme-account", 1);
+        KeyMaterialId certificateIdentity = new KeyMaterialId("acme-identity", 1);
         try (TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(configuration)) {
             identity.material().withModification(identity.material().revision(), modification -> {
-                modification.generateKey(account, 2048);
-                modification.generateKey(certificateIdentity, 2048);
+                modification.generateKey("acme-account", Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 2048);
+                modification.generateKey("acme-identity", Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
             runPlaywright(configuration, identity, rootKey, fixtureRoot, caRoot);

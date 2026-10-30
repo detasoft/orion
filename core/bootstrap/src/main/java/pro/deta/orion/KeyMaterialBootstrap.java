@@ -17,7 +17,7 @@ import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
 import pro.deta.orion.storage.BlobStorage;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
@@ -79,13 +79,17 @@ public final class KeyMaterialBootstrap {
                                 "A new material store cannot contain retained server identities");
                     }
                     keys.withModification(keys.revision(), modification -> {
-                        modification.generateKey(
-                                signingMaterial.active(), KeyMaterialConstants.RSA_KEY_SIZE_BITS);
+                        if (signingMaterial.active().version() != 1) {
+                            throw new GeneralSecurityException("New signing material must start at version 1");
+                        }
+                        modification.generateKey(signingMaterial.active().alias(),
+                                Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA,
+                                KeyMaterialConstants.RSA_KEY_SIZE_BITS);
                         modification.apply();
                     });
                 }
-                for (KeyMaterialDescriptor descriptor : signingMaterial.verificationIncludingActive()) {
-                    keys.require(descriptor);
+                for (KeyMaterialId descriptor : signingMaterial.verificationIncludingActive()) {
+                    keys.require(descriptor, Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA);
                 }
                 return keys;
             } catch (IOException | GeneralSecurityException | RuntimeException failure) {
@@ -112,28 +116,24 @@ public final class KeyMaterialBootstrap {
         if (algorithm != KeyMaterialAlgorithm.RSA) {
             throw new IllegalArgumentException("JWT server signing material must use RSA");
         }
-        KeyMaterialDescriptor active = descriptor(signing.getActive(), algorithm, "active");
-        List<KeyMaterialDescriptor> verification = new ArrayList<>();
+        KeyMaterialId active = reference(signing.getActive(), "active");
+        List<KeyMaterialId> verification = new ArrayList<>();
         if (signing.getVerification() != null) {
             for (SigningKeyReferenceConfig reference : signing.getVerification()) {
-                verification.add(descriptor(reference, algorithm, "verification"));
+                verification.add(reference(reference, "verification"));
             }
         }
         return new SigningMaterialSet(active, verification);
     }
 
-    private static KeyMaterialDescriptor descriptor(
+    private static KeyMaterialId reference(
             SigningKeyReferenceConfig reference,
-            KeyMaterialAlgorithm algorithm,
             String role) {
         if (reference == null) {
             throw new IllegalArgumentException("Server signing " + role + " reference must not be null");
         }
-        return new KeyMaterialDescriptor(
-                required(reference.getAlias(), role + " alias"),
-                Set.of(KeyMaterialPurpose.SERVER_SIGNING),
-                algorithm,
-                reference.getVersion());
+        return new KeyMaterialId(
+                required(reference.getAlias(), role + " alias"), reference.getVersion());
     }
 
     private static String resolveAgainstBaseDirectory(

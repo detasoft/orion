@@ -20,7 +20,7 @@ import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
@@ -220,15 +220,14 @@ class BootstrapConnectionDecisionTest {
             provider.resolveProvisional(NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration, false);
             storage = new NativeGitOrionConfigurationStorage(provider.fileEvents(
                 NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration));
-            KeyMaterialDescriptor signing = new KeyMaterialDescriptor("signing",
-                    Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
+            KeyMaterialId signing = new KeyMaterialId("signing", 1);
             try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
                 material = OrionKeyMaterial.open(new KeyMaterialRepository(
                         new InMemoryBlobStorage(),
                         new KeyMaterialCodec(options),
                         testRuntime.unstartedEvents()));
                 material.withModification(material.revision(), modification -> {
-                    modification.generateKey(signing, 2048);
+                    modification.generateKey("signing", Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
                     modification.apply();
                 });
             }

@@ -18,7 +18,7 @@ import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -41,8 +41,7 @@ class AcmeConfigurationTest {
         OrionDocument initial = OrionDocument.withAccessControl(new AccessControl());
         try (OrionKeyMaterial owner = owner(new InMemoryBlobStorage())) {
             owner.withModification(owner.revision(), modification -> {
-                modification.generateKey(new KeyMaterialDescriptor("other-account",
-                        Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 1), 3072);
+                modification.generateKey("other-account", Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 3072);
                 modification.apply();
             });
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
@@ -78,15 +77,13 @@ class AcmeConfigurationTest {
             OrionDocument initial = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
                     Optional.of(https), List.of(), List.of(), List.of(),
                     List.of(), List.of()), List.of());
-            KeyMaterialDescriptor account = new KeyMaterialDescriptor("account",
-                    Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 1);
+            KeyMaterialId account = new KeyMaterialId("account", 1);
             owner.withModification(owner.revision(), modification -> {
-                modification.generateKey(account, 2048);
-                modification.generateKey(new KeyMaterialDescriptor("identity",
-                        Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 1), 2048);
+                modification.generateKey("account", Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 2048);
+                modification.generateKey("identity", Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
-            byte[] accountKey = owner.read(account.id()).keyPair().getPublic().getEncoded();
+            byte[] accountKey = owner.read(account).keyPair().getPublic().getEncoded();
             desired.publish(initial, Optional.of("r1"));
             AcmeCertificateService service = new AcmeCertificateService(desired.editor(),
                     owner, null, null, events.executor());
@@ -101,7 +98,7 @@ class AcmeConfigurationTest {
             OrionAcmeConfiguration enabled = updated.system().https().orElseThrow().acme().orElseThrow();
             assertThat(enabled.enabled()).isTrue();
             assertThat(enabled.accountMaterial()).isEqualTo(acme.accountMaterial());
-            assertThat(owner.read(account.id()).keyPair().getPublic().getEncoded()).isEqualTo(accountKey);
+            assertThat(owner.read(account).keyPair().getPublic().getEncoded()).isEqualTo(accountKey);
         }
     }
 

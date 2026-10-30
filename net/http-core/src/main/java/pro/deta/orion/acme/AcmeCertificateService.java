@@ -36,7 +36,6 @@ import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialModification;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
@@ -157,9 +156,8 @@ public class AcmeCertificateService implements ServiceLifecycle {
         KeyMaterialId requestedAccount = input.accountMaterial();
         if (requestedAccount != null) {
             try {
-                keyMaterial.require(new KeyMaterialDescriptor(requestedAccount.alias(),
-                        Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA,
-                        requestedAccount.version()));
+                keyMaterial.require(requestedAccount, Set.of(KeyMaterialPurpose.ACME_ACCOUNT),
+                        KeyMaterialAlgorithm.RSA);
             } catch (GeneralSecurityException invalid) {
                 throw new IllegalArgumentException("Select an existing RSA ACME account key");
             }
@@ -264,8 +262,8 @@ public class AcmeCertificateService implements ServiceLifecycle {
         KeyPair domainKeyPair;
         try {
             prepareMaterial(settings.material());
-            accountKeyPair = keyMaterial.read(settings.material().account().id()).keyPair();
-            domainKeyPair = keyMaterial.read(settings.material().identity().id()).keyPair();
+            accountKeyPair = keyMaterial.read(settings.material().account()).keyPair();
+            domainKeyPair = keyMaterial.read(settings.material().identity()).keyPair();
         } catch (IOException | GeneralSecurityException failure) {
             throw new AcmeCertificateIssueException("Cannot acquire ACME key material", failure);
         }
@@ -298,14 +296,23 @@ public class AcmeCertificateService implements ServiceLifecycle {
             KeyMaterialId identityId;
             Optional<KeyMaterialId> issuerId = Optional.empty();
             try {
-                Optional<KeyMaterialDescriptor> issuer = settings.material().issuerTrustAnchor();
+                Optional<KeyMaterialId> issuer = settings.material().issuerTrustAnchor();
                 if (issuer.isPresent()) {
-                    KeyMaterialDescriptor descriptor = issuer.orElseThrow();
-                    KeyMaterialId savedIssuer = modification.setTrustedCertificate(descriptor,
-                            certificates.issuerTrustAnchor().orElseThrow());
+                    KeyMaterialId descriptor = issuer.orElseThrow();
+                    KeyMaterialId savedIssuer;
+                    if (keyMaterial.contains(descriptor.alias(), Set.of())) {
+                        savedIssuer = modification.setTrustedCertificate(descriptor,
+                                certificates.issuerTrustAnchor().orElseThrow());
+                    } else {
+                        if (descriptor.version() != 1) {
+                            throw new GeneralSecurityException("Key material version not found: " + descriptor);
+                        }
+                        savedIssuer = modification.setTrustedCertificate(descriptor.alias(),
+                                Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA,
+                                certificates.issuerTrustAnchor().orElseThrow());
+                    }
                     issuerId = Optional.of(savedIssuer);
-                    issuer = Optional.of(new KeyMaterialDescriptor(savedIssuer.alias(), descriptor.purposes(),
-                            descriptor.algorithm(), savedIssuer.version()));
+                    issuer = Optional.of(savedIssuer);
                 }
                 identityId = modification.installCertificateChain(settings.material().identity(),
                         certificates.chain(), issuer);
@@ -402,7 +409,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
                 try {
                     IssueSettings settings = settingsFrom(IssueRequest.EMPTY);
                     Optional<List<X509Certificate>> chain =
-                            keyMaterial.read(settings.material().identity().id()).issuedCertificateChain();
+                            keyMaterial.read(settings.material().identity()).issuedCertificateChain();
                     if (chain.isPresent() && !now.isBefore(nextAttempt(settings, chain.orElseThrow().getFirst()))) {
                         LOG.warn("Starting ACME certificate renewal: domains={}, expiresAt={}, attemptAt={}",
                                 settings.domains(), chain.orElseThrow().getFirst().getNotAfter().toInstant(), now);
@@ -424,7 +431,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
         try {
             IssueSettings settings = settingsFrom(IssueRequest.EMPTY);
             Optional<List<X509Certificate>> chain =
-                    keyMaterial.read(settings.material().identity().id()).issuedCertificateChain();
+                    keyMaterial.read(settings.material().identity()).issuedCertificateChain();
             RenewalAttempt attempt = currentAttempt(settings);
             String state = !isRunning() ? "stopped"
                     : issuanceInProgress.get() ? "issuing"
@@ -469,7 +476,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
     public Optional<IssuedAcmeCertificate> savedCertificate() {
         IssueSettings settings = settingsFrom(IssueRequest.EMPTY);
         try {
-            return keyMaterial.read(settings.material().identity().id()).issuedCertificateChain()
+            return keyMaterial.read(settings.material().identity()).issuedCertificateChain()
                     .map(chain -> new IssuedAcmeCertificate(settings.domains(), chain));
         } catch (GeneralSecurityException failure) {
             throw new AcmeCertificateIssueException("Cannot read issued ACME certificate", failure);
@@ -485,7 +492,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
             issuer = Optional.of(chain.removeLast());
         }
         if (configuration.issuerTrustAnchor().isPresent() && issuer.isEmpty()) {
-            issuer = Optional.of(keyMaterial.read(configuration.issuerTrustAnchor().orElseThrow().id())
+            issuer = Optional.of(keyMaterial.read(configuration.issuerTrustAnchor().orElseThrow())
                     .trustedCertificate());
         }
         if (configuration.issuerTrustAnchor().isEmpty()) {
@@ -551,51 +558,41 @@ public class AcmeCertificateService implements ServiceLifecycle {
             throws IOException, GeneralSecurityException {
         keyMaterial.withModification(keyMaterial.revision(), modification -> {
             if (configuration.issuerTrustAnchor().isPresent()) {
-                KeyMaterialDescriptor issuer = configuration.issuerTrustAnchor().orElseThrow();
+                KeyMaterialId issuer = configuration.issuerTrustAnchor().orElseThrow();
                 String alias = issuer.alias();
                 if (alias.equalsIgnoreCase(configuration.account().alias())
                         || alias.equalsIgnoreCase(configuration.identity().alias())) {
                     throw new IllegalArgumentException("ACME key and issuer must use different aliases");
                 }
-                if (keyMaterial.contains(issuer.alias(), Set.of())) keyMaterial.require(issuer);
+                if (keyMaterial.contains(issuer.alias(), Set.of())) {
+                    keyMaterial.require(issuer, Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA);
+                } else if (issuer.version() != 1) {
+                    throw new GeneralSecurityException("Key material version not found: " + issuer);
+                }
             }
-            modification.generateKey(configuration.account(), RSA_KEY_SIZE);
-            modification.generateKey(configuration.identity(), RSA_KEY_SIZE);
+            prepareKey(modification, configuration.account(), KeyMaterialPurpose.ACME_ACCOUNT);
+            prepareKey(modification, configuration.identity(), KeyMaterialPurpose.TLS_IDENTITY);
             modification.apply();
         });
     }
 
+    private void prepareKey(KeyMaterialModification modification, KeyMaterialId id, KeyMaterialPurpose purpose)
+            throws GeneralSecurityException {
+        if (keyMaterial.contains(id.alias(), Set.of())) {
+            keyMaterial.require(id, Set.of(purpose), KeyMaterialAlgorithm.RSA);
+        } else {
+            if (id.version() != 1) throw new GeneralSecurityException("Key material version not found: " + id);
+            modification.generateKey(id.alias(), Set.of(purpose), KeyMaterialAlgorithm.RSA, RSA_KEY_SIZE);
+        }
+    }
+
     private Material materialFrom(OrionHttpsConfiguration https) {
         OrionAcmeConfiguration acme = https.acme().orElseThrow();
-        KeyMaterialDescriptor account = descriptor(
-                acme.accountMaterial().orElseThrow(
-                        () -> new ConfigurationUnavailableException("ACME account material is not configured")),
-                KeyMaterialPurpose.ACME_ACCOUNT);
-        KeyMaterialDescriptor identity = descriptor(
-                https.identity().orElseThrow(
-                        () -> new ConfigurationUnavailableException("ACME TLS identity material is not configured")),
-                KeyMaterialPurpose.TLS_IDENTITY);
-        Optional<KeyMaterialDescriptor> issuer = https.serverIssuerTrustAnchor()
-                .map(AcmeCertificateService::trustedCertificate);
-        return new Material(account, identity, issuer);
-    }
-
-    private static KeyMaterialDescriptor descriptor(
-            KeyMaterialId reference,
-            KeyMaterialPurpose purpose) {
-        return new KeyMaterialDescriptor(
-                reference.alias(),
-                Set.of(purpose),
-                KeyMaterialAlgorithm.RSA,
-                reference.version());
-    }
-
-    private static KeyMaterialDescriptor trustedCertificate(
-            KeyMaterialId reference) {
-        return new KeyMaterialDescriptor(
-                reference.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
-                KeyMaterialAlgorithm.RSA,
-                reference.version());
+        KeyMaterialId account = acme.accountMaterial().orElseThrow(
+                () -> new ConfigurationUnavailableException("ACME account material is not configured"));
+        KeyMaterialId identity = https.identity().orElseThrow(
+                () -> new ConfigurationUnavailableException("ACME TLS identity material is not configured"));
+        return new Material(account, identity, https.serverIssuerTrustAnchor());
     }
 
     private static List<String> domainsFrom(IssueRequest request, OrionAcmeConfiguration configuration) {
@@ -733,9 +730,9 @@ public class AcmeCertificateService implements ServiceLifecycle {
     }
 
     private record Material(
-            KeyMaterialDescriptor account,
-            KeyMaterialDescriptor identity,
-            Optional<KeyMaterialDescriptor> issuerTrustAnchor) {
+            KeyMaterialId account,
+            KeyMaterialId identity,
+            Optional<KeyMaterialId> issuerTrustAnchor) {
     }
 
     public static final class ConfigurationUnavailableException extends RuntimeException {

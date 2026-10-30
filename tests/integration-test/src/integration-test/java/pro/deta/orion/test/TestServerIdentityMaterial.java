@@ -10,7 +10,7 @@ import pro.deta.orion.KeyMaterialBootstrap;
 
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import java.util.Set;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
 import pro.deta.orion.storage.BlobStorage;
@@ -56,8 +56,8 @@ final class TestServerIdentityMaterial implements AutoCloseable {
             if (!material.hasDurableSnapshot()) {
                 material.withModification(material.revision(), modification -> {
                     modification.generateKey(KeyMaterialBootstrap.signingMaterial(
-                            configuration.getBootstrap().getKeyMaterial()).active(),
-                            KeyMaterialConstants.RSA_KEY_SIZE_BITS);
+                            configuration.getBootstrap().getKeyMaterial()).active().alias(),
+                            Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, KeyMaterialConstants.RSA_KEY_SIZE_BITS);
                     modification.apply();
                 });
             }
@@ -87,18 +87,14 @@ final class TestServerIdentityMaterial implements AutoCloseable {
     }
 
     static KeyPairProvider hostKeys(OrionKeyMaterial material) throws Exception {
-        KeyMaterialDescriptor rsa = new KeyMaterialDescriptor(
-                "ssh-host-rsa-v1", Set.of(KeyMaterialPurpose.SSH_HOST),
-                KeyMaterialAlgorithm.RSA, 1);
-        KeyMaterialDescriptor ec = new KeyMaterialDescriptor(
-                "ssh-host-ec-v1", Set.of(KeyMaterialPurpose.SSH_HOST),
-                KeyMaterialAlgorithm.EC, 1);
+        KeyMaterialId rsa = new KeyMaterialId("ssh-host-rsa-v1", 1);
+        KeyMaterialId ec = new KeyMaterialId("ssh-host-ec-v1", 1);
         material.withModification(material.revision(), modification -> {
-            modification.generateKey(rsa, KeyMaterialConstants.RSA_KEY_SIZE_BITS);
-            modification.generateKey(ec, KeyMaterialConstants.EC_KEY_SIZE_BITS);
+            modification.generateKey("ssh-host-rsa-v1", Set.of(KeyMaterialPurpose.SSH_HOST), KeyMaterialAlgorithm.RSA, KeyMaterialConstants.RSA_KEY_SIZE_BITS);
+            modification.generateKey("ssh-host-ec-v1", Set.of(KeyMaterialPurpose.SSH_HOST), KeyMaterialAlgorithm.EC, KeyMaterialConstants.EC_KEY_SIZE_BITS);
             modification.apply();
         });
-        return session -> List.of(material.read(ec.id()).keyPair(), material.read(rsa.id()).keyPair());
+        return session -> List.of(material.read(ec).keyPair(), material.read(rsa).keyPair());
     }
 
     OrionKeyMaterial material() {

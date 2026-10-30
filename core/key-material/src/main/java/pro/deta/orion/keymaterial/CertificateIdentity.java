@@ -21,17 +21,17 @@ public final class CertificateIdentity {
     }
 
     public List<X509Certificate> certificateChain() throws GeneralSecurityException {
-        return material.read(configuration.identity().id()).certificateChain();
+        return material.read(configuration.identity()).certificateChain();
     }
 
     public Optional<List<X509Certificate>> issuedCertificateChain() throws GeneralSecurityException {
         if (!material.contains(configuration.identity())) return Optional.empty();
-        return material.read(configuration.identity().id()).issuedCertificateChain();
+        return material.read(configuration.identity()).issuedCertificateChain();
     }
 
     public Optional<X509Certificate> issuerTrustAnchor() throws GeneralSecurityException {
         if (configuration.serverIssuerTrustAnchor().isEmpty()) return Optional.empty();
-        return Optional.of(material.read(configuration.serverIssuerTrustAnchor().orElseThrow().id())
+        return Optional.of(material.read(configuration.serverIssuerTrustAnchor().orElseThrow())
                 .trustedCertificate());
     }
 
@@ -46,18 +46,28 @@ public final class CertificateIdentity {
                 configuration.serverIssuerTrustAnchor(), issuerTrustAnchor);
         KeyMaterialModification modification = material.modify(material.revision());
         try {
-            Optional<KeyMaterialDescriptor> issuer = configuration.serverIssuerTrustAnchor();
+            Optional<KeyMaterialId> issuer = configuration.serverIssuerTrustAnchor();
             if (root.isPresent()) {
-                KeyMaterialDescriptor descriptor = issuer.orElseThrow();
-                KeyMaterialId id = modification.setTrustedCertificate(descriptor, root.orElseThrow());
-                issuer = Optional.of(new KeyMaterialDescriptor(id.alias(), descriptor.purposes(),
-                        descriptor.algorithm(), id.version()));
+                KeyMaterialId descriptor = issuer.orElseThrow();
+                KeyMaterialId id;
+                if (material.contains(descriptor.alias(), java.util.Set.of())) {
+                    id = modification.setTrustedCertificate(descriptor, root.orElseThrow());
+                } else {
+                    if (descriptor.version() != 1) {
+                        throw new GeneralSecurityException("Key material version not found: " + descriptor);
+                    }
+                    id = modification.setTrustedCertificate(descriptor.alias(),
+                            java.util.Set.of(KeyMaterialPurpose.TRUST_ANCHOR),
+                            KeyMaterialAlgorithm.fromKeyAlgorithm(root.orElseThrow().getPublicKey().getAlgorithm()),
+                            root.orElseThrow());
+                }
+                issuer = Optional.of(id);
             }
             KeyMaterialId id =
                     modification.installCertificateChain(configuration.identity(), validated, issuer);
             modification.apply();
             return new CertificateIdentity(material,
-                    new TlsMaterialConfiguration(material.read(id).descriptor(),
+                    new TlsMaterialConfiguration(id,
                     issuer, configuration.clientTrustAnchors(), configuration.clientAuthentication()));
         } finally {
             modification.discard();
@@ -91,7 +101,7 @@ public final class CertificateIdentity {
     }
 
     static Optional<X509Certificate> requireIssuerCertificate(
-            Optional<KeyMaterialDescriptor> descriptor,
+            Optional<KeyMaterialId> descriptor,
             Optional<X509Certificate> certificate) throws GeneralSecurityException {
         if (certificate == null) {
             throw new IllegalArgumentException("Issuer trust anchor optional must not be null");
@@ -99,15 +109,6 @@ public final class CertificateIdentity {
         if (descriptor.isPresent() != certificate.isPresent()) {
             throw new IllegalArgumentException(
                     "Issuer trust anchor descriptor and certificate must be configured together");
-        }
-        if (descriptor.isPresent()
-                && !descriptor.orElseThrow().purposes().contains(KeyMaterialPurpose.TRUST_ANCHOR)) {
-            throw new IllegalArgumentException("Issuer must have TRUST_ANCHOR purpose");
-        }
-        if (descriptor.isPresent()
-                && !descriptor.orElseThrow().algorithm().acceptsKeyAlgorithm(
-                        certificate.orElseThrow().getPublicKey().getAlgorithm())) {
-            throw new GeneralSecurityException("Issuer trust anchor algorithm does not match its descriptor");
         }
         return certificate;
     }

@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.AfterEach;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
@@ -231,7 +231,7 @@ class JwtAccessTokenServiceTest {
         KeyMaterialId next = rotation.importKey(identity.signing.active(), rsaKeyPair());
         rotation.apply();
         JwtAccessTokenService current = new JwtAccessTokenService(identity.material,
-                new SigningMaterialSet(identity.material.read(next).descriptor(),
+                new SigningMaterialSet(identity.material.read(next).id(),
                         List.of(identity.signing.active())), CLOCK);
         assertThat(header(current.issue("alice", 600, null).value())).contains("\"kid\":\"signing:2\"");
         assertVerified(current, old, "alice", null);
@@ -268,9 +268,9 @@ class JwtAccessTokenServiceTest {
         TestIdentity identity = new TestIdentity("server-signing-v1", Map.of("server-signing-v1", oldKey));
         JwtAccessTokenService oldService = service(identity, CLOCK);
         String oldToken = oldService.issue("alice", 600, null).value();
-        KeyMaterialDescriptor next = descriptor("server-signing-v2", 1);
+        KeyMaterialId next = new KeyMaterialId("server-signing-v2", 1);
         identity.material.withModification(identity.material.revision(), modification -> {
-            modification.importKey(next, newKey);
+            modification.importKey(("server-signing-v2"), Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, newKey);
             modification.apply();
         });
 
@@ -440,14 +440,14 @@ class JwtAccessTokenServiceTest {
                         new OrionEventManager()));
             }
             materials.add(material);
-            List<KeyMaterialDescriptor> retained = new ArrayList<>();
-            KeyMaterialDescriptor active = descriptor(activeKeyId, 1);
+            List<KeyMaterialId> retained = new ArrayList<>();
+            KeyMaterialId active = new KeyMaterialId(activeKeyId, 1);
             material.withModification(material.revision(), modification -> {
                 for (Map.Entry<String, KeyPair> entry : keys.entrySet()) {
-                    KeyMaterialDescriptor descriptor = entry.getKey().equals(activeKeyId)
-                            ? active : descriptor(entry.getKey(), 1);
+                    KeyMaterialId descriptor = entry.getKey().equals(activeKeyId)
+                            ? active : new KeyMaterialId((entry.getKey()), 1);
                     if (!descriptor.equals(active)) retained.add(descriptor);
-                    modification.importKey(descriptor, entry.getValue());
+                    modification.importKey(descriptor.alias(), Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, entry.getValue());
                 }
                 modification.apply();
             });
@@ -463,8 +463,5 @@ class JwtAccessTokenServiceTest {
         }
     }
 
-    private static KeyMaterialDescriptor descriptor(String alias, int version) {
-        return new KeyMaterialDescriptor(alias, Set.of(KeyMaterialPurpose.SERVER_SIGNING),
-                KeyMaterialAlgorithm.RSA, version);
-    }
+
 }

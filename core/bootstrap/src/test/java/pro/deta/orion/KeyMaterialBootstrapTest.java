@@ -16,7 +16,7 @@ import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import org.junit.jupiter.api.AfterEach;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
@@ -58,7 +58,7 @@ class KeyMaterialBootstrapTest {
         try (OrionKeyMaterial material = openLocal(configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
                 new KeyMaterialCreation(true))) {
-            KeyMaterialDescriptor active = signing(configuration).active();
+            KeyMaterialId active = signing(configuration).active();
             signature = material.sign(active, payload);
             assertThat(active.alias()).isEqualTo("cluster-signing-v2");
             assertThat(material.revision()).isEqualTo(new LocalBlobStorage(
@@ -191,8 +191,7 @@ class KeyMaterialBootstrapTest {
                      new KeyMaterialCodec(options),
                      events))) {
             material.withModification(material.revision(), modification -> {
-                modification.generateKey(new KeyMaterialDescriptor("other-signing",
-                        Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1), 2048);
+                modification.generateKey("other-signing", Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
                 modification.apply();
             });
         }

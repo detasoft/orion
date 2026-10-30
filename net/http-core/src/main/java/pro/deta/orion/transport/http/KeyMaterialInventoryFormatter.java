@@ -46,7 +46,9 @@ public final class KeyMaterialInventoryFormatter {
                     certificates.add(certificateDetails(x509));
                 }
             }
-            result.add(new KeyMaterialInventoryEntry(entry.descriptor(), pem, fingerprint, certificates));
+            result.add(new KeyMaterialInventoryEntry(new KeyMaterialInventoryEntry.Metadata(
+                    entry.id().alias(), entry.purposes(), entry.algorithm(), entry.id().version()),
+                    pem, fingerprint, certificates));
         }
         return List.copyOf(result);
     }

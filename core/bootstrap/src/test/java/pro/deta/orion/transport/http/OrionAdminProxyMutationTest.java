@@ -751,15 +751,14 @@ class OrionAdminProxyMutationTest {
         }
 
         Fixture(pro.deta.orion.bootstrap.config.BootstrapSourceConfig bootstrapSource) throws Exception {
-            var signing = new KeyMaterialDescriptor("signing",
-                    Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 1);
+            var signing = new KeyMaterialId("signing", 1);
             try (var options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
                 material = OrionKeyMaterial.open(new KeyMaterialRepository(
                         new InMemoryBlobStorage(),
                         new KeyMaterialCodec(options),
                         testRuntime.unstartedEvents()));
                 material.withModification(material.revision(), modification -> {
-                    modification.generateKey(signing, 2048);
+                    modification.generateKey(signing.alias(), Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
                     modification.apply();
                 });
             }

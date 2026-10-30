@@ -19,7 +19,7 @@ import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
 import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -54,9 +54,7 @@ class ConfigurationSecretsTest {
     private static final RepositoryAddress REPOSITORY = RepositoryAddress.parse("acme/platform/api");
     private static final ConfigurationSecretReference REFERENCE = new ConfigurationSecretReference(
             ConfigurationSecretReference.Scope.REPOSITORY, "github-token");
-    private static final KeyMaterialDescriptor CIPHER = new KeyMaterialDescriptor(
-            "configuration-v1", Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER),
-            KeyMaterialAlgorithm.AES, 1);
+    private static final KeyMaterialId CIPHER = new KeyMaterialId("configuration-v1", 1);
     private final InMemoryBlobStorage material = new InMemoryBlobStorage();
     private final AtomicReference<OrionDocument> current = new AtomicReference<>(document());
     private final AtomicReference<byte[]> cipherInput = new AtomicReference<>();
@@ -158,7 +156,7 @@ class ConfigurationSecretsTest {
         String encoded;
         try {
             ConfigurationSecretEnvelope envelope =
-                    keyMaterial.seal(keyMaterial.read(next).descriptor(), plaintext,
+                    keyMaterial.seal(keyMaterial.read(next).id(), plaintext,
                     new ConfigurationSecretContext("system/github-token", "credential"));
             encoded = new ConfigurationSecretEnvelopeCodec().serialize(envelope);
         } finally {
@@ -368,7 +366,7 @@ class ConfigurationSecretsTest {
     private ConfigurationSecrets resolver(OrionKeyMaterial service) throws Exception {
         return new ConfigurationSecrets(current::get, new OrionKeyMaterial() {
             @Override
-            public ConfigurationSecretEnvelope seal(KeyMaterialDescriptor descriptor, byte[] plaintext,
+            public ConfigurationSecretEnvelope seal(KeyMaterialId descriptor, byte[] plaintext,
                     ConfigurationSecretContext context)
                     throws GeneralSecurityException {
                 cipherInput.set(plaintext);
@@ -376,7 +374,7 @@ class ConfigurationSecretsTest {
             }
 
             @Override
-            public byte[] open(KeyMaterialDescriptor descriptor, ConfigurationSecretEnvelope envelope,
+            public byte[] open(KeyMaterialId descriptor, ConfigurationSecretEnvelope envelope,
                     ConfigurationSecretContext context)
                     throws GeneralSecurityException {
                 byte[] plaintext = service.open(descriptor, envelope, context);

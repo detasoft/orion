@@ -9,7 +9,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 
 import java.io.IOException;
 import java.security.GeneralSecurityException;
@@ -59,17 +58,16 @@ public final class OrionAdminKeyMaterialRoute extends BaseAdminRoute {
                 throw new IllegalArgumentException("Only ACME account and TLS identity keys can be created");
             }
             String alias = input.alias();
-            KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(alias,
-                    Set.of(input.purpose()), KeyMaterialAlgorithm.RSA, 1);
+            Set<KeyMaterialPurpose> purposes = Set.of(input.purpose());
             char[] privateKeyPem = input.privateKeyPem();
             material.withModification(material.revision(), modification -> {
                 if (material.contains(alias, Set.of())) {
                     throw new IllegalArgumentException("Key material name already exists");
                 }
                 if (privateKeyPem == null || privateKeyPem.length == 0) {
-                    modification.generateKey(descriptor, 3072);
+                    modification.generateKey(alias, purposes, KeyMaterialAlgorithm.RSA, 3072);
                 } else {
-                    modification.importKey(descriptor, privateKeyPem);
+                    modification.importKey(alias, purposes, KeyMaterialAlgorithm.RSA, privateKeyPem);
                 }
                 modification.apply();
             });

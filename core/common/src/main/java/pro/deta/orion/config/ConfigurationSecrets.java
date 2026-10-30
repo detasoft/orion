@@ -4,7 +4,7 @@ import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
@@ -116,9 +116,7 @@ public final class ConfigurationSecrets {
                 byte[] plaintext = null;
                 try {
                     ConfigurationSecretEnvelope envelope = codec.parse(secret.envelope());
-                    KeyMaterialDescriptor selected = new KeyMaterialDescriptor(envelope.keyAlias(),
-                            Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES,
-                            envelope.keyVersion());
+                    KeyMaterialId selected = new KeyMaterialId(envelope.keyAlias(), envelope.keyVersion());
                     plaintext = keyMaterial.open(selected, envelope, context(owner, id));
                     return decode(plaintext);
                 } catch (GeneralSecurityException | CharacterCodingException failure) {

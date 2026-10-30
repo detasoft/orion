@@ -32,7 +32,7 @@ import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -53,8 +53,7 @@ class AcmeCertificateSettingsTest {
     void selectsStoredAccountKeyPersistsItsReferenceAndReusesItForIssuance() throws Exception {
         try (OrionKeyMaterial owner = owner(new InMemoryBlobStorage())) {
             owner.withModification(owner.revision(), modification -> {
-                modification.generateKey(new KeyMaterialDescriptor("existing-account",
-                        Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 1), 3072);
+                modification.generateKey("existing-account", Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 3072);
                 modification.apply();
             });
             KeyMaterialId reference = new KeyMaterialId("existing-account", 1);

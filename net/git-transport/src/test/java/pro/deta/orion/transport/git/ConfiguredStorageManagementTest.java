@@ -77,9 +77,7 @@ class ConfiguredStorageManagementTest {
                         new OrionPasswordHashingService(),
                         new RootPasswordReset(false),
                         OrionKeyMaterial.unavailable(),
-                        new SigningMaterialSet(new KeyMaterialDescriptor("signing",
-                                Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA,
-                                1), List.of()),
+                        new SigningMaterialSet(new KeyMaterialId("signing", 1), List.of()),
                         new BootstrapConfiguration(),
                         editor);
         editor.onStart();
