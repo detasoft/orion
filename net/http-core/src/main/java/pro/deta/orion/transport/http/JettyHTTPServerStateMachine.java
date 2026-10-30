@@ -8,6 +8,7 @@ import jakarta.inject.Inject;
 import jakarta.inject.Provider;
 import jakarta.inject.Singleton;
 import pro.deta.orion.event.OrionEventManager;
+import pro.deta.orion.config.ConfigurationChanged;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.keymaterial.KeyMaterialChanged;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
@@ -31,6 +32,7 @@ public final class JettyHTTPServerStateMachine extends ServiceLifecycleStateMach
             private volatile boolean activationEnabled;
             private ScheduledFuture<?> activationRetry;
             private Subscription keyMaterialChanges;
+            private Subscription configurationChanges;
 
             @Override
             public void onStart() {
@@ -40,6 +42,9 @@ public final class JettyHTTPServerStateMachine extends ServiceLifecycleStateMach
                     activationEnabled = true;
                     keyMaterialChanges = events.subscribe(KeyMaterialChanged.class,
                             event -> keyMaterialChanged(event.resources()));
+                    configurationChanges = events.subscribe(ConfigurationChanged.class, event -> {
+                        if (server.usesConfiguration(event.snapshot())) configurationChanged();
+                    });
                     cleanup = cleanupProvider.get();
                     cleanup.start();
                 }
@@ -68,6 +73,10 @@ public final class JettyHTTPServerStateMachine extends ServiceLifecycleStateMach
                 if (!activationEnabled || server == null
                         || !server.usesKeyMaterialResources(resources)) return;
                 scheduleActivation(0);
+            }
+
+            private synchronized void configurationChanged() {
+                if (activationEnabled) scheduleActivation(0);
             }
 
             private synchronized void scheduleActivation(long delaySeconds) {
@@ -101,6 +110,10 @@ public final class JettyHTTPServerStateMachine extends ServiceLifecycleStateMach
                     if (keyMaterialChanges != null) {
                         keyMaterialChanges.close();
                         keyMaterialChanges = null;
+                    }
+                    if (configurationChanges != null) {
+                        configurationChanges.close();
+                        configurationChanges = null;
                     }
                     if (activationRetry != null) activationRetry.cancel(true);
                     activationRetry = null;

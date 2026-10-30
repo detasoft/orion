@@ -12,6 +12,7 @@ public record KeyMaterialDescriptor(
         if (alias == null || alias.isBlank()) {
             throw new IllegalArgumentException("Key material alias must not be empty");
         }
+        alias = alias.trim();
         if (purposes == null || purposes.isEmpty()) {
             throw new IllegalArgumentException("Key material purposes must not be empty");
         }
@@ -32,5 +33,9 @@ public record KeyMaterialDescriptor(
                 && !purposes.equals(Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER))) {
             throw new IllegalArgumentException("AES material is only valid for configuration ciphers");
         }
+    }
+
+    public KeyMaterialId id() {
+        return new KeyMaterialId(alias, version);
     }
 }

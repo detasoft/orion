@@ -13,15 +13,11 @@ import java.security.KeyPairGenerator;
 import java.security.KeyStore;
 import java.security.PKCS12Attribute;
 import java.security.PublicKey;
-import java.security.MessageDigest;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Base64;
-import java.util.Collection;
 import java.util.EnumSet;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.security.Key;
@@ -30,7 +26,7 @@ import java.util.StringJoiner;
 
 /**
  * Validates material descriptors and prepares modifications against the content-source revision.
- * Descriptor attributes identify persisted purposes, algorithms and descriptor versions and must remain stable.
+ * Descriptor attributes persist purposes and algorithms; the append-only entry owns its numeric version.
  * @AiRule Read operations must use store snapshots without acquiring the service monitor.
  */
 final class KeyMaterialService implements AutoCloseable {
@@ -70,7 +66,7 @@ final class KeyMaterialService implements AutoCloseable {
         String metadata = attribute(latest.entry().getAttributes(), DESCRIPTOR_ATTRIBUTE_OID);
         if (metadata == null) throw new GeneralSecurityException("Typed key material metadata is missing: " + alias);
         String[] fields = metadata.split(";", -1);
-        if (fields.length != 3) throw metadataFailure(alias, "format");
+        if (fields.length != 2) throw metadataFailure(alias, "format");
         try {
             return parsePurposes(fields[0]).containsAll(requested);
         } catch (IllegalArgumentException failure) {
@@ -80,47 +76,6 @@ final class KeyMaterialService implements AutoCloseable {
 
     boolean hasDurableSnapshot() {
         return store.hasDurableSnapshot();
-    }
-
-    public KeyPair getKeyPair(String alias) throws GeneralSecurityException {
-        KeyStore.Entry entry = requireEntry(alias);
-        if (!(entry instanceof KeyStore.PrivateKeyEntry key)) {
-            throw new GeneralSecurityException("Private key alias not found: " + alias);
-        }
-        Certificate[] chain = key.getCertificateChain();
-        if (chain.length == 0) {
-            throw new GeneralSecurityException("Private key alias has no certificate chain: " + alias);
-        }
-        return new KeyPair(chain[0].getPublicKey(), key.getPrivateKey());
-    }
-
-    public Certificate[] getCertificateChain(String alias) throws GeneralSecurityException {
-        KeyStore.Entry entry = requireEntry(alias);
-        if (!(entry instanceof KeyStore.PrivateKeyEntry key)) {
-            throw new GeneralSecurityException("Certificate chain alias not found: " + alias);
-        }
-        return key.getCertificateChain();
-    }
-
-    public X509Certificate getTrustedCertificate(KeyMaterialDescriptor descriptor)
-            throws GeneralSecurityException {
-        requireOpen();
-        requireDescriptor(descriptor);
-        if (!descriptor.purposes().contains(KeyMaterialPurpose.TRUST_ANCHOR)) {
-            throw new IllegalArgumentException("Trusted certificates require TRUST_ANCHOR purpose");
-        }
-        KeyStore.Entry entry = requireEntry(descriptor.alias());
-        validatePrepared(entry, descriptor);
-        return trustedCertificate(entry, descriptor.alias());
-    }
-
-    private static X509Certificate trustedCertificate(KeyStore.Entry entry, String alias)
-            throws GeneralSecurityException {
-        if (!(entry instanceof KeyStore.TrustedCertificateEntry trusted)
-                || !(trusted.getTrustedCertificate() instanceof X509Certificate certificate)) {
-            throw new GeneralSecurityException("Trusted certificate alias not found: " + alias);
-        }
-        return certificate;
     }
 
     private static void requireMatchingLeaf(
@@ -143,126 +98,46 @@ final class KeyMaterialService implements AutoCloseable {
             throws GeneralSecurityException {
         requireOpen();
         requireDescriptor(descriptor);
-        Entry addition = readEntry(descriptor.alias());
+        Entry addition = readEntry(descriptor.id());
         if (addition == null || addition.deleted()) {
-            throw new GeneralSecurityException("Key material alias not found: " + descriptor.alias());
+            throw new GeneralSecurityException("Key material version not found: " + descriptor.id());
         }
         validatePrepared(addition.entry(), descriptor);
     }
 
-    public List<KeyMaterialDescriptor> privateKeyDescriptors(
-            Set<KeyMaterialPurpose> requiredPurposes) throws GeneralSecurityException {
-        List<KeyMaterialDescriptor> descriptors = new ArrayList<>();
-        for (KeyMaterialInventoryEntry entry : inventory(requiredPurposes)) {
-            KeyMaterialDescriptor descriptor = entry.descriptor();
-            if (descriptor.purposes().contains(KeyMaterialPurpose.TRUST_ANCHOR)
-                    || descriptor.purposes().contains(KeyMaterialPurpose.CONFIGURATION_CIPHER)) continue;
-            descriptors.add(descriptor);
-        }
-        return List.copyOf(descriptors);
-    }
-
-    public List<KeyMaterialInventoryEntry> inventory(Set<KeyMaterialPurpose> requiredPurposes)
-            throws GeneralSecurityException {
+    public List<KeyMaterialId> inventory() throws GeneralSecurityException {
         requireOpen();
-        Set<KeyMaterialPurpose> requested = Set.copyOf(requiredPurposes);
-        List<KeyMaterialInventoryEntry> entries = new ArrayList<>();
+        List<KeyMaterialId> result = new ArrayList<>();
         for (Entry stored : store.entries()) {
             if (stored.deleted()) continue;
-            String alias = stored.alias();
-            KeyStore.Entry entry = stored.entry();
-            boolean trusted = entry instanceof KeyStore.TrustedCertificateEntry;
-            boolean privateKey = entry instanceof KeyStore.PrivateKeyEntry;
-            boolean secretKey = entry instanceof KeyStore.SecretKeyEntry;
-            if (!trusted && !privateKey && !secretKey) {
-                throw new GeneralSecurityException("Unknown key material entry type: " + alias);
-            }
-            String metadata = attribute(entry.getAttributes(), DESCRIPTOR_ATTRIBUTE_OID);
-            if (metadata == null) {
-                throw new GeneralSecurityException("Typed key material metadata is missing for alias: " + alias);
-            }
-            String[] fields = metadata.split(";", -1);
-            if (fields.length != 3) {
-                throw new GeneralSecurityException("Typed key material metadata has invalid format: " + alias);
-            }
-            Set<KeyMaterialPurpose> purposes;
-            KeyMaterialDescriptor descriptor;
-            try {
-                purposes = parsePurposes(fields[0]);
-                descriptor = new KeyMaterialDescriptor(alias, purposes,
-                        KeyMaterialAlgorithm.valueOf(fields[1]), Long.parseLong(fields[2]));
-            } catch (IllegalArgumentException failure) {
-                throw new GeneralSecurityException("Typed key material metadata has invalid format: " + alias,
-                        failure);
-            }
-            if (trusted != purposes.contains(KeyMaterialPurpose.TRUST_ANCHOR)
-                    || secretKey != purposes.contains(KeyMaterialPurpose.CONFIGURATION_CIPHER)) {
-                throw new GeneralSecurityException("Key material entry type does not match purpose: " + alias);
-            }
-            if (!purposes.containsAll(requested)) continue;
-            validatePrepared(entry, descriptor);
-            Certificate[] chain;
-            if (secretKey) {
-                chain = new Certificate[0];
-            } else if (trusted) {
-                chain = new Certificate[]{trustedCertificate(entry, alias)};
-            } else {
-                chain = ((KeyStore.PrivateKeyEntry) entry).getCertificateChain();
-            }
-            String publicKey = secretKey ? null : publicKeyPem(chain[0].getPublicKey());
-            List<KeyMaterialInventoryEntry.CertificateDetails> certificates = new ArrayList<>();
-            if (!isStorageCertificate(chain)) {
-                for (Certificate certificate : chain) {
-                    if (!(certificate instanceof X509Certificate x509)) {
-                        throw new GeneralSecurityException("Non-X509 certificate in key material: " + alias);
-                    }
-                    certificates.add(certificateDetails(x509));
-                }
-            }
-            entries.add(new KeyMaterialInventoryEntry(descriptor,
-                    publicKey, secretKey ? null : HexFormat.of().withDelimiter(":").formatHex(
-                            MessageDigest.getInstance("SHA-256").digest(chain[0].getPublicKey().getEncoded())),
-                    certificates));
+            KeyMaterialId id = new KeyMaterialId(stored.alias(), stored.version());
+            validatePrepared(stored.entry(), descriptor(stored));
+            result.add(id);
         }
-        return List.copyOf(entries);
+        return List.copyOf(result);
     }
 
-    private static String publicKeyPem(PublicKey key) {
-        String encoded = Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(key.getEncoded());
-        return "-----BEGIN PUBLIC KEY-----\n" + encoded + "\n-----END PUBLIC KEY-----";
+    public KeyMaterialEntry read(KeyMaterialId id) throws GeneralSecurityException {
+        Entry stored = store.find(id).orElseThrow(
+                () -> new GeneralSecurityException("Key material version not found: " + id));
+        KeyMaterialDescriptor descriptor = descriptor(stored);
+        validatePrepared(stored.entry(), descriptor);
+        return new KeyMaterialEntry(id, descriptor.purposes(), descriptor.algorithm(), stored.entry());
     }
 
-    private static boolean isStorageCertificate(Certificate[] chain) {
-        if (chain.length != 1 || !(chain[0] instanceof X509Certificate certificate)) {
-            return false;
+    private KeyMaterialDescriptor descriptor(Entry stored) throws GeneralSecurityException {
+        String metadata = attribute(stored.entry().getAttributes(), DESCRIPTOR_ATTRIBUTE_OID);
+        if (metadata == null) {
+            throw new GeneralSecurityException("Typed key material metadata is missing: " + stored.alias());
         }
-        return certificate.getBasicConstraints() < 0
-                && certificate.getSubjectX500Principal().equals(certificate.getIssuerX500Principal())
-                && certificate.getSubjectX500Principal().getName()
-                        .contains("O=" + KeyMaterialConstants.STORAGE_CERTIFICATE_ORGANIZATION);
-    }
-
-    private static KeyMaterialInventoryEntry.CertificateDetails certificateDetails(X509Certificate certificate)
-            throws GeneralSecurityException {
-        byte[] fingerprint = MessageDigest.getInstance("SHA-256").digest(certificate.getEncoded());
-        List<String> dnsNames = new ArrayList<>();
-        Collection<List<?>> alternatives = certificate.getSubjectAlternativeNames();
-        if (alternatives != null) {
-            for (List<?> alternative : alternatives) {
-                if (Integer.valueOf(2).equals(alternative.get(0))
-                        && alternative.get(1) instanceof String name) {
-                    dnsNames.add(name);
-                }
-            }
+        String[] fields = metadata.split(";", -1);
+        if (fields.length != 2) throw metadataFailure(stored.alias(), "format");
+        try {
+            return new KeyMaterialDescriptor(stored.alias(), parsePurposes(fields[0]),
+                    KeyMaterialAlgorithm.valueOf(fields[1]), stored.version());
+        } catch (IllegalArgumentException failure) {
+            throw new GeneralSecurityException("Invalid key material metadata: " + stored.alias(), failure);
         }
-        return new KeyMaterialInventoryEntry.CertificateDetails(
-                certificate.getSubjectX500Principal().getName(),
-                dnsNames,
-                certificate.getIssuerX500Principal().getName(),
-                certificate.getSerialNumber().toString(16),
-                certificate.getNotBefore().toInstant().toString(),
-                certificate.getNotAfter().toInstant().toString(),
-                HexFormat.of().withDelimiter(":").formatHex(fingerprint));
     }
 
     synchronized KeyStore.Entry prepareKey(KeyMaterialDescriptor descriptor, int keySize)
@@ -367,11 +242,15 @@ final class KeyMaterialService implements AutoCloseable {
             requireAlgorithm(descriptor, key.getPrivateKey().getAlgorithm());
         }
         validateMetadata(descriptor.alias(), attribute(entry.getAttributes(), DESCRIPTOR_ATTRIBUTE_OID),
-                descriptor.purposes(), descriptor.algorithm(), descriptor.version());
+                descriptor.purposes(), descriptor.algorithm());
     }
 
     Entry readEntry(String alias) throws GeneralSecurityException {
         return store.find(alias).orElse(null);
+    }
+
+    Entry readEntry(KeyMaterialId id) throws GeneralSecurityException {
+        return store.find(id).orElse(null);
     }
 
     private static String attribute(Set<KeyStore.Entry.Attribute> attributes, String oid) {
@@ -382,18 +261,17 @@ final class KeyMaterialService implements AutoCloseable {
     }
 
     private static void validateMetadata(String alias, String metadata, Set<KeyMaterialPurpose> requiredPurposes,
-            KeyMaterialAlgorithm algorithm, long version)
+            KeyMaterialAlgorithm algorithm)
             throws GeneralSecurityException {
         if (metadata == null) throw new GeneralSecurityException("Typed key material metadata is missing: " + alias);
         String[] fields = metadata.split(";", -1);
-        if (fields.length != 3) throw metadataFailure(alias, "format");
+        if (fields.length != 2) throw metadataFailure(alias, "format");
         try {
             if (!parsePurposes(fields[0]).containsAll(requiredPurposes)) throw metadataFailure(alias, "purpose");
         } catch (IllegalArgumentException failure) {
             throw new GeneralSecurityException("Invalid key material purposes: " + alias, failure);
         }
         requireMetadataField(alias, "algorithm", algorithm.name(), fields[1]);
-        requireMetadataField(alias, "version", Long.toString(version), fields[2]);
     }
 
     String revision() {
@@ -438,18 +316,9 @@ final class KeyMaterialService implements AutoCloseable {
         }
     }
 
-    SecretKey secretKey(String alias) throws GeneralSecurityException {
-        KeyStore.Entry entry = requireEntry(alias);
-        if (!(entry instanceof KeyStore.SecretKeyEntry secret)) {
-            throw new GeneralSecurityException("Secret key alias not found: " + alias);
-        }
-        return secret.getSecretKey();
-    }
-
     private static Set<KeyStore.Entry.Attribute> descriptorAttributes(KeyMaterialDescriptor descriptor) {
         String value = formatPurposes(descriptor.purposes())
-                + ";" + descriptor.algorithm().name()
-                + ";" + descriptor.version();
+                + ";" + descriptor.algorithm().name();
         return Set.of(new PKCS12Attribute(DESCRIPTOR_ATTRIBUTE_OID, value));
     }
 
@@ -530,10 +399,4 @@ final class KeyMaterialService implements AutoCloseable {
         store.requireOpen();
     }
 
-    private KeyStore.Entry requireEntry(String alias) throws GeneralSecurityException {
-        Entry entry = store.find(alias).orElseThrow(
-                () -> new GeneralSecurityException("Key material alias not found: " + alias));
-        if (entry.deleted()) throw new GeneralSecurityException("Key material alias not found: " + alias);
-        return entry.entry();
-    }
 }

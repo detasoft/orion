@@ -74,7 +74,7 @@ final class JwtAccessTokenService {
         String header = "{\"alg\":\"%s\",\"typ\":\"%s\",\"kid\":%s}".formatted(
                 HEADER_ALGORITHM,
                 JWT_TYPE,
-                jsonString(signing.active().alias()));
+                jsonString(keyId(signing.active())));
         String generationClaim = authenticationGeneration == null
                 ? ""
                 : ",\"%s\":%s".formatted(
@@ -219,11 +219,15 @@ final class JwtAccessTokenService {
     }
 
     private KeyMaterialDescriptor verificationKey(String keyId) {
-        if (signing.active().alias().equals(keyId)) return signing.active();
+        if (keyId(signing.active()).equals(keyId)) return signing.active();
         for (KeyMaterialDescriptor descriptor : signing.verification()) {
-            if (descriptor.alias().equals(keyId)) return descriptor;
+            if (keyId(descriptor).equals(keyId)) return descriptor;
         }
         return null;
+    }
+
+    private static String keyId(KeyMaterialDescriptor descriptor) {
+        return descriptor.alias() + ":" + descriptor.version();
     }
 
     private boolean verify(KeyMaterialDescriptor descriptor, String signingInput, byte[] signatureBytes) {

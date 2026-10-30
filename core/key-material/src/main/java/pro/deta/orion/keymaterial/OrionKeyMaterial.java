@@ -16,7 +16,6 @@ import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.PrivateKey;
-import java.security.PublicKey;
 import java.security.interfaces.RSAPrivateCrtKey;
 import java.security.spec.RSAPublicKeySpec;
 import java.security.spec.RSAPrivateCrtKeySpec;
@@ -42,7 +41,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 
 /**
  * Owns runtime key material, reads committed entries and prepares isolated modifications.
@@ -120,28 +118,9 @@ public class OrionKeyMaterial implements AutoCloseable {
         return owner.containsAlias(alias, requiredPurposes);
     }
 
-    public List<KeyMaterialDescriptor> privateKeyDescriptors(Set<KeyMaterialPurpose> requiredPurposes)
-            throws GeneralSecurityException {
+    public KeyMaterialEntry read(KeyMaterialId id) throws GeneralSecurityException {
         requireAvailable();
-        return owner.privateKeyDescriptors(requiredPurposes);
-    }
-
-    public KeyPair keyPair(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
-        requireAvailable();
-        synchronized (owner) {
-            require(descriptor);
-            if (descriptor.purposes().contains(KeyMaterialPurpose.TRUST_ANCHOR)) {
-                throw new IllegalArgumentException("Trust anchors have no private key pair");
-            }
-            if (descriptor.algorithm() == KeyMaterialAlgorithm.AES) {
-                throw new IllegalArgumentException("Symmetric key material has no key pair");
-            }
-            return owner.getKeyPair(descriptor.alias());
-        }
-    }
-
-    public PublicKey publicKey(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
-        return keyPair(descriptor).getPublic();
+        return owner.read(id);
     }
 
     public byte[] sign(KeyMaterialDescriptor descriptor, byte[] payload) throws GeneralSecurityException {
@@ -150,7 +129,7 @@ public class OrionKeyMaterial implements AutoCloseable {
             requireSigningMaterial(descriptor);
             requireBytes(payload, "Payload");
             Signature signer = Signature.getInstance(descriptor.algorithm().requireSignatureAlgorithm());
-            signer.initSign(owner.getKeyPair(descriptor.alias()).getPrivate());
+            signer.initSign(read(descriptor.id()).keyPair().getPrivate());
             signer.update(payload);
             return signer.sign();
         }
@@ -164,7 +143,7 @@ public class OrionKeyMaterial implements AutoCloseable {
             requireBytes(payload, "Payload");
             requireBytes(signature, "Signature");
             Signature verifier = Signature.getInstance(descriptor.algorithm().requireSignatureAlgorithm());
-            verifier.initVerify(owner.getKeyPair(descriptor.alias()).getPublic());
+            verifier.initVerify(read(descriptor.id()).keyPair().getPublic());
             verifier.update(payload);
             return verifier.verify(signature);
         }
@@ -211,41 +190,6 @@ public class OrionKeyMaterial implements AutoCloseable {
         }
     }
 
-    public List<X509Certificate> certificateChain(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
-        Objects.requireNonNull(descriptor, "descriptor");
-        requireAvailable();
-        synchronized (owner) {
-            require(descriptor);
-            List<X509Certificate> chain = CertificateIdentity.requireX509Chain(
-                    Arrays.asList(owner.getCertificateChain(descriptor.alias())));
-            if (chain.size() > 1 && CertificateIdentity.isSelfSigned(chain.getLast())) {
-                return List.copyOf(chain.subList(0, chain.size() - 1));
-            }
-            return chain;
-        }
-    }
-
-    public Optional<List<X509Certificate>> issuedCertificateChain(KeyMaterialDescriptor descriptor)
-            throws GeneralSecurityException {
-        Objects.requireNonNull(descriptor, "descriptor");
-        requireAvailable();
-        synchronized (owner) {
-            if (!owner.containsAlias(descriptor.alias(), Set.of())) return Optional.empty();
-            List<X509Certificate> chain = certificateChain(descriptor);
-            if (chain.size() == 1 && CertificateIdentity.isStorageCertificate(chain.getFirst())) {
-                return Optional.empty();
-            }
-            return Optional.of(chain);
-        }
-    }
-
-    public X509Certificate trustedCertificate(KeyMaterialDescriptor descriptor)
-            throws GeneralSecurityException {
-        Objects.requireNonNull(descriptor, "descriptor");
-        requireAvailable();
-        return owner.getTrustedCertificate(descriptor);
-    }
-
     public SSLContext createTlsContext(TlsMaterialConfiguration configuration) throws GeneralSecurityException {
         requireAvailable();
         synchronized (owner) {
@@ -255,7 +199,7 @@ public class OrionKeyMaterial implements AutoCloseable {
                 throw new GeneralSecurityException("TLS identity must contain an issued certificate chain");
             }
             CertificateIdentity.validateCertificateChain(
-                    chain, publicKey(configuration.identity()), identity.issuerTrustAnchor());
+                    chain, read(configuration.identity().id()).publicKey(), identity.issuerTrustAnchor());
             return createTlsContext(configuration.identity(), chain, configuration.clientTrustAnchors());
         }
     }
@@ -264,11 +208,18 @@ public class OrionKeyMaterial implements AutoCloseable {
         requireAvailable();
         if (references == null) throw new IllegalArgumentException("SSH host key references must not be null");
         synchronized (owner) {
-            List<KeyMaterialDescriptor> available = privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST));
+            List<KeyMaterialDescriptor> available = new ArrayList<>();
+            for (KeyMaterialId id : inventory()) {
+                KeyMaterialEntry entry = read(id);
+                if (entry.content() instanceof KeyStore.PrivateKeyEntry
+                        && entry.purposes().contains(KeyMaterialPurpose.SSH_HOST)) {
+                    available.add(entry.descriptor());
+                }
+            }
             List<KeyMaterialDescriptor> selected = references.isEmpty()
                     ? available : selectSshHostKeys(available, references);
             List<KeyPair> keys = new ArrayList<>();
-            for (KeyMaterialDescriptor descriptor : selected) keys.add(keyPair(descriptor));
+            for (KeyMaterialDescriptor descriptor : selected) keys.add(read(descriptor.id()).keyPair());
             return List.copyOf(keys);
         }
     }
@@ -371,10 +322,10 @@ public class OrionKeyMaterial implements AutoCloseable {
         owner.validateExisting(descriptor);
     }
 
-    public List<KeyMaterialInventoryEntry> inventory(Set<KeyMaterialPurpose> requiredPurposes)
+    public List<KeyMaterialId> inventory()
             throws GeneralSecurityException {
         if (owner == null) throw new GeneralSecurityException("Configuration material inventory is unavailable");
-        return owner.inventory(requiredPurposes);
+        return owner.inventory();
     }
 
     public KeyMaterialDescriptor configurationCipherKey() {
@@ -391,9 +342,6 @@ public class OrionKeyMaterial implements AutoCloseable {
                 throw new IllegalArgumentException("SSH host key alias must not be empty");
             }
             KeyMaterialDescriptor match = findExactSshHostKey(available, reference);
-            if (match == null && !isConcreteSshHostKeyAlias(reference)) {
-                match = findLatestSshHostKey(available, reference);
-            }
             if (match == null) {
                 throw new GeneralSecurityException("SSH host key reference not found: " + reference);
             }
@@ -410,36 +358,6 @@ public class OrionKeyMaterial implements AutoCloseable {
             if (alias.equals(candidate.alias())) return candidate;
         }
         return null;
-    }
-
-    private KeyMaterialDescriptor findLatestSshHostKey(List<KeyMaterialDescriptor> available, String alias)
-            throws GeneralSecurityException {
-        KeyMaterialDescriptor match = null;
-        for (KeyMaterialDescriptor candidate : available) {
-            if (alias.equals(sshHostKeyLogicalAlias(candidate))
-                    && (match == null || candidate.version() > match.version())) {
-                match = candidate;
-            }
-        }
-        return match;
-    }
-
-    private boolean isConcreteSshHostKeyAlias(String alias) {
-        int versionMarker = alias.lastIndexOf("-v");
-        if (versionMarker <= 0 || versionMarker + 2 == alias.length()) return false;
-        for (int index = versionMarker + 2; index < alias.length(); index++) {
-            if (!Character.isDigit(alias.charAt(index))) return false;
-        }
-        return true;
-    }
-
-    private String sshHostKeyLogicalAlias(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
-        String suffix = "-v" + descriptor.version();
-        String concreteAlias = descriptor.alias();
-        if (!concreteAlias.endsWith(suffix) || concreteAlias.length() == suffix.length()) {
-            throw new GeneralSecurityException("SSH host key alias does not identify its version: " + concreteAlias);
-        }
-        return concreteAlias.substring(0, concreteAlias.length() - suffix.length());
     }
 
     @Override
@@ -486,7 +404,8 @@ public class OrionKeyMaterial implements AutoCloseable {
         secureRandom.nextBytes(nonce);
 
         Cipher wrappingCipher = Cipher.getInstance(ConfigurationSecretEnvelopeCodec.AES_WRAP);
-        wrappingCipher.init(Cipher.WRAP_MODE, owner.secretKey(descriptor.alias()));
+        wrappingCipher.init(Cipher.WRAP_MODE,
+                ((KeyStore.SecretKeyEntry) read(descriptor.id()).content()).getSecretKey());
         byte[] wrappedDataKey = wrappingCipher.wrap(dataKey);
 
         Cipher encryptionCipher = Cipher.getInstance(ConfigurationSecretEnvelopeCodec.AES_GCM);
@@ -515,7 +434,8 @@ public class OrionKeyMaterial implements AutoCloseable {
         requireContext(context);
         requireEnvelopeMatches(descriptor, envelope);
         Cipher wrappingCipher = Cipher.getInstance(ConfigurationSecretEnvelopeCodec.AES_WRAP);
-        wrappingCipher.init(Cipher.UNWRAP_MODE, owner.secretKey(descriptor.alias()));
+        wrappingCipher.init(Cipher.UNWRAP_MODE,
+                ((KeyStore.SecretKeyEntry) read(descriptor.id()).content()).getSecretKey());
         SecretKey dataKey;
         try {
             dataKey = (SecretKey) wrappingCipher.unwrap(
@@ -582,7 +502,7 @@ public class OrionKeyMaterial implements AutoCloseable {
         try {
             KeyStore keyStore = KeyStore.getInstance(KeyMaterialConstants.DEFAULT_KEY_STORE_TYPE);
             keyStore.load(null, password);
-            KeyPair keyPair = owner.getKeyPair(descriptor.alias());
+            KeyPair keyPair = read(descriptor.id()).keyPair();
             keyStore.setKeyEntry(
                     descriptor.alias(),
                     keyPair.getPrivate(),
@@ -595,7 +515,7 @@ public class OrionKeyMaterial implements AutoCloseable {
             for (KeyMaterialDescriptor trustedCertificate : clientTrust) {
                 trustStore.setCertificateEntry(
                         trustedCertificate.alias(),
-                        owner.getTrustedCertificate(trustedCertificate));
+                        read(trustedCertificate.id()).trustedCertificate());
             }
             TrustManagerFactory trustFactory = TrustManagerFactory.getInstance(
                     TrustManagerFactory.getDefaultAlgorithm());

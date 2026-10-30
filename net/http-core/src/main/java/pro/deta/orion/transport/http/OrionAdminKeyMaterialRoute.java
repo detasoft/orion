@@ -31,7 +31,7 @@ public final class OrionAdminKeyMaterialRoute extends BaseAdminRoute {
     @Override
     protected OrionHttpResponse doGet(HttpServletRequest request) throws IOException {
         try {
-            return OrionHttpResponse.ok(Map.of("entries", material.inventory(Set.of())))
+            return OrionHttpResponse.ok(Map.of("entries", KeyMaterialInventoryFormatter.format(material)))
                     .withHeader("Cache-Control", "no-store");
         } catch (GeneralSecurityException failure) {
             throw new IOException("Cannot read key material inventory", failure);

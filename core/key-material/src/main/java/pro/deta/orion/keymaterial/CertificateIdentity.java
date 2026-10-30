@@ -21,36 +21,47 @@ public final class CertificateIdentity {
     }
 
     public List<X509Certificate> certificateChain() throws GeneralSecurityException {
-        return material.certificateChain(configuration.identity());
+        return material.read(configuration.identity().id()).certificateChain();
     }
 
     public Optional<List<X509Certificate>> issuedCertificateChain() throws GeneralSecurityException {
-        return material.issuedCertificateChain(configuration.identity());
+        if (!material.contains(configuration.identity())) return Optional.empty();
+        return material.read(configuration.identity().id()).issuedCertificateChain();
     }
 
     public Optional<X509Certificate> issuerTrustAnchor() throws GeneralSecurityException {
         if (configuration.serverIssuerTrustAnchor().isEmpty()) return Optional.empty();
-        return Optional.of(material.trustedCertificate(configuration.serverIssuerTrustAnchor().orElseThrow()));
+        return Optional.of(material.read(configuration.serverIssuerTrustAnchor().orElseThrow().id())
+                .trustedCertificate());
     }
 
     public TlsClientAuthentication clientAuthentication() {
         return configuration.clientAuthentication();
     }
 
-    public void installCertificateChain(List<? extends Certificate> certificateChain,
+    public CertificateIdentity installCertificateChain(List<? extends Certificate> certificateChain,
             Optional<X509Certificate> issuerTrustAnchor) throws IOException, GeneralSecurityException {
         List<X509Certificate> validated = requireX509Chain(certificateChain);
         Optional<X509Certificate> root = requireIssuerCertificate(
                 configuration.serverIssuerTrustAnchor(), issuerTrustAnchor);
-        material.withModification(material.revision(), modification -> {
+        KeyMaterialModification modification = material.modify(material.revision());
+        try {
+            Optional<KeyMaterialDescriptor> issuer = configuration.serverIssuerTrustAnchor();
             if (root.isPresent()) {
-                modification.setTrustedCertificate(
-                        configuration.serverIssuerTrustAnchor().orElseThrow(), root.orElseThrow());
+                KeyMaterialDescriptor descriptor = issuer.orElseThrow();
+                KeyMaterialId id = modification.setTrustedCertificate(descriptor, root.orElseThrow());
+                issuer = Optional.of(new KeyMaterialDescriptor(id.alias(), descriptor.purposes(),
+                        descriptor.algorithm(), id.version()));
             }
-            modification.installCertificateChain(
-                    configuration.identity(), validated, configuration.serverIssuerTrustAnchor());
+            KeyMaterialId id =
+                    modification.installCertificateChain(configuration.identity(), validated, issuer);
             modification.apply();
-        });
+            return new CertificateIdentity(material,
+                    new TlsMaterialConfiguration(material.read(id).descriptor(),
+                    issuer, configuration.clientTrustAnchors(), configuration.clientAuthentication()));
+        } finally {
+            modification.discard();
+        }
     }
 
     public SSLContext createContext() throws GeneralSecurityException {

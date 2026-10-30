@@ -104,9 +104,11 @@ class AcmeCertificateSettingsTest {
                     {"revision":"saved-1","provider":"letsencrypt","accountEmail":"admin@example.test",
                      "domains":["example.test"],"accountMaterial":{"alias":"existing-account","version":1}}
                     """, AcmeAdministrationTest.admin())).status()).isEqualTo(200);
+            events.awaitEvents();
             service.issue(new AcmeCertificateService.IssueRequest(null, null, null, null, null, null, true));
+            events.awaitEvents();
             assertThat(issuedKeys).hasSize(1);
-            String expected = owner.inventory(Set.of()).getFirst().publicKeyPem();
+            String expected = KeyMaterialInventoryFormatter.format(owner).getFirst().publicKeyPem();
             assertThat(expected.replaceAll("\\s", "")).contains(java.util.Base64.getEncoder()
                     .encodeToString(issuedKeys.getFirst().getPublic().getEncoded()));
             for (KeyMaterialId invalid : List.of(new KeyMaterialId("missing", 1),
@@ -115,7 +117,7 @@ class AcmeCertificateSettingsTest {
                                 () ->
                                         service.save(
                                                 new AcmeCertificateService.Settings(
-                                                        "saved-1",
+                                                        service.view().revision(),
                                                         "letsencrypt",
                                                         "",
                                                         "admin@example.test",
@@ -126,7 +128,7 @@ class AcmeCertificateSettingsTest {
                                                 "root"))
                         .isInstanceOf(IllegalArgumentException.class);
             }
-            assertThat(owner.inventory(Set.of())).noneMatch(entry -> entry.descriptor().alias().equals("missing"));
+            assertThat(owner.inventory()).noneMatch(id -> id.alias().equals("missing"));
             assertThat(service.view().accountMaterial()).isEqualTo(reference);
         }
     }
@@ -195,14 +197,17 @@ class AcmeCertificateSettingsTest {
                     {"revision":"saved-1","provider":"zerossl","accountEmail":"admin@example.test",
                      "domains":["example.test"],"eabKeyId":"key-id","eabHmacKey":""}
                     """, AcmeAdministrationTest.admin())).status()).isEqualTo(200);
+            events.awaitEvents();
             assertThat(dispatcher.dispatch(AcmeAdministrationTest.request("/acme issue",
                     AcmeAdministrationTest.admin())))
                     .isEqualTo(new CommandResult.Message("Certificate issued and saved."));
+            events.awaitEvents();
             AcmeCertificateService restarted = new AcmeCertificateService(
                     desired.editor(), owner, issuer, secrets, events.executor());
             assertThat(new OrionAdminAcmeCertificateRoute(restarted, new ObjectMapper())
                     .doPost(AcmeAdministrationTest.httpRequest("POST", "/api/admin/acme/certificate", "",
                             AcmeAdministrationTest.admin())).status()).isEqualTo(200);
+            events.awaitEvents();
             AcmeCertificateService renewal = new AcmeCertificateService(
                     desired.editor(), owner, issuer, secrets, events.executor());
             renewal.onStart();

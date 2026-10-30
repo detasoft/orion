@@ -218,9 +218,7 @@ class BootstrapContextTest {
             assertThat(context.signingMaterial().active().alias()).isNotBlank();
             assertThat(context.keyMaterial().contains(context.signingMaterial().active())).isTrue();
             context.sshHostKeys(List.of());
-            assertThat(context.keyMaterial().privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST)))
-                    .extracting(descriptor -> descriptor.alias())
-                    .containsExactly("ssh-host-ec-v1", "ssh-host-rsa-v1");
+
         }
         assertThatThrownBy(() -> backend.find("orion")).hasMessageContaining("closed");
     }
@@ -289,19 +287,21 @@ class BootstrapContextTest {
     }
 
     @Test
-    void selectsExactOrLatestSshAliasAndAllowsSeveralKeysOfTheSameType() throws Exception {
+    void selectsExactSshAliasesWithoutOrderingDifferentEntries() throws Exception {
         BootstrapConfiguration configuration = configuration();
         KeyMaterialDescriptor first = sshHostKey("node-a-rsa-v1", 1);
-        KeyMaterialDescriptor latest = sshHostKey("node-a-rsa-v3", 3);
-        KeyMaterialDescriptor other = sshHostKey("node-b-rsa-v4", 4);
+        KeyMaterialDescriptor latest = sshHostKey("node-a-rsa-v3", 1);
+        KeyMaterialDescriptor other = sshHostKey("node-b-rsa-v4", 1);
         List<KeyMaterialDescriptor> stored = List.of(first, latest, other);
         NativeGitRepositoryProvider backend = repositoryWith(configuration,
                 Map.of("orion.xml", xml(), "material.p12", materialBytes(configuration, stored)));
         try (BootstrapContext context = openContext(configuration, ENVIRONMENT, borrow(backend))) {
-            byte[] latestPublic = context.keyMaterial().publicKey(latest).getEncoded();
-            byte[] firstPublic = context.keyMaterial().publicKey(first).getEncoded();
-            assertThat(context.sshHostKeys(List.of("node-a-rsa")).loadKeys(null))
+            byte[] latestPublic = context.keyMaterial().read(latest.id()).publicKey().getEncoded();
+            byte[] firstPublic = context.keyMaterial().read(first.id()).publicKey().getEncoded();
+            assertThat(context.sshHostKeys(List.of(latest.alias())).loadKeys(null))
                     .extracting(pair -> pair.getPublic().getEncoded()).containsExactly(latestPublic);
+            assertThatThrownBy(() -> context.sshHostKeys(List.of("node-a-rsa")))
+                    .isInstanceOf(GeneralSecurityException.class);
             assertThat(context.sshHostKeys(List.of("node-a-rsa-v1")).loadKeys(null))
                     .extracting(pair -> pair.getPublic().getEncoded()).containsExactly(firstPublic);
             KeyPairProvider provider = context.sshHostKeys(
@@ -309,14 +309,12 @@ class BootstrapContextTest {
             assertThat(provider.loadKey(null, KeyPairProvider.SSH_RSA)
                     .getPublic().getEncoded()).isEqualTo(latestPublic);
             assertThat(context.sshHostKeys(List.of()).loadKeys(null)).hasSize(3);
-            assertThat(context.keyMaterial().privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST)))
-                    .containsExactlyElementsOf(stored);
+
             assertThatThrownBy(() -> context.sshHostKeys(List.of("missing")))
                     .isInstanceOf(GeneralSecurityException.class).hasMessageContaining("missing");
         }
         try (BootstrapContext context = openContext(configuration, ENVIRONMENT, backend)) {
-            assertThat(context.keyMaterial().privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST)))
-                    .containsExactlyElementsOf(stored);
+            assertThat(context.sshHostKeys(List.of()).loadKeys(null)).hasSize(3);
         }
     }
 
@@ -325,7 +323,7 @@ class BootstrapContextTest {
         BootstrapConfiguration configuration = configuration();
         NativeGitRepositoryProvider backend = repositoryWith(configuration,
                 Map.of("orion.xml", xml(), "material.p12",
-                        materialBytes(configuration, List.of(sshHostKey("node-a-rsa-v1-v3", 3)))));
+                        materialBytes(configuration, List.of(sshHostKey("node-a-rsa-v1-v3", 1)))));
         try (BootstrapContext context = openContext(configuration, ENVIRONMENT, backend)) {
             assertThatThrownBy(() -> context.sshHostKeys(List.of("node-a-rsa-v1")))
                     .isInstanceOf(GeneralSecurityException.class).hasMessageContaining("node-a-rsa-v1");
@@ -339,8 +337,8 @@ class BootstrapContextTest {
             context.sshHostKeys(List.of());
             KeyPairProvider provider = context.sshHostKeys(List.of("ssh-host-ec-v1"));
             assertThat(provider.loadKeys(null)).hasSize(1);
-            KeyMaterialDescriptor removed = context.keyMaterial()
-                    .privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST)).getFirst();
+            KeyMaterialDescriptor removed = context.keyMaterial().read(
+                    new pro.deta.orion.keymaterial.KeyMaterialId("ssh-host-ec-v1", 1)).descriptor();
             context.keyMaterial().withModification(context.keyMaterial().revision(), modification -> {
                 modification.delete(removed);
                 modification.apply();
@@ -395,7 +393,7 @@ class BootstrapContextTest {
                         "material.p12", materialBytes(initial)))) {
             BootstrapConfiguration next = configuration();
             next.getBootstrap().getKeyMaterial().getServerSigning()
-                    .setActive(new SigningKeyReferenceConfig("server-signing-v2", 2));
+                    .setActive(new SigningKeyReferenceConfig("server-signing-v2", 1));
             next.getBootstrap().getKeyMaterial().getServerSigning()
                     .setVerification(List.of(new SigningKeyReferenceConfig("server-signing-v1", 1)));
             byte[] payload = bytes("bootstrap-rotation");
@@ -415,7 +413,7 @@ class BootstrapContextTest {
                         "server-signing-v2",
                         Set.of(KeyMaterialPurpose.SERVER_SIGNING),
                         KeyMaterialAlgorithm.RSA,
-                        2);
+                        1);
                 try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("correct-password".toCharArray());
                      OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialContentStore(
                              new NativeGitKeyMaterialContentSource(new GitFileEvents(
@@ -452,7 +450,7 @@ class BootstrapContextTest {
     void doesNotRecreateLostMaterialForConfigurationWithRetainedIdentity() throws Exception {
         BootstrapConfiguration configuration = configuration();
         configuration.getBootstrap().getKeyMaterial().getServerSigning()
-                .setActive(new SigningKeyReferenceConfig("server-signing-v2", 2));
+                .setActive(new SigningKeyReferenceConfig("server-signing-v2", 1));
         configuration.getBootstrap().getKeyMaterial().getServerSigning()
                 .setVerification(List.of(new SigningKeyReferenceConfig("server-signing-v1", 1)));
         try (NativeGitRepositoryProvider backend = repositoryWith(

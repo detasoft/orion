@@ -29,7 +29,7 @@ class OrionKeyMaterialTest {
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
-            assertThat(material.inventory(Set.of())).isEmpty();
+            assertThat(material.inventory()).isEmpty();
             assertThat(material.revision()).isNull();
             assertThat(store.load().bytes()).isNull();
             material.withModification(material.revision(), modification -> {
@@ -53,7 +53,7 @@ class OrionKeyMaterialTest {
     void retainsSigningKeysAcrossReload() throws Exception {
         InMemoryKeyMaterialContentSource store = new InMemoryKeyMaterialContentSource();
         KeyMaterialDescriptor old = rsa("server-signing-v1", 1);
-        KeyMaterialDescriptor active = rsa("server-signing-v2", 2);
+        KeyMaterialDescriptor active = rsa("server-signing-v2", 1);
         byte[] payload = "retained-jwt".getBytes(StandardCharsets.UTF_8);
         byte[] oldSignature;
         try (KeyMaterialService service = KeyMaterialService.open(new KeyMaterialContentStore(
@@ -114,18 +114,20 @@ class OrionKeyMaterialTest {
                 .hasMessageContaining("issued certificate chain");
         TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
         TestCertificateChain.Authority intermediate = TestCertificateChain.intermediate("Intermediate", root);
-        material.certificateIdentity(tls).installCertificateChain(
-                List.of(TestCertificateChain.leaf("orion.example", material.keyPair(identity), intermediate)),
+        CertificateIdentity installed = material.certificateIdentity(tls).installCertificateChain(
+                List.of(TestCertificateChain.leaf("orion.example",
+                        material.read(identity.id()).keyPair(), intermediate)),
                 Optional.empty());
 
         int sourceReadsAfterSave = store.readCalls;
         assertThat(material.verify(signing, payload, signature)).isTrue();
-        assertThat(material.certificateIdentity(tls).issuedCertificateChain().orElseThrow()).hasSize(1);
-        assertThat(certificate.createContext().getProtocol()).isEqualTo("TLS");
+        assertThat(installed.issuedCertificateChain().orElseThrow()).hasSize(1);
+        assertThat(installed.createContext().getProtocol()).isEqualTo("TLS");
+        assertThatThrownBy(certificate::createContext).hasMessageContaining("issued certificate chain");
         assertThat(store.readCalls).isEqualTo(sourceReadsAfterSave);
         KeyMaterialDescriptor staleAccount = new KeyMaterialDescriptor(account.alias(), account.purposes(),
                 account.algorithm(), 2);
-        assertThatThrownBy(() -> material.keyPair(staleAccount))
+        assertThatThrownBy(() -> material.read(staleAccount.id()).keyPair())
                 .isInstanceOf(GeneralSecurityException.class).hasMessageContaining("version");
 
         material.close();
@@ -166,7 +168,7 @@ class OrionKeyMaterialTest {
                         new KeyMaterialCodec(options),
                         new OrionEventManager()))) {
             store.material = material;
-            assertThat(material.inventory(Set.of())).isEmpty();
+            assertThat(material.inventory()).isEmpty();
             ConfigurationSecretEnvelope envelope = material.seal(material.configurationCipherKey(), new byte[]{1}, context);
             assertThat(material.open(material.configurationCipherKey(), envelope, context)).containsExactly((byte) 1);
             assertThat(material.revision()).isEqualTo("1");
@@ -287,8 +289,8 @@ class OrionKeyMaterialTest {
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
             generateKeys(reopened, account, configuration.identity());
-            assertThat(reopened.keyPair(account).getPrivate()).isNotNull();
-            assertThat(reopened.keyPair(configuration.identity()).getPrivate()).isNotNull();
+            assertThat(reopened.read(account.id()).keyPair().getPrivate()).isNotNull();
+            assertThat(reopened.read(configuration.identity().id()).keyPair().getPrivate()).isNotNull();
             assertThat(store.load().revision().equals(afterFailure)).isEqualTo(committed);
         }
     }
@@ -307,25 +309,22 @@ class OrionKeyMaterialTest {
             generateKeys(material, account, configuration.identity());
             TestCertificateChain.Authority issuer = TestCertificateChain.root("Certificate issuer");
             X509Certificate original = TestCertificateChain.leaf(
-                    "original.example", material.keyPair(configuration.identity()), issuer);
+                    "original.example", material.read(configuration.identity().id()).keyPair(), issuer);
             X509Certificate replacement = TestCertificateChain.leaf(
-                    "replacement.example", material.keyPair(configuration.identity()), issuer);
-            material.certificateIdentity(configuration).installCertificateChain(
+                    "replacement.example", material.read(configuration.identity().id()).keyPair(), issuer);
+            CertificateIdentity installed = material.certificateIdentity(configuration).installCertificateChain(
                     List.of(original), Optional.empty());
-            assertThatThrownBy(() -> material.certificateIdentity(configuration)
-                    .installCertificateChain(List.of(), Optional.empty()))
+            assertThatThrownBy(() -> installed.installCertificateChain(List.of(), Optional.empty()))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThat(material.certificateIdentity(configuration).issuedCertificateChain().orElseThrow())
+            assertThat(installed.issuedCertificateChain().orElseThrow())
                     .containsExactly(original);
             store.fail = true;
-            assertThatThrownBy(() -> material.certificateIdentity(configuration)
-                    .installCertificateChain(List.of(replacement), Optional.empty()))
+            assertThatThrownBy(() -> installed.installCertificateChain(List.of(replacement), Optional.empty()))
                     .isInstanceOf(IOException.class).hasMessage("Material save failed");
             store.fail = false;
-            assertThatThrownBy(() -> material.certificateIdentity(configuration).issuedCertificateChain())
+            assertThatThrownBy(() -> installed.issuedCertificateChain())
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
-            assertThatThrownBy(() -> material.certificateIdentity(configuration)
-                    .installCertificateChain(List.of(replacement), Optional.empty()))
+            assertThatThrownBy(() -> installed.installCertificateChain(List.of(replacement), Optional.empty()))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
             expected = committed ? replacement : original;
         }
@@ -334,7 +333,13 @@ class OrionKeyMaterialTest {
                 store,
                 new KeyMaterialCodec(options()),
                 new OrionEventManager()))) {
-            assertThat(reopened.certificateIdentity(configuration).issuedCertificateChain().orElseThrow())
+            KeyMaterialDescriptor identity = configuration.identity();
+            TlsMaterialConfiguration saved =
+                    new TlsMaterialConfiguration(new KeyMaterialDescriptor(identity.alias(),
+                    identity.purposes(), identity.algorithm(), committed ? 3 : 2),
+                    configuration.serverIssuerTrustAnchor(), configuration.clientTrustAnchors(),
+                    configuration.clientAuthentication());
+            assertThat(reopened.certificateIdentity(saved).issuedCertificateChain().orElseThrow())
                     .containsExactly(expected);
             assertThat(store.load().revision()).isEqualTo(durableVersion);
         }

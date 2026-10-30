@@ -1,9 +1,11 @@
-package pro.deta.orion.keymaterial;
+package pro.deta.orion.transport.http;
+
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 
 import java.util.List;
 import java.util.Objects;
 
-/** Public metadata for one physical key-material entry. */
+/** Public HTTP metadata for one material version. */
 public record KeyMaterialInventoryEntry(
         KeyMaterialDescriptor descriptor,
         String publicKeyPem,

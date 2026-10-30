@@ -224,7 +224,7 @@ public final class BootstrapContext implements AutoCloseable {
         }
         List<String> selected = List.copyOf(references);
         if (selected.isEmpty()
-                && keyMaterial.privateKeyDescriptors(Set.of(KeyMaterialPurpose.SSH_HOST)).isEmpty()) {
+                && keyMaterial.sshHostKeyPairs(List.of()).isEmpty()) {
             KeyMaterialDescriptor rsa = defaultSshHostKey("ssh-host-rsa", KeyMaterialAlgorithm.RSA);
             KeyMaterialDescriptor ec = defaultSshHostKey("ssh-host-ec", KeyMaterialAlgorithm.EC);
             for (KeyMaterialDescriptor descriptor : List.of(rsa, ec)) {

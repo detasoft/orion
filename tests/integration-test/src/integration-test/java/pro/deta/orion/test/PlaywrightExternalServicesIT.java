@@ -74,7 +74,12 @@ class PlaywrightExternalServicesIT {
             runPlaywright(configuration, identity, rootKey, fixtureRoot, caRoot);
         }
         try (TestServerIdentityMaterial reopened = TestServerIdentityMaterial.open(configuration)) {
-            assertThat(reopened.material().issuedCertificateChain(certificateIdentity)).isPresent();
+            KeyMaterialId selected = null;
+            for (KeyMaterialId id : reopened.material().inventory()) {
+                if (id.alias().equals(certificateIdentity.alias())) selected = id;
+            }
+            assertThat(selected).isNotNull();
+            assertThat(reopened.material().read(selected).issuedCertificateChain()).isPresent();
         }
     }
 

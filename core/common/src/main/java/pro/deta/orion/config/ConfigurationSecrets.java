@@ -3,6 +3,10 @@ package pro.deta.orion.config;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
+import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
+import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecretReference;
@@ -20,6 +24,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 
 /**
@@ -110,8 +115,11 @@ public final class ConfigurationSecrets {
             if (secret.id().equals(id)) {
                 byte[] plaintext = null;
                 try {
-                    plaintext = keyMaterial.open(keyMaterial.configurationCipherKey(),
-                            codec.parse(secret.envelope()), context(owner, id));
+                    ConfigurationSecretEnvelope envelope = codec.parse(secret.envelope());
+                    KeyMaterialDescriptor selected = new KeyMaterialDescriptor(envelope.keyAlias(),
+                            Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES,
+                            envelope.keyVersion());
+                    plaintext = keyMaterial.open(selected, envelope, context(owner, id));
                     return decode(plaintext);
                 } catch (GeneralSecurityException | CharacterCodingException failure) {
                     throw new IllegalStateException("Configuration secret cannot be decrypted");
