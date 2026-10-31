@@ -18,7 +18,7 @@ import pro.deta.orion.auth.check.resource.RepositoryResource;
 import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDocumentRevision;
-import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.internal.UserEmail;
@@ -29,6 +29,7 @@ import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.schema.orion.v2.*;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.util.OrionUtils;
+
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -166,7 +167,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                 // Check scope before revision validation to avoid exposing another organization's configuration.
                 requireOwner(actor, editor.current().result()
                         .valueOrFailure("Cannot read configuration document"), owner);
-                OrionConfigurationModification edit = editor.edit(new OrionRevision.Stored(revision),
+                OrionConfigurationModification edit = editor.edit(new VcRevision.Stored(revision),
                     new ChangeMetadata(new UserEmail(actor.getUserIdentity().getUserId(),
                         ""), create ? "Create S3 connection" : "Update S3 connection")).update(document -> {
                     require(connectionAllowed(actor, document, owner, input.name(), create
@@ -245,7 +246,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                     s3.pathStyleAccess(), s3.accessKeyId().orElse(""), s3.secretKey().isPresent(),
                     s3.sessionToken().isPresent(), change, use));
         }
-        return new Connections(((OrionRevision.Stored) snapshot.revision()).value(), List.copyOf(views));
+        return new Connections(((VcRevision.Stored) snapshot.revision()).value(), List.copyOf(views));
     }
 
     private boolean connectionAllowed(SecurityContext actor, OrionDocument document, Optional<OrganizationId> owner,

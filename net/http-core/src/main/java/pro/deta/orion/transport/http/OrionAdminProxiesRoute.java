@@ -14,7 +14,7 @@ import pro.deta.orion.command.audit.CommandAuditRecord;
 import pro.deta.orion.command.audit.CommandAuditSink;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDocumentRevision;
-import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory.SyncObservation;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.internal.UserEmail;
@@ -26,6 +26,7 @@ import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.RemoteAlias;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.util.OrionUtils;
+
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
@@ -71,7 +72,7 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
                     snapshot.result().valueOrFailure("Cannot read configuration document").system())));
         }
         aliases.sort(Comparator.comparing(AliasResponse::alias));
-        return OrionHttpResponse.ok(new AliasListResponse(aliases, ((OrionRevision.Stored) snapshot.revision()).value()));
+        return OrionHttpResponse.ok(new AliasListResponse(aliases, ((VcRevision.Stored) snapshot.revision()).value()));
     }
 
     @Override
@@ -98,7 +99,7 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
                         || request.credentialKind() != null || request.username() != null || request.knownHosts() != null) {
                     throw new IllegalArgumentException("Retry accepts no configuration changes");
                 }
-                OrionRevision expected = new OrionRevision.Stored(request.revision());
+                VcRevision expected = new VcRevision.Stored(request.revision());
                 snapshot = editor.current();
                 if (!snapshot.revision().equals(expected)) {
                     throw new OrionConfigurationConcurrentUpdateException("Configuration revision changed", null);
@@ -107,7 +108,7 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
                 MutationRequest mutation = request;
                 SecurityContext context = (SecurityContext) req.getAttribute(
                         OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
-                OrionConfigurationModification edit = editor.edit(new OrionRevision.Stored(request.revision()),
+                OrionConfigurationModification edit = editor.edit(new VcRevision.Stored(request.revision()),
                         new ChangeMetadata(new UserEmail(context.getUserIdentity().getUserId(), ""),
                                 "proxy " + action + " " + alias));
                 try {
@@ -132,7 +133,7 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
                     new MutationResponse(status, project(binding, snapshot.result()
                             .valueOrFailure("Cannot read configuration document")
                             .system(), observation),
-                            ((OrionRevision.Stored) snapshot.revision()).value()));
+                            ((VcRevision.Stored) snapshot.revision()).value()));
         } catch (OrionConfigurationConcurrentUpdateException failure) {
             resultCode = "configuration-conflict";
             response = OrionHttpResponse.json(409, Map.of("status", resultCode));

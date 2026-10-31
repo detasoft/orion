@@ -1,14 +1,14 @@
 package pro.deta.orion.util;
 
-import java.util.List;
-import java.util.function.Consumer;
-
 public interface VcResource {
     VcRevision getRevision();
 
-    void commit(VcChangeDescription vcChangeDescription, List<Consumer<? extends VcResource>> changes);
+    /**
+     * responsibilities: the changes being applied, have to commit and update revision.
+     *
+     * @param vcChangeDescription
+     */
+    void commit(VcChangeDescription vcChangeDescription);
 
-    Modification<? extends VcResource> modify();
-
-    Modification<? extends VcResource> modify();
+    Modification<? extends VcResource> withModification();
 }

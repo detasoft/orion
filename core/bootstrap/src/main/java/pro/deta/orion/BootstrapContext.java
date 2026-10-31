@@ -5,7 +5,7 @@ import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDocumentRevision;
-import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.config.OrionConfigurationModification;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -159,7 +159,7 @@ public final class BootstrapContext implements AutoCloseable {
                 return Optional.empty();
             }
             OrionDocument current = file.result().valueOrFailure("Cannot read configuration document");
-            if (file.revision() instanceof OrionRevision.Absent) {
+            if (file.revision() instanceof VcRevision.Absent) {
                 throw new IllegalStateException("Proxy adoption requires a configuration revision");
             }
             ConfigurationSecrets secrets = new ConfigurationSecrets(() -> current, keyMaterial);
@@ -177,7 +177,7 @@ public final class BootstrapContext implements AutoCloseable {
             if (preparedFile.result().isFailure()) {
                 return Optional.empty();
             }
-            if (preparedFile.revision() instanceof OrionRevision.Absent
+            if (preparedFile.revision() instanceof VcRevision.Absent
                     || !file.result()
                             .valueOrFailure("Cannot read configuration document")
                             .equals(preparedFile.result()

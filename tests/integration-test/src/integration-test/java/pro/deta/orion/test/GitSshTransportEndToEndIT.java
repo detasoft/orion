@@ -1,6 +1,6 @@
 package pro.deta.orion.test;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.sshd.client.SshClient;
@@ -42,10 +42,7 @@ import pro.deta.orion.config.OrionConfigurationEditor.ConfigurationStatus;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
-import pro.deta.orion.util.FileUtils;
-import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 
@@ -1554,8 +1551,8 @@ class GitSshTransportEndToEndIT {
                 .create("orion")
                 .valueOrFailure("ACL repository should be created")
                 .files().withAccess("refs/heads/" + BRANCH,
-                        new GitCommitMetadata(
-                                new GitCommitAuthor("E2E Test", "e2e@example.test"), "seed e2e access control"), fileAccess -> {
+                        new VcChangeDescription(
+                                new VcChangeAuthor("E2E Test", "e2e@example.test"), "seed e2e access control"), fileAccess -> {
             fileAccess.write("orion.xml", output.toByteArray());
             fileAccess.apply();
             return null;
@@ -1629,8 +1626,8 @@ class GitSshTransportEndToEndIT {
                 .create(repositoryName)
                 .valueOrFailure("Project repository should be created")
                 .files().withAccess("refs/heads/" + BRANCH,
-                        new GitCommitMetadata(
-                                new GitCommitAuthor("E2E Test", "e2e@example.test"), "seed " + repositoryName), fileAccess -> {
+                        new VcChangeDescription(
+                                new VcChangeAuthor("E2E Test", "e2e@example.test"), "seed " + repositoryName), fileAccess -> {
             fileAccess.write("README.md", content.getBytes(StandardCharsets.UTF_8));
             fileAccess.apply();
             return null;

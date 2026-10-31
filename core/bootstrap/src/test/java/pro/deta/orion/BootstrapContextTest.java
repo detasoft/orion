@@ -18,7 +18,7 @@ import java.security.KeyPair;
 import java.security.GeneralSecurityException;
 import java.util.Set;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.*;
 
 import pro.deta.orion.config.OrionConfigurationEditor;
 
@@ -27,7 +27,6 @@ import com.sun.net.httpserver.HttpServer;
 import pro.deta.orion.bootstrap.config.location.BootstrapConfigurationReader;
 
 import pro.deta.orion.config.OrionDocumentRevision;
-import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.config.OrionVersionedConfigurationStorage;
 import pro.deta.orion.internal.ChangeMetadata;
 import java.net.InetSocketAddress;
@@ -43,7 +42,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.s3.S3NativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
@@ -67,7 +65,6 @@ import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.schema.orion.v2.GitProxyBinding;
 import pro.deta.orion.schema.orion.v2.GitCredentialKind;
 import pro.deta.orion.schema.orion.v2.RemoteAlias;
-import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -245,7 +242,7 @@ class BootstrapContextTest {
                     .files()
                     .withAccess(
                             "refs/heads/main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "advance bootstrap source"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "advance bootstrap source"),
                             access -> {
                                 access.write(
                                         "configuration".equals(delayedInput)
@@ -261,7 +258,7 @@ class BootstrapContextTest {
                     context.repositoryFactory().fileEvents(NativeGitRepositoryFactory.CONFIGURATION_SOURCE,
                             configuration.getBootstrap().getConfiguration()))) {
                 assertThat(
-                                storage.load(new OrionRevision.Stored(firstCommit))
+                                storage.load(new VcRevision.Stored(firstCommit))
                                         .result()
                                                 .valueOrFailure("Cannot read configuration document")).isEqualTo(first);
                 assertThat(storage.load().result().valueOrFailure("Cannot read configuration document"))
@@ -419,7 +416,7 @@ class BootstrapContextTest {
                                          backend,
                                          "orion",
                                          "refs/heads/main",
-                                         "material.p12")), new GitCommitMetadata(GitCommitAuthor.EMPTY,
+                                         "material.p12")), new VcChangeDescription(VcChangeAuthor.EMPTY,
                                                  "Update server identity material")),
                              new KeyMaterialCodec(options),
                              testRuntime.unstartedEvents()))) {
@@ -464,7 +461,7 @@ class BootstrapContextTest {
                         backend,
                         "orion",
                         "refs/heads/main",
-                        "material.p12")), new GitCommitMetadata(GitCommitAuthor.EMPTY,
+                        "material.p12")), new VcChangeDescription(VcChangeAuthor.EMPTY,
                                 "Update server identity material")).load().revision())
                     .isEqualTo(backend.retained("orion").refs().get("refs/heads/main"));
         }
@@ -499,7 +496,7 @@ class BootstrapContextTest {
                             incomplete,
                             "orion",
                             "refs/heads/main",
-                            "material.p12")), new GitCommitMetadata(GitCommitAuthor.EMPTY,
+                            "material.p12")), new VcChangeDescription(VcChangeAuthor.EMPTY,
                                     "Update server identity material")).load().revision())
                         .isEqualTo(incomplete.retained("orion").refs().get("refs/heads/main"));
 
@@ -790,7 +787,7 @@ class BootstrapContextTest {
                         backend,
                         "orion",
                         "refs/heads/main",
-                        "material.p12")), new GitCommitMetadata(GitCommitAuthor.EMPTY,
+                        "material.p12")), new VcChangeDescription(VcChangeAuthor.EMPTY,
                                 "Update server identity material")).load().revision())
                     .isEqualTo(backend.retained("orion").refs().get("refs/heads/main"));
         }
@@ -822,7 +819,7 @@ class BootstrapContextTest {
                 fileUri ? directory.toUri().toString() : directory.toString());
         try (NativeGitRepositoryProvider backend = repositoryWith(configuration,
                 Map.of("material.p12", materialBytes(configuration)))) {
-            OrionRevision firstRevision;
+            VcRevision firstRevision;
             try (BootstrapContext context = openContext(configuration, ENVIRONMENT, borrow(backend))) {
                 assertThat(context.repositoryFactory()
                         .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE)).isPresent();
@@ -830,7 +827,7 @@ class BootstrapContextTest {
                         new NativeGitOrionConfigurationStorage(context.repositoryFactory().fileEvents(
                 NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getConfiguration()));
                 storage.save(
-                        new OrionRevision.Absent(),
+                        new VcRevision.Absent(),
                         OrionXml.read(new ByteArrayInputStream(xml())),
                         new ChangeMetadata(UserEmail.EMPTY, "initial ACL"));
                 OrionDocumentRevision first = storage.load();
@@ -1073,13 +1070,13 @@ class BootstrapContextTest {
         configuration.getBootstrap().getKeyMaterial().setLocation("git+" + upstream.bare().toUri());
         try (var ignored = upstream.git()) {
             OrionDocument adopted;
-            OrionRevision adoptedRevision;
+            VcRevision adoptedRevision;
             try (BootstrapContext first = openContext(configuration, ENVIRONMENT,
                     NativeGitRepositoryProvider.inMemory(testRuntime.unstartedEvents()))) {
                 OrionVersionedConfigurationStorage storage =
                         new NativeGitOrionConfigurationStorage(first.repositoryFactory().fileEvents(
                 NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getConfiguration()));
-                OrionRevision initialRevision =
+                VcRevision initialRevision =
                         storage.load().revision();
                 adopted = adopt(first, storage);
                 adoptedRevision =
@@ -1282,12 +1279,12 @@ class BootstrapContextTest {
             if (mode == Mode.FAIL_RELOAD && saves > 0) {
                 return new OrionDocumentRevision(
                         new Result.Failure<>(Result.FailureCode.GENERAL, "reload failed"),
-                        new OrionRevision.Absent());
+                        new VcRevision.Absent());
             }
-            OrionRevision revision =
+            VcRevision revision =
                     mode == Mode.UNVERSIONED
-                            ? new OrionRevision.Absent()
-                            : new OrionRevision.Stored(Integer.toString(version));
+                            ? new VcRevision.Absent()
+                            : new VcRevision.Stored(Integer.toString(version));
             OrionDocument document;
             try {
                 document =
@@ -1307,7 +1304,7 @@ class BootstrapContextTest {
             } catch (IOException failure) {
                 return new OrionDocumentRevision(
                         new Result.Failure<>(Result.FailureCode.GENERAL, "invalid XML", failure),
-                        new OrionRevision.Absent());
+                        new VcRevision.Absent());
             }
             OrionDocumentRevision snapshot = new OrionDocumentRevision(Result.of(document), revision);
             Runnable callback = afterLoad;
@@ -1319,16 +1316,16 @@ class BootstrapContextTest {
         }
 
         @Override
-        public OrionDocumentRevision load(OrionRevision.Stored revision) {
+        public OrionDocumentRevision load(VcRevision.Stored revision) {
             OrionDocumentRevision result = load();
             if (!result.result().isFailure() && result.revision().equals(revision)) return result;
             return new OrionDocumentRevision(
-                    new Result.Failure<>(Result.FailureCode.NOT_FOUND), new OrionRevision.Absent());
+                    new Result.Failure<>(Result.FailureCode.NOT_FOUND), new VcRevision.Absent());
         }
 
         @Override
-        public OrionRevision.Stored save(OrionRevision expected, OrionDocument document, ChangeMetadata metadata) {
-            assertThat(expected).isEqualTo(new OrionRevision.Stored(Integer.toString(version)));
+        public VcRevision.Stored save(VcRevision expected, OrionDocument document, ChangeMetadata metadata) {
+            assertThat(expected).isEqualTo(new VcRevision.Stored(Integer.toString(version)));
             saves++;
             if (mode == Mode.FAIL_SAVE) {
                 throw new IllegalStateException("save failed");
@@ -1364,7 +1361,7 @@ class BootstrapContextTest {
             if (mode == Mode.LOST_RESPONSE) {
                 throw new IllegalStateException("response lost");
             }
-            return new OrionRevision.Stored(Integer.toString(version));
+            return new VcRevision.Stored(Integer.toString(version));
         }
 
     }
@@ -1417,8 +1414,8 @@ class BootstrapContextTest {
                                 .files()
                                 .withAccess(
                                         "refs/heads/main",
-                                        new GitCommitMetadata(
-                                                GitCommitAuthor.EMPTY, "invalid update after bootstrap input load"),
+                                        new VcChangeDescription(
+                                                VcChangeAuthor.EMPTY, "invalid update after bootstrap input load"),
                                         fileAccess -> {
                                             fileAccess.write("orion.xml", bytes("<not-valid-xml"));
                                             fileAccess.apply();
@@ -1429,8 +1426,8 @@ class BootstrapContextTest {
                                 .files()
                                 .withAccess(
                                         "refs/heads/main",
-                                        new GitCommitMetadata(
-                                                GitCommitAuthor.EMPTY, "remove primary configuration after bootstrap input load"),
+                                        new VcChangeDescription(
+                                                VcChangeAuthor.EMPTY, "remove primary configuration after bootstrap input load"),
                                         fileAccess -> {
                                             fileAccess.delete("orion.xml");
                                             fileAccess.apply();
@@ -1474,8 +1471,8 @@ class BootstrapContextTest {
                     .files()
                     .withAccess(
                             "refs/heads/main",
-                            new GitCommitMetadata(
-                                    GitCommitAuthor.EMPTY, "valid update after bootstrap input load"),
+                            new VcChangeDescription(
+                                    VcChangeAuthor.EMPTY, "valid update after bootstrap input load"),
                             fileAccess -> {
                                 fileAccess.write("orion.xml", output.toByteArray());
                                 fileAccess.apply();
@@ -1525,7 +1522,7 @@ class BootstrapContextTest {
             try {
                 assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
                 source.files().withAccess("refs/heads/main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "invalid B after activating A"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "invalid B after activating A"),
                         fileAccess -> {
                             fileAccess.write("orion.xml", bytes("<not-valid-xml"));
                             fileAccess.apply();
@@ -1554,7 +1551,7 @@ class BootstrapContextTest {
                 source.files()
                         .withAccess(
                                 "refs/heads/main",
-                                new GitCommitMetadata(GitCommitAuthor.EMPTY, "valid C after invalid B"),
+                                new VcChangeDescription(VcChangeAuthor.EMPTY, "valid C after invalid B"),
                                 fileAccess -> {
                                     fileAccess.write("orion.xml", output.toByteArray());
                                     fileAccess.apply();
@@ -1707,7 +1704,7 @@ class BootstrapContextTest {
                 .files()
                 .withAccess(
                         configuration.getBootstrap().getConfiguration().selectedRef(),
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed bootstrap inputs"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "seed bootstrap inputs"),
                         fileAccess -> {
                             for (Map.Entry<String, byte[]> fileEntry : files.entrySet()) {
                                 fileAccess.write(fileEntry.getKey(), fileEntry.getValue());

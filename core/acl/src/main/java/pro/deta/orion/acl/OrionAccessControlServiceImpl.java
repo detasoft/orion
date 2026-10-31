@@ -43,6 +43,7 @@ import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OidcProvider;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.util.OrionUtils;
 import java.io.PrintStream;
@@ -83,7 +84,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     @Override
-    public AccessControlAccess createAccess(OrionRevision revision, ChangeMetadata metadata) {
+    public AccessControlAccess createAccess(VcRevision revision, ChangeMetadata metadata) {
         OrionConfigurationModification modification = editor.edit(revision, metadata);
         return new AccessControlAccess(modification, orionPasswordHashingService);
     }

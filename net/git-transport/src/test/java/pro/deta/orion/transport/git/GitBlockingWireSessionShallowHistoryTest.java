@@ -1,8 +1,8 @@
 package pro.deta.orion.transport.git;
 
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -157,7 +157,7 @@ class GitBlockingWireSessionShallowHistoryTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
                         fileAccess -> {
                             fileAccess.write("file", new byte[] {1});
                             fileAccess.apply();

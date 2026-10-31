@@ -59,7 +59,7 @@ import pro.deta.orion.transport.git.command.read.OperatorQueryResult;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.internal.ChangeMetadata;
 import java.nio.file.Path;
 import java.util.Base64;
@@ -405,7 +405,7 @@ class LegacySshCommandCatalogTest {
         private final java.util.ArrayList<String> listUsers = new java.util.ArrayList<>();
 
         @Override
-        public AccessControlAccess createAccess(OrionRevision revision, ChangeMetadata metadata) {
+        public AccessControlAccess createAccess(VcRevision revision, ChangeMetadata metadata) {
             throw new UnsupportedOperationException();
         }
         @Override

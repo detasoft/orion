@@ -35,8 +35,9 @@ import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.config.OrionConfigurationModification;
-import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.internal.ChangeMetadata;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -527,14 +528,14 @@ class OrionSshAuthenticatorTest {
         }
 
         @Override
-        public AccessControlAccess createAccess(OrionRevision revision, ChangeMetadata metadata) {
+        public AccessControlAccess createAccess(VcRevision revision, ChangeMetadata metadata) {
             return new AccessControlAccess(
                     new OrionConfigurationModification(
                             OrionDocument.withAccessControl(new pro.deta.orion.schema.acl.AccessControl()), revision,
                             document ->
-                                    revision instanceof OrionRevision.Stored stored
+                                    revision instanceof VcRevision.Stored stored
                                             ? stored
-                                            : new OrionRevision.Stored("saved")),
+                                            : new VcRevision.Stored("saved")),
                     new OrionPasswordHashingService()) {
 
                 @Override

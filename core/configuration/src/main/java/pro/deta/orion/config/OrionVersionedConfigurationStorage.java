@@ -2,6 +2,7 @@ package pro.deta.orion.config;
 
 import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.util.VcRevision;
 
 /**
  * Reads document results with independent storage revisions and saves against an expected revision.
@@ -10,7 +11,7 @@ import pro.deta.orion.schema.orion.v2.OrionDocument;
 public interface OrionVersionedConfigurationStorage {
     OrionDocumentRevision load();
 
-    OrionDocumentRevision load(OrionRevision.Stored revision);
+    OrionDocumentRevision load(VcRevision.Stored revision);
 
-    OrionRevision.Stored save(OrionRevision expectedRevision, OrionDocument document, ChangeMetadata metadata);
+    VcRevision.Stored save(VcRevision expectedRevision, OrionDocument document, ChangeMetadata metadata);
 }

@@ -23,6 +23,8 @@ import pro.deta.orion.test.integration.git.GitRepositoryFixture;
 import pro.deta.orion.test.integration.git.GitSshTestServer;
 import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.schema.orion.OrionXml;
+import pro.deta.orion.util.VcRevision;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -122,7 +124,7 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
                             byte[] materialBeforeUpdate = readFileFromRepository(remoteAclRepository, "material.p12");
                             TestRuntimeBootstrap.updateConfiguration(
                                     component,
-                                    new pro.deta.orion.config.OrionRevision.Stored(
+                                    new VcRevision.Stored(
                                             initialAcl.etag().replace("\"", "")),
                                     new pro.deta.orion.internal.ChangeMetadata(
                                             UserEmail.EMPTY, "Update remote configuration"),

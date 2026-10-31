@@ -1,6 +1,6 @@
 package pro.deta.orion.git.proxy;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
@@ -10,7 +10,7 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.client.GitClientFailure;
 import pro.deta.orion.git.client.GitClientTransportException;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
@@ -77,7 +77,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "save"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "save"),
                         access -> {
                             access.write("orion.xml", new byte[] {1});
                             access.apply();
@@ -102,7 +102,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         assertThat(repository.name()).isEqualTo(endpoint);
         assertThat(refreshes).hasValue(2);
         var update = FileTestSupport.prepared(repository.files(), "refs/heads/main", "public push",
-                GitCommitAuthor.EMPTY, fileAccess -> {
+                VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("file", new byte[]{1});
             return null;
         });
@@ -137,7 +137,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                                 retained.files()
                                         .withAccess(
                                                 "refs/heads/main",
-                                                new GitCommitMetadata(GitCommitAuthor.EMPTY, "stale handle"),
+                                                new VcChangeDescription(VcChangeAuthor.EMPTY, "stale handle"),
                                                 fileAccess -> {
                                                     fileAccess.write("file", new byte[] {1});
                                                     fileAccess.apply();
@@ -167,7 +167,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         local.files()
                 .withAccess(
                         "refs/heads/main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "local content"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "local content"),
                         fileAccess -> {
                             fileAccess.write("local", new byte[] {2});
                             fileAccess.apply();
@@ -301,7 +301,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 });
         String name = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
         NativeGitRepository repository = provider.provider().openForWrite(name).valueOrFailure("repository");
-        var prepared = FileTestSupport.prepared(repository.files(), "main", "prepared", GitCommitAuthor.EMPTY,
+        var prepared = FileTestSupport.prepared(repository.files(), "main", "prepared", VcChangeAuthor.EMPTY,
                 fileAccess -> {
             fileAccess.write("orion.xml", new byte[]{1});
             return null;
@@ -321,7 +321,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         String name = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
         NativeGitRepository repository = provider.provider().openForWrite(name).valueOrFailure("repository");
         var prepared = FileTestSupport.prepared(repository.files(), "refs/heads/main", "update",
-                GitCommitAuthor.EMPTY, fileAccess -> {
+                VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", "updated".getBytes(StandardCharsets.UTF_8));
             return null;
         });
@@ -375,7 +375,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         writable.files()
                 .withAccess(
                         "refs/heads/main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "save through proxy"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "save through proxy"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "configuration".getBytes(StandardCharsets.UTF_8));
@@ -516,7 +516,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         writable.files()
                 .withAccess(
                         "refs/heads/main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initialize configuration"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initialize configuration"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "configuration".getBytes(StandardCharsets.UTF_8));
@@ -540,7 +540,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 .files()
                 .withAccess(
                         "refs/heads/main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "delete configuration"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "delete configuration"),
                         fileAccess -> {
                             fileAccess.delete("orion.xml");
                             fileAccess.apply();
@@ -596,7 +596,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 .files()
                 .withAccess(
                         "refs/heads/main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "update configuration"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "update configuration"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "updated".getBytes(StandardCharsets.UTF_8));
@@ -609,7 +609,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 .files()
                 .withAccess(
                         "refs/heads/main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "delete configuration"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "delete configuration"),
                         fileAccess -> {
                             fileAccess.delete("orion.xml");
                             fileAccess.apply();
@@ -636,7 +636,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 .files()
                 .withAccess(
                         "refs/heads/main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "direct"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "direct"),
                         fileAccess -> {
                             fileAccess.write("file.txt", new byte[] {1});
                             fileAccess.apply();
@@ -739,7 +739,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                                 retained.files()
                                         .withAccess(
                                                 "refs/heads/main",
-                                                new GitCommitMetadata(GitCommitAuthor.EMPTY, "save"),
+                                                new VcChangeDescription(VcChangeAuthor.EMPTY, "save"),
                                                 fileAccess -> {
                                                     fileAccess.write("orion.xml", new byte[] {1});
                                                     fileAccess.apply();
@@ -854,7 +854,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "seed"),
                         fileAccess -> {
                             fileAccess.write("other.xml", new byte[] {1});
                             fileAccess.apply();
@@ -874,7 +874,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "repair"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "repair"),
                         fileAccess -> {
                             fileAccess.write("orion.xml", new byte[] {2});
                             fileAccess.apply();
@@ -895,7 +895,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "seed"),
                         fileAccess -> {
                             fileAccess.write("orion.xml", new byte[] {1});
                             fileAccess.apply();
@@ -936,7 +936,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                                             .files()
                                             .withAccess(
                                                     "refs/heads/main",
-                                                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "save"),
+                                                    new VcChangeDescription(VcChangeAuthor.EMPTY, "save"),
                                                     fileAccess -> {
                                                         fileAccess.write(
                                                                 "orion.xml", new byte[] {1});

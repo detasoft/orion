@@ -18,13 +18,13 @@ import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
-import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.Connection;
+import pro.deta.orion.util.VcRevision;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -203,7 +203,7 @@ class AcmeConfigurationTest {
                 List.of("example.test"), kid, key.toCharArray(), null), "root");
         events.awaitEvents();
         assertThat(desired.stored().revision())
-                .isEqualTo(new pro.deta.orion.config.OrionRevision.Stored(saved.revision()));
+                .isEqualTo(new VcRevision.Stored(saved.revision()));
         return desired.stored().result().valueOrFailure("configuration");
     }
 }

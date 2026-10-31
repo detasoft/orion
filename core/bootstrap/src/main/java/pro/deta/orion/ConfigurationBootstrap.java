@@ -31,6 +31,7 @@ public final class ConfigurationBootstrap {
             BootstrapConfiguration configuration,
             NativeGitRepositoryFactory repositoryFactory) {
         return new NativeGitOrionConfigurationStorage(repositoryFactory.fileEvents(
+//                AI_TODO зачем тут configuration.getBootstrap().getAccessControl() - он создаётся сильно позже bootstrap - надо же сначала сделать конфигурацию, (репозитории вот это всё) и только потом настраивать ACL?
                 NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getConfiguration()));
     }
 

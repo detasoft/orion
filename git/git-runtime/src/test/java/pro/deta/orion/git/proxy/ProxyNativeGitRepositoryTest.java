@@ -1,6 +1,6 @@
 package pro.deta.orion.git.proxy;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -11,7 +11,7 @@ import pro.deta.orion.decision.Decision;
 import pro.deta.orion.decision.DecisionAction;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.decision.DecisionRequiredException;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
@@ -52,7 +52,7 @@ class ProxyNativeGitRepositoryTest {
                 .files()
                 .withAccess(
                         location.refName(),
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "first"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "first"),
                         fileAccess -> {
                             fileAccess.write("orion.xml", "first".getBytes());
                             fileAccess.apply();
@@ -60,7 +60,7 @@ class ProxyNativeGitRepositoryTest {
                         });
         String oldId = repository.refs().get(location.refName());
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), location.refName(),
-                "second", GitCommitAuthor.EMPTY, fileAccess -> {
+                "second", VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", "second".getBytes());
             return null;
         });
@@ -91,7 +91,7 @@ class ProxyNativeGitRepositoryTest {
                 .files()
                 .withAccess(
                         location.refName(),
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "first"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "first"),
                         fileAccess -> {
                             fileAccess.write("file", new byte[] {1});
                             fileAccess.apply();
@@ -99,7 +99,7 @@ class ProxyNativeGitRepositoryTest {
                         });
         String previous = repository.refs().get(location.refName());
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), location.refName(),
-                "second", GitCommitAuthor.EMPTY, fileAccess -> {
+                "second", VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("file", new byte[]{2});
             return null;
         });

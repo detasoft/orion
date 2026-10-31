@@ -1,6 +1,6 @@
 package pro.deta.orion;
 
-import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.acl.AccessControlAccess;
 import pro.deta.orion.auth.AuthenticationResult;
@@ -42,6 +42,6 @@ public interface OrionAccessControlService {
             AuthenticationResult.Success renewalAuthority,
             long expiresInSeconds);
 
-    AccessControlAccess createAccess(OrionRevision revision, ChangeMetadata metadata);
+    AccessControlAccess createAccess(VcRevision revision, ChangeMetadata metadata);
 
 }

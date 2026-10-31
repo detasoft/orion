@@ -1,6 +1,6 @@
 package pro.deta.orion.test;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import org.apache.sshd.client.SshClient;
 import org.apache.sshd.client.channel.ClientChannelEvent;
@@ -10,7 +10,7 @@ import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.test.integration.OrionTestRootAccess;
 import pro.deta.orion.util.KeyUtils;
@@ -46,8 +46,8 @@ class PlaywrightTransportTest {
 
             orion.repositoryProvider().create("transport-check")
                     .valueOrFailure("test Git repository")
-                    .files().withAccess("refs/heads/main", new GitCommitMetadata(
-                            new GitCommitAuthor("Test", "test@orion.test"), "seed transport check"), fileAccess -> {
+                    .files().withAccess("refs/heads/main", new VcChangeDescription(
+                            new VcChangeAuthor("Test", "test@orion.test"), "seed transport check"), fileAccess -> {
                 fileAccess.write("README.md", "transport check\n".getBytes(StandardCharsets.UTF_8));
                 fileAccess.apply();
                 return null;

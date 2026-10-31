@@ -9,7 +9,7 @@ import pro.deta.orion.git.client.GitClientTransportException;
 import pro.deta.orion.git.client.GitFileClientTransport;
 import pro.deta.orion.git.client.GitReceivePackResult;
 import pro.deta.orion.git.client.GitRemoteAdvertisement;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.FileMode;
@@ -51,7 +51,7 @@ class NativeBootstrapGitPusherTest {
         NativeBootstrapGitFetcher fetcher = new NativeBootstrapGitFetcher();
         fetcher.fetch(location, new GitFileClientTransport(), repository);
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), location.refName(),
-                "proxy update", GitCommitAuthor.EMPTY, fileAccess -> {
+                "proxy update", VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", "from proxy".getBytes());
             fileAccess.write("run.sh", FileMode.EXECUTABLE_FILE, "#!/bin/sh\n".getBytes());
             fileAccess.write("link", FileMode.SYMLINK, "run.sh".getBytes());
@@ -94,7 +94,7 @@ class NativeBootstrapGitPusherTest {
         new NativeBootstrapGitFetcher().fetch(location, new GitFileClientTransport(), repository);
         String localOldId = repository.refs().get(location.refName());
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), location.refName(),
-                "proxy update", GitCommitAuthor.EMPTY, fileAccess -> {
+                "proxy update", VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", "proxy change".getBytes());
             return null;
         });
@@ -130,7 +130,7 @@ class NativeBootstrapGitPusherTest {
         BootstrapGitLocation location = location(tempDir.resolve("upstream.git"));
         NativeGitRepository repository = repository(location);
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), location.refName(),
-                "update", GitCommitAuthor.EMPTY, fileAccess -> {
+                "update", VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", new byte[]{1});
             return null;
         });

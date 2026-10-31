@@ -3,9 +3,9 @@ package pro.deta.orion.test;
 import pro.deta.orion.storage.BlobStorage;
 import pro.deta.orion.KeyMaterialBootstrap;
 
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import pro.deta.orion.KeyMaterialCreation;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -29,6 +29,7 @@ import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.test.integration.s3.MinioS3TestServer;
 import pro.deta.orion.config.OrionDocumentRevision;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -100,7 +101,7 @@ class S3BootstrapRestartIT {
                         .files()
                         .withAccess(
                                 CONFIGURATION_REF,
-                                new GitCommitMetadata(GitCommitAuthor.EMPTY, "Seed bootstrap configuration"),
+                                new VcChangeDescription(VcChangeAuthor.EMPTY, "Seed bootstrap configuration"),
                                 access -> {
                                     access.write(CONFIGURATION_PATH, xml);
                                     access.apply();
@@ -110,7 +111,7 @@ class S3BootstrapRestartIT {
                         .files()
                         .withAccess(
                                 MATERIAL_REF,
-                                new GitCommitMetadata(GitCommitAuthor.EMPTY, "Seed bootstrap key material"),
+                                new VcChangeDescription(VcChangeAuthor.EMPTY, "Seed bootstrap key material"),
                                 access -> {
                                     access.write(MATERIAL_PATH, material);
                                     access.apply();

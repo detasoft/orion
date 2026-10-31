@@ -1,8 +1,8 @@
 package pro.deta.orion.test.integration.git;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.git.fileapi.GitFileAccess;
 import pro.deta.orion.git.fileapi.GitFileApi;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
@@ -17,18 +17,18 @@ import java.util.List;
 public final class FileTestSupport {
     private FileTestSupport() {}
 
-    public static Prepared prepared(GitFileApi files, String branch, String message, GitCommitAuthor author,
+    public static Prepared prepared(GitFileApi files, String branch, String message, VcChangeAuthor author,
             CheckedFunction<GitFileAccess, Void> changes) throws Exception {
-        return files.withAccess(branch, new GitCommitMetadata(author, message), access -> {
+        return files.withAccess(branch, new VcChangeDescription(author, message), access -> {
             changes.apply(access);
             return prepared(access);
         });
     }
 
     public static Prepared prepared(GitFileApi files, String branch, String revision,
-            String message, GitCommitAuthor author, CheckedFunction<GitFileAccess, Void> changes) throws Exception {
+            String message, VcChangeAuthor author, CheckedFunction<GitFileAccess, Void> changes) throws Exception {
         return files.withAccess(branch, revision,
-                new GitCommitMetadata(author, message), access -> {
+                new VcChangeDescription(author, message), access -> {
             changes.apply(access);
             return prepared(access);
         });

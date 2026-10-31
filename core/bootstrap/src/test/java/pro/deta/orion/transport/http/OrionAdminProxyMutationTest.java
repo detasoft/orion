@@ -40,10 +40,12 @@ import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.schema.orion.v2.GitProxyBinding;
 import pro.deta.orion.schema.orion.v2.RemoteAlias;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.config.ConfigurationChanged;
 import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.internal.ChangeMetadata;
+
 import java.io.*;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
@@ -547,7 +549,7 @@ class OrionAdminProxyMutationTest {
             f.storage.snapshot =
                     new OrionDocumentRevision(
                             Result.of(f.storage.snapshot.result()
-                                    .valueOrFailure("Cannot read configuration document")), new OrionRevision.Stored("external"));
+                                    .valueOrFailure("Cannot read configuration document")), new VcRevision.Stored("external"));
             testRuntime.events().publishAndWait(new ConfigurationChanged(f.storage, f.storage.snapshot));
             assertThat(f.post(old).status).isEqualTo(409);
             Reply listing = f.request("GET", Map.of(), true);
@@ -562,7 +564,7 @@ class OrionAdminProxyMutationTest {
         try (var f = new Fixture()) {
             var first = f.command("create", "credential", f.upstream(), "private-token");
             assertThat(f.post(first).status).isEqualTo(201);
-            OrionRevision version = f.storage.snapshot.revision();
+            VcRevision version = f.storage.snapshot.revision();
             assertThat(f.post(first).status).isEqualTo(409);
             assertThat(f.storage.snapshot.revision()).isEqualTo(version);
             f.storage.conflict = true;
@@ -834,7 +836,7 @@ class OrionAdminProxyMutationTest {
             command.put("action", action);
             command.put("scope", "system");
             command.put("alias", alias);
-            command.put("revision", ((OrionRevision.Stored) editor.current().revision()).value());
+            command.put("revision", ((VcRevision.Stored) editor.current().revision()).value());
             if (upstream != null) {
                 command.put("upstream", upstream);
                 command.put("ref", "main");
@@ -897,7 +899,7 @@ class OrionAdminProxyMutationTest {
 
     private final class MemoryStorage implements OrionVersionedConfigurationStorage {
         OrionDocumentRevision snapshot = new OrionDocumentRevision(
-                Result.of(OrionDocument.withAccessControl(new AccessControl())), new OrionRevision.Stored("0"));
+                Result.of(OrionDocument.withAccessControl(new AccessControl())), new VcRevision.Stored("0"));
         int saves;
         boolean conflict;
         boolean failSave;
@@ -908,23 +910,23 @@ class OrionAdminProxyMutationTest {
         }
 
         @Override
-        public OrionDocumentRevision load(OrionRevision.Stored revision) {
+        public OrionDocumentRevision load(VcRevision.Stored revision) {
             return snapshot.revision().equals(revision)
                     ? load()
                     : new OrionDocumentRevision(
                             new Result.Failure<>(Result.FailureCode.NOT_FOUND),
-                            new OrionRevision.Absent());
+                            new VcRevision.Absent());
         }
-        @Override public synchronized OrionRevision.Stored save(OrionRevision expected,
+        @Override public synchronized VcRevision.Stored save(VcRevision expected,
                 OrionDocument document, ChangeMetadata metadata) {
             if (failSave) throw new IllegalStateException("storage unavailable");
             if (conflict || !snapshot.revision().equals(expected)) {
                 throw new OrionConfigurationConcurrentUpdateException("configuration conflict", null);
             }
-            if (snapshot.revision() instanceof OrionRevision.Stored stored && snapshot.result()
+            if (snapshot.revision() instanceof VcRevision.Stored stored && snapshot.result()
                     .valueOrFailure("Cannot read configuration document")
                     .equals(document)) return stored;
-            OrionRevision.Stored saved = new OrionRevision.Stored(Integer.toString(++saves));
+            VcRevision.Stored saved = new VcRevision.Stored(Integer.toString(++saves));
             snapshot = new OrionDocumentRevision(Result.of(document), saved);
             testRuntime.events().publish(new ConfigurationChanged(this, snapshot));
             return saved;

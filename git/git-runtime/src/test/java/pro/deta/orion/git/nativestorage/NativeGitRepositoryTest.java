@@ -1,13 +1,13 @@
 package pro.deta.orion.git.nativestorage;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import pro.deta.orion.git.parser.v2.id.RefId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
@@ -43,7 +43,7 @@ class NativeGitRepositoryTest {
                     .files()
                     .withAccess(
                             "topic",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "create"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "create"),
                             fileAccess -> {
                                 fileAccess.write("./каталог//файл.txt", file);
                                 fileAccess.apply();
@@ -66,7 +66,7 @@ class NativeGitRepositoryTest {
                     .files()
                     .withAccess(
                             "main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "create"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "create"),
                             fileAccess -> {
                                 fileAccess.write("file", file);
                                 fileAccess.apply();
@@ -80,7 +80,7 @@ class NativeGitRepositoryTest {
                                             .files()
                                             .withAccess(
                                                     "main",
-                                                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "invalid"),
+                                                    new VcChangeDescription(VcChangeAuthor.EMPTY, "invalid"),
                                                     fileAccess -> {
                                                         fileAccess.write(path, file);
                                                         fileAccess.apply();
@@ -101,7 +101,7 @@ class NativeGitRepositoryTest {
             assertThatThrownBy(() -> repository.files().readBytes("main", "file"))
                     .isInstanceOf(GitOperationException.class).hasMessageContaining("Malformed tree entry");
             assertThatThrownBy(() -> FileTestSupport.prepared(repository.files(), "main", "update",
-                    GitCommitAuthor.EMPTY, fileAccess -> {
+                    VcChangeAuthor.EMPTY, fileAccess -> {
                 fileAccess.write("other", new byte[]{1});
                 return null;
             }))
@@ -118,7 +118,7 @@ class NativeGitRepositoryTest {
             assertThatThrownBy(() -> repository.files().readBytes("main", "file"))
                     .isInstanceOf(GitOperationException.class).hasMessageContaining("Commit is missing root tree");
             assertThatThrownBy(() -> FileTestSupport.prepared(repository.files(), "main", "update",
-                    GitCommitAuthor.EMPTY, fileAccess -> {
+                    VcChangeAuthor.EMPTY, fileAccess -> {
                 fileAccess.write("file", new byte[]{1});
                 return null;
             }))
@@ -151,7 +151,7 @@ class NativeGitRepositoryTest {
             });
             repository.updateRef("refs/heads/main", NULL_ID, blob.toHex());
             FileTestSupport.Prepared prepared = FileTestSupport.prepared(repository.files(), "configuration",
-                    "configuration", GitCommitAuthor.EMPTY, fileAccess -> {
+                    "configuration", VcChangeAuthor.EMPTY, fileAccess -> {
                 fileAccess.write("config.txt", new byte[]{1});
                 return null;
             });
@@ -209,7 +209,7 @@ class NativeGitRepositoryTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial acl"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initial acl"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "initial acl".getBytes(StandardCharsets.UTF_8));
@@ -230,7 +230,7 @@ class NativeGitRepositoryTest {
                 "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), testRuntime.events());
 
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "prepared acl",
-                GitCommitAuthor.EMPTY, fileAccess -> {
+                VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", "prepared acl".getBytes(StandardCharsets.UTF_8));
             return null;
         });
@@ -253,7 +253,7 @@ class NativeGitRepositoryTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial acl"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initial acl"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "initial acl".getBytes(StandardCharsets.UTF_8));
@@ -268,7 +268,7 @@ class NativeGitRepositoryTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "updated acl"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "updated acl"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "updated acl".getBytes(StandardCharsets.UTF_8));
@@ -291,7 +291,7 @@ class NativeGitRepositoryTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "version one"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "version one"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "version one".getBytes(StandardCharsets.UTF_8));
@@ -300,7 +300,7 @@ class NativeGitRepositoryTest {
                         });
         String versionOne = repository.refs().get("refs/heads/main");
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", versionOne,
-                "stale", GitCommitAuthor.EMPTY, fileAccess -> {
+                "stale", VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", "stale".getBytes(StandardCharsets.UTF_8));
             return null;
         });
@@ -308,7 +308,7 @@ class NativeGitRepositoryTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "version two"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "version two"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "version two".getBytes(StandardCharsets.UTF_8));
@@ -342,7 +342,7 @@ class NativeGitRepositoryTest {
         first.files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "version one"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "version one"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "version one".getBytes(StandardCharsets.UTF_8));
@@ -354,14 +354,14 @@ class NativeGitRepositoryTest {
         NativeGitRepository second = secondProvider.find("demo").valueOrFailure("repository");
         String versionOne = second.refs().get("refs/heads/main");
         FileTestSupport.Prepared update = FileTestSupport.prepared(second.files(), "main", versionOne, "stale",
-                GitCommitAuthor.EMPTY, fileAccess -> {
+                VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", "stale".getBytes(StandardCharsets.UTF_8));
             return null;
         });
         first.files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "version two"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "version two"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "version two".getBytes(StandardCharsets.UTF_8));
@@ -396,7 +396,7 @@ class NativeGitRepositoryTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "version one"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "version one"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "version one".getBytes(StandardCharsets.UTF_8));
@@ -408,7 +408,7 @@ class NativeGitRepositoryTest {
         String expectedVersion = repository.refs().get("refs/heads/main");
 
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", expectedVersion,
-                "version two", GitCommitAuthor.EMPTY, fileAccess -> {
+                "version two", VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", "version two".getBytes(StandardCharsets.UTF_8));
             return null;
         });
@@ -433,7 +433,7 @@ class NativeGitRepositoryTest {
                 .files()
                 .withAccess(
                         "master",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial acl"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initial acl"),
                         fileAccess -> {
                             fileAccess.write(
                                     "orion.xml", "initial acl".getBytes(StandardCharsets.UTF_8));

@@ -35,8 +35,9 @@ import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.CommandValue;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.config.OrionConfigurationModification;
-import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.internal.ChangeMetadata;
+
 import java.security.KeyPairGenerator;
 import java.util.ArrayList;
 import java.util.List;
@@ -249,14 +250,14 @@ class SshCredentialCommandCatalogTest {
         private final List<String> removals = new ArrayList<>();
 
         @Override
-        public AccessControlAccess createAccess(OrionRevision revision, ChangeMetadata metadata) {
+        public AccessControlAccess createAccess(VcRevision revision, ChangeMetadata metadata) {
             return new AccessControlAccess(
                     new OrionConfigurationModification(
                             OrionDocument.withAccessControl(new pro.deta.orion.schema.acl.AccessControl()), revision,
                             document ->
-                                    revision instanceof OrionRevision.Stored stored
+                                    revision instanceof VcRevision.Stored stored
                                             ? stored
-                                            : new OrionRevision.Stored("saved")),
+                                            : new VcRevision.Stored("saved")),
                     new OrionPasswordHashingService()) {
 
                 @Override

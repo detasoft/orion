@@ -1,6 +1,6 @@
 package pro.deta.orion.test;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -9,7 +9,7 @@ import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
@@ -66,7 +66,7 @@ class BootstrapProxyTransportIT {
                     .files()
                     .withAccess(
                             REF,
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "bootstrap inputs"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "bootstrap inputs"),
                             fileAccess -> {
                                 fileAccess.write("orion.xml", originalConfiguration);
                                 fileAccess.write(
@@ -132,7 +132,7 @@ class BootstrapProxyTransportIT {
                                 .files()
                                 .withAccess(
                                         REF,
-                                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "upstream edit"),
+                                        new VcChangeDescription(VcChangeAuthor.EMPTY, "upstream edit"),
                                         fileAccess -> {
                                             fileAccess.write("orion.xml", updatedConfiguration);
                                             fileAccess.apply();
@@ -168,7 +168,7 @@ class BootstrapProxyTransportIT {
                         retained.files()
                                 .withAccess(
                                         REF,
-                                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "proxy edit"),
+                                        new VcChangeDescription(VcChangeAuthor.EMPTY, "proxy edit"),
                                         fileAccess -> {
                                             fileAccess.write("marker.txt", bytes("proxy edit"));
                                             fileAccess.apply();
@@ -178,7 +178,7 @@ class BootstrapProxyTransportIT {
                                 .isEqualTo(bytes("proxy edit"));
 
                         var stale = FileTestSupport.prepared(retained.files(), REF, "stale candidate",
-                                GitCommitAuthor.EMPTY, fileAccess -> {
+                                VcChangeAuthor.EMPTY, fileAccess -> {
                             fileAccess.write("marker.txt", bytes("stale edit"));
                             return null;
                         });
@@ -186,7 +186,7 @@ class BootstrapProxyTransportIT {
                                 .files()
                                 .withAccess(
                                         REF,
-                                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "concurrent edit"),
+                                        new VcChangeDescription(VcChangeAuthor.EMPTY, "concurrent edit"),
                                         fileAccess -> {
                                             fileAccess.write(
                                                     "marker.txt",

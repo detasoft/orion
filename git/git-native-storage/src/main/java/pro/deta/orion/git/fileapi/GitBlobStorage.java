@@ -1,5 +1,6 @@
 package pro.deta.orion.git.fileapi;
 
+import pro.deta.orion.util.VcChangeDescription;
 import pro.deta.orion.util.Subscription;
 import pro.deta.orion.util.EventListeners;
 import pro.deta.orion.git.nativestorage.GitOperationException;
@@ -23,11 +24,9 @@ public final class GitBlobStorage implements BlobStorage {
     private final GitFileEvents events;
     private final Subscription changes;
     private final EventListeners<BlobChanged> subscribers = new EventListeners<>();
-    private final GitCommitMetadata metadata;
     private volatile String loadedRevision;
 
-    public GitBlobStorage(GitFileEvents events, GitCommitMetadata metadata) {
-        this.metadata = Objects.requireNonNull(metadata, "metadata");
+    public GitBlobStorage(GitFileEvents events) {
         this.events = Objects.requireNonNull(events, "events");
         changes = events.events().subscribe(GitFileChanged.class, event -> {
             if (events.matches(event)) {

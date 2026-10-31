@@ -1,6 +1,6 @@
 package pro.deta.orion.git.proxy;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Constants;
@@ -12,7 +12,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.client.GitClientTransport;
 import pro.deta.orion.git.client.GitClientTransportSession;
 import pro.deta.orion.git.client.GitFileClientTransport;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
@@ -159,7 +159,7 @@ class NativeBootstrapGitFetcherTest {
         FileTestSupport.Prepared prepared;
         try (NativeGitRepository source = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("source").valueOrFailure("source")) {
-            prepared = FileTestSupport.prepared(source.files(), "main", "initial", GitCommitAuthor.EMPTY,
+            prepared = FileTestSupport.prepared(source.files(), "main", "initial", VcChangeAuthor.EMPTY,
                     fileAccess -> {
                 fileAccess.write("orion.xml", new byte[]{1, 2, 3});
                 return null;
@@ -197,7 +197,7 @@ class NativeBootstrapGitFetcherTest {
                 .files()
                 .withAccess(
                         "refs/heads/main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "local"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "local"),
                         fileAccess -> {
                             fileAccess.write("orion.xml", new byte[] {1});
                             fileAccess.apply();
@@ -207,7 +207,7 @@ class NativeBootstrapGitFetcherTest {
                 .files()
                 .withAccess(
                         "refs/heads/incoming",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "remote"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "remote"),
                         fileAccess -> {
                             fileAccess.write("orion.xml", new byte[] {2});
                             fileAccess.apply();

@@ -25,7 +25,10 @@ public abstract class Modification<T extends VcResource> {
         checkRevision();
         synchronized (target) {
             checkRevision();
-            target.commit(vcChangeDescription, changes);
+            for (var change: changes) {
+                change.accept(target);
+            }
+            target.commit(vcChangeDescription);
         }
     }
 

@@ -35,9 +35,10 @@ import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.schema.orion.v2.RemoteAlias;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
-import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.config.OrionVersionedConfigurationStorage;
 import pro.deta.orion.internal.ChangeMetadata;
+
 import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -85,10 +86,10 @@ class BootstrapConnectionDecisionTest {
     void rejectionKeepsTheYamlConnectionAndDoesNotRewriteXml() throws Exception {
         try (Fixture fixture = new Fixture(directory)) {
             fixture.start();
-            String revision = ((OrionRevision.Stored) fixture.editor.current().revision()).value();
+            String revision = ((VcRevision.Stored) fixture.editor.current().revision()).value();
             fixture.decisions.decide(fixture.decisions.list(ACTOR).getFirst().id(), new DecisionAnswer(1, ACTOR))
                     .valueOrFailure("reject");
-            assertThat(fixture.editor.current().revision()).isEqualTo(new OrionRevision.Stored(revision));
+            assertThat(fixture.editor.current().revision()).isEqualTo(new VcRevision.Stored(revision));
             assertThat(fixture.storage.load().result().isFailure()).isFalse();
             assertThat(fixture.provider.retry(fixture.previous.alias(),
                     () -> fixture.editor.current().result()

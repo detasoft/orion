@@ -16,7 +16,7 @@ import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.config.OrionDocumentRevision;
-import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.config.OrionVersionedConfigurationStorage;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.internal.ChangeMetadata;
@@ -113,8 +113,8 @@ public final class TestConfiguration implements AutoCloseable {
     }
 
     public void publish(OrionDocument document, Optional<String> revision) {
-        OrionRevision selected = revision.<OrionRevision>map(OrionRevision.Stored::new)
-                .orElseGet(() -> new OrionRevision.Stored("published-" + ++storage.revision));
+        VcRevision selected = revision.<VcRevision>map(VcRevision.Stored::new)
+                .orElseGet(() -> new VcRevision.Stored("published-" + ++storage.revision));
         storage.snapshot = new OrionDocumentRevision(Result.of(document), selected);
         events.events().publishAndWait(new ConfigurationChanged(storage, storage.snapshot));
     }
@@ -128,7 +128,7 @@ public final class TestConfiguration implements AutoCloseable {
     private final class MemoryStorage implements OrionVersionedConfigurationStorage {
         private volatile OrionDocumentRevision snapshot = new OrionDocumentRevision(
                 Result.of(OrionDocument.withAccessControl(new AccessControl())),
-                new OrionRevision.Stored("initial"));
+                new VcRevision.Stored("initial"));
         private int revision;
 
         @Override
@@ -137,24 +137,24 @@ public final class TestConfiguration implements AutoCloseable {
         }
 
         @Override
-        public OrionDocumentRevision load(OrionRevision.Stored selected) {
+        public OrionDocumentRevision load(VcRevision.Stored selected) {
             return snapshot.revision().equals(selected)
                     ? load()
                     : new OrionDocumentRevision(
                             new Result.Failure<>(Result.FailureCode.NOT_FOUND),
-                            new OrionRevision.Absent());
+                            new VcRevision.Absent());
         }
 
         @Override
-        public synchronized OrionRevision.Stored save(
-                OrionRevision expected, OrionDocument document, ChangeMetadata metadata) {
+        public synchronized VcRevision.Stored save(
+                VcRevision expected, OrionDocument document, ChangeMetadata metadata) {
             if (!snapshot.revision().equals(expected)) {
                 throw new OrionConfigurationConcurrentUpdateException("Configuration changed", null);
             }
-            if (snapshot.revision() instanceof OrionRevision.Stored stored && snapshot.result()
+            if (snapshot.revision() instanceof VcRevision.Stored stored && snapshot.result()
                     .valueOrFailure("Cannot read configuration document")
                     .equals(document)) return stored;
-            OrionRevision.Stored saved = new OrionRevision.Stored("saved-" + ++revision);
+            VcRevision.Stored saved = new VcRevision.Stored("saved-" + ++revision);
             snapshot = new OrionDocumentRevision(Result.of(document), saved);
             events.events().publish(new ConfigurationChanged(this, snapshot));
             return saved;

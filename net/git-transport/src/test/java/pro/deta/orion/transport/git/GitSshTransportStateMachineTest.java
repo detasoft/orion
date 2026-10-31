@@ -41,8 +41,9 @@ import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
 import pro.deta.orion.transport.git.command.SshCredentialCommandCatalog;
 import pro.deta.orion.transport.git.ssh.SshCommandFactory;
-import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.internal.ChangeMetadata;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PipedInputStream;
@@ -376,7 +377,7 @@ class GitSshTransportStateMachineTest {
         }
 
         @Override
-        public AccessControlAccess createAccess(OrionRevision revision, ChangeMetadata metadata) {
+        public AccessControlAccess createAccess(VcRevision revision, ChangeMetadata metadata) {
             throw new UnsupportedOperationException();
         }
         @Override

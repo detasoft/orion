@@ -10,7 +10,7 @@ import pro.deta.orion.acl.AccessControlAccess;
 import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.config.OrionDocumentRevision;
-import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.schema.acl.Credential;
 import pro.deta.orion.schema.acl.CredentialType;
 import pro.deta.orion.schema.acl.User;
@@ -57,7 +57,7 @@ public class OrionAdminCreateOrUpdateUserRoute extends BaseAdminRoute {
             }
             users.add(Map.of("id", user.id(), "bindings", bindings));
         }
-        String revision = ((OrionRevision.Stored) snapshot.revision()).value();
+        String revision = ((VcRevision.Stored) snapshot.revision()).value();
         return OrionHttpResponse.ok(Map.of("revision", revision, "users", users))
                 .withHeader("Cache-Control", "no-store");
     }
@@ -99,7 +99,7 @@ public class OrionAdminCreateOrUpdateUserRoute extends BaseAdminRoute {
             editor.withAccess(
                     new ChangeMetadata(UserEmail.EMPTY,
                             "Configure system OIDC bindings " + input.path("id").asText()),
-                    new OrionRevision.Stored(revision), edit -> {
+                    new VcRevision.Stored(revision), edit -> {
                         edit.update(document -> replaceOidcBindings(document, input));
                         edit.apply();
                     });

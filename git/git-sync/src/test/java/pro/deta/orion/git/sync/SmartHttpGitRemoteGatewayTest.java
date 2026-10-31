@@ -1,6 +1,6 @@
 package pro.deta.orion.git.sync;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import pro.deta.orion.git.parser.v2.id.RefId;
 import org.eclipse.jgit.api.Git;
@@ -15,7 +15,7 @@ import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitReceivePackClient;
 import pro.deta.orion.git.client.GitTcpClientTransport;
 import pro.deta.orion.git.client.GitUploadPackClient;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
@@ -85,8 +85,8 @@ class SmartHttpGitRemoteGatewayTest {
 
                 assertThat(local.updateRef("refs/heads/main", NULL_ID, seed.main()).status())
                         .isEqualTo(RefUpdateResult.Status.APPLIED);
-                local.files().withAccess("main", new GitCommitMetadata(
-                        new GitCommitAuthor("Orion", "orion@example.invalid"), "Orion outbound"), fileAccess -> {
+                local.files().withAccess("main", new VcChangeDescription(
+                        new VcChangeAuthor("Orion", "orion@example.invalid"), "Orion outbound"), fileAccess -> {
                     fileAccess.write("orion.txt", "outbound\n".getBytes());
                     fileAccess.apply();
                     return null;
@@ -138,8 +138,8 @@ class SmartHttpGitRemoteGatewayTest {
                 gateway.fetchHeads(local);
                 assertThat(local.updateRef("refs/heads/main", NULL_ID, seed.main()).status())
                         .isEqualTo(RefUpdateResult.Status.APPLIED);
-                local.files().withAccess("main", new GitCommitMetadata(
-                        new GitCommitAuthor("Orion", "orion@example.invalid"), "Outbound"), fileAccess -> {
+                local.files().withAccess("main", new VcChangeDescription(
+                        new VcChangeAuthor("Orion", "orion@example.invalid"), "Outbound"), fileAccess -> {
                     fileAccess.write("outbound.txt", "outbound\n".getBytes());
                     fileAccess.apply();
                     return null;

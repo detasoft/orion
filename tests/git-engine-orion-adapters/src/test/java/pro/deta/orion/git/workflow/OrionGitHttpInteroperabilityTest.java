@@ -1,6 +1,6 @@
 package pro.deta.orion.git.workflow;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
@@ -26,7 +26,7 @@ import pro.deta.orion.git.client.GitSmartHttpClientTransport;
 import pro.deta.orion.git.client.GitUploadPackClient;
 import pro.deta.orion.git.client.GitUploadPackRequest;
 import pro.deta.orion.git.client.GitUploadPackResult;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
@@ -113,8 +113,8 @@ class OrionGitHttpInteroperabilityTest {
             if (divergence > 0) {
                 for (int number = 0; number < 64; number++) {
                     String version = "history " + number;
-                    repository.files().withAccess("main", new GitCommitMetadata(
-                            GitCommitAuthor.EMPTY, "history " + number),
+                    repository.files().withAccess("main", new VcChangeDescription(
+                            VcChangeAuthor.EMPTY, "history " + number),
                             fileAccess -> {
                         fileAccess.write("README.md", version.getBytes(
                                     StandardCharsets.UTF_8));
@@ -132,7 +132,7 @@ class OrionGitHttpInteroperabilityTest {
                         .files()
                         .withAccess(
                                 "main",
-                                new GitCommitMetadata(GitCommitAuthor.EMPTY, "update"),
+                                new VcChangeDescription(VcChangeAuthor.EMPTY, "update"),
                                 fileAccess -> {
                                     fileAccess.write(
                                             "README.md", content.getBytes(StandardCharsets.UTF_8));

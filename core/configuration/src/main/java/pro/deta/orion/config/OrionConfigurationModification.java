@@ -2,6 +2,7 @@ package pro.deta.orion.config;
 
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.util.Modification;
+import pro.deta.orion.util.VcRevision;
 
 import java.util.Objects;
 import java.util.function.Function;
@@ -9,12 +10,12 @@ import java.util.function.UnaryOperator;
 
 /** Owns a configuration candidate and completes it through a single persistence callback. */
 public class OrionConfigurationModification implements Modification {
-    private final Function<OrionDocument, OrionRevision.Stored> onSave;
+    private final Function<OrionDocument, VcRevision.Stored> onSave;
     private OrionDocument document;
-    private OrionRevision revision;
+    private VcRevision revision;
 
-    public OrionConfigurationModification(OrionDocument document, OrionRevision revision,
-            Function<OrionDocument, OrionRevision.Stored> onSave) {
+    public OrionConfigurationModification(OrionDocument document, VcRevision revision,
+            Function<OrionDocument, VcRevision.Stored> onSave) {
         this.document = Objects.requireNonNull(document, "document");
         this.revision = Objects.requireNonNull(revision, "revision");
         this.onSave = Objects.requireNonNull(onSave, "onSave");
@@ -25,7 +26,7 @@ public class OrionConfigurationModification implements Modification {
         return document;
     }
 
-    public synchronized OrionRevision revision() {
+    public synchronized VcRevision revision() {
         return revision;
     }
 

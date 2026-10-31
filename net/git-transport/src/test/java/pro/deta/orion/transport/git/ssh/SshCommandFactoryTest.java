@@ -57,8 +57,9 @@ import pro.deta.orion.transport.git.auth.RootSshKeyEnrollmentSession;
 import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
 
 import pro.deta.orion.config.OrionConfigurationModification;
-import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.internal.ChangeMetadata;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -494,15 +495,15 @@ class SshCommandFactoryTest {
 
                     @Override
                     public AccessControlAccess createAccess(
-                            OrionRevision revision, ChangeMetadata metadata) {
+                            VcRevision revision, ChangeMetadata metadata) {
                         return new AccessControlAccess(
                                 new OrionConfigurationModification(
                                         OrionDocument.withAccessControl(new pro.deta.orion.schema.acl.AccessControl()),
                                         revision,
                                         document ->
-                                                revision instanceof OrionRevision.Stored stored
+                                                revision instanceof VcRevision.Stored stored
                                                         ? stored
-                                                        : new OrionRevision.Stored("saved")),
+                                                        : new VcRevision.Stored("saved")),
                                 new OrionPasswordHashingService()) {
                             @Override
                             public SshKeyEnrollmentResult completeRootSshKeyEnrollment(

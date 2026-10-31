@@ -1,6 +1,6 @@
 package pro.deta.orion.git.workflow.orion;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import org.eclipse.jgit.internal.storage.dfs.DfsRepositoryDescription;
@@ -10,7 +10,7 @@ import org.eclipse.jgit.lib.ObjectInserter;
 import pro.deta.orion.git.client.GitReceivePackRequest;
 import pro.deta.orion.git.client.GitRemoteAdvertisement;
 import pro.deta.orion.git.client.GitUploadPackRequest;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
@@ -59,11 +59,14 @@ import java.util.Set;
 final class OrionGitWorkTree implements GitWorkTree {
     private static final String NULL_ID = "0".repeat(40);
     private static final String MAIN_REF = "refs/heads/" + GitScenarioContext.DEFAULT_BRANCH;
-
+// @TODO похоже надо поменять подход - как минимум скрыть клиента за каким то комплексным типом, чтобы worktree не имел понимания - это наш репозиторий или удалённый. Скорее всего NativeGitRepository тут не нужен - но тогда зачем от открывается?
+    // @TODO это нужно для репозиториев которые удалённые
     private final OrionGitClient client;
     private final Path directory;
+    // @TODO это нужно для репозиториев которые обслуживаются самим орионом
     private final NativeGitRepository repository;
     private final Set<String> stagedPaths = new LinkedHashSet<>();
+    // @TODO это для ссылок на удалённые
     private final Map<String, GitRemoteRepository> remotes = new LinkedHashMap<>();
     private String currentBranch = GitScenarioContext.DEFAULT_BRANCH;
 
@@ -156,8 +159,8 @@ final class OrionGitWorkTree implements GitWorkTree {
         if (stagedPaths.isEmpty()) {
             throw new IllegalStateException("Orion native commit requires staged files");
         }
-        repository.files().withAccess(currentBranch, new GitCommitMetadata(
-                new GitCommitAuthor(GitScenarioContext.IDENTITY_NAME, GitScenarioContext.IDENTITY_EMAIL), message), access -> {
+        repository.files().withAccess(currentBranch, new VcChangeDescription(
+                new VcChangeAuthor(GitScenarioContext.IDENTITY_NAME, GitScenarioContext.IDENTITY_EMAIL), message), access -> {
             for (String path : stagedPaths) {
                 Path source = directory.resolve(path);
                 if (Files.isSymbolicLink(source)) {
@@ -172,6 +175,7 @@ final class OrionGitWorkTree implements GitWorkTree {
                 }
                 if (deleted) {
                     try {
+                        // @TODO непонятно - зачем считать размер если удалено?
                         repository.files().readFile(currentBranch, path, (type, size, base, input) -> size);
                     } catch (GitOperationException failure) {
                         throw new IOException("Staged Git path is not tracked: " + path, failure);

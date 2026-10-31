@@ -8,6 +8,7 @@ import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.util.Result;
 
 import java.util.List;
@@ -70,7 +71,7 @@ class OrionConfigurationEditorTest {
                     List.of(new ConfigurationSecret("invalid", "not-an-envelope")),
                     system.proxies(), system.connections(), system.oidcProviders(), system.invitations()),
                     document.organizations());
-            fixture.storage.snapshot = new OrionDocumentRevision(Result.of(invalid), new OrionRevision.Stored("bad"));
+            fixture.storage.snapshot = new OrionDocumentRevision(Result.of(invalid), new VcRevision.Stored("bad"));
             fixture.events.publishAndWait(new ConfigurationChanged(fixture.storage, fixture.storage.snapshot));
             assertThat(fixture.editor.current()).isSameAs(initial);
             assertThat(fixture.editor.status().storedRevision()).contains("bad");
@@ -82,7 +83,7 @@ class OrionConfigurationEditorTest {
     void missingDocumentKeepsItsRevisionAndBecomesCurrentOnlyAfterSaving() {
         try (Fixture fixture = new Fixture()) {
             fixture.storage.snapshot = new OrionDocumentRevision(
-                    new Result.Failure<>(Result.FailureCode.NOT_FOUND), new OrionRevision.Stored("existing-branch"));
+                    new Result.Failure<>(Result.FailureCode.NOT_FOUND), new VcRevision.Stored("existing-branch"));
             fixture.editor.onStart();
             assertThat(fixture.editor.isRunning()).isTrue();
             assertThat(fixture.editor.isInitialized()).isFalse();
@@ -93,7 +94,7 @@ class OrionConfigurationEditorTest {
             assertThat(fixture.editor.isInitialized()).isFalse();
             edit.apply();
             fixture.runtime.awaitEvents();
-            assertThat(fixture.storage.expected).isEqualTo(new OrionRevision.Stored("existing-branch"));
+            assertThat(fixture.storage.expected).isEqualTo(new VcRevision.Stored("existing-branch"));
             assertThat(fixture.editor.current().revision()).isEqualTo(edit.revision());
         }
     }
@@ -123,17 +124,17 @@ class OrionConfigurationEditorTest {
             fixture.editor.onStart();
             fixture.editor.onStop();
             fixture.storage.snapshot = new OrionDocumentRevision(
-                    new Result.Failure<>(Result.FailureCode.NOT_FOUND), new OrionRevision.Stored("without-file"));
+                    new Result.Failure<>(Result.FailureCode.NOT_FOUND), new VcRevision.Stored("without-file"));
             fixture.editor.onStart();
             assertThat(fixture.editor.isRunning()).isTrue();
             assertThat(fixture.editor.isInitialized()).isFalse();
-            assertThat(fixture.editor.load().revision()).isEqualTo(new OrionRevision.Stored("without-file"));
+            assertThat(fixture.editor.load().revision()).isEqualTo(new VcRevision.Stored("without-file"));
         }
     }
 
     private static OrionDocumentRevision snapshot(String revision) {
         return new OrionDocumentRevision(Result.of(OrionDocument.withAccessControl(new AccessControl())),
-                new OrionRevision.Stored(revision));
+                new VcRevision.Stored(revision));
     }
 
     private static final class Fixture implements AutoCloseable {
@@ -156,7 +157,7 @@ class OrionConfigurationEditorTest {
     private static final class MemoryStorage implements OrionVersionedConfigurationStorage {
         private final OrionEventManager events;
         private OrionDocumentRevision snapshot = snapshot("initial");
-        private OrionRevision expected;
+        private VcRevision expected;
         private boolean unavailable;
         private Runnable afterLoad;
 
@@ -177,15 +178,15 @@ class OrionConfigurationEditorTest {
         }
 
         @Override
-        public OrionDocumentRevision load(OrionRevision.Stored revision) {
+        public OrionDocumentRevision load(VcRevision.Stored revision) {
             return snapshot;
         }
 
         @Override
-        public OrionRevision.Stored save(OrionRevision expected, OrionDocument document, ChangeMetadata metadata) {
+        public VcRevision.Stored save(VcRevision expected, OrionDocument document, ChangeMetadata metadata) {
             assertThat(expected).isEqualTo(snapshot.revision());
             this.expected = expected;
-            OrionRevision.Stored saved = new OrionRevision.Stored("saved");
+            VcRevision.Stored saved = new VcRevision.Stored("saved");
             snapshot = new OrionDocumentRevision(Result.of(document), saved);
             events.publish(new ConfigurationChanged(this, snapshot));
             return saved;

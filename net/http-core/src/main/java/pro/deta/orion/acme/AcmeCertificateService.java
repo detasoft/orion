@@ -30,7 +30,7 @@ import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.config.OrionConfigurationModification;
 import pro.deta.orion.config.OrionDocumentRevision;
-import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.UserEmail;
@@ -100,7 +100,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
         for (Preset preset : PRESETS) {
             if (preset.directoryUrl().equals(directory)) provider = preset.id();
         }
-        String revision = ((OrionRevision.Stored) snapshot.revision()).value();
+        String revision = ((VcRevision.Stored) snapshot.revision()).value();
         return new View(revision, acme != null && acme.enabled(), provider, directory,
                 acme == null || acme.accountEmail() == null ? "" : acme.accountEmail(),
                 acme == null ? List.of() : acme.domains(),
@@ -114,7 +114,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
             if (settings.revision() == null || settings.revision().isBlank()) {
                 throw new IllegalArgumentException("Configuration revision is required");
             }
-            OrionConfigurationModification edit = editor.edit(new OrionRevision.Stored(settings.revision()),
+            OrionConfigurationModification edit = editor.edit(new VcRevision.Stored(settings.revision()),
                     new ChangeMetadata(new UserEmail(userId, ""), "Configure ACME certificate issuance"));
             try {
                 edit.update(document -> {

@@ -8,6 +8,8 @@ import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
+import pro.deta.orion.util.VcRevision;
+
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -73,7 +75,7 @@ final class RuntimeHttpTestSupport {
     static void updateConfiguration(StartedOrion orion, byte[] content, String etag) throws IOException {
         OrionDocument document = OrionXml.read(new ByteArrayInputStream(content));
         TestRuntimeBootstrap.updateConfiguration(orion.component(),
-                new pro.deta.orion.config.OrionRevision.Stored(etag.replace("\"", "")),
+                new VcRevision.Stored(etag.replace("\"", "")),
                 new pro.deta.orion.internal.ChangeMetadata(UserEmail.EMPTY, "Update test configuration"),
                 ignored -> document);
     }

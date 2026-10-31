@@ -1,8 +1,8 @@
 package pro.deta.orion.test;
 
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import pro.deta.orion.internal.UserEmail;
 
@@ -118,7 +118,7 @@ class BootstrapProxyEndpointIT {
                     .files()
                     .withAccess(
                             REF,
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed inputs"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "seed inputs"),
                             fileAccess -> {
                                 fileAccess.write("orion.xml", xml.toByteArray());
                                 fileAccess.write(
@@ -198,7 +198,7 @@ class BootstrapProxyEndpointIT {
                                     .files()
                                     .withAccess(
                                             REF,
-                                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "ordinary seed"),
+                                            new VcChangeDescription(VcChangeAuthor.EMPTY, "ordinary seed"),
                                             fileAccess -> {
                                                 fileAccess.write("file", new byte[] {1});
                                                 fileAccess.apply();
