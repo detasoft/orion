@@ -14,7 +14,7 @@ ORION_MAVEN_LOCK_RUN = $(if $(filter Darwin,$(shell uname -s)),lockf -k,flock) \
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dist clean test test-all integration-test test-jfr test-jfr-report xml-schema dependency-audit \
+.PHONY: help dist clean compile-only compile-all test test-all integration-test test-jfr test-jfr-report xml-schema dependency-audit \
 	dependency-minimize \
 	skill-check skills-check docker-exec build-processes \
 	cargo-init rust-install rust-maven-plugin-install session-host session-host-test session-host-linux-test
@@ -54,6 +54,12 @@ dist: ## Package the bootstrap distribution
 
 clean: ## Clean Maven outputs and this repository's build cache
 	$(ORION_MAVEN_LOCK_RUN) $(MAVEN) clean -Pdev,clean-build-cache -T 4 -q
+
+compile-only: ## Compile production code without compiling or running tests
+	$(ORION_MAVEN_LOCK_RUN) $(MAVEN) compile -Pdev -T 4 -q -Dmaven.test.skip=true
+
+compile-all: ## Compile production and test code without running tests
+	$(ORION_MAVEN_LOCK_RUN) $(MAVEN) test-compile -Pdev -T 4 -q -DskipTests
 
 test: ## Run package with unit tests; MODULE+TEST select tests, LOG sets a log file
 test-all: ## Run verify with unit and integration tests, including the Git matrix; supports MODULE+TEST and LOG
