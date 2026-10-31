@@ -4,22 +4,39 @@ import pro.deta.orion.util.VcChangeDescription;
 import pro.deta.orion.util.VcResource;
 import pro.deta.orion.util.VcRevision;
 
+import java.util.Objects;
 
 public abstract class BlobStorage extends VcResource {
-    public final byte[] read(String revision) {
-        return read(new VcRevision.Stored(revision), this::readContent);
-    }
-
-    protected abstract byte[] readContent();
+    protected abstract byte[] readContent(VcRevision.ReadTarget revision);
 
     protected abstract void write(byte[] content);
 
-    public final VcModification<BlobStorageOperations> withModification(VcChangeDescription vcChangeDescription) {
-        return new VcModification<BlobStorageOperations>(vcChangeDescription, new BlobStorageOperations());
+    public final VcRead<BlobStorageReadOperations> withRead(VcRevision.ReadTarget revision) {
+        return new VcRead<>(new BlobStorageReadOperations(Objects.requireNonNull(revision, "revision")));
     }
 
-    public final class BlobStorageOperations {
-        private BlobStorageOperations() {}
+    public final byte[] readBytes(VcRevision.ReadTarget revision) {
+        return withRead(revision).read(BlobStorageReadOperations::readContent);
+    }
+
+    public final VcModification<BlobStorageUpdateOperations> withModification(VcChangeDescription description) {
+        return new VcModification<>(description, new BlobStorageUpdateOperations());
+    }
+
+    public final class BlobStorageReadOperations {
+        private final VcRevision.ReadTarget revision;
+
+        private BlobStorageReadOperations(VcRevision.ReadTarget revision) {
+            this.revision = revision;
+        }
+
+        public byte[] readContent() {
+            return BlobStorage.this.readContent(revision);
+        }
+    }
+
+    public final class BlobStorageUpdateOperations {
+        private BlobStorageUpdateOperations() {}
 
         public void write(byte[] bytes) {
             BlobStorage.this.write(bytes);

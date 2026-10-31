@@ -5,13 +5,10 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 public abstract class VcResource {
-    @FunctionalInterface
-    protected interface VcRead<R> {
-        R read();
-    }
-
     private final ReentrantReadWriteLock resourceLock = new ReentrantReadWriteLock();
     private final EventListeners<VcResourceModified> changes = new EventListeners<>();
 
@@ -21,20 +18,13 @@ public abstract class VcResource {
 
     protected abstract VcRevision readRevision();
 
-    protected final <R> R read(VcRead<R> operation) {
+    private <R> R read(Supplier<R> operation) {
         resourceLock.readLock().lock();
         try {
-            return operation.read();
+            return operation.get();
         } finally {
             resourceLock.readLock().unlock();
         }
-    }
-
-    protected final <R> R read(VcRevision expectedRevision, VcRead<R> operation) {
-        return read(() -> {
-            checkRevision(expectedRevision);
-            return operation.read();
-        });
     }
 
     protected abstract VcRevision.Stored commit(VcChangeDescription description);
@@ -47,6 +37,20 @@ public abstract class VcResource {
         VcRevision current = getRevision();
         if (!expectedRevision.equals(current)) {
             throw new VcModificationException(expectedRevision, current);
+        }
+    }
+
+    /** Operation objects are borrowed under the read-lock and must not escape the callback. */
+    public class VcRead<M> {
+        private final M operations;
+
+        public VcRead(M operations) {
+            this.operations = Objects.requireNonNull(operations, "operations");
+        }
+
+        public final <R> R read(Function<M, R> operation) {
+            Objects.requireNonNull(operation, "operation");
+            return VcResource.this.read(() -> operation.apply(operations));
         }
     }
 
@@ -73,6 +77,9 @@ public abstract class VcResource {
 
         public final VcRevision apply() {
             requireOpen();
+            if (resourceLock.getReadHoldCount() > 0 && !resourceLock.isWriteLockedByCurrentThread()) {
+                throw new IllegalStateException("Cannot apply a modification from a read operation");
+            }
             List<VcChange<M>> prepared = pending;
             pending = null;
             VcRevision revision;

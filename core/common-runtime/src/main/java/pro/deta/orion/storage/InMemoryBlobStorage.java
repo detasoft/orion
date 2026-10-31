@@ -4,6 +4,8 @@ import pro.deta.orion.util.VcChangeDescription;
 import pro.deta.orion.util.VcRevision;
 
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -12,6 +14,7 @@ import java.util.Objects;
  */
 public class InMemoryBlobStorage extends BlobStorage {
     private final boolean readOnly;
+    private final Map<VcRevision.Stored, byte[]> versions = new HashMap<>();
     private byte[] bytes;
     private long version;
 
@@ -24,6 +27,7 @@ public class InMemoryBlobStorage extends BlobStorage {
         this.bytes = Arrays.copyOf(content, content.length);
         this.version = 1;
         this.readOnly = readOnly;
+        versions.put(new VcRevision.Stored(versionString()), bytes);
     }
 
     @Override
@@ -32,8 +36,23 @@ public class InMemoryBlobStorage extends BlobStorage {
     }
 
     @Override
-    protected byte[] readContent() {
-        return Arrays.copyOf(bytes, bytes.length);
+    protected byte[] readContent(VcRevision.ReadTarget revision) {
+        byte[] content = switch (revision) {
+            case VcRevision.Latest ignored -> {
+                if (bytes == null) {
+                    throw new IllegalStateException("Blob is absent");
+                }
+                yield bytes;
+            }
+            case VcRevision.Stored stored -> {
+                byte[] selected = versions.get(stored);
+                if (selected == null) {
+                    throw new IllegalArgumentException("Blob revision is not available: " + stored.value());
+                }
+                yield selected;
+            }
+        };
+        return Arrays.copyOf(content, content.length);
     }
 
     @Override
@@ -47,7 +66,9 @@ public class InMemoryBlobStorage extends BlobStorage {
     @Override
     protected VcRevision.Stored commit(VcChangeDescription description) {
         version++;
-        return new VcRevision.Stored(versionString());
+        VcRevision.Stored revision = new VcRevision.Stored(versionString());
+        versions.put(revision, bytes);
+        return revision;
     }
 
     private String versionString() {
