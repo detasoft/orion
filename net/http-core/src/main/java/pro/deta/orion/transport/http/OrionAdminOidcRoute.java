@@ -12,7 +12,7 @@ import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDocumentRevision;
-import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecretReference;
@@ -24,6 +24,7 @@ import pro.deta.orion.schema.orion.v2.Connection;
 import pro.deta.orion.schema.orion.v2.GitProxyBinding;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
+
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -69,7 +70,7 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
                     "clientId", provider.clientId(), "idleTimeoutSeconds", provider.idleTimeoutSeconds(),
                     "reauthenticationTimeoutSeconds", provider.reauthenticationTimeoutSeconds()));
         }
-        return OrionHttpResponse.ok(Map.of("revision", ((OrionRevision.Stored) snapshot.revision()).value(),
+        return OrionHttpResponse.ok(Map.of("revision", ((VcRevision.Stored) snapshot.revision()).value(),
                 "system", Map.of("providers", systemProviders), "organizations", organizations))
                 .withHeader("Cache-Control", "no-store");
     }
@@ -104,7 +105,7 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
             char[] suppliedSecret = secret;
             SecurityContext context = (SecurityContext) request.getAttribute(
                     OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
-            OrionConfigurationModification edit = editor.edit(new OrionRevision.Stored(revision),
+            OrionConfigurationModification edit = editor.edit(new VcRevision.Stored(revision),
                     new ChangeMetadata(new UserEmail(context.getUserIdentity().getUserId(), ""), "Configure " + scope + " OIDC provider"))
                     .update(document -> save(document, id, provider, suppliedSecret));
             edit.apply();

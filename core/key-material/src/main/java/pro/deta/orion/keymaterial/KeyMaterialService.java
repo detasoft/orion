@@ -75,6 +75,7 @@ final class KeyMaterialService implements AutoCloseable {
         return store.hasDurableSnapshot();
     }
 
+    // AI_TODO почему это не часть modification?
     private static void requireMatchingLeaf(
             String alias,
             KeyPair keyPair,

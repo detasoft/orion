@@ -47,7 +47,6 @@ import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
-import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
@@ -64,7 +63,7 @@ import pro.deta.orion.util.Subscription;
 import pro.deta.orion.config.ConfigurationChanged;
 import pro.deta.orion.config.OrionConfigurationModification;
 import pro.deta.orion.config.OrionDocumentRevision;
-import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.config.OrionVersionedConfigurationStorage;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.internal.ChangeMetadata;
@@ -83,6 +82,7 @@ import java.util.function.Consumer;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -418,7 +418,7 @@ class OrionAccessControlServiceImplTest {
             fixture.storage.snapshot =
                     new OrionDocumentRevision(
                             Result.of(OrionDocument.withAccessControl(initial.toAccessControl())),
-                            new OrionRevision.Stored("external-root"));
+                            new VcRevision.Stored("external-root"));
             fixture.storage.publish("external root update");
             assertThat(fixture.storage.saveCount).isZero();
             assertThat(fixture.editor.current().result()
@@ -479,11 +479,11 @@ class OrionAccessControlServiceImplTest {
                 snapshot(OrionDocument.withAccessControl(new AccessControl()), Optional.empty()));
         OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, testMaterial(), new OrionEventManager());
         OrionConfigurationModification modification =
-                editor.edit(new OrionRevision.Absent(), ChangeMetadata.EMPTY);
+                editor.edit(new VcRevision.Absent(), ChangeMetadata.EMPTY);
         try {
             modification.apply();
             assertThat(storage.saved).isTrue();
-            assertThat(modification.revision()).isEqualTo(new OrionRevision.Stored("saved"));
+            assertThat(modification.revision()).isEqualTo(new VcRevision.Stored("saved"));
             assertThat(storage.load().result()).isInstanceOf(Result.Failure.class);
             assertThatThrownBy(modification::apply).isInstanceOf(IllegalStateException.class)
                     .hasMessage("Configuration modification is already finished");
@@ -752,7 +752,7 @@ class OrionAccessControlServiceImplTest {
                             () ->
                                     fixture.editor
                                             .edit(
-                                                    new OrionRevision.Stored("stale"),
+                                                    new VcRevision.Stored("stale"),
                                                     new ChangeMetadata(
                                                             UserEmail.EMPTY, "update proxy"))
                                             .update(
@@ -774,7 +774,7 @@ class OrionAccessControlServiceImplTest {
                             () ->
                                     fixture.editor
                                             .edit(
-                                                    new OrionRevision.Stored("version-one"),
+                                                    new VcRevision.Stored("version-one"),
                                                     new ChangeMetadata(
                                                             UserEmail.EMPTY, "update ACL"))
                                             .update(
@@ -817,7 +817,7 @@ class OrionAccessControlServiceImplTest {
                             .valueOrFailure("Cannot read configuration document"));
             OrionDocumentRevision lastValid = fixture.editor.current();
             fixture.storage.snapshot = new OrionDocumentRevision(Result.of(invalidDocument()),
-                    new OrionRevision.Stored("broken-version"));
+                    new VcRevision.Stored("broken-version"));
             fixture.storage.publish("invalid configuration");
             assertThat(fixture.editor.current()).isSameAs(lastValid);
             assertThat(fixture.editor.status().validation()).isEqualTo("invalid");
@@ -846,7 +846,7 @@ class OrionAccessControlServiceImplTest {
                             List.of());
             fixture.storage.snapshot =
                     new OrionDocumentRevision(
-                            Result.of(candidate), new OrionRevision.Stored("invalid-commit"));
+                            Result.of(candidate), new VcRevision.Stored("invalid-commit"));
             fixture.storage.publish("missing material");
             assertThat(fixture.editor.current()).isSameAs(lastValid);
             assertThat(fixture.service.isRunning()).isTrue();
@@ -870,10 +870,10 @@ class OrionAccessControlServiceImplTest {
             OrionDocument changed = new OrionDocument(new OrionDocument.SystemConfiguration(
                     acl, Optional.of(https), List.of(), List.of(), List.of(), List.of(), List.of()), List.of());
             fixture.storage.snapshot =
-                    new OrionDocumentRevision(Result.of(changed), new OrionRevision.Stored("second-commit"));
+                    new OrionDocumentRevision(Result.of(changed), new VcRevision.Stored("second-commit"));
             fixture.storage.publish("configuration changed");
             assertThat(fixture.editor.current().revision())
-                    .isEqualTo(new OrionRevision.Stored("second-commit"));
+                    .isEqualTo(new VcRevision.Stored("second-commit"));
             assertThat(fixture.editor.current().result()
                     .valueOrFailure("Cannot read configuration document")
                     .system().https()).contains(https);
@@ -889,7 +889,7 @@ class OrionAccessControlServiceImplTest {
             OrionDocumentRevision lastValid = fixture.editor.current();
             fixture.storage.snapshot =
                     new OrionDocumentRevision(
-                            Result.of(invalidDocument()), new OrionRevision.Stored("invalid"));
+                            Result.of(invalidDocument()), new VcRevision.Stored("invalid"));
             fixture.storage.publish("invalid secret");
             assertThat(fixture.editor.current()).isSameAs(lastValid);
         }
@@ -1238,7 +1238,7 @@ class OrionAccessControlServiceImplTest {
                 .addCredential(CredentialType.ARGON2, "old-hash"));
 
         try (ServiceFixture fixture = fixture(primary)) {
-            OrionRevision revision = fixture.editor.current().revision();
+            VcRevision revision = fixture.editor.current().revision();
             AccessControlAccess admin = fixture.service.createAccess(revision,
                     new ChangeMetadata(UserEmail.EMPTY, "update alice"));
             AccessControlAccess removal = fixture.service.createAccess(revision,
@@ -1291,7 +1291,7 @@ class OrionAccessControlServiceImplTest {
                     SshCredentialFailureCode.CONCURRENT_UPDATE);
             fixture.storage.awaitEvents();
             assertThat(fixture.editor.current().revision())
-                    .isEqualTo(new OrionRevision.Stored("winning-revision"));
+                    .isEqualTo(new VcRevision.Stored("winning-revision"));
             assertThat(fixture.addSshCredentials("root", List.of(key(KEY_TWO.getPublic()))))
                     .isInstanceOf(SshCredentialUpdateResult.Success.class);
             assertThat(credentials(fixture.storage.snapshot, "alice"))
@@ -1368,13 +1368,13 @@ class OrionAccessControlServiceImplTest {
             users.add(user("alice").toAccessControl());
             storage.snapshot = new OrionDocumentRevision(Result.of(document.replaceAccessControl(
                     new AccessControl(users, accessControl.roles(), accessControl.grants()))),
-                    new OrionRevision.Stored("after-root-save"));
+                    new VcRevision.Stored("after-root-save"));
             storage.publish("unrelated update after root reset");
         };
         try {
             editor.onStart();
             service.onStart();
-            assertThat(editor.current().revision()).isEqualTo(new OrionRevision.Stored("after-root-save"));
+            assertThat(editor.current().revision()).isEqualTo(new VcRevision.Stored("after-root-save"));
             assertThat(service.userExists("alice")).isTrue();
         } finally {
             service.onStop();
@@ -1499,7 +1499,7 @@ class OrionAccessControlServiceImplTest {
     private static ServiceFixture fixture(OrionDocument document, OrionKeyMaterial identity,
             OrionPasswordHashingService hashing, OrionKeyMaterial material) {
         InMemoryStorage storage = new InMemoryStorage(
-                new OrionDocumentRevision(Result.of(document), new OrionRevision.Stored("version-one")));
+                new OrionDocumentRevision(Result.of(document), new VcRevision.Stored("version-one")));
         BootstrapConfiguration configuration = new BootstrapConfiguration();
         OrionConfigurationEditor editor =
                 new OrionConfigurationEditor(storage, material, storage.events);
@@ -1519,8 +1519,8 @@ class OrionAccessControlServiceImplTest {
 
     private static OrionDocumentRevision snapshot(OrionDocument document, Optional<String> revision) {
         return new OrionDocumentRevision(Result.of(document),
-                revision.<OrionRevision>map(OrionRevision.Stored::new)
-                        .orElseGet(OrionRevision.Absent::new));
+                revision.<VcRevision>map(VcRevision.Stored::new)
+                        .orElseGet(VcRevision.Absent::new));
     }
 
     private static OrionDocument invalidDocument() {
@@ -1842,24 +1842,24 @@ class OrionAccessControlServiceImplTest {
             if (loadUnavailable)
                 return new OrionDocumentRevision(
                         new Result.Failure<>(Result.FailureCode.GENERAL),
-                        new OrionRevision.Absent());
+                        new VcRevision.Absent());
             return snapshot == null
                     ? new OrionDocumentRevision(
                             new Result.Failure<>(Result.FailureCode.NOT_FOUND),
-                            new OrionRevision.Absent())
+                            new VcRevision.Absent())
                     : snapshot;
         }
 
         @Override
-        public OrionDocumentRevision load(OrionRevision.Stored revision) {
+        public OrionDocumentRevision load(VcRevision.Stored revision) {
             if (snapshot != null && snapshot.revision().equals(revision)) return load();
             return new OrionDocumentRevision(
-                    new Result.Failure<>(Result.FailureCode.NOT_FOUND), new OrionRevision.Absent());
+                    new Result.Failure<>(Result.FailureCode.NOT_FOUND), new VcRevision.Absent());
         }
 
         @Override
-        public OrionRevision.Stored save(
-                OrionRevision expectedRevision, OrionDocument document, ChangeMetadata metadata) {
+        public VcRevision.Stored save(
+                VcRevision expectedRevision, OrionDocument document, ChangeMetadata metadata) {
             if (concurrentReplacement != null) {
                 snapshot = concurrentReplacement;
                 concurrentReplacement = null;
@@ -1869,7 +1869,7 @@ class OrionAccessControlServiceImplTest {
             if (concurrentOnSave || snapshot != null && !snapshot.revision().equals(expectedRevision)) {
                 throw new OrionConfigurationConcurrentUpdateException("simulated race", null);
             }
-            OrionRevision.Stored revision = new OrionRevision.Stored("saved-" + ++saveCount);
+            VcRevision.Stored revision = new VcRevision.Stored("saved-" + ++saveCount);
             snapshot = new OrionDocumentRevision(Result.of(document), revision);
             events.publish(new ConfigurationChanged(this, snapshot));
             if (afterSave != null) afterSave.run();
@@ -1902,25 +1902,25 @@ class OrionAccessControlServiceImplTest {
                                 Result.FailureCode.GENERAL,
                                 "simulated reload failure",
                                 new IOException("simulated reload failure")),
-                        new OrionRevision.Absent());
+                        new VcRevision.Absent());
             return initial == null
                     ? new OrionDocumentRevision(
                             new Result.Failure<>(Result.FailureCode.NOT_FOUND),
-                            new OrionRevision.Absent())
+                            new VcRevision.Absent())
                     : initial;
         }
 
         @Override
-        public OrionDocumentRevision load(OrionRevision.Stored revision) {
+        public OrionDocumentRevision load(VcRevision.Stored revision) {
             return load();
         }
 
         @Override
-        public OrionRevision.Stored save(
-                OrionRevision expectedRevision, OrionDocument document, ChangeMetadata metadata) {
+        public VcRevision.Stored save(
+                VcRevision expectedRevision, OrionDocument document, ChangeMetadata metadata) {
             saved = true;
             if (failSave) throw new IllegalStateException("simulated save failure");
-            return new OrionRevision.Stored("saved");
+            return new VcRevision.Stored("saved");
         }
     }
 }

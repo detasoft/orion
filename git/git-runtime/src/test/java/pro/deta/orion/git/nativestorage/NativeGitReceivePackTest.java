@@ -1,9 +1,9 @@
 package pro.deta.orion.git.nativestorage;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
@@ -98,7 +98,7 @@ class NativeGitReceivePackTest {
                 .files()
                 .withAccess(
                         MAIN,
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
                         fileAccess -> {
                             fileAccess.write("config.txt", bytes("initial"));
                             fileAccess.apply();
@@ -109,7 +109,7 @@ class NativeGitReceivePackTest {
                 .files()
                 .withAccess(
                         MAIN,
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "concurrent"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "concurrent"),
                         fileAccess -> {
                             fileAccess.write("config.txt", bytes("concurrent"));
                             fileAccess.apply();
@@ -144,7 +144,7 @@ class NativeGitReceivePackTest {
                 .files()
                 .withAccess(
                         MAIN,
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
                         fileAccess -> {
                             fileAccess.write("config.txt", bytes("initial"));
                             fileAccess.apply();
@@ -153,7 +153,7 @@ class NativeGitReceivePackTest {
         String initial = repository.refs().get(MAIN);
         for (int index = 0; index < 8; index++) {
             String next = "next" + index;
-            repository.files().withAccess(MAIN, new GitCommitMetadata(GitCommitAuthor.EMPTY, "next" + index), fileAccess -> {
+            repository.files().withAccess(MAIN, new VcChangeDescription(VcChangeAuthor.EMPTY, "next" + index), fileAccess -> {
                 fileAccess.write("config.txt", bytes(next));
                 fileAccess.apply();
                 return null;
@@ -164,7 +164,7 @@ class NativeGitReceivePackTest {
                 .files()
                 .withAccess(
                         "side",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "side"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "side"),
                         fileAccess -> {
                             fileAccess.write("config.txt", bytes("side"));
                             fileAccess.apply();
@@ -213,7 +213,7 @@ class NativeGitReceivePackTest {
                 .files()
                 .withAccess(
                         MAIN,
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
                         fileAccess -> {
                             fileAccess.write("config.txt", bytes("initial"));
                             fileAccess.apply();
@@ -225,7 +225,7 @@ class NativeGitReceivePackTest {
                 .files()
                 .withAccess(
                         "side",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "concurrent"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "concurrent"),
                         fileAccess -> {
                             fileAccess.write("config.txt", bytes("concurrent"));
                             fileAccess.apply();
@@ -253,7 +253,7 @@ class NativeGitReceivePackTest {
 
     private static FileTestSupport.Prepared prepare(NativeGitRepository repository, String value)
             throws Exception {
-        return FileTestSupport.prepared(repository.files(), MAIN, value, GitCommitAuthor.EMPTY, fileAccess -> {
+        return FileTestSupport.prepared(repository.files(), MAIN, value, VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("config.txt", bytes(value));
             return null;
         });

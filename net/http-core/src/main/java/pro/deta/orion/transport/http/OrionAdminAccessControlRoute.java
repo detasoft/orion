@@ -2,12 +2,13 @@ package pro.deta.orion.transport.http;
 
 import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.config.OrionDocumentCodec;
-import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.config.OrionConfigurationEditor;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
+
 import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 
 public class OrionAdminAccessControlRoute extends BaseAdminRoute {
@@ -25,7 +26,7 @@ public class OrionAdminAccessControlRoute extends BaseAdminRoute {
     @Override
     protected OrionHttpResponse doGet(HttpServletRequest req) throws IOException {
         OrionDocumentRevision snapshot = editor.load();
-        if (!(snapshot.revision() instanceof OrionRevision.Stored revision)) {
+        if (!(snapshot.revision() instanceof VcRevision.Stored revision)) {
             throw new IllegalStateException("Configuration revision is unavailable");
         }
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {

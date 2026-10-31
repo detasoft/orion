@@ -1,6 +1,6 @@
 package pro.deta.orion.git.proxy;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import io.netty.buffer.ByteBuf;
 import org.eclipse.jgit.api.Git;
@@ -14,7 +14,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.client.GitClientTransport;
 import pro.deta.orion.git.client.GitClientTransportSession;
 import pro.deta.orion.git.client.GitFileClientTransport;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
@@ -137,7 +137,7 @@ class NativeBootstrapGitPackReplayTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "local"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "local"),
                         fileAccess -> {
                             fileAccess.write("config.txt", new byte[] {1});
                             fileAccess.apply();
@@ -145,7 +145,7 @@ class NativeBootstrapGitPackReplayTest {
                         });
         String commit = repository.refs().get("refs/heads/main");
         var unrelated = FileTestSupport.prepared(repository.files(), "other", "unrelated",
-                GitCommitAuthor.EMPTY, fileAccess -> {
+                VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("other.txt", new byte[]{2});
             return null;
         });

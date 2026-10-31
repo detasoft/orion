@@ -6,7 +6,7 @@ import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.config.OrionConfigurationModification;
 import pro.deta.orion.util.OrionUtils;
 import jakarta.inject.Singleton;
-import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.acl.Credential;
 import pro.deta.orion.schema.acl.CredentialType;
@@ -280,7 +280,7 @@ public final class OrganizationAccounts {
 
     private void update(OrganizationId id, UnaryOperator<OrionDocument.Organization> operation,
             String message, UserEmail author) {
-        OrionRevision revision = editor.current().revision();
+        VcRevision revision = editor.current().revision();
         editor.edit(revision, new ChangeMetadata(author, message)).update(document -> {
             List<OrionDocument.Organization> organizations = new ArrayList<>();
             boolean found = false;

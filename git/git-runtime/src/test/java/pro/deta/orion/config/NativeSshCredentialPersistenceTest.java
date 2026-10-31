@@ -4,9 +4,9 @@ import pro.deta.orion.git.fileapi.GitFile;
 
 import pro.deta.orion.git.fileapi.GitFileEvents;
 
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -30,6 +30,7 @@ import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
+
 import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -68,7 +69,7 @@ class NativeSshCredentialPersistenceTest {
                 .files()
                 .withAccess(
                         "refs/heads/main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "seed"),
                         access -> {
                             access.write("users.xml", users.toByteArray());
                             access.write("roles.xml", unchanged);

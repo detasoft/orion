@@ -1,13 +1,13 @@
 package pro.deta.orion.transport.git;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
@@ -318,7 +318,7 @@ class GitBlockingWireSessionTest {
         NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository = backend.create("project").valueOrFailure("repository");
         FileTestSupport.Prepared prepared = FileTestSupport.prepared(repository.files(), "main", "prepared",
-                GitCommitAuthor.EMPTY, fileAccess -> {
+                VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("config.txt", new byte[]{1});
             return null;
         });
@@ -525,7 +525,7 @@ class GitBlockingWireSessionTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
                         fileAccess -> {
                             fileAccess.write(
                                     "README.md", "payload".getBytes(StandardCharsets.US_ASCII));
@@ -731,7 +731,7 @@ class GitBlockingWireSessionTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "base"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "base"),
                         fileAccess -> {
                             fileAccess.write(
                                     "README.md", "base".getBytes(StandardCharsets.US_ASCII));
@@ -743,7 +743,7 @@ class GitBlockingWireSessionTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "next"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "next"),
                         fileAccess -> {
                             fileAccess.write(
                                     "README.md", "next".getBytes(StandardCharsets.US_ASCII));
@@ -779,7 +779,7 @@ class GitBlockingWireSessionTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "first"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "first"),
                         fileAccess -> {
                             fileAccess.write("first", new byte[] {1});
                             fileAccess.apply();
@@ -789,7 +789,7 @@ class GitBlockingWireSessionTest {
                 .files()
                 .withAccess(
                         "second",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "second"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "second"),
                         fileAccess -> {
                             fileAccess.write("second", new byte[] {2});
                             fileAccess.apply();
@@ -827,7 +827,7 @@ class GitBlockingWireSessionTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "base"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "base"),
                         fileAccess -> {
                             fileAccess.write(
                                     "README.md", "base".getBytes(StandardCharsets.US_ASCII));
@@ -839,7 +839,7 @@ class GitBlockingWireSessionTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "next"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "next"),
                         fileAccess -> {
                             fileAccess.write(
                                     "README.md", "next".getBytes(StandardCharsets.US_ASCII));
@@ -981,7 +981,7 @@ class GitBlockingWireSessionTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "root"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "root"),
                         fileAccess -> {
                             fileAccess.write(
                                     "README.md", "root".getBytes(StandardCharsets.US_ASCII));
@@ -992,7 +992,7 @@ class GitBlockingWireSessionTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "tip"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "tip"),
                         fileAccess -> {
                             fileAccess.write(
                                     "README.md", "tip".getBytes(StandardCharsets.US_ASCII));

@@ -13,6 +13,7 @@ import org.apache.sshd.common.keyprovider.KeyPairProvider;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.util.ConfigurationContext;
+import pro.deta.orion.util.VcRevision;
 
 import java.util.Map;
 
@@ -44,14 +45,14 @@ final class TestRuntimeBootstrap {
     }
 
     static void awaitConfiguration(pro.deta.orion.config.OrionConfigurationEditor editor,
-            pro.deta.orion.config.OrionRevision revision) {
+            VcRevision revision) {
         if (!pro.deta.orion.util.OrionUtils.waitForCondition(
                 () -> editor.current().revision().equals(revision))) {
             throw new IllegalStateException("Configuration revision was not activated");
         }
     }
 
-    static void updateConfiguration(OrionComponent component, pro.deta.orion.config.OrionRevision revision,
+    static void updateConfiguration(OrionComponent component, VcRevision revision,
             pro.deta.orion.internal.ChangeMetadata metadata,
             java.util.function.UnaryOperator<pro.deta.orion.schema.orion.v2.OrionDocument> update) {
         pro.deta.orion.config.OrionConfigurationModification modification =

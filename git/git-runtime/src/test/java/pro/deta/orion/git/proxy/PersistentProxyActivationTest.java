@@ -4,9 +4,9 @@ import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
 import pro.deta.orion.keymaterial.KeyMaterialRepository;
 
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import com.sun.net.httpserver.HttpServer;
@@ -104,7 +104,7 @@ class PersistentProxyActivationTest {
             retained.files()
                     .withAccess(
                             "main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "save"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "save"),
                             fileAccess -> {
                                 fileAccess.write("orion.xml", new byte[] {1});
                                 fileAccess.apply();
@@ -269,7 +269,7 @@ class PersistentProxyActivationTest {
                                     retained.files()
                                             .withAccess(
                                                     "main",
-                                                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "save"),
+                                                    new VcChangeDescription(VcChangeAuthor.EMPTY, "save"),
                                                     fileAccess -> {
                                                         fileAccess.write("file", new byte[] {1});
                                                         fileAccess.apply();

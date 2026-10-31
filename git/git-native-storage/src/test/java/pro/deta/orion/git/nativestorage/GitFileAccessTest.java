@@ -1,12 +1,12 @@
 package pro.deta.orion.git.nativestorage;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.git.parser.v2.data.FileMode;
 import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
@@ -16,6 +16,7 @@ import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
+
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -42,9 +43,9 @@ class GitFileAccessTest {
         NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(testRuntime.events());
         testRuntime.own(provider);
         NativeGitRepository repository = provider.create("metadata").valueOrFailure("repository");
-        GitCommitAuthor author = new GitCommitAuthor("Ирина", "irina@example.test");
+        VcChangeAuthor author = new VcChangeAuthor("Ирина", "irina@example.test");
         for (String message : List.of("first commit", "обновление\nвторая строка")) {
-            String revision = repository.files().withAccess("main", new GitCommitMetadata(author, message), access -> {
+            String revision = repository.files().withAccess("main", new VcChangeDescription(author, message), access -> {
                 access.write("file", message.getBytes(StandardCharsets.UTF_8));
                 String next = access.refUpdates().getFirst().newId().orElseThrow().toHex();
                 access.apply();
@@ -64,7 +65,7 @@ class GitFileAccessTest {
         NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(testRuntime.events());
         testRuntime.own(provider);
         NativeGitRepository repository = provider.create("metadata").valueOrFailure("repository");
-        String revision = repository.files().withAccess("main", new GitCommitMetadata(null, message), access -> {
+        String revision = repository.files().withAccess("main", new VcChangeDescription(null, message), access -> {
             access.write("file", new byte[]{1});
             String next = access.refUpdates().getFirst().newId().orElseThrow().toHex();
             access.apply();
@@ -92,7 +93,7 @@ class GitFileAccessTest {
                     .files()
                     .withAccess(
                             "topic",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "first"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "first"),
                             access -> {
                                 access.write("file", new byte[] {1});
                                 access.apply();
@@ -112,7 +113,7 @@ class GitFileAccessTest {
                     .files()
                     .withAccess(
                             "other",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "second"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "second"),
                             access -> {
                                 access.write("file", new byte[] {2});
                                 access.apply();
@@ -132,7 +133,7 @@ class GitFileAccessTest {
                     .files()
                     .withAccess(
                             "main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
                             fileAccess -> {
                                 fileAccess.write("nested/keep", new byte[] {7});
                                 fileAccess.apply();
@@ -142,7 +143,7 @@ class GitFileAccessTest {
                     .files()
                     .withAccess(
                             "main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "config"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "config"),
                             access -> {
                                 access.write("orion.xml", FileMode.REGULAR_FILE, 3, input(1, 2, 3));
                                 assertThat(access.pack().objectCount()).isEqualTo(3);
@@ -171,7 +172,7 @@ class GitFileAccessTest {
                                             .files()
                                             .withAccess(
                                                     "main",
-                                                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "config"),
+                                                    new VcChangeDescription(VcChangeAuthor.EMPTY, "config"),
                                                     access -> {
                                                         access.write(
                                                                 "orion.xml",
@@ -197,14 +198,14 @@ class GitFileAccessTest {
                     .files()
                     .withAccess(
                             "main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "stale"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "stale"),
                             access -> {
                                 access.write("orion.xml", FileMode.REGULAR_FILE, 1, input(1));
                                 repository
                                         .files()
                                         .withAccess(
                                                 "main",
-                                                new GitCommitMetadata(GitCommitAuthor.EMPTY, "winner"),
+                                                new VcChangeDescription(VcChangeAuthor.EMPTY, "winner"),
                                                 fileAccess -> {
                                                     fileAccess.write("orion.xml", new byte[] {2});
                                                     fileAccess.apply();
@@ -228,7 +229,7 @@ class GitFileAccessTest {
                                             .files()
                                             .withAccess(
                                                     "main",
-                                                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "config"),
+                                                    new VcChangeDescription(VcChangeAuthor.EMPTY, "config"),
                                                     access -> {
                                                         access.write(
                                                                 "orion.xml",
@@ -262,7 +263,7 @@ class GitFileAccessTest {
                     .files()
                     .withAccess(
                             "main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "stream"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "stream"),
                             access -> {
                                 for (String name : List.of("first", "second")) {
                                     try (BufferedByteInputV2 input =
@@ -293,7 +294,7 @@ class GitFileAccessTest {
                     .files()
                     .withAccess(
                             "main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "winner"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "winner"),
                             access -> {
                                 access.write("orion.xml", FileMode.REGULAR_FILE, 1, input(1));
                                 access.apply();
@@ -301,7 +302,7 @@ class GitFileAccessTest {
                             });
             String winner = repository.refs().get("refs/heads/main");
             repository.files().withAccess("main", null,
-                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "creation"), access -> {
+                    new VcChangeDescription(VcChangeAuthor.EMPTY, "creation"), access -> {
                 access.write("orion.xml", FileMode.REGULAR_FILE, 1, input(2));
                 assertThatThrownBy(access::apply).isInstanceOf(GitRefConflictException.class);
                 return null;
@@ -316,7 +317,7 @@ class GitFileAccessTest {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             repository.files().withAccess(branch, null,
-                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "creation"), access -> {
+                    new VcChangeDescription(VcChangeAuthor.EMPTY, "creation"), access -> {
                 access.write("material.p12", FileMode.REGULAR_FILE, 1, input(1));
                 assertThat(access.refUpdates().getFirst().expectedOld()).isEmpty();
                 assertThat(access.refUpdates().getFirst().newId()).isPresent();
@@ -340,7 +341,7 @@ class GitFileAccessTest {
                     .files()
                     .withAccess(
                             "main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "first"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "first"),
                             access -> {
                                 access.write("orion.xml", FileMode.REGULAR_FILE, 3, input(1, 2, 3));
                                 access.apply();
@@ -351,7 +352,7 @@ class GitFileAccessTest {
                     .files()
                     .withAccess(
                             "main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "second"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "second"),
                             access -> {
                                 access.write("orion.xml", FileMode.REGULAR_FILE, 1, input(4));
                                 access.apply();
@@ -380,7 +381,7 @@ class GitFileAccessTest {
                             .files()
                             .withAccess(
                                     "main",
-                                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "discard"),
+                                    new VcChangeDescription(VcChangeAuthor.EMPTY, "discard"),
                                     access -> {
                                         try (BufferedByteInputV2 input = input(1)) {
                                             access.write(

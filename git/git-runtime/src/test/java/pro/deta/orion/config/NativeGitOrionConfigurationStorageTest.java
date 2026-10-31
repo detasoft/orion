@@ -4,9 +4,7 @@ import pro.deta.orion.git.fileapi.GitFile;
 
 import pro.deta.orion.git.fileapi.GitFileEvents;
 
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
-
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.*;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -18,14 +16,13 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.bootstrap.config.BootstrapConfigurationSourceConfig;
-import pro.deta.orion.util.Result;
 
 import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
-import pro.deta.orion.util.Subscription;
+
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
@@ -66,7 +63,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .files()
                 .withAccess(
                         "refs/heads/main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "seed"),
                         fileAccess -> {
                             fileAccess.write(ACL_PATH, bytes("resolved acl"));
                             fileAccess.write(secondaryPath, bytes("resolved roles"));
@@ -84,7 +81,7 @@ class NativeGitOrionConfigurationStorageTest {
         assertThat(storage.load().result().valueOrFailure("Cannot read configuration document"))
                 .isEqualTo(document("resolved acl"));
         storage.save(
-                new OrionRevision.Stored(repository.refs().get("refs/heads/main")),
+                new VcRevision.Stored(repository.refs().get("refs/heads/main")),
                 document("updated ACL"),
                 new ChangeMetadata(UserEmail.EMPTY, "update"));
         assertThat(repository.files().readBytes("refs/heads/main", secondaryPath))
@@ -104,7 +101,7 @@ class NativeGitOrionConfigurationStorageTest {
         selected.files()
                 .withAccess(
                         ref,
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "seed"),
                         fileAccess -> {
                             fileAccess.write(ACL_PATH, bytes("selected ACL"));
                             fileAccess.apply();
@@ -149,13 +146,13 @@ class NativeGitOrionConfigurationStorageTest {
                 NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
         OrionVersionedConfigurationStorage storage = preparedStorage(provider);
 
-        assertThat(storage.load().revision()).isInstanceOf(OrionRevision.Absent.class);
+        assertThat(storage.load().revision()).isInstanceOf(VcRevision.Absent.class);
         assertThat(storage.load().result()).isInstanceOf(Result.Failure.class);
         assertThat(((Result.Failure<?>) storage.load().result()).code())
                 .isEqualTo(Result.FailureCode.NOT_FOUND);
 
-        OrionRevision.Stored saved = storage.save(
-                new OrionRevision.Absent(),
+        VcRevision.Stored saved = storage.save(
+                new VcRevision.Absent(),
                 document("initial acl"),
                 new ChangeMetadata(useDefaults ? UserEmail.EMPTY : new UserEmail("root", "root@example.test"),
                         useDefaults ? "" : "bootstrap ACL"));
@@ -184,7 +181,7 @@ class NativeGitOrionConfigurationStorageTest {
                 NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events())) {
             OrionVersionedConfigurationStorage first = preparedStorage(provider);
             first.save(
-                    new OrionRevision.Absent(),
+                    new VcRevision.Absent(),
                     document("persisted acl"),
                     new ChangeMetadata(UserEmail.EMPTY, "bootstrap ACL"));
             testRuntime.awaitEvents();
@@ -211,7 +208,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .files()
                 .withAccess(
                         "refs/heads/configuration",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "add readme"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "add readme"),
                         fileAccess -> {
                             fileAccess.write("README.md", bytes("not an ACL"));
                             fileAccess.apply();
@@ -224,7 +221,7 @@ class NativeGitOrionConfigurationStorageTest {
         Result<OrionDocument> result = read.result();
         assertThat(read.revision())
                 .isEqualTo(
-                        new OrionRevision.Stored(
+                        new VcRevision.Stored(
                                 repository.refs().get("refs/heads/configuration")));
 
         assertThat(result).isInstanceOf(Result.Failure.class);
@@ -250,7 +247,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .files()
                 .withAccess(
                         "refs/heads/configuration",
-                        GitCommitMetadata.EMPTY,
+                        VcChangeDescription.EMPTY,
                         access -> {
                             access.write("README.md", bytes("existing file"));
                             access.apply();
@@ -293,7 +290,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .files()
                 .withAccess(
                         "refs/heads/configuration",
-                        GitCommitMetadata.EMPTY,
+                        VcChangeDescription.EMPTY,
                         access -> {
                             access.write(ACL_PATH, "<broken".getBytes(StandardCharsets.UTF_8));
                             access.apply();
@@ -309,9 +306,9 @@ class NativeGitOrionConfigurationStorageTest {
                                 assertThat(failure.code()).isEqualTo(Result.FailureCode.GENERAL));
         assertThat(read.revision())
                 .isEqualTo(
-                        new OrionRevision.Stored(
+                        new VcRevision.Stored(
                                 repository.refs().get("refs/heads/configuration")));
-        assertThatThrownBy(() -> editor.edit(new OrionRevision.Stored("stale"), ChangeMetadata.EMPTY))
+        assertThatThrownBy(() -> editor.edit(new VcRevision.Stored("stale"), ChangeMetadata.EMPTY))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Cannot load configuration for update");
     }
@@ -326,7 +323,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .files()
                 .withAccess(
                         "refs/heads/configuration",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "add primary ACL"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "add primary ACL"),
                         fileAccess -> {
                             fileAccess.write(ACL_PATH, bytes("primary ACL"));
                             fileAccess.apply();
@@ -363,19 +360,19 @@ class NativeGitOrionConfigurationStorageTest {
                 if (event.storage() == storage) changes.add(event.snapshot());
             });
             try {
-                OrionRevision.Stored first = storage.save(new OrionRevision.Absent(), document("first"),
+                VcRevision.Stored first = storage.save(new VcRevision.Absent(), document("first"),
                         new ChangeMetadata(UserEmail.EMPTY, "first"));
                 assertThat(processingFirstUpdate.await(5, TimeUnit.SECONDS)).isTrue();
                 provider.find("internal/configuration")
                         .valueOrFailure("repository")
                         .files()
                         .withAccess("refs/heads/other",
-                                new GitCommitMetadata(GitCommitAuthor.EMPTY, "other branch"), access -> {
+                                new VcChangeDescription(VcChangeAuthor.EMPTY, "other branch"), access -> {
                             access.write(ACL_PATH, bytes("other"));
                             access.apply();
                             return null;
                         });
-                OrionRevision.Stored second = storage.save(first, document("second"),
+                VcRevision.Stored second = storage.save(first, document("second"),
                         new ChangeMetadata(UserEmail.EMPTY, "second"));
                 resumeProcessing.countDown();
                 testRuntime.awaitEvents();
@@ -400,7 +397,7 @@ class NativeGitOrionConfigurationStorageTest {
                 NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
         OrionVersionedConfigurationStorage storage = preparedStorage(provider);
         storage.save(
-                new OrionRevision.Absent(),
+                new VcRevision.Absent(),
                 document("version one"),
                 new ChangeMetadata(UserEmail.EMPTY, "version one"));
         OrionDocumentRevision stale = storage.load();
@@ -409,7 +406,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .files()
                 .withAccess(
                         "refs/heads/configuration",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "version two"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "version two"),
                         fileAccess -> {
                             fileAccess.write(ACL_PATH, bytes("version two"));
                             fileAccess.write("winner.txt", bytes("winner"));
@@ -443,7 +440,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .files()
                 .withAccess(
                         "refs/heads/configuration",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "winner"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "winner"),
                         fileAccess -> {
                             fileAccess.write("winner.txt", bytes("winner"));
                             fileAccess.apply();
@@ -452,7 +449,7 @@ class NativeGitOrionConfigurationStorageTest {
         OrionVersionedConfigurationStorage storage = resolvedStorage(provider, ACL_PATH);
 
         storage.save(
-                new OrionRevision.Stored(repository.refs().get("refs/heads/configuration")),
+                new VcRevision.Stored(repository.refs().get("refs/heads/configuration")),
                 document("created"),
                 new ChangeMetadata(UserEmail.EMPTY, "created"));
 
@@ -485,7 +482,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .files()
                 .withAccess(
                         "refs/heads/configuration",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "seed"),
                         fileAccess -> {
                             fileAccess.write(ACL_PATH, bytes("provider acl"));
                             fileAccess.apply();
@@ -508,7 +505,7 @@ class NativeGitOrionConfigurationStorageTest {
         OrionVersionedConfigurationStorage storage = preparedStorage(provider);
 
         storage.save(
-                new OrionRevision.Absent(),
+                new VcRevision.Absent(),
                 document("provider acl"),
                 new ChangeMetadata(UserEmail.EMPTY, "provider ACL"));
 

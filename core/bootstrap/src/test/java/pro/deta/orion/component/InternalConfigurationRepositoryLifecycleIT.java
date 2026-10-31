@@ -2,7 +2,7 @@ package pro.deta.orion.component;
 
 import pro.deta.orion.KeyMaterialBootstrap;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.*;
 
 
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
@@ -21,7 +21,6 @@ import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
@@ -40,13 +39,10 @@ import pro.deta.orion.schema.acl.Role;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.acl.RootPasswordReset;
-import pro.deta.orion.util.ConfigurationContext;
-import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 
 import pro.deta.orion.acl.AccessControlAccess;
-import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.internal.ChangeMetadata;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -159,8 +155,8 @@ class InternalConfigurationRepositoryLifecycleIT {
     }
 
     private static void awaitConfiguration(OrionComponent component) {
-        OrionRevision.Stored revision =
-                new OrionRevision.Stored(repository(component).refs().get(CONFIGURATION_REF));
+        VcRevision.Stored revision =
+                new VcRevision.Stored(repository(component).refs().get(CONFIGURATION_REF));
         assertThat(pro.deta.orion.util.OrionUtils.waitForCondition(() ->
                 component.configurationEditor().current().revision().equals(revision))).isTrue();
     }
@@ -564,7 +560,7 @@ class InternalConfigurationRepositoryLifecycleIT {
                 .files()
                 .withAccess(
                         CONFIGURATION_REF,
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed configuration and unrelated XML"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "seed configuration and unrelated XML"),
                         fileAccess -> {
                             fileAccess.write(ACL_PATH, primaryAcl);
                             fileAccess.write(secondaryPath, secondaryAcl);
@@ -644,7 +640,7 @@ class InternalConfigurationRepositoryLifecycleIT {
                     .files()
                     .withAccess(
                             CONFIGURATION_REF,
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed noncanonical root ACL"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "seed noncanonical root ACL"),
                             fileAccess -> {
                                 fileAccess.write(ACL_PATH, noncanonicalRootAclBytes());
                                 fileAccess.apply();
@@ -1012,8 +1008,8 @@ class InternalConfigurationRepositoryLifecycleIT {
             String candidateName,
             byte[] content) throws Exception {
         String candidateRef = "refs/heads/candidate-" + candidateName;
-        repository.files().withAccess(candidateRef, new GitCommitMetadata(
-                GitCommitAuthor.EMPTY, "candidate " + candidateName),
+        repository.files().withAccess(candidateRef, new VcChangeDescription(
+                VcChangeAuthor.EMPTY, "candidate " + candidateName),
                 fileAccess -> {
             fileAccess.write(ACL_PATH, content);
             fileAccess.apply();

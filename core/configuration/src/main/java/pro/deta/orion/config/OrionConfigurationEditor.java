@@ -12,8 +12,10 @@ import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.keymaterial.KeyMaterialId;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.util.Subscription;
+
 import java.security.GeneralSecurityException;
 import java.util.Objects;
 import java.util.Optional;
@@ -104,10 +106,10 @@ public final class OrionConfigurationEditor implements ServiceLifecycleStateMach
         };
     }
 
-    private static Optional<String> revisionValue(OrionRevision revision) {
+    private static Optional<String> revisionValue(VcRevision revision) {
         return switch (revision) {
-            case OrionRevision.Absent ignored -> Optional.empty();
-            case OrionRevision.Stored stored -> Optional.of(stored.value());
+            case VcRevision.Absent ignored -> Optional.empty();
+            case VcRevision.Stored stored -> Optional.of(stored.value());
         };
     }
 
@@ -135,7 +137,7 @@ public final class OrionConfigurationEditor implements ServiceLifecycleStateMach
     }
 
     public OrionConfigurationModification edit(
-            OrionRevision expectedRevision, ChangeMetadata metadata) {
+            VcRevision expectedRevision, ChangeMetadata metadata) {
         Objects.requireNonNull(expectedRevision, "expectedRevision");
         OrionDocumentRevision snapshot = load();
         snapshot.result().failOnFailure("Cannot load configuration for update");
@@ -202,7 +204,7 @@ public final class OrionConfigurationEditor implements ServiceLifecycleStateMach
         configurationMaterial.require(reference, Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA);
     }
 
-    public void withAccess(ChangeMetadata metadata, OrionRevision expectedRevision,
+    public void withAccess(ChangeMetadata metadata, VcRevision expectedRevision,
             Consumer<OrionConfigurationModification> operation) {
         OrionConfigurationModification modification = edit(expectedRevision, metadata);
         try {

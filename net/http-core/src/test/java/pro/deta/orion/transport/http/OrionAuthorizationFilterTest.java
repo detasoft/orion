@@ -1,5 +1,4 @@
 package pro.deta.orion.transport.http;
-import pro.deta.orion.util.Result;
 import pro.deta.orion.acl.AccessControlAccess;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ReadListener;
@@ -22,8 +21,9 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.TokenRefreshResult;
-import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.internal.ChangeMetadata;
+
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.lang.reflect.InvocationHandler;
@@ -233,7 +233,7 @@ class OrionAuthorizationFilterTest {
         private boolean adminGrant = true;
 
         @Override
-        public AccessControlAccess createAccess(OrionRevision revision, ChangeMetadata metadata) {
+        public AccessControlAccess createAccess(VcRevision revision, ChangeMetadata metadata) {
             throw new UnsupportedOperationException();
         }
 

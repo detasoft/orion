@@ -1,4 +1,6 @@
 package pro.deta.orion.git.fileapi;
+import pro.deta.orion.util.VcChangeAuthor;
+import pro.deta.orion.util.VcChangeDescription;
 import pro.deta.orion.util.Modification;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
@@ -24,6 +26,7 @@ import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
@@ -53,7 +56,7 @@ import static pro.deta.orion.git.fileapi.GitFileApi.*;
  * Pack export freezes the changes without publishing them. Apply publishes the pack and updates refs
  * through the repository's publication policy. Discard releases resources and is harmless after completion.
  */
-public final class GitFileAccess implements Modification {
+public final class GitFileAccess {
     private final NativeGitRepository repository;
     private final GitIndexAccess index;
     private final PackId packId;
@@ -63,7 +66,6 @@ public final class GitFileAccess implements Modification {
     private final Optional<ObjectId> parent;
     private final Map<String, TreeEntry> rootEntries;
     private final Optional<RefId> headToInitialize;
-    private final GitCommitMetadata metadata;
     private final Set<ObjectId> objects = new HashSet<>();
     private final Set<String> deleted = new HashSet<>();
     private final Map<String, TreeEntry> entries = new HashMap<>();
@@ -72,14 +74,14 @@ public final class GitFileAccess implements Modification {
     private boolean finished;
 
     GitFileAccess(NativeGitRepository repository, GitIndexAccess index, String branch, Optional<ObjectId> parent,
-                  GitCommitMetadata metadata, boolean initializeHead, Head head)
+                  VcChangeDescription metadata, boolean initializeHead, Head head)
             throws IOException, GitOperationException {
+        super(metadata);
         this.repository = repository;
         this.index = index;
         this.packId = index.packId().orElseThrow(() -> new IllegalArgumentException("Pack access required"));
         this.ref = new RefId(branchRefName(branch));
         this.parent = parent;
-        this.metadata = metadata;
         if (!index.snapshotRefs(new RefSelection.Head()).head().equals(head)) {
             throw new IOException("Repository HEAD changed while opening file access");
         }
@@ -150,7 +152,7 @@ public final class GitFileAccess implements Modification {
             Set<String> changedPaths = new HashSet<>(entries.keySet());
             changedPaths.addAll(deleted);
             ObjectId tree = writeTree("", null, changedPaths).orElseThrow();
-            ObjectId commit = writeCommit(tree, parent.orElse(null), metadata);
+            ObjectId commit = writeCommit(tree, parent.orElse(null), getChangeMetadata());
             List<RefUpdate> prepared = new ArrayList<>();
             prepared.add(new RefUpdate(ref, parent, Optional.of(commit)));
             headToInitialize.ifPresent(target ->
@@ -423,9 +425,9 @@ public final class GitFileAccess implements Modification {
     private ObjectId writeCommit(
             ObjectId treeId,
             ObjectId parent,
-            GitCommitMetadata metadata) throws IOException {
-        GitCommitMetadata commitMetadata = Objects.requireNonNullElse(metadata, GitCommitMetadata.EMPTY);
-        GitCommitAuthor commitAuthor = commitMetadata.author();
+            VcChangeDescription metadata) throws IOException {
+        VcChangeDescription commitMetadata = Objects.requireNonNullElse(metadata, VcChangeDescription.EMPTY);
+        VcChangeAuthor commitAuthor = commitMetadata.author();
         String identity = commitAuthor.name() + " <" + commitAuthor.email() + "> 0 +0000";
         StringBuilder data = new StringBuilder()
                 .append("tree ")

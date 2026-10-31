@@ -41,10 +41,12 @@ import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.schema.orion.*;
 import pro.deta.orion.schema.orion.v2.*;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.util.Result;
 import javax.net.ssl.*;
 import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.internal.ChangeMetadata;
+
 import java.io.*;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
@@ -757,12 +759,12 @@ class OrionOidcOnboardingTest {
             for (Object invalid : List.of(0, -1, 1.5, "3600", Long.MAX_VALUE)) {
                 input.put("idleTimeoutSeconds", invalid);
                 assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null, f.admin).status).isEqualTo(400);
-                assertThat(f.editor.current().revision()).isEqualTo(new OrionRevision.Stored(revision));
+                assertThat(f.editor.current().revision()).isEqualTo(new VcRevision.Stored(revision));
             }
             input.put("idleTimeoutSeconds", 172800);
             input.put("reauthenticationTimeoutSeconds", -1);
             assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null, f.admin).status).isEqualTo(400);
-            assertThat(f.editor.current().revision()).isEqualTo(new OrionRevision.Stored(revision));
+            assertThat(f.editor.current().revision()).isEqualTo(new VcRevision.Stored(revision));
         }
     }
 
@@ -922,7 +924,7 @@ class OrionOidcOnboardingTest {
             assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(200);
             f.editor
                     .edit(
-                            new OrionRevision.Stored(f.revision()),
+                            new VcRevision.Stored(f.revision()),
                             new ChangeMetadata(UserEmail.EMPTY, "remove account"))
                     .update(
                             document -> {
@@ -1024,7 +1026,7 @@ class OrionOidcOnboardingTest {
             assertThat(f.post("complete", Map.of("ticket", returningTicket), returning.cookie).status).isEqualTo(200);
             f.editor
                     .edit(
-                            new OrionRevision.Stored(f.revision()),
+                            new VcRevision.Stored(f.revision()),
                             new ChangeMetadata(UserEmail.EMPTY, "remove acme"))
                     .update(
                             document ->
@@ -1088,7 +1090,7 @@ class OrionOidcOnboardingTest {
             f.storage.conflict = false;
             f.editor
                     .edit(
-                            new OrionRevision.Stored(f.revision()),
+                            new VcRevision.Stored(f.revision()),
                             new ChangeMetadata(UserEmail.EMPTY, "expire fixture invitation"))
                     .update(
                             document -> {
@@ -1199,7 +1201,7 @@ class OrionOidcOnboardingTest {
         try (Fixture f = new Fixture()) {
             f.editor
                     .edit(
-                            new OrionRevision.Stored(f.revision()),
+                            new VcRevision.Stored(f.revision()),
                             new ChangeMetadata(UserEmail.EMPTY, "share fixture secret"))
                     .update(
                             document -> {
@@ -1450,7 +1452,7 @@ class OrionOidcOnboardingTest {
             }
             ByteArrayOutputStream xml = new ByteArrayOutputStream();
             OrionXml.write(document, xml);
-            storage.snapshot = new OrionDocumentRevision(Result.of(document), new OrionRevision.Stored("0"));
+            storage.snapshot = new OrionDocumentRevision(Result.of(document), new VcRevision.Stored("0"));
             editor = new OrionConfigurationEditor(storage,
                 material,
                 testRuntime.events());
@@ -1682,7 +1684,7 @@ class OrionOidcOnboardingTest {
 
         String revision() {
             testRuntime.awaitEvents();
-            return ((OrionRevision.Stored) editor.current().revision()).value();
+            return ((VcRevision.Stored) editor.current().revision()).value();
         }
 
         @Override public void close() {
@@ -1723,24 +1725,24 @@ class OrionOidcOnboardingTest {
         }
 
         @Override
-        public OrionDocumentRevision load(OrionRevision.Stored revision) {
+        public OrionDocumentRevision load(VcRevision.Stored revision) {
             return snapshot.revision().equals(revision)
                     ? load()
                     : new OrionDocumentRevision(
                             new Result.Failure<>(Result.FailureCode.NOT_FOUND),
-                            new OrionRevision.Absent());
+                            new VcRevision.Absent());
         }
 
         @Override
-        public synchronized OrionRevision.Stored save(
-                OrionRevision expected, OrionDocument document, ChangeMetadata metadata) {
+        public synchronized VcRevision.Stored save(
+                VcRevision expected, OrionDocument document, ChangeMetadata metadata) {
             if (conflict || !snapshot.revision().equals(expected)) {
                 throw new OrionConfigurationConcurrentUpdateException("configuration conflict", null);
             }
-            if (snapshot.revision() instanceof OrionRevision.Stored stored && snapshot.result()
+            if (snapshot.revision() instanceof VcRevision.Stored stored && snapshot.result()
                     .valueOrFailure("Cannot read configuration document")
                     .equals(document)) return stored;
-            OrionRevision.Stored saved = new OrionRevision.Stored(Integer.toString(++saves));
+            VcRevision.Stored saved = new VcRevision.Stored(Integer.toString(++saves));
             snapshot = new OrionDocumentRevision(Result.of(document), saved);
             if (deferPublication) savedWithoutPublication.countDown();
             else testRuntime.events().publish(new ConfigurationChanged(this, snapshot));

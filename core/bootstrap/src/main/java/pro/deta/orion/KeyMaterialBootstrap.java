@@ -1,7 +1,7 @@
 package pro.deta.orion;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeDescription;
+import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.git.fileapi.GitBlobStorage;
 
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
@@ -61,7 +61,7 @@ public final class KeyMaterialBootstrap {
             BlobStorage store = gitSource
                     ? new GitBlobStorage(
                             repositories.fileEvents(NativeGitRepositoryFactory.MATERIAL_SOURCE, material),
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "Update server identity material"))
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "Update server identity material"))
                     : resolver.resolveSource(resolveAgainstBaseDirectory(
                             material.getLocation(), baseDirectory, "location"));
             OrionKeyMaterial keys = OrionKeyMaterial.open(new KeyMaterialRepository(

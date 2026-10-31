@@ -11,6 +11,7 @@ import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
+import pro.deta.orion.util.VcChangeDescription;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationHandler;
@@ -63,7 +64,7 @@ class GitFileAccessLifecycleTest {
             });
             NativeGitRepository repository = new NativeGitRepository("demo", observed, owner, testRuntime.events());
             GitFileAccess access = new GitFileAccess(repository, index, "main", Optional.empty(),
-                    GitCommitMetadata.EMPTY, false, owner.getHEAD());
+                    VcChangeDescription.EMPTY, false, owner.getHEAD());
             try {
                 if (failPack || failIndex) {
                     IOException expected = failPack ? packFailure : indexFailure;

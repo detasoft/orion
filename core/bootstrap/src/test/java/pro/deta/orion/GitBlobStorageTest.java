@@ -34,9 +34,9 @@ import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.util.Optional;
 
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Test;
@@ -85,7 +85,7 @@ class GitBlobStorageTest {
         try (NativeGitRepositoryProvider provider = fixture.provider();
              GitBlobStorage configuration = new GitBlobStorage(
                      new GitFileEvents(new GitFile(provider, REPOSITORY, REF, "orion.xml")),
-                     GitCommitMetadata.EMPTY);
+                     VcChangeDescription.EMPTY);
              GitBlobStorage material = fixture.store()) {
             List<BlobChanged> changes = new CopyOnWriteArrayList<>();
             pro.deta.orion.util.Subscription subscription = configuration.subscribe(changes::add);
@@ -123,7 +123,7 @@ class GitBlobStorageTest {
         try (NativeGitRepositoryProvider provider = fixture.provider();
              GitBlobStorage storage = new GitBlobStorage(new GitFileEvents(
                      new GitFile(provider, REPOSITORY, "refs/heads/new", "orion.xml")),
-                             GitCommitMetadata.EMPTY)) {
+                             VcChangeDescription.EMPTY)) {
             List<BlobChanged> changes = new CopyOnWriteArrayList<>();
             try (pro.deta.orion.util.Subscription ignored = storage.subscribe(changes::add)) {
                 String saved = storage.write(new BlobStorage.Modification(null, bytes("<orion />")));
@@ -137,8 +137,8 @@ class GitBlobStorageTest {
     @Test
     void storesOpaqueXmlWithCallerCommitMetadata() throws Exception {
         Fixture fixture = fixture(Map.of("orion.xml", bytes("<orion/>")));
-        GitCommitMetadata metadata = new GitCommitMetadata(
-                new GitCommitAuthor("Configuration editor", "editor@example.test"), "Update configuration");
+        VcChangeDescription metadata = new VcChangeDescription(
+                new VcChangeAuthor("Configuration editor", "editor@example.test"), "Update configuration");
         try (NativeGitRepositoryProvider provider = fixture.provider();
              GitBlobStorage storage = new GitBlobStorage(
                      new GitFileEvents(new GitFile(provider, REPOSITORY, REF, "orion.xml")), metadata)) {
@@ -254,7 +254,7 @@ class GitBlobStorageTest {
                                     provider,
                                     REPOSITORY,
                                     REF,
-                                    MATERIAL_PATH)), new GitCommitMetadata(GitCommitAuthor.EMPTY,
+                                    MATERIAL_PATH)), new VcChangeDescription(VcChangeAuthor.EMPTY,
                                             "Update server identity material"))) {
                     activeStore.set(store);
                     String saved = store.write(new BlobStorage.Modification(null, bytes("material")));
@@ -322,7 +322,7 @@ class GitBlobStorageTest {
                 .files()
                 .withAccess(
                         REF,
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "configuration update"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "configuration update"),
                         fileAccess -> {
                             fileAccess.write("orion.xml", bytes("new config"));
                             fileAccess.apply();
@@ -364,7 +364,7 @@ class GitBlobStorageTest {
                 .files()
                 .withAccess(
                         REF,
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed repository"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "seed repository"),
                         fileAccess -> {
                             fileAccess.write(MATERIAL_PATH, bytes("initial"));
                             fileAccess.apply();
@@ -380,8 +380,8 @@ class GitBlobStorageTest {
                                         .files()
                                         .withAccess(
                                                 REF,
-                                                new GitCommitMetadata(
-                                                        GitCommitAuthor.EMPTY, "concurrent update"),
+                                                new VcChangeDescription(
+                                                        VcChangeAuthor.EMPTY, "concurrent update"),
                                                 fileAccess -> {
                                                     fileAccess.write("orion.xml",
                                                             bytes("concurrent configuration"));
@@ -399,7 +399,7 @@ class GitBlobStorageTest {
                     provider,
                     REPOSITORY,
                     REF,
-                    MATERIAL_PATH)), new GitCommitMetadata(GitCommitAuthor.EMPTY,
+                    MATERIAL_PATH)), new VcChangeDescription(VcChangeAuthor.EMPTY,
                             "Update server identity material"));
         String observedVersion = store.load().revision();
 
@@ -440,7 +440,7 @@ class GitBlobStorageTest {
                     repositoryName,
                     NativeGitRepositoryFactory.sourceRefName(source),
                     NativeGitRepositoryFactory.repositoryPath(source.getPath()))),
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "Update server identity material"));
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "Update server identity material"));
 
         String base = store.load().revision();
         assertThatThrownBy(() -> store.read(base)).isInstanceOf(java.io.FileNotFoundException.class);
@@ -472,13 +472,13 @@ class GitBlobStorageTest {
                 if (source.matches(event)) revisions.add(event.revision().toHex());
             }));
             fixture.repository().files().withAccess(REF,
-                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "unrelated file"), access -> {
+                    new VcChangeDescription(VcChangeAuthor.EMPTY, "unrelated file"), access -> {
                         access.write("orion.xml", bytes("updated configuration"));
                         access.apply();
                         return null;
                     });
             fixture.repository().files().withAccess("refs/heads/other",
-                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "other branch"), access -> {
+                    new VcChangeDescription(VcChangeAuthor.EMPTY, "other branch"), access -> {
                         access.write(MATERIAL_PATH, bytes("other branch"));
                         access.apply();
                         return null;
@@ -526,7 +526,7 @@ class GitBlobStorageTest {
                     modification.apply();
                 });
                 fixture.repository().files().withAccess(REF,
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "external KMS update"), access -> {
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "external KMS update"), access -> {
                             access.write(MATERIAL_PATH, external.load().bytes());
                             access.apply();
                             return null;
@@ -570,7 +570,7 @@ class GitBlobStorageTest {
                     modification.apply();
                 });
                 fixture.repository().files().withAccess(REF,
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "append material"), access -> {
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "append material"), access -> {
                             access.write(MATERIAL_PATH, external.load().bytes());
                             access.apply();
                             return null;
@@ -582,7 +582,7 @@ class GitBlobStorageTest {
                 assertThatThrownBy(stale::apply).isInstanceOf(BlobStorageConflictException.class);
 
                 fixture.repository().files().withAccess(REF,
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "corrupt material"), access -> {
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "corrupt material"), access -> {
                             access.write(MATERIAL_PATH, new byte[]{1, 2, 3});
                             access.apply();
                             return null;
@@ -604,7 +604,7 @@ class GitBlobStorageTest {
                 .files()
                 .withAccess(
                         REF,
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "seed repository"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "seed repository"),
                         fileAccess -> {
                             for (Map.Entry<String, byte[]> fileEntry : initialFiles.entrySet()) {
                                 fileAccess.write(fileEntry.getKey(), fileEntry.getValue());
@@ -628,7 +628,7 @@ class GitBlobStorageTest {
                         provider,
                         REPOSITORY,
                         REF,
-                        MATERIAL_PATH)), new GitCommitMetadata(GitCommitAuthor.EMPTY,
+                        MATERIAL_PATH)), new VcChangeDescription(VcChangeAuthor.EMPTY,
                                 "Update server identity material"));
         }
     }

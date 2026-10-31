@@ -14,6 +14,7 @@ import pro.deta.orion.git.parser.v2.object.LooseObject;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.internal.CheckedFunction;
+import pro.deta.orion.util.VcChangeDescription;
 
 import java.io.File;
 import java.io.IOException;
@@ -77,6 +78,7 @@ public final class GitFileApi {
         return entry;
     }
 
+    // @TODO убрать - не вижу смысла в
     public <T> T readFile(String branch, String path, GitObjectRead<T> reader)
             throws IOException, GitOperationException {
         return readFile(resolveBranch(branch), path, reader);
@@ -90,7 +92,7 @@ public final class GitFileApi {
         return readFile(commitId, path, (type, size, base, input) -> input.newInputStream().readAllBytes());
     }
 
-    public <T> T withAccess(String branch, GitCommitMetadata metadata,
+    public <T> T withAccess(String branch, VcChangeDescription metadata,
                             CheckedFunction<GitFileAccess, T> operation) throws Exception {
         Objects.requireNonNull(operation, "operation");
         RefId ref = new RefId(branchRefName(branch));
@@ -108,7 +110,7 @@ public final class GitFileApi {
         return refs;
     }
 
-    public <T> T withAccess(String branch, String expectedRevision, GitCommitMetadata metadata,
+    public <T> T withAccess(String branch, String expectedRevision, VcChangeDescription metadata,
                             CheckedFunction<GitFileAccess, T> operation) throws Exception {
         Objects.requireNonNull(operation, "operation");
         RefId ref = new RefId(branchRefName(branch));
@@ -119,7 +121,7 @@ public final class GitFileApi {
     }
 
     private <T> T run(GitIndexAccess index, String branch, Optional<ObjectId> parent,
-                      GitCommitMetadata metadata, Head head,
+                      VcChangeDescription metadata, Head head,
                       CheckedFunction<GitFileAccess, T> operation) throws Exception {
         GitFileAccess access = new GitFileAccess(
                 repository, index, branch, parent, metadata, initializeHead, head);
@@ -141,6 +143,7 @@ public final class GitFileApi {
         }
     }
 
+    // @TODO перенеси в NativeGitRepository чтобы не было здесь логики создания "refs/*"
     private ObjectId resolveBranch(String branch)
             throws GitRepositoryFileNotFoundException {
         Map<String, String> refs = repository.refs();

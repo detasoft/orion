@@ -7,6 +7,8 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.test.util.OrionTestRuntime;
+import pro.deta.orion.util.VcChangeAuthor;
+import pro.deta.orion.util.VcChangeDescription;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -21,7 +23,7 @@ class GitFileBindingTest {
     final OrionTestRuntime runtime = new OrionTestRuntime();
 
     private static final String REF = "refs/heads/main";
-    private static final GitCommitMetadata METADATA = new GitCommitMetadata(GitCommitAuthor.EMPTY, "update");
+    private static final VcChangeDescription METADATA = new VcChangeDescription(VcChangeAuthor.EMPTY, "update");
 
     @Test
     void readsPinnedRevisionsAndRejectsStalePublication() throws Exception {

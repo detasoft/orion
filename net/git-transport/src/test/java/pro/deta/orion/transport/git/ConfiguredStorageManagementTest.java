@@ -29,8 +29,8 @@ import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.bootstrap.config.*;
-import pro.deta.orion.schema.orion.*;
 import pro.deta.orion.schema.orion.v2.*;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.util.Result;
 
 import pro.deta.orion.config.OrionDocumentRevision;
@@ -299,7 +299,7 @@ class ConfiguredStorageManagementTest {
         testRuntime.awaitEvents();
         // A matching revision from storage with a stale identity still cannot authorize the revoked change.
         assertFailure(management.saveConnection(actor, Optional.of(organization),
-                ((OrionRevision.Stored) storage.snapshot.revision()).value(), false,
+                ((VcRevision.Stored) storage.snapshot.revision()).value(), false,
                 input("replacement".toCharArray())), StorageManagement.FailureCode.DENIED);
         storage.publish();
         assertThat(((StorageManagement.Success<StorageManagement.Connections>) management.connections(
@@ -595,7 +595,7 @@ class ConfiguredStorageManagementTest {
 
     private String revision() {
         testRuntime.awaitEvents();
-        return ((OrionRevision.Stored) editor.current().revision()).value();
+        return ((VcRevision.Stored) editor.current().revision()).value();
     }
 
     private OrionDocument activeDocument() {
@@ -631,7 +631,7 @@ class ConfiguredStorageManagementTest {
         void set(OrionDocument document, boolean publish) {
             snapshot =
                     new OrionDocumentRevision(
-                            Result.of(document), new OrionRevision.Stored("fixture-" + replacements++));
+                            Result.of(document), new VcRevision.Stored("fixture-" + replacements++));
             if (publish) publish();
         }
 
@@ -645,24 +645,24 @@ class ConfiguredStorageManagementTest {
         }
 
         @Override
-        public OrionDocumentRevision load(OrionRevision.Stored revision) {
+        public OrionDocumentRevision load(VcRevision.Stored revision) {
             return snapshot.revision().equals(revision)
                     ? load()
                     : new OrionDocumentRevision(
                             new Result.Failure<>(Result.FailureCode.NOT_FOUND),
-                            new OrionRevision.Absent());
+                            new VcRevision.Absent());
         }
 
         @Override
-        public synchronized OrionRevision.Stored save(
-                OrionRevision expected, OrionDocument document, ChangeMetadata metadata) {
+        public synchronized VcRevision.Stored save(
+                VcRevision expected, OrionDocument document, ChangeMetadata metadata) {
             if (!snapshot.revision().equals(expected)) {
                 throw new OrionConfigurationConcurrentUpdateException("Changed", null);
             }
-            if (snapshot.revision() instanceof OrionRevision.Stored stored && snapshot.result()
+            if (snapshot.revision() instanceof VcRevision.Stored stored && snapshot.result()
                     .valueOrFailure("Cannot read configuration document")
                     .equals(document)) return stored;
-            OrionRevision.Stored saved = new OrionRevision.Stored("v" + ++saves);
+            VcRevision.Stored saved = new VcRevision.Stored("v" + ++saves);
             snapshot = new OrionDocumentRevision(Result.of(document), saved);
             testRuntime.events().publish(new ConfigurationChanged(this, snapshot));
             return saved;

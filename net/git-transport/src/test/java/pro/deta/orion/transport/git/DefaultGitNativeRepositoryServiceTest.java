@@ -1,6 +1,6 @@
 package pro.deta.orion.transport.git;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.schema.acl.Grant;
@@ -14,7 +14,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
@@ -200,7 +200,7 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
         NativeGitRepository repository = createRepository(backend, "demo");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         FileTestSupport.Prepared prepared = FileTestSupport.prepared(repository.files(), "feature", "update",
-                GitCommitAuthor.EMPTY, fileAccess -> {
+                VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("a", new byte[]{1});
             return null;
         });
@@ -234,7 +234,7 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
                         fileAccess -> {
                             fileAccess.write("a", new byte[] {0});
                             fileAccess.apply();
@@ -242,7 +242,7 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
                         });
         String initial = repository.refs().get("refs/heads/main");
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "update",
-                GitCommitAuthor.EMPTY, fileAccess -> {
+                VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("a", new byte[]{1});
             return null;
         });
@@ -277,7 +277,7 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
         NativeGitRepository repository = createRepository(backend, "demo");
         rejectPublication = true;
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "update",
-                GitCommitAuthor.EMPTY, fileAccess -> {
+                VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("a", new byte[]{1});
             return null;
         });
@@ -325,7 +325,7 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "first"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "first"),
                         fileAccess -> {
                             fileAccess.write("a", new byte[] {1});
                             fileAccess.apply();
@@ -333,7 +333,7 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
                         });
         String first = repository.refs().get("refs/heads/main");
         FileTestSupport.Prepared next = FileTestSupport.prepared(repository.files(), "main", "next",
-                GitCommitAuthor.EMPTY, fileAccess -> {
+                VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("a", new byte[]{2});
             return null;
         });
@@ -404,7 +404,7 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "allowed"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "allowed"),
                         fileAccess -> {
                             fileAccess.write("a", new byte[] {1});
                             fileAccess.apply();
@@ -414,7 +414,7 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
                 .files()
                 .withAccess(
                         "secret",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "denied"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "denied"),
                         fileAccess -> {
                             fileAccess.write("a", new byte[] {2});
                             fileAccess.apply();
@@ -484,7 +484,7 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
                         fileAccess -> {
                             fileAccess.write("a", new byte[] {1});
                             fileAccess.apply();
@@ -539,7 +539,7 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
                         fileAccess -> {
                             fileAccess.write("a", new byte[] {1});
                             fileAccess.apply();

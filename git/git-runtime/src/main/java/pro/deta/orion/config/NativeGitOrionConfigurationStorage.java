@@ -1,20 +1,17 @@
 package pro.deta.orion.config;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.*;
 
 import lombok.extern.slf4j.Slf4j;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.fileapi.GitFileEvents;
 import pro.deta.orion.git.fileapi.GitFileChanged;
-import pro.deta.orion.util.Subscription;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
 import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
-import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -39,7 +36,7 @@ public final class NativeGitOrionConfigurationStorage
         this.events = Objects.requireNonNull(events, "events");
         changes = events.events().subscribe(GitFileChanged.class, event -> {
             if (events.matches(event)) {
-                onFileChanged(events.file(), new OrionRevision.Stored(event.revision().toHex()));
+                onFileChanged(events.file(), new VcRevision.Stored(event.revision().toHex()));
             }
         });
     }
@@ -49,17 +46,17 @@ public final class NativeGitOrionConfigurationStorage
         Optional<CommitId> revision = events.file().revision();
         if (revision.isEmpty()) {
             return new OrionDocumentRevision(
-                    new Result.Failure<>(Result.FailureCode.NOT_FOUND), new OrionRevision.Absent());
+                    new Result.Failure<>(Result.FailureCode.NOT_FOUND), new VcRevision.Absent());
         }
-        return load(new OrionRevision.Stored(revision.orElseThrow().toHex()));
+        return load(new VcRevision.Stored(revision.orElseThrow().toHex()));
     }
 
     @Override
-    public OrionDocumentRevision load(OrionRevision.Stored revision) {
+    public OrionDocumentRevision load(VcRevision.Stored revision) {
         return load(events.file(), revision);
     }
 
-    private OrionDocumentRevision load(GitFile file, OrionRevision.Stored revision) {
+    private OrionDocumentRevision load(GitFile file, VcRevision.Stored revision) {
         Objects.requireNonNull(revision, "revision");
         Result<OrionDocument> result;
         try {
@@ -87,7 +84,7 @@ public final class NativeGitOrionConfigurationStorage
     }
 
     @Override
-    public OrionRevision.Stored save(OrionRevision expectedRevision, OrionDocument document,
+    public VcRevision.Stored save(VcRevision expectedRevision, OrionDocument document,
             ChangeMetadata metadata) {
         Objects.requireNonNull(expectedRevision, "expectedRevision");
         Objects.requireNonNull(document, "document");
@@ -95,14 +92,14 @@ public final class NativeGitOrionConfigurationStorage
         Objects.requireNonNull(metadata.author(), "author");
         byte[] content = serialize(document);
         CommitId revision = switch (expectedRevision) {
-            case OrionRevision.Absent ignored -> null;
-            case OrionRevision.Stored stored -> new CommitId(stored.value());
+            case VcRevision.Absent ignored -> null;
+            case VcRevision.Stored stored -> new CommitId(stored.value());
         };
         try {
-            GitCommitMetadata commitMetadata = new GitCommitMetadata(
-                    new GitCommitAuthor(metadata.author().getUsername(), metadata.author().getEmail()),
+            VcChangeDescription commitMetadata = new VcChangeDescription(
+                    new VcChangeAuthor(metadata.author().getUsername(), metadata.author().getEmail()),
                     metadata.message());
-            return new OrionRevision.Stored(events.file().write(revision, content, commitMetadata).toHex());
+            return new VcRevision.Stored(events.file().write(revision, content, commitMetadata).toHex());
         } catch (GitRefConflictException error) {
             throw new OrionConfigurationConcurrentUpdateException("Orion configuration changed concurrently", error);
         } catch (Exception error) {
@@ -112,7 +109,7 @@ public final class NativeGitOrionConfigurationStorage
         }
     }
 
-    private void onFileChanged(GitFile file, OrionRevision.Stored revision) {
+    private void onFileChanged(GitFile file, VcRevision.Stored revision) {
         OrionDocumentRevision snapshot = load(file, revision);
         switch (snapshot.result()) {
             case Result.Success<OrionDocument> ignored ->

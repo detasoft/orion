@@ -44,7 +44,7 @@ import pro.deta.orion.util.Result;
 import pro.deta.orion.schema.orion.OrionXml;
 
 import pro.deta.orion.config.OrionDocumentRevision;
-import pro.deta.orion.config.OrionRevision;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.config.OrionVersionedConfigurationStorage;
 import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.test.integration.TestConfiguration;
@@ -329,7 +329,7 @@ class OrionRuntimeModuleTest {
         OrionVersionedConfigurationStorage storage = runtimeOrionVersionedConfigurationStorage(configuration);
 
         storage.save(
-                new OrionRevision.Absent(),
+                new VcRevision.Absent(),
                 OrionDocument.withAccessControl(accessControlWithUser("native-user")),
                 new ChangeMetadata(new UserEmail("tester", "tester@example.test"), "native acl"));
 
@@ -347,7 +347,7 @@ class OrionRuntimeModuleTest {
 
         OrionVersionedConfigurationStorage storage = resolvedStorage(configuration, provider);
         storage.save(
-                new OrionRevision.Absent(),
+                new VcRevision.Absent(),
                 OrionDocument.withAccessControl(accessControlWithUser("versioned-user")),
                 new ChangeMetadata(UserEmail.EMPTY, "versioned acl"));
 

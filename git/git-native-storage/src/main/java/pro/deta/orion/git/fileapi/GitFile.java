@@ -11,6 +11,8 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
+import pro.deta.orion.util.VcChangeDescription;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 
@@ -53,7 +55,7 @@ public final class GitFile {
         return objectId(Objects.requireNonNull(revision, "revision")) != null;
     }
 
-    public CommitId write(CommitId expectedRevision, byte[] bytes, GitCommitMetadata metadata) throws Exception {
+    public CommitId write(CommitId expectedRevision, byte[] bytes, VcChangeDescription metadata) throws Exception {
         Objects.requireNonNull(bytes, "bytes");
         NativeGitRepository repository = provider.openForWrite(repositoryName)
                 .valueOrFailure("Cannot open Git file repository");

@@ -3,9 +3,9 @@ package pro.deta.orion.test;
 import pro.deta.orion.storage.BlobStorage;
 import pro.deta.orion.KeyMaterialBootstrap;
 
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import pro.deta.orion.KeyMaterialCreation;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -112,7 +112,7 @@ class S3BootstrapProxyColdStartIT {
                         .files()
                         .withAccess(
                                 REF,
-                                new GitCommitMetadata(GitCommitAuthor.EMPTY, "Seed remote bootstrap inputs"),
+                                new VcChangeDescription(VcChangeAuthor.EMPTY, "Seed remote bootstrap inputs"),
                                 access -> {
                                     access.write(CONFIGURATION_PATH, xml);
                                     access.write(MATERIAL_PATH, material);
@@ -157,8 +157,8 @@ class S3BootstrapProxyColdStartIT {
                                 .files()
                                 .withAccess(
                                         REF,
-                                        new GitCommitMetadata(
-                                                GitCommitAuthor.EMPTY, "Change upstream after cold start"),
+                                        new VcChangeDescription(
+                                                VcChangeAuthor.EMPTY, "Change upstream after cold start"),
                                         access -> {
                                             access.write("marker.txt", marker);
                                             access.apply();

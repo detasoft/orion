@@ -18,11 +18,12 @@ import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
-import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.TeamId;
 import pro.deta.orion.test.integration.OrionTestRootAccess;
 import pro.deta.orion.util.KeyUtils;
+import pro.deta.orion.util.VcRevision;
+
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocketFactory;
@@ -109,7 +110,7 @@ class PlaywrightExternalServicesIT {
                 OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), Optional.of(acme));
         TestRuntimeBootstrap.updateConfiguration(
                 component,
-                new pro.deta.orion.config.OrionRevision.Stored(revision),
+                new VcRevision.Stored(revision),
                 new pro.deta.orion.internal.ChangeMetadata(UserEmail.EMPTY, "configure test ACME"),
                 document ->
                         new OrionDocument(

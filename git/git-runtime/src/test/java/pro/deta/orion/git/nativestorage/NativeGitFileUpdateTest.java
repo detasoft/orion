@@ -1,6 +1,6 @@
 package pro.deta.orion.git.nativestorage;
 
-import pro.deta.orion.git.fileapi.GitCommitMetadata;
+import pro.deta.orion.util.VcChangeDescription;
 
 import org.eclipse.jgit.internal.storage.dfs.DfsRepositoryDescription;
 import org.eclipse.jgit.internal.storage.dfs.InMemoryRepository;
@@ -10,7 +10,7 @@ import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.treewalk.TreeWalk;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
@@ -46,7 +46,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
                             access -> {
                                 access.write("folder", bytes("original"));
                                 access.apply();
@@ -60,7 +60,7 @@ class NativeGitFileUpdateTest {
                                             .files()
                                             .withAccess(
                                                     "main",
-                                                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "invalid"),
+                                                    new VcChangeDescription(VcChangeAuthor.EMPTY, "invalid"),
                                                     access -> {
                                                         access.write(
                                                                 "folder/child.txt", bytes("new"));
@@ -82,7 +82,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
                             access -> {
                                 access.write("folder/keep.txt", bytes("original"));
                                 access.apply();
@@ -96,7 +96,7 @@ class NativeGitFileUpdateTest {
                                             .files()
                                             .withAccess(
                                                     "main",
-                                                    new GitCommitMetadata(GitCommitAuthor.EMPTY, "invalid"),
+                                                    new VcChangeDescription(VcChangeAuthor.EMPTY, "invalid"),
                                                     access -> {
                                                         access.write(
                                                                 "folder", bytes("replacement"));
@@ -119,7 +119,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
                             access -> {
                                 access.write("left/config.txt", bytes("before"));
                                 access.write("right/keep.txt", bytes("keep"));
@@ -131,7 +131,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "update"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "update"),
                             access -> {
                                 access.write("left/config.txt", bytes("after"));
                                 assertThat(access.pack().objectCount()).isEqualTo(4);
@@ -152,7 +152,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
                             access -> {
                                 access.write("entry", bytes("file"));
                                 access.apply();
@@ -162,7 +162,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "file to directory"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "file to directory"),
                             access -> {
                                 access.delete("entry");
                                 access.write("entry/child", bytes("nested"));
@@ -175,7 +175,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "directory to file"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "directory to file"),
                             access -> {
                                 access.delete("entry/child");
                                 access.write("entry", bytes("file again"));
@@ -194,7 +194,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
                             fileAccess -> {
                                 fileAccess.write("nested/remove.txt", new byte[] {1});
                                 fileAccess.write("keep.txt", new byte[] {2});
@@ -204,7 +204,7 @@ class NativeGitFileUpdateTest {
                             });
             String initial = repository.refs().get("refs/heads/main");
             FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main",
-                    "delete and replace", GitCommitAuthor.EMPTY, fileAccess -> {
+                    "delete and replace", VcChangeAuthor.EMPTY, fileAccess -> {
                 fileAccess.delete("nested/remove.txt");
                 fileAccess.write("change.txt", new byte[]{4});
                 return null;
@@ -221,7 +221,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "delete remaining files"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "delete remaining files"),
                             fileAccess -> {
                                 fileAccess.delete("keep.txt");
                                 fileAccess.delete("change.txt");
@@ -243,7 +243,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "initial"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
                             fileAccess -> {
                                 fileAccess.write("config.txt", bytes("initial"));
                                 fileAccess.apply();
@@ -262,8 +262,8 @@ class NativeGitFileUpdateTest {
                                                                     .files()
                                                                     .withAccess(
                                                                             "main",
-                                                                            new GitCommitMetadata(
-                                                                                    GitCommitAuthor.EMPTY, "invalid"),
+                                                                            new VcChangeDescription(
+                                                                                    VcChangeAuthor.EMPTY, "invalid"),
                                                                             fileAccess -> {
                                                                                 fileAccess.delete(
                                                                                         path);
@@ -293,7 +293,7 @@ class NativeGitFileUpdateTest {
                     .files()
                     .withAccess(
                             "main",
-                            new GitCommitMetadata(GitCommitAuthor.EMPTY, "first"),
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "first"),
                             fileAccess -> {
                                 fileAccess.write("config.txt", bytes("first"));
                                 fileAccess.apply();
@@ -324,7 +324,7 @@ class NativeGitFileUpdateTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "first"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "first"),
                         fileAccess -> {
                             fileAccess.write("config.txt", bytes("first"));
                             fileAccess.apply();
@@ -332,7 +332,7 @@ class NativeGitFileUpdateTest {
                         });
         String expected = repository.refs().get("refs/heads/main");
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", expected,
-                "stale", GitCommitAuthor.EMPTY, fileAccess -> {
+                "stale", VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("config.txt", bytes("stale"));
             return null;
         });
@@ -340,7 +340,7 @@ class NativeGitFileUpdateTest {
                 .files()
                 .withAccess(
                         "main",
-                        new GitCommitMetadata(GitCommitAuthor.EMPTY, "second"),
+                        new VcChangeDescription(VcChangeAuthor.EMPTY, "second"),
                         fileAccess -> {
                             fileAccess.write("config.txt", bytes("second"));
                             fileAccess.apply();
@@ -371,7 +371,7 @@ class NativeGitFileUpdateTest {
         NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository");
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "prepared",
-                GitCommitAuthor.EMPTY, fileAccess -> {
+                VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("config.txt", bytes("prepared"));
             return null;
         });
@@ -410,7 +410,7 @@ class NativeGitFileUpdateTest {
         NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository");
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "prepared",
-                GitCommitAuthor.EMPTY, fileAccess -> {
+                VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("config.txt", bytes("prepared"));
             return null;
         });
