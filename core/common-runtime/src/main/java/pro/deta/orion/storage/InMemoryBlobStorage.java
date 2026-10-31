@@ -1,60 +1,53 @@
 package pro.deta.orion.storage;
 
-import java.io.IOException;
-import java.util.function.Consumer;
-import pro.deta.orion.util.Subscription;
+import pro.deta.orion.util.VcChangeDescription;
+import pro.deta.orion.util.VcRevision;
+
 import java.util.Arrays;
 import java.util.Objects;
 
 /**
- * Stores opaque bytes in memory with conditional publication.
- * TODO Implement change subscriptions; subscriptions currently receive no notifications.
+ * Stores the current blob in memory with a fixed read-only policy.
+ * Synchronization, revision checks, and change notifications belong to the shared Vc model.
  */
-public class InMemoryBlobStorage implements BlobStorage {
+public class InMemoryBlobStorage extends BlobStorage {
+    private final boolean readOnly;
     private byte[] bytes;
     private long version;
 
-    @Override
-    public Subscription subscribe(Consumer<BlobChanged> subscriber) {
-        Objects.requireNonNull(subscriber, "subscriber");
-        return () -> {};
+    public InMemoryBlobStorage() {
+        readOnly = false;
+    }
+
+    public InMemoryBlobStorage(byte[] content, boolean readOnly) {
+        Objects.requireNonNull(content, "content");
+        this.bytes = Arrays.copyOf(content, content.length);
+        this.version = 1;
+        this.readOnly = readOnly;
     }
 
     @Override
-    public synchronized Content load() throws IOException {
-        return bytes == null ? new Content(null, null) : new Content(versionString(), read(versionString()));
+    protected VcRevision readRevision() {
+        return bytes == null ? new VcRevision.Absent() : new VcRevision.Stored(versionString());
     }
 
     @Override
-    public synchronized byte[] read(String revision) throws IOException {
-        Objects.requireNonNull(revision, "revision");
-        if (bytes == null || !revision.equals(versionString())) {
-            throw new BlobStorageConflictException("Blob revision is no longer available: " + revision);
-        }
+    protected byte[] readContent() {
         return Arrays.copyOf(bytes, bytes.length);
     }
 
     @Override
-    public synchronized String write(Modification modification) throws IOException {
-        byte[] newBytes = modification.bytes();
-        String expectedVersion = modification.expectedRevision();
-        if (newBytes == null) {
-            throw new IllegalArgumentException("Blob bytes must not be null");
+    protected void write(byte[] content) {
+        if (readOnly) {
+            throw new IllegalStateException("Blob store is read-only");
         }
-        String currentVersion = bytes == null ? null : versionString();
-        if (!matchesExpectedVersion(currentVersion, expectedVersion)) {
-            throw new BlobStorageConflictException("Blob store changed before save");
-        }
-        bytes = Arrays.copyOf(newBytes, newBytes.length);
-        version++;
-        return versionString();
+        bytes = Arrays.copyOf(content, content.length);
     }
 
-    private static boolean matchesExpectedVersion(String currentVersion, String expectedVersion) {
-        if (currentVersion == null) {
-            return expectedVersion == null;
-        }
-        return currentVersion.equals(expectedVersion);
+    @Override
+    protected VcRevision.Stored commit(VcChangeDescription description) {
+        version++;
+        return new VcRevision.Stored(versionString());
     }
 
     private String versionString() {

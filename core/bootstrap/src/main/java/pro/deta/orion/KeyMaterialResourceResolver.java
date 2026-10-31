@@ -1,10 +1,10 @@
 package pro.deta.orion;
 
 import pro.deta.orion.storage.BlobStorage;
+import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.storage.ProtectedFiles;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.storage.LocalBlobStorage;
-import pro.deta.orion.storage.ReadOnlyBlobStorage;
 
 import pro.deta.orion.resource.reference.ResourceAddress;
 import pro.deta.orion.resource.reference.ResourceReferenceResolver;
@@ -73,7 +73,7 @@ public final class KeyMaterialResourceResolver {
         if (address.hasScheme(ResourceScheme.CONTENT)) {
             byte[] bytes = contentBytes(address.body());
             try {
-                return new ReadOnlyBlobStorage(bytes, "inline key material");
+                return new InMemoryBlobStorage(bytes, true);
             } finally {
                 Arrays.fill(bytes, (byte) 0);
             }

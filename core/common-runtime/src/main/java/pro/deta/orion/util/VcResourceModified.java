@@ -4,22 +4,26 @@ import pro.deta.orion.event.type.OrionEvent;
 
 import java.util.Objects;
 
-public class VcResourceModified<T extends VcResource> extends OrionEvent {
-    private final T target;
-    private final String oldRevision;
-    private final String revision;
+public final class VcResourceModified extends OrionEvent {
+    private final VcResource target;
+    private final VcRevision oldRevision;
+    private final VcRevision revision;
 
-    public VcResourceModified(T target, String oldRevision, String revision) {
-        this.target = target;
-        this.oldRevision = oldRevision;
+    public VcResourceModified(VcResource target, VcRevision oldRevision, VcRevision revision) {
+        this.target = Objects.requireNonNull(target, "target");
+        this.oldRevision = Objects.requireNonNull(oldRevision, "oldRevision");
         this.revision = Objects.requireNonNull(revision, "revision");
     }
 
-    public String oldRevision() {
+    public VcResource target() {
+        return target;
+    }
+
+    public VcRevision oldRevision() {
         return oldRevision;
     }
 
-    public String revision() {
+    public VcRevision revision() {
         return revision;
     }
 }
