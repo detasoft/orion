@@ -67,4 +67,8 @@ public class OrionDisruptor {
     public void handleEventsWith(EventHandler<EventHolder> eventHandler) {
         eventHolderDisruptor.handleEventsWith(eventHandler);
     }
+
+    public boolean isStarted() {
+        return started;
+    }
 }

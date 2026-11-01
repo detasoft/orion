@@ -10,8 +10,10 @@ import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 
 import java.util.ArrayDeque;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
@@ -22,7 +24,7 @@ import java.util.function.Supplier;
  * the data their handlers need, because handlers run later and outside the original request flow.</p>
  *
  * <p>The manager owns a single root Disruptor and starts/stops it with the application lifecycle. Event dispatch is
- * delegated to the shared registry, which matches the concrete event class and source.</p>
+ * based on matching the concrete event class and source.</p>
  *
  * <p>Handlers run on the Disruptor daemon thread, so they should be quick and should not rely on request-thread
  * ThreadLocals. If a handler needs request context, the publisher must copy the required data into the event object.</p>
@@ -35,13 +37,16 @@ import java.util.function.Supplier;
 public class OrionEventManager implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
     public static final int RING_BUFFER_SIZE = 32_768;
     private final OrionDisruptor rootDisruptor = new OrionDisruptor(RING_BUFFER_SIZE);
-    private final OrionEventRegistry registry;
+    private final ConcurrentHashMap<Route, ConcurrentHashMap<Object, Consumer<OrionEvent>>> registrations
+            = new ConcurrentHashMap<>();
     private final ArrayDeque<OrionEvent> pendingEvents = new ArrayDeque<>();
     private volatile Thread dispatchThread;
 
     @Inject
-    public OrionEventManager(OrionEventRegistry registry) {
-        this.registry = registry;
+    public OrionEventManager() {}
+
+    public OrionEvents forTarget(Object target) {
+        return new OrionEvents(this, Objects.requireNonNull(target, "target"));
     }
 
     @Override
@@ -53,7 +58,7 @@ public class OrionEventManager implements ServiceLifecycleStateMachineAdapter.Se
                 while (!pendingEvents.isEmpty()) {
                     OrionEvent event = pendingEvents.removeFirst();
                     try {
-                        registry.dispatch(event);
+                        dispatch(event);
                     } finally {
                         event.setProcessed();
                     }
@@ -96,6 +101,7 @@ public class OrionEventManager implements ServiceLifecycleStateMachineAdapter.Se
         }
     }
 
+    // Use only in rare cases.
     public void publishAndWait(OrionEvent event) {
         if (Thread.currentThread() == dispatchThread) {
             throw new IllegalStateException("Cannot wait for an event on the dispatcher thread");
@@ -107,6 +113,53 @@ public class OrionEventManager implements ServiceLifecycleStateMachineAdapter.Se
                 throw new IllegalStateException("Timed out waiting for event: " + event);
             }
             LockSupport.parkNanos(100_000);
+        }
+    }
+
+    <T extends OrionEvent> void subscribe(
+            Class<T> type, Object source, Object target, Consumer<? super T> handler) {
+        Objects.requireNonNull(target, "target");
+        Objects.requireNonNull(handler, "handler");
+        registrations.compute(new Route(type, source), (route, targets) -> {
+            if (targets == null) targets = new ConcurrentHashMap<>();
+            targets.putIfAbsent(target, event -> handler.accept(type.cast(event)));
+            return targets;
+        });
+    }
+
+    void unsubscribe(Object source, Object target) {
+        for (Route route : registrations.keySet()) {
+            if (Objects.equals(route.source(), source)) removeTarget(route, target);
+        }
+    }
+
+    void unsubscribe(Class<? extends OrionEvent> type, Object source, Object target) {
+        removeTarget(new Route(type, source), target);
+    }
+
+    private void removeTarget(Route route, Object target) {
+        registrations.computeIfPresent(route, (key, targets) -> {
+            targets.remove(target);
+            return targets.isEmpty() ? null : targets;
+        });
+    }
+
+    private void dispatch(OrionEvent event) {
+        ConcurrentHashMap<Object, Consumer<OrionEvent>> targets = registrations.get(
+                new Route(event.getClass(), event.source()));
+        if (targets == null) return;
+        for (Consumer<OrionEvent> target : targets.values()) {
+            try {
+                target.accept(event);
+            } catch (RuntimeException failure) {
+                log.warn("Event handler failed for {}", event, failure);
+            }
+        }
+    }
+
+    private record Route(Class<? extends OrionEvent> type, Object source) {
+        private Route {
+            Objects.requireNonNull(type, "type");
         }
     }
 }
