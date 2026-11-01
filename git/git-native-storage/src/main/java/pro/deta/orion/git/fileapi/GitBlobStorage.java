@@ -6,6 +6,8 @@ import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import pro.deta.orion.storage.BlobStorage;
 import pro.deta.orion.util.VcChangeDescription;
 import pro.deta.orion.util.VcRevision;
+import pro.deta.orion.util.VcModificationException;
+import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -33,7 +35,7 @@ public final class GitBlobStorage extends BlobStorage implements AutoCloseable {
     }
 
     @Override
-    protected BlobStorageOperations createOperation(VcRevision target) {
+    protected BlobStorageOperations createOperation(VcRevision.ReadTarget target) {
         if (!(target instanceof VcRevision.Stored) && !(target instanceof VcRevision.Latest)) {
             throw new IllegalArgumentException("Blob reads require a stored or latest revision");
         }
@@ -61,6 +63,12 @@ public final class GitBlobStorage extends BlobStorage implements AutoCloseable {
                 CommitId expected = new CommitId(revision().value());
                 try {
                     return new VcRevision.Stored(fileEvents.file().write(expected, content, description).toHex());
+                } catch (GitRefConflictException failure) {
+                    VcRevision actual = failure.actual().<VcRevision>map(id -> new VcRevision.Stored(id.toHex()))
+                            .orElseGet(VcRevision.Absent::new);
+                    VcModificationException conflict = new VcModificationException(revision(), actual);
+                    conflict.initCause(failure);
+                    throw conflict;
                 } catch (IOException failure) {
                     throw new UncheckedIOException(failure);
                 } catch (RuntimeException failure) {

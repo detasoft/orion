@@ -1,5 +1,11 @@
 package pro.deta.orion;
 
+import pro.deta.orion.keymaterial.KeyMaterialOperation;
+
+import pro.deta.orion.util.VcChangeDescription;
+
+import pro.deta.orion.util.VcRevision;
+
 import pro.deta.orion.git.fileapi.GitBlobStorage;
 
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
@@ -33,7 +39,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-/** Resolves KMS bootstrap settings and initializes missing material through a committed modification. */
+/** Resolves KMS bootstrap settings and initializes missing material through a committed operation. */
 public final class KeyMaterialBootstrap {
     private KeyMaterialBootstrap() {
     }
@@ -60,7 +66,7 @@ public final class KeyMaterialBootstrap {
                     ? new GitBlobStorage(
                             repositories.fileEvents(NativeGitRepositoryFactory.MATERIAL_SOURCE, material))
                     : resolver.resolveSource(resolveAgainstBaseDirectory(
-                            material.getLocation(), baseDirectory, "location"));
+                            material.getLocation(), baseDirectory, "location"), events);
             OrionKeyMaterial keys = OrionKeyMaterial.open(new KeyMaterialRepository(
                     store,
                     new KeyMaterialCodec(options),
@@ -75,15 +81,16 @@ public final class KeyMaterialBootstrap {
                         throw new GeneralSecurityException(
                                 "A new material store cannot contain retained server identities");
                     }
-                    keys.withModification(keys.revision(), modification -> {
+                    try (KeyMaterialOperation modification = keys.open(
+                    new VcRevision.Stored(keys.revision()))) {
                         if (signingMaterial.active().version() != 1) {
                             throw new GeneralSecurityException("New signing material must start at version 1");
                         }
                         modification.generateKey(signingMaterial.active().alias(),
                                 Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA,
                                 KeyMaterialConstants.RSA_KEY_SIZE_BITS);
-                        modification.apply();
-                    });
+                        modification.commit(VcChangeDescription.EMPTY);
+                    }
                 }
                 for (KeyMaterialId descriptor : signingMaterial.verificationIncludingActive()) {
                     keys.require(descriptor, Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA);

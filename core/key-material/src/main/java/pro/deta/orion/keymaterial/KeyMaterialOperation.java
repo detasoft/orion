@@ -1,35 +1,56 @@
 package pro.deta.orion.keymaterial;
 
-import pro.deta.orion.util.Modification;
 import pro.deta.orion.keymaterial.KeyMaterialRepository.Entry;
+import pro.deta.orion.storage.BlobStorage.BlobStorageOperations;
+import pro.deta.orion.util.VcRevision;
+import pro.deta.orion.util.VcChangeDescription;
 
 import javax.crypto.SecretKey;
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import pro.deta.orion.util.VcResource;
 import java.security.GeneralSecurityException;
 import java.security.KeyPair;
 import java.security.KeyStore;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
-import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
-/** Collects append-only additions against a captured source revision; deletion appends a marked entry. */
-public final class KeyMaterialModification implements Modification {
+/** Reads and prepares append-only changes against one opened source snapshot; deletion appends a marked entry. */
+public final class KeyMaterialOperation extends VcResource<KeyMaterialOperation>.VcOperation {
     private final KeyMaterialService owner;
-    private final String expectedRevision;
-    private final List<Entry> additions = new ArrayList<>();
-    private boolean finished;
+    private final KeyMaterialRepository repository;
+    private final BlobStorageOperations source;
+    private KeyStore snapshot;
+    private final Set<String> changedAliases = new HashSet<>();
 
-    KeyMaterialModification(KeyMaterialService owner, String expectedRevision) {
-        this.owner = owner;
-        this.expectedRevision = expectedRevision;
+    KeyMaterialOperation(KeyMaterialRepository repository, BlobStorageOperations source, KeyStore snapshot) {
+        repository.super(source.revision());
+        this.owner = new KeyMaterialService(repository);
+        this.repository = repository;
+        this.source = source;
+        this.snapshot = snapshot;
     }
 
-    public String version() {
-        return expectedRevision;
+    public synchronized KeyMaterialEntry read(KeyMaterialId id) throws GeneralSecurityException {
+        requireOpen();
+        return owner.describe(requireEntry(id));
+    }
+
+    public synchronized boolean contains(String alias) throws GeneralSecurityException {
+        requireOpen();
+        Entry entry = find(alias);
+        return entry != null && !entry.deleted();
+    }
+
+    public synchronized void require(KeyMaterialId id, Set<KeyMaterialPurpose> purposes,
+            KeyMaterialAlgorithm algorithm) throws GeneralSecurityException {
+        KeyMaterialEntry entry = read(id);
+        owner.validatePrepared(id.alias(), entry.content(), purposes, algorithm);
     }
 
     public synchronized KeyMaterialId generateKey(String alias, Set<KeyMaterialPurpose> purposes,
@@ -145,37 +166,33 @@ public final class KeyMaterialModification implements Modification {
     }
 
     @Override
-    public synchronized void apply() throws IOException {
+    protected synchronized VcRevision.Stored commitChanges(VcChangeDescription description) {
+        requireOpen();
         try {
-            requireOpen();
-            owner.apply(additions, expectedRevision);
-        } finally {
-            discard();
+            VcRevision.Stored committed = repository.commit(source, snapshot, changedAliases, description);
+            changedAliases.clear();
+            return committed;
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
         }
     }
 
     @Override
-    public synchronized void discard() {
-        additions.clear();
-        finished = true;
+    public synchronized void close() {
+        if (snapshot == null) return;
+        changedAliases.clear();
+        snapshot = null;
+        source.close();
     }
 
     private Entry find(String alias) throws GeneralSecurityException {
-        for (int index = additions.size() - 1; index >= 0; index--) {
-            Entry addition = additions.get(index);
-            if (addition.alias().equalsIgnoreCase(alias)) return addition;
-        }
-        return owner.readEntry(alias);
+        return repository.find(snapshot, alias).orElse(null);
     }
 
     private Entry requireEntry(KeyMaterialId id) throws GeneralSecurityException {
         Entry latest = find(id.alias());
         if (latest != null) requireAvailable(latest);
-        for (int index = additions.size() - 1; index >= 0; index--) {
-            Entry entry = additions.get(index);
-            if (entry.alias().equalsIgnoreCase(id.alias()) && entry.version() == id.version()) return entry;
-        }
-        Entry entry = owner.readEntry(id);
+        Entry entry = repository.find(snapshot, id).orElse(null);
         if (entry == null) throw new GeneralSecurityException("Key material version not found: " + id);
         requireAvailable(entry);
         return entry;
@@ -191,21 +208,18 @@ public final class KeyMaterialModification implements Modification {
         if (addition.deleted()) throw new GeneralSecurityException("Key material is deleted: " + addition.alias());
     }
 
-    private KeyMaterialId add(String alias, KeyStore.Entry entry, boolean deleted)
+    KeyMaterialId add(String alias, KeyStore.Entry entry, boolean deleted)
             throws GeneralSecurityException {
         Entry previous = find(alias);
         long next = previous == null ? 1 : Math.incrementExact(previous.version());
-        additions.add(new Entry(alias, entry, next, deleted));
+        repository.append(snapshot, new Entry(alias, entry, next, deleted));
+        changedAliases.add(alias);
         return new KeyMaterialId(alias, next);
     }
 
     private void requireOpen() {
-        if (finished) throw new IllegalStateException("Key material modification is already finished");
+        if (snapshot == null) throw new IllegalStateException("Key material operation is closed");
         owner.requireOpen();
     }
 
-    @FunctionalInterface
-    public interface Operation {
-        void accept(KeyMaterialModification modification) throws IOException, GeneralSecurityException;
-    }
 }

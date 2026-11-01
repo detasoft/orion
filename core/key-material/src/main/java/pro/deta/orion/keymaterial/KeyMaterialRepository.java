@@ -1,13 +1,18 @@
 package pro.deta.orion.keymaterial;
 
 import pro.deta.orion.storage.BlobStorage;
+import pro.deta.orion.storage.BlobStorage.BlobStorageOperations;
 import pro.deta.orion.storage.BlobStorageConflictException;
 
 import pro.deta.orion.event.OrionEventManager;
-import pro.deta.orion.storage.BlobStorage.Content;
-import pro.deta.orion.util.Subscription;
+import pro.deta.orion.util.VcChangeDescription;
+import pro.deta.orion.util.VcModificationException;
+import pro.deta.orion.util.VcResourceModified;
+import pro.deta.orion.util.VcRevision;
+import pro.deta.orion.util.VcResource;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.io.FileNotFoundException;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
@@ -26,23 +31,22 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Owns decoded material, revisions, persistence, and source-change handling without retaining serialized bytes.
- * Writer coordination is separate from state access. Source notifications during a write are deferred until
- * it finishes, and material events are published outside both locks. Failed writes invalidate this owner.
+ * Source notifications during a commit are deferred until its state is published. Persistence and event
+ * publication do not hold the state monitor, so readers can use the last committed state during a write.
+ * Failed writes invalidate this owner.
  * The addition attribute stores logical aliases, per-alias entry versions and deletion markers.
  * The content source alone supplies the whole-store revision; it is not stored in individual entries.
  */
-public final class KeyMaterialRepository implements AutoCloseable {
+public final class KeyMaterialRepository extends VcResource<KeyMaterialOperation> implements AutoCloseable {
     private static final String LOCAL_KEY_ID_ATTRIBUTE_OID = "1.2.840.113549.1.9.21";
     private static final String ADDITION_ATTRIBUTE_OID = "2.25.260349814076539099691640886169327826429";
-    private final ReentrantLock writes = new ReentrantLock();
+    private boolean writing;
     private final BlobStorage source;
     private final KeyMaterialCodec codec;
-    private final OrionEventManager events;
-    private final Subscription changes;
+    private final OrionEventManager eventManager;
     private KeyStore keyStore;
     private String sourceRevision;
     private boolean sourceChangePending;
@@ -50,36 +54,35 @@ public final class KeyMaterialRepository implements AutoCloseable {
 
     public KeyMaterialRepository(BlobStorage source, KeyMaterialCodec codec,
             OrionEventManager events) throws IOException, GeneralSecurityException {
+        super(events);
         this.source = Objects.requireNonNull(source, "source");
         this.codec = Objects.requireNonNull(codec, "codec");
         if (events == null) throw new IllegalArgumentException("Orion event manager must not be null");
-        this.events = events;
-        Subscription subscribed = null;
+        this.eventManager = events;
         try {
-            Content initial = source.load();
-            sourceRevision = initial.revision();
-            byte[] bytes = initial.bytes();
-            try {
-                keyStore = bytes == null ? codec.create() : codec.decode(bytes);
-                durableSnapshot = bytes != null;
-            } finally {
-                if (bytes != null) Arrays.fill(bytes, (byte) 0);
+            try (BlobStorageOperations initial = source.open(new VcRevision.Latest())) {
+                sourceRevision = initial.revision().value();
+                byte[] bytes = readAvailableBytes(initial);
+                try {
+                    keyStore = bytes == null ? codec.create() : codec.decode(bytes);
+                    durableSnapshot = bytes != null;
+                } finally {
+                    if (bytes != null) Arrays.fill(bytes, (byte) 0);
+                }
             }
             for (String physical : physicalAliases()) entryVersion(physical);
-            subscribed = source.subscribe(event -> reloadChangedSource(event.revision()));
-            changes = subscribed;
-            Content current = source.load();
+            this.events.subscribe(VcResourceModified.class, source, this::accept);
             try {
-                reload(current);
+                reload(new VcRevision.Latest());
             } catch (IOException | GeneralSecurityException | RuntimeException failure) {
                 System.getLogger(KeyMaterialRepository.class.getName()).log(System.Logger.Level.WARNING,
                         "Cannot reload key material; retaining the last valid state", failure);
             }
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {
-            if (subscribed != null) subscribed.close();
+            this.events.unsubscribe(VcResourceModified.class, source);
             codec.close();
             try {
-                source.close();
+                closeSource();
             } catch (RuntimeException cleanup) {
                 failure.addSuppressed(cleanup);
             }
@@ -87,15 +90,17 @@ public final class KeyMaterialRepository implements AutoCloseable {
         }
     }
 
-    private void reloadChangedSource(String sourceRevision) {
+    private void accept(VcResourceModified event) {
+        VcRevision announced = event.revision();
         synchronized (this) {
-            if (writes.isLocked()) {
+            if (writing) {
                 sourceChangePending = true;
                 return;
             }
         }
         try {
-            reload(sourceRevision);
+            if (announced instanceof VcRevision.Stored stored) reload(stored.value());
+            else reload(new VcRevision.Latest());
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {
             System.getLogger(KeyMaterialRepository.class.getName()).log(System.Logger.Level.WARNING,
                     "Cannot reload key material; retaining the last valid state", failure);
@@ -106,22 +111,30 @@ public final class KeyMaterialRepository implements AutoCloseable {
 
     public synchronized Optional<Entry> find(String alias) throws GeneralSecurityException {
         requireOpen();
+        return find(keyStore, alias);
+    }
+
+    Optional<Entry> find(KeyStore snapshot, String alias) throws GeneralSecurityException {
         requireAlias(alias);
-        EntryVersion latest = findVersion(alias);
+        EntryVersion latest = findVersion(snapshot, alias);
         if (latest == null) return Optional.empty();
-        return Optional.of(new Entry(latest.alias(), readEntry(keyStore, latest.physicalAlias()),
+        return Optional.of(new Entry(latest.alias(), readEntry(snapshot, latest.physicalAlias()),
                 latest.version(), latest.deleted()));
     }
 
     public synchronized Optional<Entry> find(KeyMaterialId id) throws GeneralSecurityException {
         requireOpen();
+        return find(keyStore, id);
+    }
+
+    Optional<Entry> find(KeyStore snapshot, KeyMaterialId id) throws GeneralSecurityException {
         Objects.requireNonNull(id, "id");
-        EntryVersion latest = findVersion(id.alias());
+        EntryVersion latest = findVersion(snapshot, id.alias());
         if (latest == null || latest.deleted()) return Optional.empty();
-        for (String physical : physicalAliases()) {
-            EntryVersion version = entryVersion(physical);
+        for (String physical : physicalAliases(snapshot)) {
+            EntryVersion version = entryVersion(snapshot, physical);
             if (version.alias().equalsIgnoreCase(id.alias()) && version.version() == id.version()) {
-                return Optional.of(new Entry(version.alias(), readEntry(keyStore, physical),
+                return Optional.of(new Entry(version.alias(), readEntry(snapshot, physical),
                         version.version(), version.deleted()));
             }
         }
@@ -138,19 +151,13 @@ public final class KeyMaterialRepository implements AutoCloseable {
     }
 
     void addIfAbsent(String alias, KeyStore.Entry entry) throws IOException, GeneralSecurityException {
-        try {
-            Set<String> resources = Set.of();
-            writes.lock();
-            try {
-                if (find(alias).isEmpty()) {
-                    resources = applyState(revision(), List.of(new Entry(alias, entry, 1, false)));
-                }
-            } finally {
-                writes.unlock();
-            }
-            if (!resources.isEmpty()) publishChanged(resources);
-        } finally {
-            processPendingSourceChange();
+        try (KeyMaterialOperation operation = open(new VcRevision.Stored(revision()))) {
+            if (operation.contains(alias)) return;
+            operation.add(alias, entry, false);
+            operation.commit(VcChangeDescription.EMPTY);
+        } catch (UncheckedIOException failure) {
+            if (failure.getCause() instanceof BlobStorageConflictException && find(alias).isPresent()) return;
+            throw failure.getCause();
         }
     }
 
@@ -159,7 +166,7 @@ public final class KeyMaterialRepository implements AutoCloseable {
         return durableSnapshot;
     }
 
-    private void append(KeyStore target, Entry addition) throws GeneralSecurityException {
+    void append(KeyStore target, Entry addition) throws GeneralSecurityException {
         String alias = addition.alias().toLowerCase(Locale.ROOT);
         String physical = target.containsAlias(alias)
                 ? "__orion_kms_" + HexFormat.of().formatHex(alias.getBytes(StandardCharsets.UTF_8))
@@ -206,9 +213,13 @@ public final class KeyMaterialRepository implements AutoCloseable {
     }
 
     private EntryVersion findVersion(String alias) throws GeneralSecurityException {
+        return findVersion(keyStore, alias);
+    }
+
+    private EntryVersion findVersion(KeyStore snapshot, String alias) throws GeneralSecurityException {
         EntryVersion latest = null;
-        for (String physical : physicalAliases()) {
-            EntryVersion entry = entryVersion(physical);
+        for (String physical : physicalAliases(snapshot)) {
+            EntryVersion entry = entryVersion(snapshot, physical);
             if (entry.alias().equalsIgnoreCase(alias)
                     && (latest == null || entry.version() > latest.version())) latest = entry;
         }
@@ -250,10 +261,39 @@ public final class KeyMaterialRepository implements AutoCloseable {
         return sourceRevision;
     }
 
-    public void apply(String expectedRevision, List<Entry> additions) throws IOException {
+    @Override
+    protected KeyMaterialOperation createOperation(VcRevision.ReadTarget revision) {
+        requireOpen();
+        BlobStorageOperations operation = source.open(revision);
         try {
-            Set<String> resources = applyState(expectedRevision, additions);
+            byte[] bytes = readAvailableBytes(operation);
+            try {
+                KeyStore snapshot = bytes == null ? codec.create() : codec.decode(bytes);
+                return new KeyMaterialOperation(this, operation, snapshot);
+            } catch (IOException failure) {
+                throw new UncheckedIOException(failure);
+            } catch (GeneralSecurityException failure) {
+                throw new IllegalStateException("Cannot decode key material", failure);
+            } finally {
+                if (bytes != null) Arrays.fill(bytes, (byte) 0);
+            }
+        } catch (RuntimeException | Error failure) {
+            try {
+                operation.close();
+            } catch (RuntimeException | Error cleanup) {
+                failure.addSuppressed(cleanup);
+            }
+            throw failure;
+        }
+    }
+
+    VcRevision.Stored commit(BlobStorageOperations operation, KeyStore snapshot,
+            Set<String> changedAliases, VcChangeDescription description) throws IOException {
+        try {
+            Set<String> resources = new HashSet<>();
+            VcRevision.Stored committed = applyState(operation, snapshot, changedAliases, description, resources);
             if (!resources.isEmpty()) publishChanged(resources);
+            return committed;
         } finally {
             processPendingSourceChange();
         }
@@ -265,20 +305,23 @@ public final class KeyMaterialRepository implements AutoCloseable {
                 sourceChangePending = false;
                 return;
             }
-            if (writes.isLocked() || !sourceChangePending) return;
+            if (writing || !sourceChangePending) return;
             sourceChangePending = false;
         }
         try {
-            reload(source.load());
+            reload(new VcRevision.Latest());
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {
             System.getLogger(KeyMaterialRepository.class.getName()).log(System.Logger.Level.WARNING,
                     "Cannot refresh material source after save; retaining the committed state", failure);
         }
     }
 
-    private Set<String> applyState(String expectedRevision, List<Entry> additions) throws IOException {
-        Set<String> resources = new HashSet<>();
-        writes.lock();
+    private VcRevision.Stored applyState(BlobStorageOperations operation, KeyStore snapshot,
+            Set<String> changedAliases, VcChangeDescription description, Set<String> resources) throws IOException {
+        String expectedRevision = operation.revision().value();
+        synchronized (this) {
+            writing = true;
+        }
         try {
             byte[] serialized;
             KeyStore publication;
@@ -287,11 +330,15 @@ public final class KeyMaterialRepository implements AutoCloseable {
                 if (!Objects.equals(sourceRevision, expectedRevision)) {
                     throw new BlobStorageConflictException("Key material changed before apply");
                 }
-                if (additions.isEmpty()) return Set.of();
+                if (changedAliases.isEmpty()) return operation.revision();
                 try {
-                    publication = copyForPublication();
-                    for (Entry addition : additions) append(publication, addition);
-                    serialized = codec.encode(publication);
+                    serialized = codec.encode(snapshot);
+                    try {
+                        publication = codec.decode(serialized);
+                    } catch (IOException | GeneralSecurityException | RuntimeException failure) {
+                        Arrays.fill(serialized, (byte) 0);
+                        throw failure;
+                    }
                 } catch (GeneralSecurityException failure) {
                     close();
                     throw new IOException("Cannot prepare key material", failure);
@@ -301,9 +348,14 @@ public final class KeyMaterialRepository implements AutoCloseable {
                 }
             }
             try {
-                String saved;
+                VcRevision.Stored saved;
                 try {
-                    saved = source.write(new BlobStorage.Modification(expectedRevision, serialized));
+                    operation.write(serialized);
+                    saved = operation.commit(description);
+                } catch (VcModificationException conflict) {
+                    throw new BlobStorageConflictException("Key material changed before apply", conflict);
+                } catch (UncheckedIOException failure) {
+                    throw failure.getCause();
                 } finally {
                     Arrays.fill(serialized, (byte) 0);
                 }
@@ -311,10 +363,8 @@ public final class KeyMaterialRepository implements AutoCloseable {
                     requireOpen();
                     if (Objects.equals(sourceRevision, expectedRevision)) {
                         keyStore = publication;
-                        for (Entry addition : additions) {
-                            resources.add(addition.alias());
-                        }
-                        sourceRevision = saved;
+                        resources.addAll(changedAliases);
+                        sourceRevision = saved.value();
                         durableSnapshot = true;
                     } else {
                         for (String physical : physicalAliases(publication)) {
@@ -326,6 +376,7 @@ public final class KeyMaterialRepository implements AutoCloseable {
                         }
                     }
                 }
+                return saved;
             } catch (GeneralSecurityException failure) {
                 close();
                 throw new IOException("Cannot save key material", failure);
@@ -334,9 +385,10 @@ public final class KeyMaterialRepository implements AutoCloseable {
                 throw failure;
             }
         } finally {
-            writes.unlock();
+            synchronized (this) {
+                writing = false;
+            }
         }
-        return resources;
     }
 
     public void reload(String requestedRevision) throws IOException, GeneralSecurityException {
@@ -345,21 +397,26 @@ public final class KeyMaterialRepository implements AutoCloseable {
             Objects.requireNonNull(requestedRevision, "revision");
             if (Objects.equals(sourceRevision, requestedRevision)) return;
         }
-        reload(new Content(requestedRevision, readContent(requestedRevision)));
+        reload(new VcRevision.Stored(requestedRevision));
     }
 
-    private void reload(Content content) throws IOException, GeneralSecurityException {
-        Set<String> resources = reloadState(content);
+    private void reload(VcRevision.ReadTarget revision) throws IOException, GeneralSecurityException {
+        Set<String> resources;
+        try (BlobStorageOperations operation = source.open(revision)) {
+            resources = reloadState(operation);
+        } catch (UncheckedIOException failure) {
+            throw failure.getCause();
+        }
         if (!resources.isEmpty()) publishChanged(resources);
     }
 
-    private synchronized Set<String> reloadState(Content content)
+    private synchronized Set<String> reloadState(BlobStorageOperations content)
             throws IOException, GeneralSecurityException {
         KeyStore incoming;
-        byte[] bytes = content.bytes();
+        byte[] bytes = readAvailableBytes(content);
         try {
             requireOpen();
-            if (Objects.equals(sourceRevision, content.revision())) return Set.of();
+            if (Objects.equals(sourceRevision, content.revision().value())) return Set.of();
             incoming = bytes == null ? codec.create() : codec.decode(bytes);
         } finally {
             if (bytes != null) Arrays.fill(bytes, (byte) 0);
@@ -386,16 +443,29 @@ public final class KeyMaterialRepository implements AutoCloseable {
             resources.add(entry.alias());
         }
         keyStore = incoming;
-        sourceRevision = content.revision();
+        sourceRevision = content.revision().value();
         durableSnapshot = bytes != null;
         return Set.copyOf(resources);
     }
 
-    private byte[] readContent(String revision) throws IOException {
+    private byte[] readAvailableBytes(BlobStorageOperations operation) {
         try {
-            return source.read(revision);
-        } catch (FileNotFoundException missing) {
-            return null;
+            return operation.readContent();
+        } catch (UncheckedIOException failure) {
+            if (failure.getCause() instanceof FileNotFoundException) return null;
+            throw failure;
+        }
+    }
+
+    private void closeSource() {
+        if (source instanceof AutoCloseable closeable) {
+            try {
+                closeable.close();
+            } catch (RuntimeException failure) {
+                throw failure;
+            } catch (Exception failure) {
+                throw new IllegalStateException("Cannot close key material source", failure);
+            }
         }
     }
 
@@ -446,19 +516,10 @@ public final class KeyMaterialRepository implements AutoCloseable {
 
     private void publishChanged(Set<String> resources) {
         try {
-            events.publishIfRunning(new KeyMaterialChanged(Set.copyOf(resources)));
+            if (eventManager.isRunning()) events.publish(new KeyMaterialChanged(Set.copyOf(resources)));
         } catch (RuntimeException failure) {
             System.getLogger(KeyMaterialRepository.class.getName()).log(System.Logger.Level.WARNING,
                     "Could not publish key material change event", failure);
-        }
-    }
-
-    private KeyStore copyForPublication() throws IOException, GeneralSecurityException {
-        byte[] serialized = codec.encode(keyStore);
-        try {
-            return codec.decode(serialized);
-        } finally {
-            Arrays.fill(serialized, (byte) 0);
         }
     }
 
@@ -483,12 +544,12 @@ public final class KeyMaterialRepository implements AutoCloseable {
         if (keyStore == null) return;
         keyStore = null;
         try {
-            changes.close();
+            this.events.unsubscribe(VcResourceModified.class, source);
         } finally {
             try {
                 codec.close();
             } finally {
-                source.close();
+                closeSource();
             }
         }
     }

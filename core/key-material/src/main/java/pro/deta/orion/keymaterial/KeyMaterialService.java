@@ -1,6 +1,6 @@
 package pro.deta.orion.keymaterial;
 
-import pro.deta.orion.storage.BlobStorageConflictException;
+import pro.deta.orion.util.VcRevision;
 
 import pro.deta.orion.keymaterial.KeyMaterialRepository.Entry;
 
@@ -242,14 +242,6 @@ final class KeyMaterialService implements AutoCloseable {
                 purposes, algorithm);
     }
 
-    Entry readEntry(String alias) throws GeneralSecurityException {
-        return store.find(alias).orElse(null);
-    }
-
-    Entry readEntry(KeyMaterialId id) throws GeneralSecurityException {
-        return store.find(id).orElse(null);
-    }
-
     private static String attribute(Set<KeyStore.Entry.Attribute> attributes, String oid) {
         for (KeyStore.Entry.Attribute attribute : attributes) {
             if (oid.equals(attribute.getName())) return attribute.getValue();
@@ -275,17 +267,9 @@ final class KeyMaterialService implements AutoCloseable {
         return store.revision();
     }
 
-    synchronized KeyMaterialModification modify(String expectedRevision)
-            throws BlobStorageConflictException {
-        requireOpen();
-        if (!Objects.equals(store.revision(), expectedRevision)) {
-            throw new BlobStorageConflictException("Key material changed before modify");
-        }
-        return new KeyMaterialModification(this, expectedRevision);
-    }
-
-    void apply(List<Entry> additions, String expectedRevision) throws IOException {
-        store.apply(expectedRevision, additions);
+    KeyMaterialOperation open(VcRevision.ReadTarget revision)
+            throws IOException, GeneralSecurityException {
+        return store.open(revision);
     }
 
     void prepareConfigurationCipher(KeyMaterialId id) throws GeneralSecurityException {

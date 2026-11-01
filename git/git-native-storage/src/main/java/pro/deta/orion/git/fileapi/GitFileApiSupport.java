@@ -27,25 +27,23 @@ import java.util.Optional;
 final class GitFileApiSupport {
     private GitFileApiSupport() {}
 
-    static GitFileAccess open(GitFileApi resource, VcRevision revision) {
+    static GitFileAccess open(GitFileApi resource, VcRevision.ReadTarget revision) {
         NativeGitRepository repository = resource.repository;
         try {
             GitIndexAccess index = repository.index().createAccess(Optional.of(PackId.create()));
             try {
-                ObjectId commit;
-                if (revision instanceof VcRevision.Stored stored) {
-                    commit = new ObjectId(stored.value());
-                } else if (revision instanceof VcRevision.Ref ref) {
-                    commit = index.findRef(new RefId(ref.value()))
+                ObjectId commit = switch (revision) {
+                    case VcRevision.Stored stored -> new ObjectId(stored.value());
+                    case VcRevision.Ref ref -> index.findRef(new RefId(ref.value()))
                             .orElseThrow(() -> new GitRepositoryFileNotFoundException("Ref not found: " + ref.value()));
-                } else if (revision instanceof VcRevision.Latest) {
-                    RefsSnapshot snapshot = index.snapshotRefs(new RefSelection.Head());
-                    commit = snapshot.head() instanceof Head.Detached detached
-                            ? detached.target() : snapshot.refs().get(((Head.Symbolic) snapshot.head()).target());
-                    if (commit == null) throw new GitRepositoryFileNotFoundException("HEAD is unborn");
-                } else {
-                    throw new IllegalArgumentException("Cannot open an absent Git revision");
-                }
+                    case VcRevision.Latest ignored -> {
+                        RefsSnapshot snapshot = index.snapshotRefs(new RefSelection.Head());
+                        ObjectId current = snapshot.head() instanceof Head.Detached detached
+                                ? detached.target() : snapshot.refs().get(((Head.Symbolic) snapshot.head()).target());
+                        if (current == null) throw new GitRepositoryFileNotFoundException("HEAD is unborn");
+                        yield current;
+                    }
+                };
                 return new GitFileAccess(resource, index, new VcRevision.Stored(commit.toHex()));
             } catch (IOException | GitOperationException | RuntimeException | Error failure) {
                 try {

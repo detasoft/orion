@@ -1,5 +1,11 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.keymaterial.KeyMaterialOperation;
+
+import pro.deta.orion.util.VcChangeDescription;
+
+import pro.deta.orion.util.VcRevision;
+
 import java.util.Set;
 
 import jakarta.inject.Inject;
@@ -60,8 +66,9 @@ public final class OrionAdminKeyMaterialRoute extends BaseAdminRoute {
             String alias = input.alias();
             Set<KeyMaterialPurpose> purposes = Set.of(input.purpose());
             char[] privateKeyPem = input.privateKeyPem();
-            material.withModification(material.revision(), modification -> {
-                if (material.contains(alias, Set.of())) {
+            try (KeyMaterialOperation modification = material.open(
+                    new VcRevision.Stored(material.revision()))) {
+                if (modification.contains(alias)) {
                     throw new IllegalArgumentException("Key material name already exists");
                 }
                 if (privateKeyPem == null || privateKeyPem.length == 0) {
@@ -69,8 +76,8 @@ public final class OrionAdminKeyMaterialRoute extends BaseAdminRoute {
                 } else {
                     modification.importKey(alias, purposes, KeyMaterialAlgorithm.RSA, privateKeyPem);
                 }
-                modification.apply();
-            });
+                modification.commit(VcChangeDescription.EMPTY);
+            }
             return OrionHttpResponse.empty(201).withHeader("Cache-Control", "no-store");
         } catch (IllegalArgumentException | JsonProcessingException invalid) {
             return OrionHttpResponse.text(400,

@@ -31,7 +31,7 @@ public class InMemoryBlobStorage extends BlobStorage {
     }
 
     @Override
-    protected BlobStorageOperations createOperation(VcRevision target) {
+    protected BlobStorageOperations createOperation(VcRevision.ReadTarget target) {
         if (!(target instanceof VcRevision.Stored) && !(target instanceof VcRevision.Latest)) {
             throw new IllegalArgumentException("Blob reads require a stored or latest revision");
         }

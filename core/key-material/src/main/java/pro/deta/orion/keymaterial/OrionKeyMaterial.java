@@ -1,6 +1,6 @@
 package pro.deta.orion.keymaterial;
 
-import pro.deta.orion.storage.BlobStorageConflictException;
+import pro.deta.orion.util.VcRevision;
 
 import java.util.Set;
 
@@ -45,7 +45,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Owns runtime key material, reads committed entries and prepares isolated modifications.
+ * Owns runtime key material and opens isolated read/write operations.
  * The configuration wrapping key is persisted on first seal;
  * a failed material save invalidates this owner so a caller must reopen the durable state before retrying.
  */
@@ -88,20 +88,10 @@ public class OrionKeyMaterial implements AutoCloseable {
         return owner.revision();
     }
 
-    public KeyMaterialModification modify(String expectedRevision) throws BlobStorageConflictException {
-        requireAvailable();
-        return owner.modify(expectedRevision);
-    }
-
-    public void withModification(String expectedRevision, KeyMaterialModification.Operation operation)
+    public KeyMaterialOperation open(VcRevision.ReadTarget revision)
             throws IOException, GeneralSecurityException {
-        Objects.requireNonNull(operation, "operation");
-        KeyMaterialModification modification = modify(expectedRevision);
-        try {
-            operation.accept(modification);
-        } finally {
-            modification.discard();
-        }
+        requireAvailable();
+        return owner.open(revision);
     }
 
     public boolean contains(KeyMaterialId descriptor) throws GeneralSecurityException {

@@ -18,7 +18,7 @@ public abstract class VcResource<O extends VcResource.VcOperation> {
         events = eventManager.forTarget(this);
     }
 
-    public final O open(VcRevision revision) {
+    public final O open(VcRevision.ReadTarget revision) {
         Objects.requireNonNull(revision, "revision");
         resourceLock.readLock().lock();
         try {
@@ -28,9 +28,9 @@ public abstract class VcResource<O extends VcResource.VcOperation> {
         }
     }
 
-    protected abstract O createOperation(VcRevision revision);
+    protected abstract O createOperation(VcRevision.ReadTarget revision);
 
-    public final <T, E extends Exception> T read(VcRevision revision,
+    public final <T, E extends Exception> T read(VcRevision.ReadTarget revision,
             CheckedFunction<? super O, ? extends T, E> action) throws E {
         Objects.requireNonNull(action, "action");
         try (O operation = open(revision)) {

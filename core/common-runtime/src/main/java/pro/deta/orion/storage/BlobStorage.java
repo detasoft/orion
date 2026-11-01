@@ -9,7 +9,7 @@ public abstract class BlobStorage extends VcResource<BlobStorage.BlobStorageOper
         super(eventManager);
     }
 
-    public final byte[] readBytes(VcRevision revision) {
+    public final byte[] readBytes(VcRevision.ReadTarget revision) {
         return read(revision, BlobStorageOperations::readContent);
     }
 

@@ -13,7 +13,7 @@ public final class GitFileApi extends VcResource<GitFileAccess> {
     }
 
     @Override
-    protected GitFileAccess createOperation(VcRevision revision) {
+    protected GitFileAccess createOperation(VcRevision.ReadTarget revision) {
         return GitFileApiSupport.open(this, revision);
     }
 }

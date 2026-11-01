@@ -1,5 +1,9 @@
 package pro.deta.orion.keymaterial;
 
+import pro.deta.orion.util.VcChangeDescription;
+
+import pro.deta.orion.util.VcRevision;
+
 import javax.net.ssl.SSLContext;
 import java.io.IOException;
 import java.security.GeneralSecurityException;
@@ -44,13 +48,13 @@ public final class CertificateIdentity {
         List<X509Certificate> validated = requireX509Chain(certificateChain);
         Optional<X509Certificate> root = requireIssuerCertificate(
                 configuration.serverIssuerTrustAnchor(), issuerTrustAnchor);
-        KeyMaterialModification modification = material.modify(material.revision());
+        KeyMaterialOperation modification = material.open(new VcRevision.Stored(material.revision()));
         try {
             Optional<KeyMaterialId> issuer = configuration.serverIssuerTrustAnchor();
             if (root.isPresent()) {
                 KeyMaterialId descriptor = issuer.orElseThrow();
                 KeyMaterialId id;
-                if (material.contains(descriptor.alias(), java.util.Set.of())) {
+                if (modification.contains(descriptor.alias())) {
                     id = modification.setTrustedCertificate(descriptor, root.orElseThrow());
                 } else {
                     if (descriptor.version() != 1) {
@@ -65,12 +69,12 @@ public final class CertificateIdentity {
             }
             KeyMaterialId id =
                     modification.installCertificateChain(configuration.identity(), validated, issuer);
-            modification.apply();
+            modification.commit(VcChangeDescription.EMPTY);
             return new CertificateIdentity(material,
                     new TlsMaterialConfiguration(id,
                     issuer, configuration.clientTrustAnchors(), configuration.clientAuthentication()));
         } finally {
-            modification.discard();
+            modification.close();
         }
     }
 

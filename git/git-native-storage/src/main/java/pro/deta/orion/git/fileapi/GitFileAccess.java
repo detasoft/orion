@@ -188,8 +188,6 @@ public final class GitFileAccess extends VcResource<GitFileAccess>.VcOperation {
             storage.apply();
             index.publishIndex(pack);
             return new VcRevision.Stored(commit.toHex());
-        } catch (GitOperationException failure) {
-            throw new UncheckedIOException(new IOException("Cannot apply file changes", failure));
         } catch (IOException failure) {
             throw new UncheckedIOException(failure);
         }

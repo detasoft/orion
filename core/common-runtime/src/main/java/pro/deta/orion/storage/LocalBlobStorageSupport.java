@@ -42,7 +42,7 @@ final class LocalBlobStorageSupport {
         }
     }
 
-    static byte[] readContent(Path path, VcRevision revision) {
+    static byte[] readContent(Path path, VcRevision.ReadTarget revision) {
         Objects.requireNonNull(revision, "revision");
         if (!(revision instanceof VcRevision.Stored) && !(revision instanceof VcRevision.Latest)) {
             throw new IllegalArgumentException("Blob reads require a stored or latest revision");

@@ -1,6 +1,7 @@
 package pro.deta.orion;
 
 import pro.deta.orion.storage.BlobStorage;
+import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.storage.ProtectedFiles;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
@@ -60,20 +61,20 @@ public final class KeyMaterialResourceResolver {
         return unsafe(scope(environment));
     }
 
-    public BlobStorage resolveSource(String locationReference) {
+    public BlobStorage resolveSource(String locationReference, OrionEventManager events) {
         ResourceAddress address = resolveAddress(
                 locationReference,
                 "Key material location reference must not be empty");
         if (address.scheme().isEmpty() || address.hasScheme(ResourceScheme.FILE)) {
-            return new LocalBlobStorage(Path.of(address.body()));
+            return new LocalBlobStorage(Path.of(address.body()), events);
         }
         if (address.hasScheme(ENV)) {
-            return resolveSource(resolveEnvironment(address.body()));
+            return resolveSource(resolveEnvironment(address.body()), events);
         }
         if (address.hasScheme(ResourceScheme.CONTENT)) {
             byte[] bytes = contentBytes(address.body());
             try {
-                return new InMemoryBlobStorage(bytes, true);
+                return new InMemoryBlobStorage(bytes, true, events);
             } finally {
                 Arrays.fill(bytes, (byte) 0);
             }

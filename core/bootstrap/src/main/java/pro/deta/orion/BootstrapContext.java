@@ -1,5 +1,9 @@
 package pro.deta.orion;
 
+import pro.deta.orion.keymaterial.KeyMaterialOperation;
+
+import pro.deta.orion.util.VcChangeDescription;
+
 import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
@@ -224,13 +228,14 @@ public final class BootstrapContext implements AutoCloseable {
         List<String> selected = List.copyOf(references);
         if (selected.isEmpty()
                 && keyMaterial.sshHostKeyPairs(List.of()).isEmpty()) {
-            keyMaterial.withModification(keyMaterial.revision(), modification -> {
+            try (KeyMaterialOperation modification = keyMaterial.open(
+                    new VcRevision.Stored(keyMaterial.revision()))) {
                 modification.generateKey("ssh-host-rsa-v1", Set.of(KeyMaterialPurpose.SSH_HOST),
                         KeyMaterialAlgorithm.RSA, KeyMaterialConstants.RSA_KEY_SIZE_BITS);
                 modification.generateKey("ssh-host-ec-v1", Set.of(KeyMaterialPurpose.SSH_HOST),
                         KeyMaterialAlgorithm.EC, KeyMaterialConstants.EC_KEY_SIZE_BITS);
-                modification.apply();
-            });
+                modification.commit(VcChangeDescription.EMPTY);
+            }
         }
         keyMaterial.sshHostKeyPairs(selected);
         return session -> keyMaterial.sshHostKeyPairs(selected);

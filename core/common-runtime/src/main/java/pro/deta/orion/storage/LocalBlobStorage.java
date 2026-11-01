@@ -17,7 +17,7 @@ public class LocalBlobStorage extends BlobStorage {
     }
 
     @Override
-    protected BlobStorageOperations createOperation(VcRevision target) {
+    protected BlobStorageOperations createOperation(VcRevision.ReadTarget target) {
         byte[] initial = LocalBlobStorageSupport.readContent(path, target);
         VcRevision.Stored base = new VcRevision.Stored(BlobRevisions.sha256(initial));
         return new BlobStorageOperations(base) {

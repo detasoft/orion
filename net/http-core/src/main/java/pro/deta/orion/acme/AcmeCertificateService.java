@@ -1,5 +1,7 @@
 package pro.deta.orion.acme;
 
+import pro.deta.orion.util.VcChangeDescription;
+
 import java.io.IOException;
 import java.net.URI;
 import java.security.GeneralSecurityException;
@@ -36,7 +38,7 @@ import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
-import pro.deta.orion.keymaterial.KeyMaterialModification;
+import pro.deta.orion.keymaterial.KeyMaterialOperation;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter.ServiceLifecycle;
@@ -292,7 +294,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
         }
         try {
             CertificateMaterial certificates = certificateMaterial(settings.material(), issued.certificateChain());
-            KeyMaterialModification modification = keyMaterial.modify(keyMaterial.revision());
+            KeyMaterialOperation modification = keyMaterial.open(new VcRevision.Stored(keyMaterial.revision()));
             KeyMaterialId identityId;
             Optional<KeyMaterialId> issuerId = Optional.empty();
             try {
@@ -300,7 +302,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
                 if (issuer.isPresent()) {
                     KeyMaterialId descriptor = issuer.orElseThrow();
                     KeyMaterialId savedIssuer;
-                    if (keyMaterial.contains(descriptor.alias(), Set.of())) {
+                    if (modification.contains(descriptor.alias())) {
                         savedIssuer = modification.setTrustedCertificate(descriptor,
                                 certificates.issuerTrustAnchor().orElseThrow());
                     } else {
@@ -316,9 +318,9 @@ public class AcmeCertificateService implements ServiceLifecycle {
                 }
                 identityId = modification.installCertificateChain(settings.material().identity(),
                         certificates.chain(), issuer);
-                modification.apply();
+                modification.commit(VcChangeDescription.EMPTY);
             } finally {
-                modification.discard();
+                modification.close();
             }
             OrionHttpsConfiguration activated = activateCertificate(settings, identityId, issuerId);
             renewalAttempt = new RenewalAttempt(Optional.of(activated), now, now, "");
@@ -556,7 +558,8 @@ public class AcmeCertificateService implements ServiceLifecycle {
 
     private void prepareMaterial(Material configuration)
             throws IOException, GeneralSecurityException {
-        keyMaterial.withModification(keyMaterial.revision(), modification -> {
+        try (KeyMaterialOperation modification = keyMaterial.open(
+                    new VcRevision.Stored(keyMaterial.revision()))) {
             if (configuration.issuerTrustAnchor().isPresent()) {
                 KeyMaterialId issuer = configuration.issuerTrustAnchor().orElseThrow();
                 String alias = issuer.alias();
@@ -564,22 +567,22 @@ public class AcmeCertificateService implements ServiceLifecycle {
                         || alias.equalsIgnoreCase(configuration.identity().alias())) {
                     throw new IllegalArgumentException("ACME key and issuer must use different aliases");
                 }
-                if (keyMaterial.contains(issuer.alias(), Set.of())) {
-                    keyMaterial.require(issuer, Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA);
+                if (modification.contains(issuer.alias())) {
+                    modification.require(issuer, Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA);
                 } else if (issuer.version() != 1) {
                     throw new GeneralSecurityException("Key material version not found: " + issuer);
                 }
             }
             prepareKey(modification, configuration.account(), KeyMaterialPurpose.ACME_ACCOUNT);
             prepareKey(modification, configuration.identity(), KeyMaterialPurpose.TLS_IDENTITY);
-            modification.apply();
-        });
+            modification.commit(VcChangeDescription.EMPTY);
+        }
     }
 
-    private void prepareKey(KeyMaterialModification modification, KeyMaterialId id, KeyMaterialPurpose purpose)
+    private void prepareKey(KeyMaterialOperation modification, KeyMaterialId id, KeyMaterialPurpose purpose)
             throws GeneralSecurityException {
-        if (keyMaterial.contains(id.alias(), Set.of())) {
-            keyMaterial.require(id, Set.of(purpose), KeyMaterialAlgorithm.RSA);
+        if (modification.contains(id.alias())) {
+            modification.require(id, Set.of(purpose), KeyMaterialAlgorithm.RSA);
         } else {
             if (id.version() != 1) throw new GeneralSecurityException("Key material version not found: " + id);
             modification.generateKey(id.alias(), Set.of(purpose), KeyMaterialAlgorithm.RSA, RSA_KEY_SIZE);
