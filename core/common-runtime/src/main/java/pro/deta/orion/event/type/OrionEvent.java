@@ -16,11 +16,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>The event manager marks an event as processed after all registered handlers for its concrete class have run. The
  * flag is intentionally small: it is useful for tests and diagnostics, but event handlers should communicate real
  * state changes through their own domain objects or services.</p>
+ *
+ * <p>Subscription routing matches the concrete event class and source equality.
+ * Events without a specified source return {@code null}.</p>
  */
 @Getter
 public abstract class OrionEvent {
     private final Instant createdAt = Instant.now();
     private final AtomicBoolean processed = new AtomicBoolean(false);
+
+    public Object source() {
+        return null;
+    }
 
     public void setProcessed() {
         processed.set(true);
