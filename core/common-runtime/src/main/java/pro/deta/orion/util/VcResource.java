@@ -19,8 +19,6 @@ public abstract class VcResource {
         events = eventManager.forTarget(this);
     }
 
-    protected abstract VcRevision commit(VcChangeDescription description);
-
     private <R> R inReadLock(Supplier<R> operation) {
         resourceLock.readLock().lock();
         try {
@@ -38,6 +36,12 @@ public abstract class VcResource {
         if (!expectedRevision.equals(lastRevision)) {
             throw new VcModificationException(expectedRevision, lastRevision);
         }
+    }
+
+    public abstract static class VcUpdateOperations {
+        protected abstract VcRevision commit(VcChangeDescription description);
+
+        protected void discard() {}
     }
 
     /** Operation objects are borrowed under the read-lock and must not escape the callback. */
@@ -58,7 +62,7 @@ public abstract class VcResource {
      * A single caller uses each modification. Changes run only during apply; captured mutable inputs
      * are not snapshots. Operation objects are borrowed during callbacks and must not escape them.
      */
-    public class VcModification<M> {
+    public class VcModification<M extends VcUpdateOperations> {
         private final VcRevision oldRevision;
         private final VcChangeDescription description;
         private final M operations;
@@ -84,16 +88,27 @@ public abstract class VcResource {
             pending = null;
             VcRevision revision;
             resourceLock.writeLock().lock();
+            Throwable failure = null;
             try {
                 checkRevision(oldRevision);
                 for (VcChange<M> change : prepared) {
                     change.apply(operations);
                 }
-                revision = Objects.requireNonNull(VcResource.this.commit(description), "committed revision");
+                revision = Objects.requireNonNull(operations.commit(description), "committed revision");
                 lastRevision = revision;
+            } catch (RuntimeException | Error error) {
+                failure = error;
+                throw error;
             } finally {
-                resourceLock.writeLock().unlock();
-                prepared.clear();
+                try {
+                    operations.discard();
+                } catch (RuntimeException | Error cleanup) {
+                    if (failure == null) throw cleanup;
+                    if (failure != cleanup) failure.addSuppressed(cleanup);
+                } finally {
+                    resourceLock.writeLock().unlock();
+                    prepared.clear();
+                }
             }
             if (!oldRevision.equals(revision)) {
                 events.publish(new VcResourceModified(VcResource.this, oldRevision, revision));
@@ -105,6 +120,7 @@ public abstract class VcResource {
             if (pending != null) {
                 pending.clear();
                 pending = null;
+                operations.discard();
             }
         }
 

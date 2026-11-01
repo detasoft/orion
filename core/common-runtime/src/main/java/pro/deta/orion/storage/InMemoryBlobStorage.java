@@ -26,8 +26,13 @@ public class InMemoryBlobStorage extends BlobStorage {
     }
 
     @Override
-    protected VcRevision commit(VcChangeDescription description) {
-        return versions.isEmpty() ? new VcRevision.Absent() : versions.lastEntry().getKey();
+    protected BlobStorageUpdateOperations createUpdateOperation() {
+        return new BlobStorageUpdateOperations() {
+            @Override
+            protected VcRevision commit(VcChangeDescription description) {
+                return versions.isEmpty() ? new VcRevision.Absent() : versions.lastEntry().getKey();
+            }
+        };
     }
 
     @Override

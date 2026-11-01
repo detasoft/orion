@@ -28,9 +28,7 @@ public abstract class BlobStorage extends VcResource {
         return new VcModification<>(description, createUpdateOperation());
     }
 
-    protected BlobStorageUpdateOperations createUpdateOperation() {
-        return new BlobStorageUpdateOperations();
-    }
+    protected abstract BlobStorageUpdateOperations createUpdateOperation();
 
     public final class BlobStorageReadOperations {
         private final VcRevision.ReadTarget revision;
@@ -44,7 +42,7 @@ public abstract class BlobStorage extends VcResource {
         }
     }
 
-    public class BlobStorageUpdateOperations {
+    public abstract class BlobStorageUpdateOperations extends VcUpdateOperations {
         protected BlobStorageUpdateOperations() {}
 
         public void write(byte[] bytes) {

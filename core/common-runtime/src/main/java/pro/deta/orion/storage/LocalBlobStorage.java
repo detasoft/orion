@@ -33,16 +33,21 @@ public class LocalBlobStorage extends BlobStorage {
     }
 
     @Override
-    protected VcRevision commit(VcChangeDescription description) {
-        if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
-            return new VcRevision.Absent();
-        }
-        byte[] content = readContent(new VcRevision.Latest());
-        try {
-            return new VcRevision.Stored(BlobRevisions.sha256(content));
-        } finally {
-            Arrays.fill(content, (byte) 0);
-        }
+    protected BlobStorageUpdateOperations createUpdateOperation() {
+        return new BlobStorageUpdateOperations() {
+            @Override
+            protected VcRevision commit(VcChangeDescription description) {
+                if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+                    return new VcRevision.Absent();
+                }
+                byte[] content = readContent(new VcRevision.Latest());
+                try {
+                    return new VcRevision.Stored(BlobRevisions.sha256(content));
+                } finally {
+                    Arrays.fill(content, (byte) 0);
+                }
+            }
+        };
     }
 
     @Override
