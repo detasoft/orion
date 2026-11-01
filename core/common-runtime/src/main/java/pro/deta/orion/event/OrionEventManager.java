@@ -3,7 +3,6 @@ package pro.deta.orion.event;
 import com.lmax.disruptor.TimeoutException;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.event.disruptor.OrionDisruptor;
 import pro.deta.orion.event.type.OrionEvent;
@@ -33,20 +32,20 @@ import java.util.function.Supplier;
  */
 @Singleton
 @Slf4j
-@RequiredArgsConstructor(onConstructor_ = @Inject)
-public class OrionEventManager implements OrionEvents, ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
+public class OrionEventManager implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
     public static final int RING_BUFFER_SIZE = 32_768;
     private final OrionDisruptor rootDisruptor = new OrionDisruptor(RING_BUFFER_SIZE);
     private final OrionEventRegistry registry;
     private final ArrayDeque<OrionEvent> pendingEvents = new ArrayDeque<>();
     private volatile Thread dispatchThread;
-    private volatile boolean running;
 
-    public OrionEventRegistry registry() {
-        return registry;
+    @Inject
+    public OrionEventManager(OrionEventRegistry registry) {
+        this.registry = registry;
     }
 
-    public void onInit() {
+    @Override
+    public void onStart() {
         rootDisruptor.handleEventsWith((holder, sequence, endOfBatch) -> {
             dispatchThread = Thread.currentThread();
             try {
@@ -61,25 +60,17 @@ public class OrionEventManager implements OrionEvents, ServiceLifecycleStateMach
                 }
             } finally {
                 holder.setOrionEvent(null);
-                dispatchThread = null;
             }
         });
         rootDisruptor.start();
-        running = true;
     }
 
     public void onStop() {
-        running = false;
         try {
             rootDisruptor.stop();
         } catch (TimeoutException e) {
             log.error("Error while stopping Disruptor: ",e);
         }
-    }
-
-    @Override
-    public void onStart() {
-        onInit();
     }
 
     @Override
@@ -89,14 +80,13 @@ public class OrionEventManager implements OrionEvents, ServiceLifecycleStateMach
 
     @Override
     public boolean isRunning() {
-        return running;
+        return rootDisruptor.isStarted();
     }
 
     public void publish(Supplier<OrionEvent> eventPublisher) {
         publish(Objects.requireNonNull(eventPublisher, "eventPublisher").get());
     }
 
-    @Override
     public void publish(OrionEvent event) {
         Objects.requireNonNull(event, "event");
         if (Thread.currentThread() == dispatchThread) {
@@ -104,10 +94,6 @@ public class OrionEventManager implements OrionEvents, ServiceLifecycleStateMach
         } else {
             rootDisruptor.publish(event);
         }
-    }
-
-    public void publishIfRunning(OrionEvent event) {
-        if (running) publish(event);
     }
 
     public void publishAndWait(OrionEvent event) {
@@ -123,5 +109,4 @@ public class OrionEventManager implements OrionEvents, ServiceLifecycleStateMach
             LockSupport.parkNanos(100_000);
         }
     }
-
 }
