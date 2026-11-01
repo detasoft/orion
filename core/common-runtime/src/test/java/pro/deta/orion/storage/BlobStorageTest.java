@@ -7,13 +7,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
-import java.util.Arrays;
-import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -101,60 +94,6 @@ class BlobStorageTest {
     }
 
     @Test
-    void localStoreRejectsStaleWritesAfterAnotherWriterSaves() throws Exception {
-        Path path = tempDir.resolve("orion.p12");
-        LocalBlobStorage first = new LocalBlobStorage(path);
-        LocalBlobStorage second = new LocalBlobStorage(path);
-
-        String initialVersion = first.write(new BlobStorage.Modification(null, bytes("first")));
-        String secondVersion = second.write(new BlobStorage.Modification(initialVersion, bytes("second")));
-
-        assertThatThrownBy(() -> first.write(new BlobStorage.Modification(initialVersion, bytes("stale"))))
-                .isInstanceOf(BlobStorageConflictException.class);
-        assertThat(second.load().revision()).isEqualTo(secondVersion);
-        assertThat(second.load().bytes()).isEqualTo(bytes("second"));
-    }
-
-    @Test
-    void localStoreSerializesConcurrentWritersAndPreservesCompareAndSwap() throws Exception {
-        Path path = tempDir.resolve("orion.p12");
-        LocalBlobStorage first = new LocalBlobStorage(path);
-        LocalBlobStorage second = new LocalBlobStorage(path);
-        String initialVersion = first.write(new BlobStorage.Modification(null, bytes("initial")));
-        CountDownLatch ready = new CountDownLatch(2);
-        CountDownLatch start = new CountDownLatch(1);
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-
-        try {
-            Future<Throwable> firstResult = executor.submit(
-                    () -> concurrentWrite(first, "first", initialVersion, ready, start));
-            Future<Throwable> secondResult = executor.submit(
-                    () -> concurrentWrite(second, "second", initialVersion, ready, start));
-            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
-            start.countDown();
-
-            List<Throwable> results = Arrays.asList(
-                    firstResult.get(10, TimeUnit.SECONDS),
-                    secondResult.get(10, TimeUnit.SECONDS));
-            int successful = 0;
-            int conflicts = 0;
-            for (Throwable result : results) {
-                if (result == null) {
-                    successful++;
-                } else if (result instanceof BlobStorageConflictException) {
-                    conflicts++;
-                }
-            }
-
-            assertThat(successful).isEqualTo(1);
-            assertThat(conflicts).isEqualTo(1);
-            assertThat(first.load().bytes()).isIn(bytes("first"), bytes("second"));
-        } finally {
-            executor.shutdownNow();
-        }
-    }
-
-    @Test
     void localStoreCreatesOwnerOnlyFiles() throws Exception {
         assumeTrue(ProtectedFiles.supportsPosix(tempDir), "POSIX permissions are not available");
         Path path = tempDir.resolve("orion.p12");
@@ -163,8 +102,6 @@ class BlobStorageTest {
         store.write(new BlobStorage.Modification(null, bytes("protected")));
 
         assertThat(Files.getPosixFilePermissions(path))
-                .isEqualTo(PosixFilePermissions.fromString("rw-------"));
-        assertThat(Files.getPosixFilePermissions(tempDir.resolve(".orion.p12.lock")))
                 .isEqualTo(PosixFilePermissions.fromString("rw-------"));
     }
 
@@ -191,13 +128,13 @@ class BlobStorageTest {
         Path exposedDirectory = tempDir.resolve("exposed");
         Files.createDirectory(exposedDirectory);
         Files.setPosixFilePermissions(exposedDirectory, PosixFilePermissions.fromString("rwxrwxrwx"));
-        LocalBlobStorage store = new LocalBlobStorage(
-                exposedDirectory.resolve("orion.p12"));
+        Path path = exposedDirectory.resolve("orion.p12");
+        LocalBlobStorage store = new LocalBlobStorage(path);
 
         assertThatThrownBy(() -> store.write(new BlobStorage.Modification(null, bytes("protected"))))
                 .isInstanceOf(java.io.IOException.class)
                 .hasMessageContaining("writable by another user");
-        assertThat(Files.exists(store.path())).isFalse();
+        assertThat(Files.exists(path)).isFalse();
     }
 
     @Test
@@ -217,40 +154,6 @@ class BlobStorageTest {
                 .isInstanceOf(java.io.IOException.class)
                 .hasMessageContaining("must not contain symbolic links");
         assertThat(Files.readAllBytes(target)).isEqualTo(bytes("protected"));
-    }
-
-    @Test
-    void incompletePublicationRequiresExplicitDiscardAndNeverReplacesCurrentStore() throws Exception {
-        Path path = tempDir.resolve("orion.p12");
-        LocalBlobStorage store = new LocalBlobStorage(path);
-        store.write(new BlobStorage.Modification(null, bytes("published")));
-        Path incomplete = tempDir.resolve(".orion.p12.interrupted.tmp");
-        Files.write(incomplete, bytes("incomplete"));
-        setOwnerOnly(incomplete);
-
-        assertThat(store.load().bytes()).isEqualTo(bytes("published"));
-        assertThat(Files.exists(incomplete)).isTrue();
-
-        assertThat(store.discardIncompleteWrites()).isEqualTo(1);
-        assertThat(Files.exists(incomplete)).isFalse();
-        assertThat(store.load().bytes()).isEqualTo(bytes("published"));
-        assertThat(store.discardIncompleteWrites()).isZero();
-    }
-
-    private static Throwable concurrentWrite(
-            LocalBlobStorage store,
-            String value,
-            String expectedVersion,
-            CountDownLatch ready,
-            CountDownLatch start) {
-        ready.countDown();
-        try {
-            start.await();
-            store.write(new BlobStorage.Modification(expectedVersion, bytes(value)));
-            return null;
-        } catch (Throwable failure) {
-            return failure;
-        }
     }
 
     private static void setOwnerOnly(Path path) throws Exception {

@@ -27,8 +27,6 @@ public abstract class VcResource {
         }
     }
 
-    protected abstract VcRevision.Stored commit(VcChangeDescription description);
-
     public final Subscription subscribe(Consumer<VcResourceModified> subscriber) {
         return changes.subscribe(subscriber);
     }
@@ -38,6 +36,12 @@ public abstract class VcResource {
         if (!expectedRevision.equals(current)) {
             throw new VcModificationException(expectedRevision, current);
         }
+    }
+
+    public abstract static class VcUpdateOperations {
+        protected abstract VcRevision commit(VcChangeDescription description);
+
+        protected void discard() {}
     }
 
     /** Operation objects are borrowed under the read-lock and must not escape the callback. */
@@ -58,10 +62,10 @@ public abstract class VcResource {
      * A single caller uses each modification. Changes run only during apply; captured mutable inputs
      * are not snapshots. Operation objects are borrowed during callbacks and must not escape them.
      */
-    public class VcModification<M> {
+    public class VcModification<M extends VcUpdateOperations> {
         private final VcRevision oldRevision;
         private final VcChangeDescription description;
-        private final M operations;
+        private M operations;
         private List<VcChange<M>> pending = new ArrayList<>();
 
         public VcModification(VcChangeDescription description, M operations) {
@@ -85,17 +89,32 @@ public abstract class VcResource {
             VcRevision revision;
             try {
                 resourceLock.writeLock().lock();
+                Throwable primary = null;
                 try {
                     checkRevision(oldRevision);
                     if (!prepared.isEmpty()) {
                         for (VcChange<M> change : prepared) {
                             change.apply(operations);
                         }
-                        commit(description);
+                        revision = Objects.requireNonNull(operations.commit(description),
+                                "committed revision");
+                    } else {
+                        revision = oldRevision;
                     }
-                    revision = getRevision();
+                } catch (RuntimeException | Error failure) {
+                    primary = failure;
+                    throw failure;
                 } finally {
-                    resourceLock.writeLock().unlock();
+                    try {
+                        discard();
+                    } catch (RuntimeException | Error cleanup) {
+                        if (primary == null) {
+                            throw cleanup;
+                        }
+                        primary.addSuppressed(cleanup);
+                    } finally {
+                        resourceLock.writeLock().unlock();
+                    }
                 }
             } finally {
                 prepared.clear();
@@ -110,6 +129,11 @@ public abstract class VcResource {
             if (pending != null) {
                 pending.clear();
                 pending = null;
+            }
+            if (operations != null) {
+                M discarded = operations;
+                operations = null;
+                discarded.discard();
             }
         }
 

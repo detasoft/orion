@@ -20,7 +20,11 @@ public abstract class BlobStorage extends VcResource {
     }
 
     public final VcModification<BlobStorageUpdateOperations> withModification(VcChangeDescription description) {
-        return new VcModification<>(description, new BlobStorageUpdateOperations());
+        return new VcModification<>(description, createUpdateOperation());
+    }
+
+    protected BlobStorageUpdateOperations createUpdateOperation() {
+        return new BlobStorageUpdateOperations();
     }
 
     public final class BlobStorageReadOperations {
@@ -35,11 +39,16 @@ public abstract class BlobStorage extends VcResource {
         }
     }
 
-    public final class BlobStorageUpdateOperations {
-        private BlobStorageUpdateOperations() {}
+    public class BlobStorageUpdateOperations extends VcUpdateOperations {
+        protected BlobStorageUpdateOperations() {}
 
         public void write(byte[] bytes) {
             BlobStorage.this.write(bytes);
+        }
+
+        @Override
+        protected VcRevision commit(VcChangeDescription description) {
+            return getRevision();
         }
     }
 }
