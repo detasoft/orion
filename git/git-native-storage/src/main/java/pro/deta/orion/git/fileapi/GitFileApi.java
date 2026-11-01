@@ -29,23 +29,18 @@ public final class GitFileApi extends VcResource<GitFileApi.GitFileReadOperation
 
     @Override
     protected GitFileReadOperations createReadOperation(VcRevision.ReadTarget revision) {
-        return new GitFileReadOperations(revision);
+        return new GitFileReadOperations(GitFileApiSupport.readRevision(repository, branch, revision));
     }
 
     public final class GitFileReadOperations {
-        private final VcRevision.ReadTarget revision;
+        private final ObjectId commitId;
 
-        private GitFileReadOperations(VcRevision.ReadTarget revision) {
-            this.revision = revision;
-        }
-
-        private ObjectId commitId() throws GitOperationException {
-            return revision instanceof VcRevision.Stored stored
-                    ? new ObjectId(stored.value()) : GitFileApiSupport.resolveBranch(repository, branch);
+        private GitFileReadOperations(ObjectId commitId) {
+            this.commitId = commitId;
         }
 
         public <T> T readFile(String path, GitObjectRead<T> reader) throws IOException, GitOperationException {
-            return GitFileApiSupport.readFile(repository, commitId(), path, reader);
+            return GitFileApiSupport.readFile(repository, commitId, path, reader);
         }
 
         public byte[] readBytes(String path) throws IOException, GitOperationException {
@@ -53,7 +48,7 @@ public final class GitFileApi extends VcResource<GitFileApi.GitFileReadOperation
         }
 
         public ObjectId objectId(String path) throws GitOperationException {
-            return GitFileApiSupport.fileEntry(repository, commitId(), path).objectId();
+            return GitFileApiSupport.fileEntry(repository, commitId, path).objectId();
         }
     }
 

@@ -29,7 +29,7 @@ public abstract class VcResource<R, U extends VcResource.VcUpdateOperations> {
     protected abstract U createUpdateOperation();
 
     public final VcRead withRead(VcRevision.ReadTarget revision) {
-        return new VcRead(createReadOperation(Objects.requireNonNull(revision, "revision")));
+        return new VcRead(Objects.requireNonNull(revision, "revision"));
     }
 
     public final VcModification withModification() {
@@ -63,15 +63,16 @@ public abstract class VcResource<R, U extends VcResource.VcUpdateOperations> {
 
     /** Operation objects are borrowed under the read-lock and must not escape the callback. */
     public class VcRead {
-        private final R operations;
+        private final VcRevision.ReadTarget revision;
 
-        private VcRead(R operations) {
-            this.operations = Objects.requireNonNull(operations, "operations");
+        private VcRead(VcRevision.ReadTarget revision) {
+            this.revision = revision;
         }
 
         public final <T> T read(Function<R, T> operation) {
             Objects.requireNonNull(operation, "operation");
-            return VcResource.this.inReadLock(() -> operation.apply(operations));
+            return VcResource.this.inReadLock(() ->
+                    operation.apply(Objects.requireNonNull(createReadOperation(revision), "operations")));
         }
     }
 

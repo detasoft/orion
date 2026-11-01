@@ -35,6 +35,17 @@ final class GitFileApiSupport {
         return revision == null ? new VcRevision.Absent() : new VcRevision.Stored(revision);
     }
 
+    static ObjectId readRevision(NativeGitRepository repository, String branch, VcRevision.ReadTarget revision) {
+        if (revision instanceof VcRevision.Stored stored) {
+            return new ObjectId(stored.value());
+        }
+        try {
+            return resolveBranch(repository, branch);
+        } catch (GitRepositoryFileNotFoundException failure) {
+            throw new IllegalStateException("Cannot open Git read", failure);
+        }
+    }
+
     static GitFileAccess createAccess(NativeGitRepository repository, String branch, boolean initializeHead) {
         try {
             RefId ref = new RefId(branch);
