@@ -28,7 +28,7 @@ import java.util.Set;
 
 /**
  * File operations borrowing a Git repository. Updates preserve omitted files and their modes;
- * preparing an update does not publish objects or move refs. An explicit null revision expects a new branch.
+ * preparing an update does not publish objects or move refs. Access captures the current branch revision.
  * Local updates initialize an absent symbolic HEAD branch; proxy updates leave unrelated refs unchanged.
  * Streaming read callbacks borrow the inflated file input. WithAccess requires explicit apply and
  * always discards on exit. Byte-array reads explicitly materialize a single file.
@@ -91,13 +91,25 @@ public final class GitFileApi {
         return readFile(commitId, path, (type, size, base, input) -> input.newInputStream().readAllBytes());
     }
 
-    public <T> T withAccess(String branch,
-                            CheckedFunction<GitFileAccess, T> operation) throws Exception {
-        Objects.requireNonNull(operation, "operation");
+    public GitFileAccess createAccess(String branch) throws IOException, GitOperationException {
         RefId ref = new RefId(branchRefName(branch));
         Head head = repository.index().getHEAD();
-        return repository.index().withAccess(writableRefs(ref, head), Optional.of(PackId.create()),
-                index -> run(index, branch, index.findRef(ref), head, operation));
+        GitIndexAccess index = repository.index().createAccess(writableRefs(ref, head), Optional.of(PackId.create()));
+        try {
+            return new GitFileAccess(repository, index, branch, initializeHead, head);
+        } catch (IOException | GitOperationException | RuntimeException | Error failure) {
+            try {
+                index.discard();
+            } catch (IOException | RuntimeException | Error cleanup) {
+                if (failure != cleanup) failure.addSuppressed(cleanup);
+            }
+            throw failure;
+        }
+    }
+
+    public <T> T withAccess(String branch, CheckedFunction<GitFileAccess, T> operation) throws Exception {
+        Objects.requireNonNull(operation, "operation");
+        return run(createAccess(branch), operation);
     }
 
     private Set<RefId> writableRefs(RefId ref, Head head) {
@@ -109,21 +121,7 @@ public final class GitFileApi {
         return refs;
     }
 
-    public <T> T withAccess(String branch, String expectedRevision,
-                            CheckedFunction<GitFileAccess, T> operation) throws Exception {
-        Objects.requireNonNull(operation, "operation");
-        RefId ref = new RefId(branchRefName(branch));
-        Optional<ObjectId> expected = Optional.ofNullable(expectedRevision).map(ObjectId::new);
-        Head head = repository.index().getHEAD();
-        return repository.index().withAccess(writableRefs(ref, head), Optional.of(PackId.create()),
-                index -> run(index, branch, expected, head, operation));
-    }
-
-    private <T> T run(GitIndexAccess index, String branch, Optional<ObjectId> parent,
-                      Head head,
-                      CheckedFunction<GitFileAccess, T> operation) throws Exception {
-        GitFileAccess access = new GitFileAccess(
-                repository, index, branch, parent, initializeHead, head);
+    static <T> T run(GitFileAccess access, CheckedFunction<GitFileAccess, T> operation) throws Exception {
         Throwable primary = null;
         try {
             return operation.apply(access);
@@ -134,10 +132,8 @@ public final class GitFileApi {
             try {
                 access.discard();
             } catch (Exception | Error cleanup) {
-                if (primary == null) {
-                    throw cleanup;
-                }
-                primary.addSuppressed(cleanup);
+                if (primary == null) throw cleanup;
+                if (primary != cleanup) primary.addSuppressed(cleanup);
             }
         }
     }

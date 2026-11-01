@@ -190,9 +190,8 @@ final class OrionGitWorkTree implements GitWorkTree {
                     access.write(path, mode, Files.size(source), input);
                 }
             }
-            access.prepare(new VcChangeDescription(
+            access.commit(new VcChangeDescription(
                     new VcChangeAuthor(GitScenarioContext.IDENTITY_NAME, GitScenarioContext.IDENTITY_EMAIL), message));
-            access.apply();
             return null;
         });
         stagedPaths.clear();

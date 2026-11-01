@@ -1,6 +1,7 @@
 package pro.deta.orion.git.fileapi;
 import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.util.VcChangeDescription;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
@@ -52,6 +53,9 @@ import java.util.zip.Deflater;
 import static pro.deta.orion.git.fileapi.GitFileApi.*;
 
 /**
+ * Current scope: one modification changes one branch and returns that branch's commit revision.
+ * Independent changes to multiple branches in one modification are not supported. Initializing an
+ * absent symbolic HEAD branch to the same commit remains part of repository initialization.
  * File changes against captured refs. Each write consumes exactly the declared number of bytes from a
  * borrowed input and stores compressed content immediately; only changed paths and the entries of
  * each directory being rebuilt remain in memory.
@@ -74,14 +78,14 @@ public final class GitFileAccess {
     private List<RefUpdate> updates;
     private boolean finished;
 
-    GitFileAccess(NativeGitRepository repository, GitIndexAccess index, String branch, Optional<ObjectId> parent,
+    GitFileAccess(NativeGitRepository repository, GitIndexAccess index, String branch,
                   boolean initializeHead, Head head)
             throws IOException, GitOperationException {
         this.repository = repository;
         this.index = index;
         this.packId = index.packId().orElseThrow(() -> new IllegalArgumentException("Pack access required"));
         this.ref = new RefId(branchRefName(branch));
-        this.parent = parent;
+        this.parent = index.findRef(ref);
         if (!index.snapshotRefs(new RefSelection.Head()).head().equals(head)) {
             throw new IOException("Repository HEAD changed while opening file access");
         }
@@ -105,6 +109,10 @@ public final class GitFileAccess {
             }
             throw failure;
         }
+    }
+
+    public Optional<ObjectId> baseRevision() {
+        return parent;
     }
 
     public byte[] readBytes(String path) throws IOException, GitOperationException {
@@ -240,6 +248,13 @@ public final class GitFileAccess {
         }
     }
 
+    public VcRevision.Stored commit(VcChangeDescription description) throws IOException {
+        prepare(description);
+        VcRevision.Stored revision = new VcRevision.Stored(updates.getFirst().newId().orElseThrow().toHex());
+        apply();
+        return revision;
+    }
+
     public void apply() throws IOException {
         requireOpen();
         Throwable primary = null;
@@ -280,7 +295,20 @@ public final class GitFileAccess {
     public void discard() throws IOException {
         if (!finished) {
             finished = true;
-            storage.discard();
+            Throwable primary = null;
+            try {
+                storage.discard();
+            } catch (IOException | RuntimeException | Error failure) {
+                primary = failure;
+                throw failure;
+            } finally {
+                try {
+                    index.discard();
+                } catch (IOException | RuntimeException | Error cleanup) {
+                    if (primary == null) throw cleanup;
+                    if (primary != cleanup) primary.addSuppressed(cleanup);
+                }
+            }
         }
     }
 

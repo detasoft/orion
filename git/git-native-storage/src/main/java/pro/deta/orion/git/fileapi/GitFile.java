@@ -13,8 +13,6 @@ import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.util.VcChangeDescription;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 
 import java.io.IOException;
 import java.util.Objects;
@@ -55,27 +53,23 @@ public final class GitFile {
         return objectId(Objects.requireNonNull(revision, "revision")) != null;
     }
 
-    public CommitId write(CommitId expectedRevision, byte[] bytes, VcChangeDescription metadata) throws Exception {
-        Objects.requireNonNull(bytes, "bytes");
+    public GitFileAccess createAccess() throws IOException, GitOperationException {
         NativeGitRepository repository = provider.openForWrite(repositoryName)
                 .valueOrFailure("Cannot open Git file repository");
-        String head = repository.refs().get(ref);
-        CommitId current = head == null ? null : new CommitId(head);
-        ObjectId currentFile = objectId(current);
-        if (!Objects.equals(current, expectedRevision)
-                && !Objects.equals(currentFile, objectId(expectedRevision))) {
-            throw new GitRefConflictException(new RefUpdate(new RefId(ref),
-                    Optional.ofNullable(expectedRevision), Optional.ofNullable(current)), Optional.ofNullable(current));
-        }
-        MessageDigest hash = repository.hashAlgorithm().newDigest();
-        hash.update(("blob " + bytes.length + "\0").getBytes(StandardCharsets.US_ASCII));
-        ObjectId content = new ObjectId(hash.digest(bytes));
-        return repository.files().withAccess(ref, head, access -> {
-            if (!content.equals(currentFile)) access.write(path, bytes);
-            access.prepare(metadata);
-            CommitId saved = new CommitId(access.refUpdates().getFirst().newId().orElseThrow().toHex());
-            access.apply();
-            return saved;
+        return repository.files().createAccess(ref);
+    }
+
+    public CommitId write(CommitId expectedRevision, byte[] bytes, VcChangeDescription metadata) throws Exception {
+        Objects.requireNonNull(bytes, "bytes");
+        return GitFileApi.run(createAccess(), access -> {
+            CommitId current = access.baseRevision().map(id -> new CommitId(id.toHex())).orElse(null);
+            if (!Objects.equals(current, expectedRevision)
+                    && !Objects.equals(objectId(current), objectId(expectedRevision))) {
+                throw new GitRefConflictException(new RefUpdate(new RefId(ref),
+                        Optional.ofNullable(expectedRevision), Optional.ofNullable(current)), Optional.ofNullable(current));
+            }
+            access.write(path, bytes);
+            return new CommitId(access.commit(metadata).value());
         });
     }
 

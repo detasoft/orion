@@ -59,17 +59,15 @@ public abstract class VcResource {
     }
 
     /**
-     * A single caller uses each modification. Changes run only during apply; captured mutable inputs
+     * A single caller uses each modification. Changes run only during commit; captured mutable inputs
      * are not snapshots. Operation objects are borrowed during callbacks and must not escape them.
      */
     public class VcModification<M extends VcUpdateOperations> {
         private final VcRevision oldRevision;
-        private final VcChangeDescription description;
         private final M operations;
         private List<VcChange<M>> pending = new ArrayList<>();
 
-        public VcModification(VcChangeDescription description, M operations) {
-            this.description = Objects.requireNonNull(description, "description");
+        public VcModification(M operations) {
             oldRevision = getRevision();
             this.operations = Objects.requireNonNull(operations, "operations");
         }
@@ -79,10 +77,11 @@ public abstract class VcResource {
             pending.add(Objects.requireNonNull(change, "change"));
         }
 
-        public final VcRevision apply() {
+        public final VcRevision commit(VcChangeDescription description) {
             requireOpen();
+            Objects.requireNonNull(description, "description");
             if (resourceLock.getReadHoldCount() > 0 && !resourceLock.isWriteLockedByCurrentThread()) {
-                throw new IllegalStateException("Cannot apply a modification from a read operation");
+                throw new IllegalStateException("Cannot commit a modification from a read operation");
             }
             List<VcChange<M>> prepared = pending;
             pending = null;
