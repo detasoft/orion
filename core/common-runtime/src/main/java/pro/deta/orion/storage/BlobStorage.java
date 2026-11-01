@@ -10,9 +10,7 @@ public abstract class BlobStorage extends VcResource<BlobStorage.BlobStorageOper
     }
 
     public final byte[] readBytes(VcRevision revision) {
-        try (BlobStorageOperations operation = open(revision)) {
-            return operation.readContent();
-        }
+        return read(revision, BlobStorageOperations::readContent);
     }
 
     public abstract class BlobStorageOperations extends VcOperation {
