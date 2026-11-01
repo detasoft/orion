@@ -28,7 +28,6 @@ import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.shared.PackHandle;
 import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.net.io.BufferedByteInputV2;
-import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayInputStream;
@@ -61,8 +60,6 @@ import static pro.deta.orion.git.fileapi.GitFileApiSupport.*;
  * File changes against captured refs. Each write consumes exactly the declared number of bytes from a
  * borrowed input and stores compressed content immediately; only changed paths and the entries of
  * each directory being rebuilt remain in memory.
- * Preparation creates the commit and freezes changes without publishing them. Apply publishes the pack and updates refs
- * through the repository's publication policy. Discard releases resources and is harmless after completion.
  */
 public final class GitFileAccess extends VcUpdateOperations {
     private final NativeGitRepository repository;
@@ -76,9 +73,6 @@ public final class GitFileAccess extends VcUpdateOperations {
     private final Optional<RefId> headToInitialize;
     private final Set<String> deleted = new HashSet<>();
     private final Map<String, TreeEntry> entries = new HashMap<>();
-    private PackMetadata pack;
-    private List<RefUpdate> updates;
-    private boolean finished;
 
     GitFileAccess(NativeGitRepository repository, GitIndexAccess index, String branch,
                   boolean initializeHead, Head head)
@@ -118,7 +112,6 @@ public final class GitFileAccess extends VcUpdateOperations {
     }
 
     public byte[] readBytes(String path) throws IOException, GitOperationException {
-        requireOpen();
         String normalized = gitPath(path);
         for (int slash = normalized.indexOf('/'); slash >= 0; slash = normalized.indexOf('/', slash + 1)) {
             String ancestor = normalized.substring(0, slash);
@@ -163,7 +156,6 @@ public final class GitFileAccess extends VcUpdateOperations {
     }
 
     public void write(String path, FileMode mode, long size, BufferedByteInputV2 input) throws IOException {
-        requireEditable();
         String normalized = gitPath(path);
         Objects.requireNonNull(mode, "mode");
         Objects.requireNonNull(input, "input");
@@ -189,7 +181,6 @@ public final class GitFileAccess extends VcUpdateOperations {
     }
 
     public void delete(String path) throws IOException {
-        requireEditable();
         String normalized = gitPath(path);
         if (entries.containsKey(normalized)) {
             throw new IllegalArgumentException("Git file is both saved and deleted: " + normalized);
@@ -197,78 +188,28 @@ public final class GitFileAccess extends VcUpdateOperations {
         deleted.add(normalized);
     }
 
-    public void prepare(VcChangeDescription description) throws IOException {
-        requireEditable();
+    @Override
+    protected VcRevision.Stored commit(VcChangeDescription description) {
         Objects.requireNonNull(description, "description");
         try {
             Set<String> changedPaths = new HashSet<>(entries.keySet());
             changedPaths.addAll(deleted);
             ObjectId tree = writeTree("", null, changedPaths).orElseThrow();
             ObjectId commit = writeCommit(tree, parent.orElse(null), description);
-            List<RefUpdate> prepared = new ArrayList<>();
-            prepared.add(new RefUpdate(ref, parent, Optional.of(commit)));
+            List<RefUpdate> updates = new ArrayList<>();
+            updates.add(new RefUpdate(ref, parent, Optional.of(commit)));
             headToInitialize.ifPresent(target ->
-                    prepared.add(new RefUpdate(target, Optional.empty(), Optional.of(commit))));
-            updates = List.copyOf(prepared);
+                    updates.add(new RefUpdate(target, Optional.empty(), Optional.of(commit))));
             bytes.flush();
             List<IndexedObject> indexed = index.objects(packId);
+            PackMetadata pack;
             try (PackWriter writer = new PackWriter(
                     new OutputStreamBufferedByteOutput(OutputStream.nullOutputStream()), indexed.size())) {
                 writer.writeObjects(storage, indexed);
                 pack = new PackMetadata(packId, writer.finish(), packId.toString(), indexed.size(), writer.size());
             }
-        } catch (IOException | RuntimeException | Error failure) {
-            try {
-                discard();
-            } catch (Exception cleanup) {
-                failure.addSuppressed(cleanup);
-            }
-            throw failure;
-        }
-    }
-
-    public PackMetadata pack() throws IOException {
-        requireOpen();
-        if (pack == null) {
-            throw new IOException("File changes are not prepared");
-        }
-        return pack;
-    }
-
-    public List<RefUpdate> refUpdates() throws IOException {
-        pack();
-        return updates;
-    }
-
-    public void writePack(BufferedByteOutput output) throws IOException {
-        PackMetadata metadata = pack();
-        try (PackWriter writer = new PackWriter(output, metadata.objectCount())) {
-            writer.writeObjects(storage, index.objects(packId));
-            if (!writer.finish().equals(metadata.packChecksum())) {
-                throw new IOException("File pack checksum changed during export");
-            }
-        }
-    }
-
-    @Override
-    public VcRevision.Stored commit(VcChangeDescription description) {
-        try {
-            prepare(description);
-            VcRevision.Stored revision = new VcRevision.Stored(updates.getFirst().newId().orElseThrow().toHex());
-            apply();
-            return revision;
-        } catch (IOException failure) {
-            throw new UncheckedIOException(failure);
-        }
-    }
-
-    public void apply() throws IOException {
-        requireOpen();
-        Throwable primary = null;
-        try {
-            PackMetadata metadata = pack();
             storage.apply();
-            index.publishIndex(metadata);
+            index.publishIndex(pack);
             List<RefUpdateResult> results = NativeGitReceivePack.complete(repository.name(), repository,
                     updates, true, GitNativeRepositoryAccessHook.ALLOW_ALL,
                     valid -> repository.publishReceivedPack(Optional.of(pack.packChecksum()), valid, true));
@@ -280,43 +221,29 @@ public final class GitFileAccess extends VcUpdateOperations {
                 }
             }
             GitOperationException.requireSuccess(results);
+            return new VcRevision.Stored(commit.toHex());
         } catch (GitOperationException failure) {
-            IOException wrapped = new IOException("Cannot apply file changes", failure);
-            primary = wrapped;
-            throw wrapped;
-        } catch (IOException | RuntimeException | Error failure) {
-            primary = failure;
-            throw failure;
-        } finally {
-            try {
-                discard();
-            } catch (RuntimeException | Error cleanup) {
-                if (primary == null) {
-                    throw cleanup;
-                }
-                primary.addSuppressed(cleanup);
-            }
+            throw new UncheckedIOException(new IOException("Cannot apply file changes", failure));
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
         }
     }
 
     @Override
-    public void discard() {
+    protected void discard() {
         try {
-            if (!finished) {
-                finished = true;
-                Throwable primary = null;
+            Throwable primary = null;
+            try {
+                storage.discard();
+            } catch (IOException | RuntimeException | Error failure) {
+                primary = failure;
+                throw failure;
+            } finally {
                 try {
-                    storage.discard();
-                } catch (IOException | RuntimeException | Error failure) {
-                    primary = failure;
-                    throw failure;
-                } finally {
-                    try {
-                        index.discard();
-                    } catch (IOException | RuntimeException | Error cleanup) {
-                        if (primary == null) throw cleanup;
-                        if (primary != cleanup) primary.addSuppressed(cleanup);
-                    }
+                    index.discard();
+                } catch (IOException | RuntimeException | Error cleanup) {
+                    if (primary == null) throw cleanup;
+                    if (primary != cleanup) primary.addSuppressed(cleanup);
                 }
             }
         } catch (IOException failure) {
@@ -367,28 +294,8 @@ public final class GitFileAccess extends VcUpdateOperations {
                 index.addObject(new IndexedObject(packId, id, type, size, start, bytes.size() - start, Optional.empty()));
             }
             return id;
-        } catch (IOException | RuntimeException | Error failure) {
-            try {
-                discard();
-            } catch (Exception cleanup) {
-                failure.addSuppressed(cleanup);
-            }
-            throw failure;
         } finally {
             deflater.end();
-        }
-    }
-
-    private void requireOpen() throws IOException {
-        if (finished) {
-            throw new IOException("File access is finished");
-        }
-    }
-
-    private void requireEditable() throws IOException {
-        requireOpen();
-        if (pack != null) {
-            throw new IOException("File pack is already prepared");
         }
     }
 
