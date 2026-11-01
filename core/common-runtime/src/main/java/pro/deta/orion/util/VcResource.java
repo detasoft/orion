@@ -13,18 +13,15 @@ import java.util.function.Supplier;
 public abstract class VcResource {
     private final ReentrantReadWriteLock resourceLock = new ReentrantReadWriteLock();
     private final OrionEvents events;
+    private volatile VcRevision lastRevision = new VcRevision.Absent();
 
     protected VcResource(OrionEventManager eventManager) {
         events = eventManager.forTarget(this);
     }
 
-    public final VcRevision getRevision() {
-        return read(() -> Objects.requireNonNull(readRevision(), "revision"));
-    }
-
     protected abstract VcRevision readRevision();
 
-    private <R> R read(Supplier<R> operation) {
+    private <R> R inReadLock(Supplier<R> operation) {
         resourceLock.readLock().lock();
         try {
             return operation.get();
@@ -33,15 +30,14 @@ public abstract class VcResource {
         }
     }
 
-    private void checkRevision(VcRevision expectedRevision) {
-        VcRevision current = getRevision();
-        if (!expectedRevision.equals(current)) {
-            throw new VcModificationException(expectedRevision, current);
-        }
+    public final VcRevision getRevision() {
+        return lastRevision;
     }
 
-    public abstract static class VcUpdateOperations {
-        protected abstract VcRevision commit(VcChangeDescription description);
+    private void checkRevision(VcRevision expectedRevision) {
+        if (!expectedRevision.equals(lastRevision)) {
+            throw new VcModificationException(expectedRevision, lastRevision);
+        }
     }
 
     /** Operation objects are borrowed under the read-lock and must not escape the callback. */
@@ -54,7 +50,7 @@ public abstract class VcResource {
 
         public final <R> R read(Function<M, R> operation) {
             Objects.requireNonNull(operation, "operation");
-            return VcResource.this.read(() -> operation.apply(operations));
+            return VcResource.this.inReadLock(() -> operation.apply(operations));
         }
     }
 
@@ -62,7 +58,7 @@ public abstract class VcResource {
      * A single caller uses each modification. Changes run only during apply; captured mutable inputs
      * are not snapshots. Operation objects are borrowed during callbacks and must not escape them.
      */
-    public class VcModification<M extends VcUpdateOperations> {
+    public class VcModification<M> {
         private final VcRevision oldRevision;
         private final VcChangeDescription description;
         private final M operations;
@@ -90,13 +86,11 @@ public abstract class VcResource {
             resourceLock.writeLock().lock();
             try {
                 checkRevision(oldRevision);
-                revision = oldRevision;
-                if (!prepared.isEmpty()) {
-                    for (VcChange<M> change : prepared) {
-                        change.apply(operations);
-                    }
-                    revision = Objects.requireNonNull(operations.commit(description), "committed revision");
+                for (VcChange<M> change : prepared) {
+                    change.apply(operations);
                 }
+                revision = prepared.isEmpty() ? oldRevision : Objects.requireNonNull(readRevision(), "revision");
+                lastRevision = revision;
             } finally {
                 resourceLock.writeLock().unlock();
                 prepared.clear();

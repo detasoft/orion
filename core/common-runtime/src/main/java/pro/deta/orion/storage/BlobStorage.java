@@ -44,16 +44,12 @@ public abstract class BlobStorage extends VcResource {
         }
     }
 
-    public class BlobStorageUpdateOperations extends VcUpdateOperations {
+    public class BlobStorageUpdateOperations {
         protected BlobStorageUpdateOperations() {}
 
         public void write(byte[] bytes) {
             BlobStorage.this.write(bytes);
         }
 
-        @Override
-        protected VcRevision commit(VcChangeDescription description) {
-            return readRevision();
-        }
     }
 }
