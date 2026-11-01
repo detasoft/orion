@@ -6,14 +6,14 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.FileMode;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.Head;
+import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
+import pro.deta.orion.git.parser.v2.index.RefSelection;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.object.LooseObject;
-import pro.deta.orion.git.parser.v2.read.GitObjectRead;
-import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 
 import java.io.File;
 import java.io.IOException;
@@ -21,39 +21,32 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.HexFormat;
-import java.util.HashSet;
-import java.util.Set;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
 final class GitFileApiSupport {
     private GitFileApiSupport() {}
 
-    static VcRevision initialRevision(NativeGitRepository repository, String branch) {
-        String revision = repository.refs().get(branchRefName(branch));
-        return revision == null ? new VcRevision.Absent() : new VcRevision.Stored(revision);
-    }
-
-    static ObjectId readRevision(NativeGitRepository repository, String branch, VcRevision.ReadTarget revision) {
-        if (revision instanceof VcRevision.Stored stored) {
-            return new ObjectId(stored.value());
-        }
+    static GitFileAccess open(GitFileApi resource, VcRevision revision) {
+        NativeGitRepository repository = resource.repository;
         try {
-            return resolveBranch(repository, branch);
-        } catch (GitRepositoryFileNotFoundException failure) {
-            throw new IllegalStateException("Cannot open Git read", failure);
-        }
-    }
-
-    static GitFileAccess createAccess(NativeGitRepository repository, String branch, boolean initializeHead) {
-        try {
-            RefId ref = new RefId(branch);
-            Head head = repository.index().getHEAD();
-            GitIndexAccess index = repository.index().createAccess(
-                    writableRefs(ref, head, initializeHead), Optional.of(PackId.create()));
+            GitIndexAccess index = repository.index().createAccess(Optional.of(PackId.create()));
             try {
-                return new GitFileAccess(repository, index, branch, initializeHead, head);
+                ObjectId commit;
+                if (revision instanceof VcRevision.Stored stored) {
+                    commit = new ObjectId(stored.value());
+                } else if (revision instanceof VcRevision.Ref ref) {
+                    commit = index.findRef(new RefId(ref.value()))
+                            .orElseThrow(() -> new GitRepositoryFileNotFoundException("Ref not found: " + ref.value()));
+                } else if (revision instanceof VcRevision.Latest) {
+                    RefsSnapshot snapshot = index.snapshotRefs(new RefSelection.Head());
+                    commit = snapshot.head() instanceof Head.Detached detached
+                            ? detached.target() : snapshot.refs().get(((Head.Symbolic) snapshot.head()).target());
+                    if (commit == null) throw new GitRepositoryFileNotFoundException("HEAD is unborn");
+                } else {
+                    throw new IllegalArgumentException("Cannot open an absent Git revision");
+                }
+                return new GitFileAccess(resource, index, new VcRevision.Stored(commit.toHex()));
             } catch (IOException | GitOperationException | RuntimeException | Error failure) {
                 try {
                     index.discard();
@@ -65,104 +58,8 @@ final class GitFileApiSupport {
         } catch (IOException failure) {
             throw new UncheckedIOException(failure);
         } catch (GitOperationException failure) {
-            throw new IllegalStateException("Cannot open Git modification", failure);
+            throw new IllegalStateException("Cannot open Git revision", failure);
         }
-    }
-
-    private static Set<RefId> writableRefs(RefId ref, Head head, boolean initializeHead) {
-        Set<RefId> refs = new HashSet<>();
-        refs.add(ref);
-        if (initializeHead && head instanceof Head.Symbolic symbolic) {
-            refs.add(symbolic.target());
-        }
-        return refs;
-    }
-
-    static <T> T readFile(NativeGitRepository repository, ObjectId commitId, String path, GitObjectRead<T> reader)
-            throws IOException, GitOperationException {
-        Objects.requireNonNull(reader, "reader");
-        TreeEntry entry = fileEntry(repository, commitId, path);
-        return repository.storage().withAccess(bytes -> {
-            Optional<T> result = repository.index().withAccess(index -> GitObjectRead.read(
-                    bytes, index, entry.objectId(),
-                    new ResolvedGitObjectRead<>(bytes, index, (type, size, base, input) -> {
-                        if (type != GitObjectType.BLOB) {
-                            throw new IOException("File target is not a blob: " + path);
-                        }
-                        return reader.read(type, size, base, input);
-                    })));
-            return result.orElseThrow(() -> new GitOperationException("Object not found: " + entry.objectId()));
-        });
-    }
-
-    static TreeEntry fileEntry(NativeGitRepository repository, ObjectId commitId, String path)
-            throws GitOperationException {
-        String normalized = gitPath(path);
-        ObjectId tree = rootTreeId(commitId, readObject(repository, commitId));
-        TreeEntry entry = resolvePath(repository, tree, normalized);
-        if (entry.mode() == FileMode.TREE || entry.mode() == FileMode.GITLINK) {
-            throw new GitOperationException("Path is not a file: " + normalized);
-        }
-        return entry;
-    }
-
-    // @TODO перенеси в NativeGitRepository чтобы не было здесь логики создания "refs/*"
-    static ObjectId resolveBranch(NativeGitRepository repository, String branch)
-            throws GitRepositoryFileNotFoundException {
-        Map<String, String> refs = repository.refs();
-        String refName = branchRefName(branch);
-        String objectId = refs.get(refName);
-        if (objectId == null && !branch.startsWith("refs/")) {
-            objectId = refs.get(branch);
-        }
-        if (objectId == null) {
-            throw new GitRepositoryFileNotFoundException("Branch not found: " + branch);
-        }
-        return new ObjectId(objectId);
-    }
-
-    private static TreeEntry resolvePath(NativeGitRepository repository, ObjectId rootTreeId, String path)
-            throws GitRepositoryFileNotFoundException, GitOperationException {
-        String[] segments = path.split("/");
-        ObjectId treeId = rootTreeId;
-        TreeEntry entry = null;
-        for (int index = 0; index < segments.length; index++) {
-            entry = treeEntry(repository, treeId, segments[index]);
-            if (index < segments.length - 1) {
-                if (entry.mode() != FileMode.TREE) {
-                    throw new GitOperationException("Path segment is not a directory: " + segments[index]);
-                }
-                treeId = entry.objectId();
-            }
-        }
-        if (entry == null) {
-            throw new GitRepositoryFileNotFoundException("File not found: " + path);
-        }
-        return entry;
-    }
-
-    private static TreeEntry treeEntry(NativeGitRepository repository, ObjectId treeId, String name)
-            throws GitRepositoryFileNotFoundException, GitOperationException {
-        LooseObject tree = readObject(repository, treeId);
-        if (tree.type() != GitObjectType.TREE) {
-            throw new GitOperationException("Path segment target is not a tree: " + treeId);
-        }
-        byte[] data = tree.data();
-        int offset = 0;
-        while (offset < data.length) {
-            ParsedTreeEntry entry = parseTreeEntry(treeId, data, offset);
-            if (entry.entry().name().equals(name)) {
-                return entry.entry();
-            }
-            offset = entry.nextOffset();
-        }
-        throw new GitRepositoryFileNotFoundException("File not found: " + name);
-    }
-
-    private static LooseObject readObject(NativeGitRepository repository, ObjectId objectId)
-            throws GitOperationException {
-        return repository.readObject(objectId)
-                .orElseThrow(() -> new GitOperationException("Object not found: " + objectId));
     }
 
     static ObjectId rootTreeId(ObjectId commitId, LooseObject commit)

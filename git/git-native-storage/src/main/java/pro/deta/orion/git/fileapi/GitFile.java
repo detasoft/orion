@@ -48,17 +48,9 @@ public final class GitFile {
 
     public byte[] read(CommitId revision) throws IOException, GitOperationException {
         Objects.requireNonNull(revision, "revision");
-        try {
-            return provider.retained(repositoryName).eventSource().files(ref)
-                    .withRead(new VcRevision.Stored(revision.toHex())).read(operations -> {
-                        try {
-                            return operations.readBytes(path);
-                        } catch (IOException failure) {
-                            throw new UncheckedIOException(failure);
-                        } catch (GitOperationException failure) {
-                            throw new IllegalStateException(failure);
-                        }
-                    });
+        try (GitFileAccess files = provider.retained(repositoryName).eventSource().files()
+                .open(new VcRevision.Stored(revision.toHex()))) {
+            return files.readBytes(path);
         } catch (UncheckedIOException failure) {
             throw failure.getCause();
         } catch (IllegalStateException failure) {
@@ -71,44 +63,33 @@ public final class GitFile {
         return objectId(Objects.requireNonNull(revision, "revision")) != null;
     }
 
-    String path() {
-        return path;
-    }
-
-    public GitFileApi.VcModification withModification() {
-        NativeGitRepository repository = provider.openForWrite(repositoryName)
-                .valueOrFailure("Cannot open Git file repository");
-        return repository.files(ref).withModification();
-    }
-
     public CommitId write(CommitId expectedRevision, byte[] bytes, VcChangeDescription metadata) throws Exception {
         Objects.requireNonNull(bytes, "bytes");
-        GitFileApi.VcModification modification = withModification();
-        try {
-            modification.addChange(access -> {
-                try {
-                    CommitId current = access.baseRevision().map(id -> new CommitId(id.toHex())).orElse(null);
-                    if (!Objects.equals(current, expectedRevision)
-                            && !Objects.equals(objectId(current), objectId(expectedRevision))) {
-                        throw new GitRefConflictException(new RefUpdate(new RefId(ref),
-                                Optional.ofNullable(expectedRevision), Optional.ofNullable(current)),
-                                Optional.ofNullable(current));
-                    }
-                    access.write(path, bytes);
-                } catch (IOException failure) {
-                    throw new UncheckedIOException(failure);
-                } catch (GitOperationException failure) {
-                    throw new IllegalStateException(failure);
-                }
-            });
-            return new CommitId(((VcRevision.Stored) modification.commit(metadata)).value());
+        NativeGitRepository repository = provider.openForWrite(repositoryName)
+                .valueOrFailure("Cannot open Git file repository");
+        VcRevision.Ref branch = repository.ref(ref);
+        try (GitFileAccess files = repository.files().open(branch)) {
+            CommitId current = new CommitId(files.revision().value());
+            ObjectId currentObject;
+            try {
+                currentObject = files.objectId(path);
+            } catch (GitRepositoryFileNotFoundException missing) {
+                currentObject = null;
+            }
+            if (!Objects.equals(current, expectedRevision)
+                    && !Objects.equals(currentObject, objectId(expectedRevision))) {
+                throw new GitRefConflictException(new RefUpdate(new RefId(ref),
+                        Optional.ofNullable(expectedRevision), Optional.of(current)), Optional.of(current));
+            }
+            files.write(path, bytes);
+            VcRevision.Stored created = files.commit(metadata);
+            repository.refUpdate(branch, files.revision(), created);
+            return new CommitId(created.value());
         } catch (UncheckedIOException failure) {
             throw failure.getCause();
         } catch (IllegalStateException failure) {
             if (failure.getCause() instanceof GitOperationException gitFailure) throw gitFailure;
             throw failure;
-        } finally {
-            modification.discard();
         }
     }
 
@@ -123,17 +104,13 @@ public final class GitFile {
 
     ObjectId objectId(CommitId revision) throws GitOperationException {
         if (revision == null) return null;
-        try {
-            return provider.retained(repositoryName).eventSource().files(ref)
-                    .withRead(new VcRevision.Stored(revision.toHex())).read(operations -> {
-                        try {
-                            return operations.objectId(path);
-                        } catch (GitRepositoryFileNotFoundException missing) {
-                            return null;
-                        } catch (GitOperationException failure) {
-                            throw new IllegalStateException(failure);
-                        }
-                    });
+        try (GitFileAccess files = provider.retained(repositoryName).eventSource().files()
+                .open(new VcRevision.Stored(revision.toHex()))) {
+            return files.objectId(path);
+        } catch (GitRepositoryFileNotFoundException missing) {
+            return null;
+        } catch (IOException | UncheckedIOException failure) {
+            throw new GitOperationException("Cannot read Git file identity", failure);
         } catch (IllegalStateException failure) {
             if (failure.getCause() instanceof GitOperationException gitFailure) throw gitFailure;
             throw failure;

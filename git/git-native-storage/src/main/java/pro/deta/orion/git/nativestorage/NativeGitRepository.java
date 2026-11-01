@@ -2,6 +2,8 @@ package pro.deta.orion.git.nativestorage;
 
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.git.fileapi.GitFileApi;
+import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.git.local.LocalGitIndex;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.nativestorage.receive.NativeGitReceivePack;
@@ -138,8 +140,25 @@ public class NativeGitRepository implements AutoCloseable {
         return name;
     }
 
-    public GitFileApi files(String branch) {
-        return new GitFileApi(this, branch);
+    public GitFileApi files() {
+        return new GitFileApi(this);
+    }
+
+    public VcRevision.Ref ref(String branch) {
+        Objects.requireNonNull(branch, "branch");
+        return new VcRevision.Ref(branch.startsWith("refs/") ? branch : "refs/heads/" + branch);
+    }
+
+    public void refUpdate(VcRevision.Ref ref, VcRevision.Stored expected, VcRevision.Stored revision)
+            throws GitOperationException, GitRefConflictException {
+        RefUpdate update = new RefUpdate(new RefId(ref.value()), Optional.of(new ObjectId(expected.value())),
+                Optional.of(new ObjectId(revision.value())));
+        List<RefUpdateResult> results = publishRefs(List.of(update), true);
+        if (results.getFirst().status() == RefUpdateResult.Status.EXPECTED_OLD_MISMATCH) {
+            Optional<ObjectId> actual = Optional.ofNullable(refs().get(ref.value())).map(ObjectId::new);
+            throw new GitRefConflictException(update, actual);
+        }
+        GitOperationException.requireSuccess(results);
     }
 
     public Map<String, String> refs() {

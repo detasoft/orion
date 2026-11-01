@@ -139,9 +139,9 @@ final class ProxyNativeGitRepository extends NativeGitRepository {
     }
 
     @Override
-    public GitFileApi files(String branch) {
+    public GitFileApi files() {
         repository();
-        return new GitFileApi(this, branch, false);
+        return super.files();
     }
 
     @Override

@@ -4,20 +4,27 @@ import pro.deta.orion.event.type.OrionEvent;
 import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /** Identifies a file event source and the exact commit whose file content changed. */
 public final class GitFileChanged extends OrionEvent {
     private final UUID source;
+    private final Optional<CommitId> oldRevision;
     private final CommitId revision;
 
-    public GitFileChanged(UUID source, CommitId revision) {
+    public GitFileChanged(UUID source, Optional<CommitId> oldRevision, CommitId revision) {
         this.source = Objects.requireNonNull(source, "source");
+        this.oldRevision = Objects.requireNonNull(oldRevision, "oldRevision");
         this.revision = Objects.requireNonNull(revision, "revision");
     }
 
     public UUID source() {
         return source;
+    }
+
+    public Optional<CommitId> oldRevision() {
+        return oldRevision;
     }
 
     public CommitId revision() {

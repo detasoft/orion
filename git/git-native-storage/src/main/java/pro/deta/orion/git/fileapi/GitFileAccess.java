@@ -2,23 +2,15 @@ package pro.deta.orion.git.fileapi;
 import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.util.VcChangeDescription;
 import pro.deta.orion.util.VcRevision;
-import pro.deta.orion.util.VcResource.VcUpdateOperations;
+import pro.deta.orion.util.VcResource;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
-import pro.deta.orion.git.nativestorage.receive.NativeGitReceivePack;
 import pro.deta.orion.git.parser.v2.data.FileMode;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
-import pro.deta.orion.git.parser.v2.data.Head;
-import pro.deta.orion.git.parser.v2.index.RefSelection;
-import pro.deta.orion.git.parser.v2.data.RefUpdate;
-import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
-import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.object.LooseObject;
@@ -54,49 +46,29 @@ import java.util.zip.Deflater;
 import static pro.deta.orion.git.fileapi.GitFileApiSupport.*;
 
 /**
- * Current scope: one modification changes one branch and returns that branch's commit revision.
- * Independent changes to multiple branches in one modification are not supported. Initializing an
- * absent symbolic HEAD branch to the same commit remains part of repository initialization.
- * File changes against captured refs. Each write consumes exactly the declared number of bytes from a
- * borrowed input and stores compressed content immediately; only changed paths and the entries of
- * each directory being rebuilt remain in memory.
+ * Reads and prepares file changes against one stored commit. Committing publishes objects;
+ * updating a ref is a separate repository operation.
  */
-public final class GitFileAccess extends VcUpdateOperations {
+public final class GitFileAccess extends VcResource<GitFileAccess>.VcOperation {
     private final NativeGitRepository repository;
     private final GitIndexAccess index;
     private final PackId packId;
-    private final PackHandle bytes;
+    private PackHandle bytes;
     private final GitStorageAccess storage;
-    private final RefId ref;
-    private final Optional<ObjectId> parent;
     private final Map<String, TreeEntry> rootEntries;
-    private final Optional<RefId> headToInitialize;
     private final Set<String> deleted = new HashSet<>();
     private final Map<String, TreeEntry> entries = new HashMap<>();
 
-    GitFileAccess(NativeGitRepository repository, GitIndexAccess index, String branch,
-                  boolean initializeHead, Head head)
+    GitFileAccess(GitFileApi resource, GitIndexAccess index, VcRevision.Stored revision)
             throws IOException, GitOperationException {
-        this.repository = repository;
+        resource.super(revision);
+        this.repository = resource.repository;
         this.index = index;
         this.packId = index.packId().orElseThrow(() -> new IllegalArgumentException("Pack access required"));
-        this.ref = new RefId(branchRefName(branch));
-        this.parent = index.findRef(ref);
-        if (!index.snapshotRefs(new RefSelection.Head()).head().equals(head)) {
-            throw new IOException("Repository HEAD changed while opening file access");
-        }
-        if (initializeHead && head instanceof Head.Symbolic symbolic
-                && !ref.equals(symbolic.target()) && index.findRef(symbolic.target()).isEmpty()) {
-            this.headToInitialize = Optional.of(symbolic.target());
-        } else {
-            this.headToInitialize = Optional.empty();
-        }
         storage = repository.storage().createAccess();
         try {
-            rootEntries = parent.isPresent()
-                    ? readTree(rootTreeId(parent.get(), readObject(parent.get()))) : Map.of();
-            bytes = storage.newPack(packId);
-            bytes.write(0, ByteBuffer.allocate(8).putInt(0x4f52504b).putInt(1).flip());
+            ObjectId parent = new ObjectId(revision.value());
+            rootEntries = readTree(rootTreeId(parent, readObject(parent)));
         } catch (IOException | GitOperationException | RuntimeException | Error failure) {
             try {
                 storage.discard();
@@ -107,11 +79,7 @@ public final class GitFileAccess extends VcUpdateOperations {
         }
     }
 
-    public Optional<ObjectId> baseRevision() {
-        return parent;
-    }
-
-    public byte[] readBytes(String path) throws IOException, GitOperationException {
+    private TreeEntry fileEntry(String path) throws IOException, GitOperationException {
         String normalized = gitPath(path);
         for (int slash = normalized.indexOf('/'); slash >= 0; slash = normalized.indexOf('/', slash + 1)) {
             String ancestor = normalized.substring(0, slash);
@@ -147,11 +115,23 @@ public final class GitFileAccess extends VcUpdateOperations {
         if (entry.mode() == FileMode.TREE || entry.mode() == FileMode.GITLINK) {
             throw new GitOperationException("Path is not a file: " + normalized);
         }
+        return entry;
+    }
+
+    public ObjectId objectId(String path) throws IOException, GitOperationException {
+        return fileEntry(path).objectId();
+    }
+
+    public byte[] readBytes(String path) throws IOException, GitOperationException {
+        return readFile(path, (type, size, base, input) -> input.newInputStream().readAllBytes());
+    }
+
+    public <T> T readFile(String path, GitObjectRead<T> reader) throws IOException, GitOperationException {
+        Objects.requireNonNull(reader, "reader");
+        TreeEntry entry = fileEntry(path);
         return readObject(entry.objectId(), (type, size, base, input) -> {
-            if (type != GitObjectType.BLOB) {
-                throw new IOException("File target is not a blob: " + normalized);
-            }
-            return input.newInputStream().readAllBytes();
+            if (type != GitObjectType.BLOB) throw new IOException("File target is not a blob: " + path);
+            return reader.read(type, size, base, input);
         });
     }
 
@@ -189,17 +169,14 @@ public final class GitFileAccess extends VcUpdateOperations {
     }
 
     @Override
-    protected VcRevision.Stored commit(VcChangeDescription description) {
+    protected VcRevision.Stored commitChanges(VcChangeDescription description) {
         Objects.requireNonNull(description, "description");
+        if (entries.isEmpty() && deleted.isEmpty()) return revision();
         try {
             Set<String> changedPaths = new HashSet<>(entries.keySet());
             changedPaths.addAll(deleted);
             ObjectId tree = writeTree("", null, changedPaths).orElseThrow();
-            ObjectId commit = writeCommit(tree, parent.orElse(null), description);
-            List<RefUpdate> updates = new ArrayList<>();
-            updates.add(new RefUpdate(ref, parent, Optional.of(commit)));
-            headToInitialize.ifPresent(target ->
-                    updates.add(new RefUpdate(target, Optional.empty(), Optional.of(commit))));
+            ObjectId commit = writeCommit(tree, new ObjectId(revision().value()), description);
             bytes.flush();
             List<IndexedObject> indexed = index.objects(packId);
             PackMetadata pack;
@@ -210,17 +187,6 @@ public final class GitFileAccess extends VcUpdateOperations {
             }
             storage.apply();
             index.publishIndex(pack);
-            List<RefUpdateResult> results = NativeGitReceivePack.complete(repository.name(), repository,
-                    updates, true, GitNativeRepositoryAccessHook.ALLOW_ALL,
-                    valid -> repository.publishReceivedPack(Optional.of(pack.packChecksum()), valid, true));
-            for (RefUpdateResult result : results) {
-                if (result.status() == RefUpdateResult.Status.EXPECTED_OLD_MISMATCH) {
-                    Optional<ObjectId> actual = Optional.ofNullable(repository.refs().get(result.update().ref().value()))
-                            .map(ObjectId::new);
-                    throw new GitRefConflictException(result.update(), actual);
-                }
-            }
-            GitOperationException.requireSuccess(results);
             return new VcRevision.Stored(commit.toHex());
         } catch (GitOperationException failure) {
             throw new UncheckedIOException(new IOException("Cannot apply file changes", failure));
@@ -230,7 +196,7 @@ public final class GitFileAccess extends VcUpdateOperations {
     }
 
     @Override
-    protected void discard() {
+    public void close() {
         try {
             Throwable primary = null;
             try {
@@ -261,6 +227,10 @@ public final class GitFileAccess extends VcUpdateOperations {
         MessageDigest hash = repository.hashAlgorithm().newDigest();
         hash.update((type.name().toLowerCase(Locale.ROOT) + " " + size + "\0")
                 .getBytes(StandardCharsets.US_ASCII));
+        if (bytes == null) {
+            bytes = storage.newPack(packId);
+            bytes.write(0, ByteBuffer.allocate(8).putInt(0x4f52504b).putInt(1).flip());
+        }
         long start = bytes.size();
         Deflater deflater = new Deflater();
         byte[] compressed = new byte[8192];

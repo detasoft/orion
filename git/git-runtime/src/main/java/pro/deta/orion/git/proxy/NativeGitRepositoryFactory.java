@@ -1,5 +1,7 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
 import pro.deta.orion.git.fileapi.GitFileEvents;
 
 import pro.deta.orion.git.fileapi.GitFile;
@@ -185,7 +187,7 @@ public final class NativeGitRepositoryFactory implements NativeGitRepositoryBack
                 }
                 throw new IllegalStateException("Bootstrap source ref is unavailable: " + id);
             }
-            return repository.files(refName).withRead(new VcRevision.Stored(revision)).read(operations -> {
+            try (GitFileAccess operations = repository.files().open(new VcRevision.Stored(revision))) {
                 try {
                     operations.readFile(path, (type, size, base, input) -> Boolean.TRUE);
                     return Optional.of(repositoryName);
@@ -197,7 +199,7 @@ public final class NativeGitRepositoryFactory implements NativeGitRepositoryBack
                 } catch (IOException | GitOperationException error) {
                     throw new IllegalStateException("Bootstrap source path is unavailable: " + id);
                 }
-            });
+            }
         } catch (RuntimeException error) {
             if (sourceAdded) {
                 provisionalSources.remove(id, repositoryName);

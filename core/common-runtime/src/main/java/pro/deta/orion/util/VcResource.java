@@ -3,148 +3,64 @@ package pro.deta.orion.util;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.OrionEvents;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.function.Function;
-import java.util.function.Supplier;
 
-public abstract class VcResource<R, U extends VcResource.VcUpdateOperations> {
+public abstract class VcResource<O extends VcResource.VcOperation> {
     private final ReentrantReadWriteLock resourceLock = new ReentrantReadWriteLock();
-    private final OrionEvents events;
-    private volatile VcRevision lastRevision;
+    protected final OrionEvents events;
 
     protected VcResource(OrionEventManager eventManager) {
-        this(eventManager, new VcRevision.Absent());
-    }
-
-    protected VcResource(OrionEventManager eventManager, VcRevision initialRevision) {
         events = eventManager.forTarget(this);
-        lastRevision = Objects.requireNonNull(initialRevision, "initialRevision");
     }
 
-    protected abstract R createReadOperation(VcRevision.ReadTarget revision);
-
-    protected abstract U createUpdateOperation();
-
-    public final VcRead withRead(VcRevision.ReadTarget revision) {
-        return new VcRead(Objects.requireNonNull(revision, "revision"));
-    }
-
-    public final VcModification withModification() {
-        return new VcModification();
-    }
-
-    private <T> T inReadLock(Supplier<T> operation) {
+    public final O open(VcRevision revision) {
+        Objects.requireNonNull(revision, "revision");
         resourceLock.readLock().lock();
         try {
-            return operation.get();
+            return Objects.requireNonNull(createOperation(revision), "operation");
         } finally {
             resourceLock.readLock().unlock();
         }
     }
 
-    public final VcRevision getRevision() {
-        return lastRevision;
-    }
+    protected abstract O createOperation(VcRevision revision);
 
-    private void checkRevision(VcRevision expectedRevision) {
-        if (!expectedRevision.equals(lastRevision)) {
-            throw new VcModificationException(expectedRevision, lastRevision);
+    protected final void publishChange(VcRevision oldRevision, VcRevision revision) {
+        Objects.requireNonNull(oldRevision, "oldRevision");
+        Objects.requireNonNull(revision, "revision");
+        if (!oldRevision.equals(revision)) {
+            events.publish(new VcResourceModified(this, oldRevision, revision));
         }
     }
 
-    public abstract static class VcUpdateOperations {
-        protected abstract VcRevision commit(VcChangeDescription description);
+    public abstract class VcOperation implements AutoCloseable {
+        private final VcRevision.Stored revision;
 
-        protected void discard() {}
-    }
-
-    /** Operation objects are borrowed under the read-lock and must not escape the callback. */
-    public class VcRead {
-        private final VcRevision.ReadTarget revision;
-
-        private VcRead(VcRevision.ReadTarget revision) {
-            this.revision = revision;
+        protected VcOperation(VcRevision.Stored revision) {
+            this.revision = Objects.requireNonNull(revision, "revision");
         }
 
-        public final <T> T read(Function<R, T> operation) {
-            Objects.requireNonNull(operation, "operation");
-            return VcResource.this.inReadLock(() ->
-                    operation.apply(Objects.requireNonNull(createReadOperation(revision), "operations")));
-        }
-    }
-
-    /**
-     * A single caller uses each modification. Changes run only during commit; captured mutable inputs
-     * are not snapshots. Operation objects are borrowed during callbacks and must not escape them.
-     */
-    public class VcModification {
-        private final VcRevision oldRevision;
-        private List<VcChange<U>> pending = new ArrayList<>();
-
-        private VcModification() {
-            oldRevision = getRevision();
-        }
-
-        public final void addChange(VcChange<U> change) {
-            requireOpen();
-            pending.add(Objects.requireNonNull(change, "change"));
-        }
-
-        public final VcRevision commit(VcChangeDescription description) {
-            requireOpen();
-            Objects.requireNonNull(description, "description");
-            if (resourceLock.getReadHoldCount() > 0 && !resourceLock.isWriteLockedByCurrentThread()) {
-                throw new IllegalStateException("Cannot commit a modification from a read operation");
-            }
-            List<VcChange<U>> prepared = pending;
-            pending = null;
-            VcRevision revision;
-            resourceLock.writeLock().lock();
-            Throwable failure = null;
-            U operations = null;
-            try {
-                checkRevision(oldRevision);
-                operations = Objects.requireNonNull(createUpdateOperation(), "operations");
-                for (VcChange<U> change : prepared) {
-                    change.apply(operations);
-                }
-                revision = Objects.requireNonNull(operations.commit(description), "committed revision");
-                lastRevision = revision;
-            } catch (RuntimeException | Error error) {
-                failure = error;
-                throw error;
-            } finally {
-                try {
-                    if (operations != null) operations.discard();
-                } catch (RuntimeException | Error cleanup) {
-                    if (failure == null) throw cleanup;
-                    if (failure != cleanup) failure.addSuppressed(cleanup);
-                } finally {
-                    resourceLock.writeLock().unlock();
-                    prepared.clear();
-                }
-            }
-            if (!oldRevision.equals(revision)) {
-                events.publish(new VcResourceModified(VcResource.this, oldRevision, revision));
-            }
+        public final VcRevision.Stored revision() {
             return revision;
         }
 
-        public final void discard() {
-            if (pending != null) {
-                pending.clear();
-                pending = null;
+        public final VcRevision.Stored commit(VcChangeDescription description) {
+            Objects.requireNonNull(description, "description");
+            if (resourceLock.getReadHoldCount() > 0 && !resourceLock.isWriteLockedByCurrentThread()) {
+                throw new IllegalStateException("Cannot commit while opening an operation");
+            }
+            resourceLock.writeLock().lock();
+            try {
+                return Objects.requireNonNull(commitChanges(description), "committed revision");
+            } finally {
+                resourceLock.writeLock().unlock();
             }
         }
 
-        private void requireOpen() {
-            if (pending == null) {
-                throw new IllegalStateException("Modification is already finished");
-            }
-        }
+        protected abstract VcRevision.Stored commitChanges(VcChangeDescription description);
 
+        @Override
+        public abstract void close();
     }
 }
