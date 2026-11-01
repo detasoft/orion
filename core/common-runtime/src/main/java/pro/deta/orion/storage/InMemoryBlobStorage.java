@@ -1,6 +1,7 @@
 package pro.deta.orion.storage;
 
 import pro.deta.orion.event.OrionEventManager;
+import pro.deta.orion.util.VcChangeDescription;
 import pro.deta.orion.util.VcRevision;
 
 import java.util.Arrays;
@@ -25,7 +26,7 @@ public class InMemoryBlobStorage extends BlobStorage {
     }
 
     @Override
-    protected VcRevision readRevision() {
+    protected VcRevision commit(VcChangeDescription description) {
         return versions.isEmpty() ? new VcRevision.Absent() : versions.lastEntry().getKey();
     }
 

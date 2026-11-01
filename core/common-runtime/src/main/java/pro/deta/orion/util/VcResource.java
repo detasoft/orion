@@ -19,7 +19,7 @@ public abstract class VcResource {
         events = eventManager.forTarget(this);
     }
 
-    protected abstract VcRevision readRevision();
+    protected abstract VcRevision commit(VcChangeDescription description);
 
     private <R> R inReadLock(Supplier<R> operation) {
         resourceLock.readLock().lock();
@@ -89,7 +89,7 @@ public abstract class VcResource {
                 for (VcChange<M> change : prepared) {
                     change.apply(operations);
                 }
-                revision = prepared.isEmpty() ? oldRevision : Objects.requireNonNull(readRevision(), "revision");
+                revision = Objects.requireNonNull(VcResource.this.commit(description), "committed revision");
                 lastRevision = revision;
             } finally {
                 resourceLock.writeLock().unlock();
