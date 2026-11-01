@@ -1,5 +1,6 @@
 package pro.deta.orion.storage;
 
+import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.util.VcRevision;
 
 import java.io.IOException;
@@ -19,7 +20,8 @@ import java.util.UUID;
 public class LocalBlobStorage extends BlobStorage {
     private final Path path;
 
-    public LocalBlobStorage(Path path) {
+    public LocalBlobStorage(Path path, OrionEventManager events) {
+        super(events);
         if (path == null) {
             throw new IllegalArgumentException("Blob path must not be null");
         }

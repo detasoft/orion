@@ -1,16 +1,22 @@
 package pro.deta.orion.util;
 
+import pro.deta.orion.event.OrionEventManager;
+import pro.deta.orion.event.OrionEvents;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
 public abstract class VcResource {
     private final ReentrantReadWriteLock resourceLock = new ReentrantReadWriteLock();
-    private final EventListeners<VcResourceModified> changes = new EventListeners<>();
+    private final OrionEvents events;
+
+    protected VcResource(OrionEventManager eventManager) {
+        events = eventManager.forTarget(this);
+    }
 
     public final VcRevision getRevision() {
         return read(() -> Objects.requireNonNull(readRevision(), "revision"));
@@ -27,10 +33,6 @@ public abstract class VcResource {
         }
     }
 
-    public final Subscription subscribe(Consumer<VcResourceModified> subscriber) {
-        return changes.subscribe(subscriber);
-    }
-
     private void checkRevision(VcRevision expectedRevision) {
         VcRevision current = getRevision();
         if (!expectedRevision.equals(current)) {
@@ -40,8 +42,6 @@ public abstract class VcResource {
 
     public abstract static class VcUpdateOperations {
         protected abstract VcRevision commit(VcChangeDescription description);
-
-        protected void discard() {}
     }
 
     /** Operation objects are borrowed under the read-lock and must not escape the callback. */
@@ -65,7 +65,7 @@ public abstract class VcResource {
     public class VcModification<M extends VcUpdateOperations> {
         private final VcRevision oldRevision;
         private final VcChangeDescription description;
-        private M operations;
+        private final M operations;
         private List<VcChange<M>> pending = new ArrayList<>();
 
         public VcModification(VcChangeDescription description, M operations) {
@@ -87,40 +87,22 @@ public abstract class VcResource {
             List<VcChange<M>> prepared = pending;
             pending = null;
             VcRevision revision;
+            resourceLock.writeLock().lock();
             try {
-                resourceLock.writeLock().lock();
-                Throwable primary = null;
-                try {
-                    checkRevision(oldRevision);
-                    if (!prepared.isEmpty()) {
-                        for (VcChange<M> change : prepared) {
-                            change.apply(operations);
-                        }
-                        revision = Objects.requireNonNull(operations.commit(description),
-                                "committed revision");
-                    } else {
-                        revision = oldRevision;
+                checkRevision(oldRevision);
+                revision = oldRevision;
+                if (!prepared.isEmpty()) {
+                    for (VcChange<M> change : prepared) {
+                        change.apply(operations);
                     }
-                } catch (RuntimeException | Error failure) {
-                    primary = failure;
-                    throw failure;
-                } finally {
-                    try {
-                        discard();
-                    } catch (RuntimeException | Error cleanup) {
-                        if (primary == null) {
-                            throw cleanup;
-                        }
-                        primary.addSuppressed(cleanup);
-                    } finally {
-                        resourceLock.writeLock().unlock();
-                    }
+                    revision = Objects.requireNonNull(operations.commit(description), "committed revision");
                 }
             } finally {
+                resourceLock.writeLock().unlock();
                 prepared.clear();
             }
             if (!oldRevision.equals(revision)) {
-                changes.publish(new VcResourceModified(VcResource.this, oldRevision, revision));
+                events.publish(new VcResourceModified(VcResource.this, oldRevision, revision));
             }
             return revision;
         }
@@ -129,11 +111,6 @@ public abstract class VcResource {
             if (pending != null) {
                 pending.clear();
                 pending = null;
-            }
-            if (operations != null) {
-                M discarded = operations;
-                operations = null;
-                discarded.discard();
             }
         }
 

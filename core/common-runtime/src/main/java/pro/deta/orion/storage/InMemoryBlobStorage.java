@@ -1,5 +1,6 @@
 package pro.deta.orion.storage;
 
+import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.util.VcRevision;
 
 import java.util.Arrays;
@@ -11,11 +12,13 @@ public class InMemoryBlobStorage extends BlobStorage {
     private final boolean readOnly;
     private final LinkedHashMap<VcRevision.Stored, byte[]> versions = new LinkedHashMap<>();
 
-    public InMemoryBlobStorage() {
+    public InMemoryBlobStorage(OrionEventManager events) {
+        super(events);
         readOnly = false;
     }
 
-    public InMemoryBlobStorage(byte[] content, boolean readOnly) {
+    public InMemoryBlobStorage(byte[] content, boolean readOnly, OrionEventManager events) {
+        super(events);
         Objects.requireNonNull(content, "content");
         this.readOnly = readOnly;
         versions.put(new VcRevision.Stored("1"), Arrays.copyOf(content, content.length));

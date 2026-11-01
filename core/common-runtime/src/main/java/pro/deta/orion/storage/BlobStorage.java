@@ -1,5 +1,6 @@
 package pro.deta.orion.storage;
 
+import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.util.VcChangeDescription;
 import pro.deta.orion.util.VcResource;
 import pro.deta.orion.util.VcRevision;
@@ -7,6 +8,10 @@ import pro.deta.orion.util.VcRevision;
 import java.util.Objects;
 
 public abstract class BlobStorage extends VcResource {
+    protected BlobStorage(OrionEventManager eventManager) {
+        super(eventManager);
+    }
+
     protected abstract byte[] readContent(VcRevision.ReadTarget revision);
 
     protected abstract void write(byte[] content);
@@ -48,7 +53,7 @@ public abstract class BlobStorage extends VcResource {
 
         @Override
         protected VcRevision commit(VcChangeDescription description) {
-            return getRevision();
+            return readRevision();
         }
     }
 }
