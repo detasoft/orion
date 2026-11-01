@@ -71,6 +71,10 @@ public final class GitFile {
         return objectId(Objects.requireNonNull(revision, "revision")) != null;
     }
 
+    String path() {
+        return path;
+    }
+
     public GitFileApi.VcModification withModification() {
         NativeGitRepository repository = provider.openForWrite(repositoryName)
                 .valueOrFailure("Cannot open Git file repository");

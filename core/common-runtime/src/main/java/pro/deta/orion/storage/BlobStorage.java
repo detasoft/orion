@@ -10,6 +10,10 @@ public abstract class BlobStorage
         super(eventManager);
     }
 
+    protected BlobStorage(OrionEventManager eventManager, VcRevision initialRevision) {
+        super(eventManager, initialRevision);
+    }
+
     public final byte[] readBytes(VcRevision.ReadTarget revision) {
         return withRead(revision).read(BlobStorageReadOperations::readContent);
     }

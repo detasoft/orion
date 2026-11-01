@@ -19,7 +19,7 @@ public class InMemoryBlobStorage extends BlobStorage {
     }
 
     public InMemoryBlobStorage(byte[] content, boolean readOnly, OrionEventManager events) {
-        super(events);
+        super(events, new VcRevision.Stored("1"));
         Objects.requireNonNull(content, "content");
         this.readOnly = readOnly;
         versions.put(new VcRevision.Stored("1"), Arrays.copyOf(content, content.length));
@@ -29,6 +29,15 @@ public class InMemoryBlobStorage extends BlobStorage {
     protected BlobStorageUpdateOperations createUpdateOperation() {
         return new BlobStorageUpdateOperations() {
             @Override
+            public void write(byte[] content) {
+                if (readOnly) {
+                    throw new IllegalStateException("Blob store is read-only");
+                }
+                VcRevision.Stored revision = new VcRevision.Stored(Long.toString((long) versions.size() + 1));
+                versions.put(revision, Arrays.copyOf(content, content.length));
+            }
+
+            @Override
             protected VcRevision commit(VcChangeDescription description) {
                 return versions.isEmpty() ? new VcRevision.Absent() : versions.lastEntry().getKey();
             }
@@ -36,7 +45,7 @@ public class InMemoryBlobStorage extends BlobStorage {
     }
 
     @Override
-    protected byte[] readContent(VcRevision.ReadTarget revision) {
+    protected BlobStorageReadOperations createReadOperation(VcRevision.ReadTarget revision) {
         byte[] content = switch (revision) {
             case VcRevision.Latest ignored -> {
                 Map.Entry<VcRevision.Stored, byte[]> latest = versions.lastEntry();
@@ -53,15 +62,6 @@ public class InMemoryBlobStorage extends BlobStorage {
                 yield selected;
             }
         };
-        return Arrays.copyOf(content, content.length);
-    }
-
-    @Override
-    protected void write(byte[] content) {
-        if (readOnly) {
-            throw new IllegalStateException("Blob store is read-only");
-        }
-        VcRevision.Stored revision = new VcRevision.Stored(Long.toString((long) versions.size() + 1));
-        versions.put(revision, Arrays.copyOf(content, content.length));
+        return () -> Arrays.copyOf(content, content.length);
     }
 }

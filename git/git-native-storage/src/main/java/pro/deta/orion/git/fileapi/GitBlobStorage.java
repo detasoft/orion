@@ -1,114 +1,90 @@
 package pro.deta.orion.git.fileapi;
 
-import pro.deta.orion.util.VcChangeDescription;
-import pro.deta.orion.util.Subscription;
-import pro.deta.orion.util.EventListeners;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
 import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
-import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.storage.BlobStorage;
-import pro.deta.orion.storage.BlobChanged;
-import pro.deta.orion.storage.BlobStorageConflictException;
+import pro.deta.orion.util.VcChangeDescription;
+import pro.deta.orion.util.VcRevision;
 
-import java.io.IOException;
 import java.io.FileNotFoundException;
-import java.util.Objects;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.function.Consumer;
 
-/**
- * Stores opaque bytes in a Git file without retaining content. Explicit reads remember the loaded revision.
- * Source notifications report that revision and the new source revision without loading or accepting it.
- */
-public final class GitBlobStorage implements BlobStorage {
-    private final GitFileEvents events;
-    private final Subscription changes;
-    private final EventListeners<BlobChanged> subscribers = new EventListeners<>();
-    private volatile String loadedRevision;
+public final class GitBlobStorage extends BlobStorage implements AutoCloseable, Consumer<GitFileChanged> {
+    private final GitFileEvents fileEvents;
 
     public GitBlobStorage(GitFileEvents events) {
-        this.events = Objects.requireNonNull(events, "events");
-        changes = events.events().subscribe(GitFileChanged.class, event -> {
-            if (events.matches(event)) {
-                subscribers.publish(new BlobChanged(
-                        loadedRevision, event.revision().toHex()));
+        super(events.events(), currentRevision(events.file()));
+        this.fileEvents = events;
+        events.events().registry().subscribe(GitFileChanged.class, events.source(), this);
+    }
+
+    private static VcRevision currentRevision(GitFile file) {
+        return file.revision().<VcRevision>map(id -> new VcRevision.Stored(id.toHex()))
+                .orElseGet(VcRevision.Absent::new);
+    }
+
+    @Override
+    public void accept(GitFileChanged event) {
+        if (!getRevision().equals(new VcRevision.Stored(event.revision().toHex()))) {
+            applyRevision(currentRevision(fileEvents.file()));
+        }
+    }
+
+    @Override
+    protected BlobStorageReadOperations createReadOperation(VcRevision.ReadTarget target) {
+        VcRevision selected = target instanceof VcRevision.Stored stored ? stored : getRevision();
+        if (!(selected instanceof VcRevision.Stored stored)) {
+            throw new UncheckedIOException(new FileNotFoundException("Git blob is absent"));
+        }
+        CommitId revision = new CommitId(stored.value());
+        return () -> {
+            try {
+                return fileEvents.file().read(revision);
+            } catch (GitRepositoryFileNotFoundException missing) {
+                FileNotFoundException failure = new FileNotFoundException("Blob is absent at " + stored.value());
+                failure.initCause(missing);
+                throw new UncheckedIOException(failure);
+            } catch (IOException failure) {
+                throw new UncheckedIOException(failure);
+            } catch (GitOperationException failure) {
+                throw new IllegalStateException("Cannot read Git blob", failure);
             }
-        });
+        };
     }
 
     @Override
-    public Subscription subscribe(Consumer<BlobChanged> subscriber) {
-        return subscribers.subscribe(subscriber);
-    }
+    protected BlobStorageUpdateOperations createUpdateOperation() {
+        GitFileApi.VcModification modification = fileEvents.file().withModification();
+        return new BlobStorageUpdateOperations() {
+            @Override
+            public void write(byte[] content) {
+                modification.addChange(access -> {
+                    try {
+                        access.write(fileEvents.file().path(), content);
+                    } catch (IOException failure) {
+                        throw new UncheckedIOException(failure);
+                    }
+                });
+            }
 
-    @Override
-    public Content load() throws IOException {
-        String revision;
-        try {
-            revision = events.file().revision().map(CommitId::toHex).orElse(null);
-        } catch (RuntimeException failure) {
-            throw new IOException("Cannot read blob revision", failure);
-        }
-        if (revision == null) {
-            loadedRevision = null;
-            return new Content(null, null);
-        }
-        try {
-            return new Content(revision, read(revision));
-        } catch (FileNotFoundException missing) {
-            loadedRevision = revision;
-            return new Content(revision, null);
-        }
-    }
+            @Override
+            protected VcRevision commit(VcChangeDescription description) {
+                return modification.commit(description);
+            }
 
-    @Override
-    public byte[] read(String revision) throws IOException {
-        Objects.requireNonNull(revision, "revision");
-        try {
-            GitFile file = events.file();
-            CommitId requested = new CommitId(revision);
-            byte[] bytes = file.read(requested);
-            loadedRevision = revision;
-            return bytes;
-        } catch (GitRepositoryFileNotFoundException missing) {
-            FileNotFoundException failure = new FileNotFoundException("Blob is absent at " + revision);
-            failure.initCause(missing);
-            throw failure;
-        } catch (GitOperationException | RuntimeException failure) {
-            throw new IOException("Cannot read blob store at " + revision, failure);
-        }
-    }
-
-    @Override
-    public String write(Modification modification) throws IOException {
-        byte[] bytes = modification.bytes();
-        String expectedRevision = modification.expectedRevision();
-        Objects.requireNonNull(bytes, "bytes");
-        try {
-            GitFile file = events.file();
-            CommitId expected = expectedRevision == null ? null : new CommitId(expectedRevision);
-            CommitId saved = file.write(expected, bytes, metadata);
-            return saved.toHex();
-        } catch (GitRefConflictException failure) {
-            throw conflict();
-        } catch (IOException failure) {
-            throw failure;
-        } catch (Exception failure) {
-            throw new IOException("Cannot write blob store", failure);
-        }
-    }
-
-    private static BlobStorageConflictException conflict() {
-        return new BlobStorageConflictException("Blob store changed before save");
+            @Override
+            protected void discard() {
+                modification.discard();
+            }
+        };
     }
 
     @Override
     public void close() {
-        try {
-            changes.close();
-        } finally {
-            subscribers.close();
-            events.close();
-        }
+        fileEvents.events().registry().unsubscribe(fileEvents.source(), this);
+        fileEvents.close();
     }
 }
