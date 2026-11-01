@@ -1,317 +1,64 @@
 package pro.deta.orion.git.fileapi;
 
 import pro.deta.orion.git.nativestorage.GitOperationException;
-import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.parser.v2.data.FileMode;
-import pro.deta.orion.git.parser.v2.data.GitObjectType;
-import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
-import pro.deta.orion.git.parser.v2.object.LooseObject;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
-import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
-import pro.deta.orion.internal.CheckedFunction;
+import pro.deta.orion.util.VcResource;
+import pro.deta.orion.util.VcRevision;
 
-import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
-import java.util.HashSet;
-import java.util.HexFormat;
-import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
 
-/**
- * File operations borrowing a Git repository. Updates preserve omitted files and their modes;
- * preparing an update does not publish objects or move refs. Access captures the current branch revision.
- * Local updates initialize an absent symbolic HEAD branch; proxy updates leave unrelated refs unchanged.
- * Streaming read callbacks borrow the inflated file input. WithAccess requires explicit apply and
- * always discards on exit. Byte-array reads explicitly materialize a single file.
- */
-public final class GitFileApi {
+/** A versioned view of one branch; each modification publishes one commit. */
+public final class GitFileApi extends VcResource<GitFileApi.GitFileReadOperations, GitFileAccess> {
     private final NativeGitRepository repository;
     private final boolean initializeHead;
+    private final String branch;
 
-    public GitFileApi(NativeGitRepository repository) {
-        this(repository, true);
+    public GitFileApi(NativeGitRepository repository, String branch) {
+        this(repository, branch, true);
     }
 
-    public GitFileApi(NativeGitRepository repository, boolean initializeHead) {
+    public GitFileApi(NativeGitRepository repository, String branch, boolean initializeHead) {
+        super(repository.events(), GitFileApiSupport.initialRevision(repository, branch));
         this.repository = Objects.requireNonNull(repository, "repository");
+        this.branch = GitFileApiSupport.branchRefName(branch);
         this.initializeHead = initializeHead;
     }
 
-    public <T> T readFile(ObjectId commitId, String path, GitObjectRead<T> reader)
-            throws IOException, GitOperationException {
-        Objects.requireNonNull(reader, "reader");
-        TreeEntry entry = fileEntry(commitId, path);
-        return repository.storage().withAccess(bytes -> {
-            Optional<T> result = repository.index().withAccess(index -> GitObjectRead.read(
-                    bytes, index, entry.objectId(),
-                    new ResolvedGitObjectRead<>(bytes, index, (type, size, base, input) -> {
-                        if (type != GitObjectType.BLOB) {
-                            throw new IOException("File target is not a blob: " + path);
-                        }
-                        return reader.read(type, size, base, input);
-                    })));
-            return result.orElseThrow(() -> new GitOperationException("Object not found: " + entry.objectId()));
-        });
+    @Override
+    protected GitFileReadOperations createReadOperation(VcRevision.ReadTarget revision) {
+        return new GitFileReadOperations(revision);
     }
 
-    public ObjectId objectId(ObjectId commitId, String path) throws GitOperationException {
-        return fileEntry(commitId, path).objectId();
-    }
+    public final class GitFileReadOperations {
+        private final VcRevision.ReadTarget revision;
 
-    private TreeEntry fileEntry(ObjectId commitId, String path) throws GitOperationException {
-        String normalized = gitPath(path);
-        ObjectId tree = rootTreeId(commitId, readObject(commitId));
-        TreeEntry entry = resolvePath(tree, normalized);
-        if (entry.mode() == FileMode.TREE || entry.mode() == FileMode.GITLINK) {
-            throw new GitOperationException("Path is not a file: " + normalized);
+        private GitFileReadOperations(VcRevision.ReadTarget revision) {
+            this.revision = revision;
         }
-        return entry;
-    }
 
-    // @TODO убрать - не вижу смысла в
-    public <T> T readFile(String branch, String path, GitObjectRead<T> reader)
-            throws IOException, GitOperationException {
-        return readFile(resolveBranch(branch), path, reader);
-    }
+        private ObjectId commitId() throws GitOperationException {
+            return revision instanceof VcRevision.Stored stored
+                    ? new ObjectId(stored.value()) : GitFileApiSupport.resolveBranch(repository, branch);
+        }
 
-    public byte[] readBytes(String branch, String path) throws IOException, GitOperationException {
-        return readBytes(resolveBranch(branch), path);
-    }
+        public <T> T readFile(String path, GitObjectRead<T> reader) throws IOException, GitOperationException {
+            return GitFileApiSupport.readFile(repository, commitId(), path, reader);
+        }
 
-    public byte[] readBytes(ObjectId commitId, String path) throws IOException, GitOperationException {
-        return readFile(commitId, path, (type, size, base, input) -> input.newInputStream().readAllBytes());
-    }
+        public byte[] readBytes(String path) throws IOException, GitOperationException {
+            return readFile(path, (type, size, base, input) -> input.newInputStream().readAllBytes());
+        }
 
-    public GitFileAccess createAccess(String branch) throws IOException, GitOperationException {
-        RefId ref = new RefId(branchRefName(branch));
-        Head head = repository.index().getHEAD();
-        GitIndexAccess index = repository.index().createAccess(writableRefs(ref, head), Optional.of(PackId.create()));
-        try {
-            return new GitFileAccess(repository, index, branch, initializeHead, head);
-        } catch (IOException | GitOperationException | RuntimeException | Error failure) {
-            try {
-                index.discard();
-            } catch (IOException | RuntimeException | Error cleanup) {
-                if (failure != cleanup) failure.addSuppressed(cleanup);
-            }
-            throw failure;
+        public ObjectId objectId(String path) throws GitOperationException {
+            return GitFileApiSupport.fileEntry(repository, commitId(), path).objectId();
         }
     }
 
-    public <T> T withAccess(String branch, CheckedFunction<GitFileAccess, T> operation) throws Exception {
-        Objects.requireNonNull(operation, "operation");
-        return run(createAccess(branch), operation);
-    }
-
-    private Set<RefId> writableRefs(RefId ref, Head head) {
-        Set<RefId> refs = new HashSet<>();
-        refs.add(ref);
-        if (initializeHead && head instanceof Head.Symbolic symbolic) {
-            refs.add(symbolic.target());
-        }
-        return refs;
-    }
-
-    static <T> T run(GitFileAccess access, CheckedFunction<GitFileAccess, T> operation) throws Exception {
-        Throwable primary = null;
-        try {
-            return operation.apply(access);
-        } catch (Exception | Error failure) {
-            primary = failure;
-            throw failure;
-        } finally {
-            try {
-                access.discard();
-            } catch (Exception | Error cleanup) {
-                if (primary == null) throw cleanup;
-                if (primary != cleanup) primary.addSuppressed(cleanup);
-            }
-        }
-    }
-
-    // @TODO перенеси в NativeGitRepository чтобы не было здесь логики создания "refs/*"
-    private ObjectId resolveBranch(String branch)
-            throws GitRepositoryFileNotFoundException {
-        Map<String, String> refs = repository.refs();
-        String refName = branchRefName(branch);
-        String objectId = refs.get(refName);
-        if (objectId == null && !branch.startsWith("refs/")) {
-            objectId = refs.get(branch);
-        }
-        if (objectId == null) {
-            throw new GitRepositoryFileNotFoundException("Branch not found: " + branch);
-        }
-        return new ObjectId(objectId);
-    }
-
-    private TreeEntry resolvePath(ObjectId rootTreeId, String path)
-            throws GitRepositoryFileNotFoundException, GitOperationException {
-        String[] segments = path.split("/");
-        ObjectId treeId = rootTreeId;
-        TreeEntry entry = null;
-        for (int index = 0; index < segments.length; index++) {
-            entry = treeEntry(treeId, segments[index]);
-            if (index < segments.length - 1) {
-                if (entry.mode() != FileMode.TREE) {
-                    throw new GitOperationException("Path segment is not a directory: " + segments[index]);
-                }
-                treeId = entry.objectId();
-            }
-        }
-        if (entry == null) {
-            throw new GitRepositoryFileNotFoundException("File not found: " + path);
-        }
-        return entry;
-    }
-
-    private TreeEntry treeEntry(ObjectId treeId, String name)
-            throws GitRepositoryFileNotFoundException, GitOperationException {
-        LooseObject tree = readObject(treeId);
-        if (tree.type() != GitObjectType.TREE) {
-            throw new GitOperationException("Path segment target is not a tree: " + treeId);
-        }
-        byte[] data = tree.data();
-        int offset = 0;
-        while (offset < data.length) {
-            ParsedTreeEntry entry = parseTreeEntry(treeId, data, offset);
-            if (entry.entry().name().equals(name)) {
-                return entry.entry();
-            }
-            offset = entry.nextOffset();
-        }
-        throw new GitRepositoryFileNotFoundException("File not found: " + name);
-    }
-
-    private LooseObject readObject(ObjectId objectId) throws GitOperationException {
-        return repository.readObject(objectId)
-                .orElseThrow(() -> new GitOperationException("Object not found: " + objectId));
-    }
-
-    static ObjectId rootTreeId(ObjectId commitId, LooseObject commit)
-            throws GitOperationException {
-        if (commit.type() != GitObjectType.COMMIT) {
-            throw new GitOperationException("Branch target is not a commit: " + commitId);
-        }
-        byte[] data = commit.data();
-        int offset = 0;
-        while (offset < data.length) {
-            int lineEnd = lineEnd(data, offset);
-            if (lineEnd == offset) {
-                break;
-            }
-            String line = new String(
-                    data,
-                    offset,
-                    lineEnd - offset,
-                    StandardCharsets.US_ASCII);
-            if (line.startsWith("tree ")) {
-                return new ObjectId(line.substring("tree ".length()));
-            }
-            offset = lineEnd + 1;
-        }
-        throw new GitOperationException("Commit is missing root tree: " + commitId);
-    }
-
-    static ParsedTreeEntry parseTreeEntry(
-            ObjectId treeId,
-            byte[] data,
-            int offset) throws GitOperationException {
-        int modeStart = offset;
-        while (offset < data.length && data[offset] != ' ') {
-            offset++;
-        }
-        if (offset == data.length || offset == modeStart) {
-            throw new GitOperationException("Malformed tree entry mode in " + treeId);
-        }
-        FileMode mode;
-        try {
-            mode = FileMode.fromCode(Integer.parseInt(
-                    new String(data, modeStart, offset - modeStart, StandardCharsets.US_ASCII), 8));
-        } catch (IllegalArgumentException failure) {
-            throw new GitOperationException("Malformed tree entry mode in " + treeId, failure);
-        }
-        offset++;
-
-        int nameStart = offset;
-        while (offset < data.length && data[offset] != 0) {
-            offset++;
-        }
-        if (offset == data.length || offset == nameStart) {
-            throw new GitOperationException("Malformed tree entry name in " + treeId);
-        }
-        String name = new String(data, nameStart, offset - nameStart, StandardCharsets.UTF_8);
-        offset++;
-
-        if (offset + 20 > data.length) {
-            throw new GitOperationException("Malformed tree entry object id in " + treeId);
-        }
-        byte[] rawObjectId = new byte[20];
-        System.arraycopy(data, offset, rawObjectId, 0, rawObjectId.length);
-        ObjectId objectId = new ObjectId(HexFormat.of().formatHex(rawObjectId));
-        return new ParsedTreeEntry(new TreeEntry(mode, name, objectId), offset + 20);
-    }
-
-    private static int lineEnd(byte[] data, int offset) {
-        int index = offset;
-        while (index < data.length && data[index] != '\n') {
-            index++;
-        }
-        return index;
-    }
-
-    static String branchRefName(String branch) {
-        Objects.requireNonNull(branch, "branch");
-        if (branch.startsWith("refs/")) {
-            return branch;
-        }
-        return "refs/heads/" + branch;
-    }
-
-    static String gitPath(String path) {
-        Objects.requireNonNull(path, "path");
-        Path rawPath = Path.of(path);
-        if (rawPath.isAbsolute()) {
-            throw new IllegalArgumentException("Git file path must be relative: " + path);
-        }
-        for (Path segment : rawPath) {
-            if ("..".equals(segment.toString())) {
-                throw new IllegalArgumentException("Git file path escapes repository: " + path);
-            }
-        }
-        Path normalizedPath = rawPath.normalize();
-        if (normalizedPath.toString().isBlank()) {
-            throw new IllegalArgumentException("Git file path must not be empty");
-        }
-        return normalizedPath.toString().replace(File.separatorChar, '/');
-    }
-
-    record TreeEntry(
-            FileMode mode,
-            String name,
-            ObjectId objectId) {
-
-        TreeEntry {
-            Objects.requireNonNull(mode, "mode");
-            Objects.requireNonNull(name, "name");
-            Objects.requireNonNull(objectId, "objectId");
-        }
-    }
-
-    record ParsedTreeEntry(
-            TreeEntry entry,
-            int nextOffset) {
-
-        ParsedTreeEntry {
-            Objects.requireNonNull(entry, "entry");
-        }
+    @Override
+    protected GitFileAccess createUpdateOperation() {
+        return GitFileApiSupport.createAccess(repository, branch, initializeHead);
     }
 }

@@ -24,6 +24,7 @@ import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.RemoteAlias;
 import pro.deta.orion.schema.orion.v2.RepositoryName;
 import pro.deta.orion.util.Result;
+import pro.deta.orion.util.VcRevision;
 
 import java.nio.file.Path;
 import java.io.IOException;
@@ -184,18 +185,19 @@ public final class NativeGitRepositoryFactory implements NativeGitRepositoryBack
                 }
                 throw new IllegalStateException("Bootstrap source ref is unavailable: " + id);
             }
-            try {
-                repository.files().readFile(new pro.deta.orion.git.parser.v2.id.ObjectId(revision), path,
-                        (type, size, base, input) -> Boolean.TRUE);
-                return Optional.of(repositoryName);
-            } catch (GitRepositoryFileNotFoundException error) {
-                if (allowMissing) {
+            return repository.files(refName).withRead(new VcRevision.Stored(revision)).read(operations -> {
+                try {
+                    operations.readFile(path, (type, size, base, input) -> Boolean.TRUE);
                     return Optional.of(repositoryName);
+                } catch (GitRepositoryFileNotFoundException error) {
+                    if (allowMissing) {
+                        return Optional.of(repositoryName);
+                    }
+                    throw new IllegalStateException("Bootstrap source path is unavailable: " + id);
+                } catch (IOException | GitOperationException error) {
+                    throw new IllegalStateException("Bootstrap source path is unavailable: " + id);
                 }
-                throw new IllegalStateException("Bootstrap source path is unavailable: " + id);
-            } catch (IOException | GitOperationException error) {
-                throw new IllegalStateException("Bootstrap source path is unavailable: " + id);
-            }
+            });
         } catch (RuntimeException error) {
             if (sourceAdded) {
                 provisionalSources.remove(id, repositoryName);

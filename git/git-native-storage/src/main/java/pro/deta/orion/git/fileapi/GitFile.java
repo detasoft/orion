@@ -12,9 +12,11 @@ import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.util.VcChangeDescription;
+import pro.deta.orion.util.VcRevision;
 
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -32,8 +34,8 @@ public final class GitFile {
     public GitFile(NativeGitRepositoryProvider provider, String repositoryName, String ref, String path) {
         this.provider = Objects.requireNonNull(provider, "provider");
         this.repositoryName = Objects.requireNonNull(repositoryName, "repositoryName");
-        this.ref = GitFileApi.branchRefName(ref);
-        this.path = GitFileApi.gitPath(path);
+        this.ref = GitFileApiSupport.branchRefName(ref);
+        this.path = GitFileApiSupport.gitPath(path);
         provider.openForRead(repositoryName).valueOrFailure("Cannot open Git file repository");
     }
 
@@ -45,32 +47,65 @@ public final class GitFile {
     }
 
     public byte[] read(CommitId revision) throws IOException, GitOperationException {
-        return provider.retained(repositoryName).eventSource().files()
-                .readBytes(Objects.requireNonNull(revision, "revision"), path);
+        Objects.requireNonNull(revision, "revision");
+        try {
+            return provider.retained(repositoryName).eventSource().files(ref)
+                    .withRead(new VcRevision.Stored(revision.toHex())).read(operations -> {
+                        try {
+                            return operations.readBytes(path);
+                        } catch (IOException failure) {
+                            throw new UncheckedIOException(failure);
+                        } catch (GitOperationException failure) {
+                            throw new IllegalStateException(failure);
+                        }
+                    });
+        } catch (UncheckedIOException failure) {
+            throw failure.getCause();
+        } catch (IllegalStateException failure) {
+            if (failure.getCause() instanceof GitOperationException gitFailure) throw gitFailure;
+            throw failure;
+        }
     }
 
     public boolean exists(CommitId revision) throws GitOperationException {
         return objectId(Objects.requireNonNull(revision, "revision")) != null;
     }
 
-    public GitFileAccess createAccess() throws IOException, GitOperationException {
+    public GitFileApi.VcModification withModification() {
         NativeGitRepository repository = provider.openForWrite(repositoryName)
                 .valueOrFailure("Cannot open Git file repository");
-        return repository.files().createAccess(ref);
+        return repository.files(ref).withModification();
     }
 
     public CommitId write(CommitId expectedRevision, byte[] bytes, VcChangeDescription metadata) throws Exception {
         Objects.requireNonNull(bytes, "bytes");
-        return GitFileApi.run(createAccess(), access -> {
-            CommitId current = access.baseRevision().map(id -> new CommitId(id.toHex())).orElse(null);
-            if (!Objects.equals(current, expectedRevision)
-                    && !Objects.equals(objectId(current), objectId(expectedRevision))) {
-                throw new GitRefConflictException(new RefUpdate(new RefId(ref),
-                        Optional.ofNullable(expectedRevision), Optional.ofNullable(current)), Optional.ofNullable(current));
-            }
-            access.write(path, bytes);
-            return new CommitId(access.commit(metadata).value());
-        });
+        GitFileApi.VcModification modification = withModification();
+        try {
+            modification.addChange(access -> {
+                try {
+                    CommitId current = access.baseRevision().map(id -> new CommitId(id.toHex())).orElse(null);
+                    if (!Objects.equals(current, expectedRevision)
+                            && !Objects.equals(objectId(current), objectId(expectedRevision))) {
+                        throw new GitRefConflictException(new RefUpdate(new RefId(ref),
+                                Optional.ofNullable(expectedRevision), Optional.ofNullable(current)),
+                                Optional.ofNullable(current));
+                    }
+                    access.write(path, bytes);
+                } catch (IOException failure) {
+                    throw new UncheckedIOException(failure);
+                } catch (GitOperationException failure) {
+                    throw new IllegalStateException(failure);
+                }
+            });
+            return new CommitId(((VcRevision.Stored) modification.commit(metadata)).value());
+        } catch (UncheckedIOException failure) {
+            throw failure.getCause();
+        } catch (IllegalStateException failure) {
+            if (failure.getCause() instanceof GitOperationException gitFailure) throw gitFailure;
+            throw failure;
+        } finally {
+            modification.discard();
+        }
     }
 
     public OrionEventManager events() {
@@ -85,9 +120,19 @@ public final class GitFile {
     ObjectId objectId(CommitId revision) throws GitOperationException {
         if (revision == null) return null;
         try {
-            return provider.retained(repositoryName).eventSource().files().objectId(revision, path);
-        } catch (GitRepositoryFileNotFoundException missing) {
-            return null;
+            return provider.retained(repositoryName).eventSource().files(ref)
+                    .withRead(new VcRevision.Stored(revision.toHex())).read(operations -> {
+                        try {
+                            return operations.objectId(path);
+                        } catch (GitRepositoryFileNotFoundException missing) {
+                            return null;
+                        } catch (GitOperationException failure) {
+                            throw new IllegalStateException(failure);
+                        }
+                    });
+        } catch (IllegalStateException failure) {
+            if (failure.getCause() instanceof GitOperationException gitFailure) throw gitFailure;
+            throw failure;
         }
     }
 

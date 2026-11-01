@@ -138,8 +138,8 @@ public class NativeGitRepository implements AutoCloseable {
         return name;
     }
 
-    public GitFileApi files() {
-        return new GitFileApi(this);
+    public GitFileApi files(String branch) {
+        return new GitFileApi(this, branch);
     }
 
     public Map<String, String> refs() {

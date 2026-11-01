@@ -41,6 +41,9 @@ import pro.deta.orion.net.io.BufferedByteInputV2;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import pro.deta.orion.git.fileapi.GitFileApi;
+import pro.deta.orion.util.VcRevision;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -159,41 +162,57 @@ final class OrionGitWorkTree implements GitWorkTree {
         if (stagedPaths.isEmpty()) {
             throw new IllegalStateException("Orion native commit requires staged files");
         }
-        repository.files().withAccess(currentBranch, access -> {
-            for (String path : stagedPaths) {
-                Path source = directory.resolve(path);
-                if (Files.isSymbolicLink(source)) {
-                    byte[] target = Files.readSymbolicLink(source).toString().getBytes(StandardCharsets.UTF_8);
-                    access.write(path, FileMode.SYMLINK, target);
-                    continue;
-                }
-                boolean deleted = Files.notExists(source) || Files.isDirectory(source);
-                for (Path parent = source.getParent(); !deleted && parent != null && parent.startsWith(directory);
-                     parent = parent.getParent()) {
-                    deleted = Files.isRegularFile(parent);
-                }
-                if (deleted) {
-                    try {
-                        // @TODO непонятно - зачем считать размер если удалено?
-                        repository.files().readFile(currentBranch, path, (type, size, base, input) -> size);
-                    } catch (GitOperationException failure) {
-                        throw new IOException("Staged Git path is not tracked: " + path, failure);
+        GitFileApi.VcModification modification =
+                repository.files(currentBranch).withModification();
+        try {
+            modification.addChange(access -> {
+                try {
+                    for (String path : stagedPaths) {
+                        Path source = directory.resolve(path);
+                        if (Files.isSymbolicLink(source)) {
+                            byte[] target = Files.readSymbolicLink(source).toString().getBytes(StandardCharsets.UTF_8);
+                            access.write(path, FileMode.SYMLINK, target);
+                            continue;
+                        }
+                        boolean deleted = Files.notExists(source) || Files.isDirectory(source);
+                        for (Path parent = source.getParent(); !deleted && parent != null && parent.startsWith(directory);
+                             parent = parent.getParent()) {
+                            deleted = Files.isRegularFile(parent);
+                        }
+                        if (deleted) {
+                            repository.files(currentBranch).withRead(new VcRevision.Latest()).read(operations -> {
+                                try {
+                                    // @TODO непонятно - зачем считать размер если удалено?
+                                    return operations.readFile(path, (type, size, base, input) -> size);
+                                } catch (GitOperationException failure) {
+                                    throw new UncheckedIOException(
+                                            new IOException("Staged Git path is not tracked: " + path, failure));
+                                } catch (IOException failure) {
+                                    throw new UncheckedIOException(failure);
+                                }
+                            });
+                            access.delete(path);
+                            continue;
+                        }
+                        if (!Files.isRegularFile(source)) {
+                            throw new IOException("Staged Git path is not a regular file: " + path);
+                        }
+                        FileMode mode = Files.isExecutable(source) ? FileMode.EXECUTABLE_FILE : FileMode.REGULAR_FILE;
+                        try (BufferedByteInputV2 input = new BufferedByteInputV2(Files.newInputStream(source))) {
+                            access.write(path, mode, Files.size(source), input);
+                        }
                     }
-                    access.delete(path);
-                    continue;
+                } catch (IOException failure) {
+                    throw new UncheckedIOException(failure);
                 }
-                if (!Files.isRegularFile(source)) {
-                    throw new IOException("Staged Git path is not a regular file: " + path);
-                }
-                FileMode mode = Files.isExecutable(source) ? FileMode.EXECUTABLE_FILE : FileMode.REGULAR_FILE;
-                try (BufferedByteInputV2 input = new BufferedByteInputV2(Files.newInputStream(source))) {
-                    access.write(path, mode, Files.size(source), input);
-                }
-            }
-            access.commit(new VcChangeDescription(
+            });
+            modification.commit(new VcChangeDescription(
                     new VcChangeAuthor(GitScenarioContext.IDENTITY_NAME, GitScenarioContext.IDENTITY_EMAIL), message));
-            return null;
-        });
+        } catch (UncheckedIOException failure) {
+            throw failure.getCause();
+        } finally {
+            modification.discard();
+        }
         stagedPaths.clear();
     }
 

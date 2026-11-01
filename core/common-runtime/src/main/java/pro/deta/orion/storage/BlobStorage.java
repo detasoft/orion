@@ -4,49 +4,21 @@ import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.util.VcResource;
 import pro.deta.orion.util.VcRevision;
 
-import java.util.Objects;
-
-public abstract class BlobStorage extends VcResource {
+public abstract class BlobStorage
+        extends VcResource<BlobStorage.BlobStorageReadOperations, BlobStorage.BlobStorageUpdateOperations> {
     protected BlobStorage(OrionEventManager eventManager) {
         super(eventManager);
-    }
-
-    protected abstract byte[] readContent(VcRevision.ReadTarget revision);
-
-    protected abstract void write(byte[] content);
-
-    public final VcRead<BlobStorageReadOperations> withRead(VcRevision.ReadTarget revision) {
-        return new VcRead<>(new BlobStorageReadOperations(Objects.requireNonNull(revision, "revision")));
     }
 
     public final byte[] readBytes(VcRevision.ReadTarget revision) {
         return withRead(revision).read(BlobStorageReadOperations::readContent);
     }
 
-    public final VcModification<BlobStorageUpdateOperations> withModification() {
-        return new VcModification<>(createUpdateOperation());
+    public interface BlobStorageReadOperations {
+        byte[] readContent();
     }
 
-    protected abstract BlobStorageUpdateOperations createUpdateOperation();
-
-    public final class BlobStorageReadOperations {
-        private final VcRevision.ReadTarget revision;
-
-        private BlobStorageReadOperations(VcRevision.ReadTarget revision) {
-            this.revision = revision;
-        }
-
-        public byte[] readContent() {
-            return BlobStorage.this.readContent(revision);
-        }
-    }
-
-    public abstract class BlobStorageUpdateOperations extends VcUpdateOperations {
-        protected BlobStorageUpdateOperations() {}
-
-        public void write(byte[] bytes) {
-            BlobStorage.this.write(bytes);
-        }
-
+    public abstract static class BlobStorageUpdateOperations extends VcUpdateOperations {
+        public abstract void write(byte[] bytes);
     }
 }

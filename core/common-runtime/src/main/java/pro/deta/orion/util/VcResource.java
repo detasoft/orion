@@ -10,16 +10,33 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-public abstract class VcResource {
+public abstract class VcResource<R, U extends VcResource.VcUpdateOperations> {
     private final ReentrantReadWriteLock resourceLock = new ReentrantReadWriteLock();
     private final OrionEvents events;
-    private volatile VcRevision lastRevision = new VcRevision.Absent();
+    private volatile VcRevision lastRevision;
 
     protected VcResource(OrionEventManager eventManager) {
-        events = eventManager.forTarget(this);
+        this(eventManager, new VcRevision.Absent());
     }
 
-    private <R> R inReadLock(Supplier<R> operation) {
+    protected VcResource(OrionEventManager eventManager, VcRevision initialRevision) {
+        events = eventManager.forTarget(this);
+        lastRevision = Objects.requireNonNull(initialRevision, "initialRevision");
+    }
+
+    protected abstract R createReadOperation(VcRevision.ReadTarget revision);
+
+    protected abstract U createUpdateOperation();
+
+    public final VcRead withRead(VcRevision.ReadTarget revision) {
+        return new VcRead(createReadOperation(Objects.requireNonNull(revision, "revision")));
+    }
+
+    public final VcModification withModification() {
+        return new VcModification();
+    }
+
+    private <T> T inReadLock(Supplier<T> operation) {
         resourceLock.readLock().lock();
         try {
             return operation.get();
@@ -45,14 +62,14 @@ public abstract class VcResource {
     }
 
     /** Operation objects are borrowed under the read-lock and must not escape the callback. */
-    public class VcRead<M> {
-        private final M operations;
+    public class VcRead {
+        private final R operations;
 
-        public VcRead(M operations) {
+        private VcRead(R operations) {
             this.operations = Objects.requireNonNull(operations, "operations");
         }
 
-        public final <R> R read(Function<M, R> operation) {
+        public final <T> T read(Function<R, T> operation) {
             Objects.requireNonNull(operation, "operation");
             return VcResource.this.inReadLock(() -> operation.apply(operations));
         }
@@ -62,17 +79,15 @@ public abstract class VcResource {
      * A single caller uses each modification. Changes run only during commit; captured mutable inputs
      * are not snapshots. Operation objects are borrowed during callbacks and must not escape them.
      */
-    public class VcModification<M extends VcUpdateOperations> {
+    public class VcModification {
         private final VcRevision oldRevision;
-        private final M operations;
-        private List<VcChange<M>> pending = new ArrayList<>();
+        private List<VcChange<U>> pending = new ArrayList<>();
 
-        public VcModification(M operations) {
+        private VcModification() {
             oldRevision = getRevision();
-            this.operations = Objects.requireNonNull(operations, "operations");
         }
 
-        public final void addChange(VcChange<M> change) {
+        public final void addChange(VcChange<U> change) {
             requireOpen();
             pending.add(Objects.requireNonNull(change, "change"));
         }
@@ -83,14 +98,16 @@ public abstract class VcResource {
             if (resourceLock.getReadHoldCount() > 0 && !resourceLock.isWriteLockedByCurrentThread()) {
                 throw new IllegalStateException("Cannot commit a modification from a read operation");
             }
-            List<VcChange<M>> prepared = pending;
+            List<VcChange<U>> prepared = pending;
             pending = null;
             VcRevision revision;
             resourceLock.writeLock().lock();
             Throwable failure = null;
+            U operations = null;
             try {
                 checkRevision(oldRevision);
-                for (VcChange<M> change : prepared) {
+                operations = Objects.requireNonNull(createUpdateOperation(), "operations");
+                for (VcChange<U> change : prepared) {
                     change.apply(operations);
                 }
                 revision = Objects.requireNonNull(operations.commit(description), "committed revision");
@@ -100,7 +117,7 @@ public abstract class VcResource {
                 throw error;
             } finally {
                 try {
-                    operations.discard();
+                    if (operations != null) operations.discard();
                 } catch (RuntimeException | Error cleanup) {
                     if (failure == null) throw cleanup;
                     if (failure != cleanup) failure.addSuppressed(cleanup);
@@ -119,7 +136,6 @@ public abstract class VcResource {
             if (pending != null) {
                 pending.clear();
                 pending = null;
-                operations.discard();
             }
         }
 

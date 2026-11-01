@@ -2,6 +2,7 @@ package pro.deta.orion.git.fileapi;
 import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.util.VcChangeDescription;
 import pro.deta.orion.util.VcRevision;
+import pro.deta.orion.util.VcResource.VcUpdateOperations;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
@@ -34,6 +35,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -50,7 +52,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.zip.Deflater;
-import static pro.deta.orion.git.fileapi.GitFileApi.*;
+import static pro.deta.orion.git.fileapi.GitFileApiSupport.*;
 
 /**
  * Current scope: one modification changes one branch and returns that branch's commit revision.
@@ -62,7 +64,7 @@ import static pro.deta.orion.git.fileapi.GitFileApi.*;
  * Preparation creates the commit and freezes changes without publishing them. Apply publishes the pack and updates refs
  * through the repository's publication policy. Discard releases resources and is harmless after completion.
  */
-public final class GitFileAccess {
+public final class GitFileAccess extends VcUpdateOperations {
     private final NativeGitRepository repository;
     private final GitIndexAccess index;
     private final PackId packId;
@@ -248,11 +250,16 @@ public final class GitFileAccess {
         }
     }
 
-    public VcRevision.Stored commit(VcChangeDescription description) throws IOException {
-        prepare(description);
-        VcRevision.Stored revision = new VcRevision.Stored(updates.getFirst().newId().orElseThrow().toHex());
-        apply();
-        return revision;
+    @Override
+    public VcRevision.Stored commit(VcChangeDescription description) {
+        try {
+            prepare(description);
+            VcRevision.Stored revision = new VcRevision.Stored(updates.getFirst().newId().orElseThrow().toHex());
+            apply();
+            return revision;
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
+        }
     }
 
     public void apply() throws IOException {
@@ -283,7 +290,7 @@ public final class GitFileAccess {
         } finally {
             try {
                 discard();
-            } catch (IOException | RuntimeException | Error cleanup) {
+            } catch (RuntimeException | Error cleanup) {
                 if (primary == null) {
                     throw cleanup;
                 }
@@ -292,23 +299,28 @@ public final class GitFileAccess {
         }
     }
 
-    public void discard() throws IOException {
-        if (!finished) {
-            finished = true;
-            Throwable primary = null;
-            try {
-                storage.discard();
-            } catch (IOException | RuntimeException | Error failure) {
-                primary = failure;
-                throw failure;
-            } finally {
+    @Override
+    public void discard() {
+        try {
+            if (!finished) {
+                finished = true;
+                Throwable primary = null;
                 try {
-                    index.discard();
-                } catch (IOException | RuntimeException | Error cleanup) {
-                    if (primary == null) throw cleanup;
-                    if (primary != cleanup) primary.addSuppressed(cleanup);
+                    storage.discard();
+                } catch (IOException | RuntimeException | Error failure) {
+                    primary = failure;
+                    throw failure;
+                } finally {
+                    try {
+                        index.discard();
+                    } catch (IOException | RuntimeException | Error cleanup) {
+                        if (primary == null) throw cleanup;
+                        if (primary != cleanup) primary.addSuppressed(cleanup);
+                    }
                 }
             }
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
         }
     }
 
