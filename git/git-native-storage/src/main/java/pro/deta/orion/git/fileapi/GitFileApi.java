@@ -14,7 +14,6 @@ import pro.deta.orion.git.parser.v2.object.LooseObject;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.internal.CheckedFunction;
-import pro.deta.orion.util.VcChangeDescription;
 
 import java.io.File;
 import java.io.IOException;
@@ -92,13 +91,13 @@ public final class GitFileApi {
         return readFile(commitId, path, (type, size, base, input) -> input.newInputStream().readAllBytes());
     }
 
-    public <T> T withAccess(String branch, VcChangeDescription metadata,
+    public <T> T withAccess(String branch,
                             CheckedFunction<GitFileAccess, T> operation) throws Exception {
         Objects.requireNonNull(operation, "operation");
         RefId ref = new RefId(branchRefName(branch));
         Head head = repository.index().getHEAD();
         return repository.index().withAccess(writableRefs(ref, head), Optional.of(PackId.create()),
-                index -> run(index, branch, index.findRef(ref), metadata, head, operation));
+                index -> run(index, branch, index.findRef(ref), head, operation));
     }
 
     private Set<RefId> writableRefs(RefId ref, Head head) {
@@ -110,21 +109,21 @@ public final class GitFileApi {
         return refs;
     }
 
-    public <T> T withAccess(String branch, String expectedRevision, VcChangeDescription metadata,
+    public <T> T withAccess(String branch, String expectedRevision,
                             CheckedFunction<GitFileAccess, T> operation) throws Exception {
         Objects.requireNonNull(operation, "operation");
         RefId ref = new RefId(branchRefName(branch));
         Optional<ObjectId> expected = Optional.ofNullable(expectedRevision).map(ObjectId::new);
         Head head = repository.index().getHEAD();
         return repository.index().withAccess(writableRefs(ref, head), Optional.of(PackId.create()),
-                index -> run(index, branch, expected, metadata, head, operation));
+                index -> run(index, branch, expected, head, operation));
     }
 
     private <T> T run(GitIndexAccess index, String branch, Optional<ObjectId> parent,
-                      VcChangeDescription metadata, Head head,
+                      Head head,
                       CheckedFunction<GitFileAccess, T> operation) throws Exception {
         GitFileAccess access = new GitFileAccess(
-                repository, index, branch, parent, metadata, initializeHead, head);
+                repository, index, branch, parent, initializeHead, head);
         Throwable primary = null;
         try {
             return operation.apply(access);

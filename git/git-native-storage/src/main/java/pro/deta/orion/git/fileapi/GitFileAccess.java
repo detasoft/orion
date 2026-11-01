@@ -1,8 +1,8 @@
 package pro.deta.orion.git.fileapi;
 import pro.deta.orion.util.VcChangeAuthor;
 import pro.deta.orion.util.VcChangeDescription;
-import pro.deta.orion.util.Modification;
 import pro.deta.orion.git.nativestorage.GitOperationException;
+import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.nativestorage.receive.NativeGitReceivePack;
@@ -21,6 +21,8 @@ import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.object.LooseObject;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
+import pro.deta.orion.git.parser.v2.read.GitObjectRead;
+import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.shared.PackHandle;
 import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -53,7 +55,7 @@ import static pro.deta.orion.git.fileapi.GitFileApi.*;
  * File changes against captured refs. Each write consumes exactly the declared number of bytes from a
  * borrowed input and stores compressed content immediately; only changed paths and the entries of
  * each directory being rebuilt remain in memory.
- * Pack export freezes the changes without publishing them. Apply publishes the pack and updates refs
+ * Preparation creates the commit and freezes changes without publishing them. Apply publishes the pack and updates refs
  * through the repository's publication policy. Discard releases resources and is harmless after completion.
  */
 public final class GitFileAccess {
@@ -66,7 +68,6 @@ public final class GitFileAccess {
     private final Optional<ObjectId> parent;
     private final Map<String, TreeEntry> rootEntries;
     private final Optional<RefId> headToInitialize;
-    private final Set<ObjectId> objects = new HashSet<>();
     private final Set<String> deleted = new HashSet<>();
     private final Map<String, TreeEntry> entries = new HashMap<>();
     private PackMetadata pack;
@@ -74,9 +75,8 @@ public final class GitFileAccess {
     private boolean finished;
 
     GitFileAccess(NativeGitRepository repository, GitIndexAccess index, String branch, Optional<ObjectId> parent,
-                  VcChangeDescription metadata, boolean initializeHead, Head head)
+                  boolean initializeHead, Head head)
             throws IOException, GitOperationException {
-        super(metadata);
         this.repository = repository;
         this.index = index;
         this.packId = index.packId().orElseThrow(() -> new IllegalArgumentException("Pack access required"));
@@ -91,13 +91,13 @@ public final class GitFileAccess {
         } else {
             this.headToInitialize = Optional.empty();
         }
-        rootEntries = parent.isPresent()
-                ? readTree(rootTreeId(parent.get(), readObject(parent.get()))) : Map.of();
         storage = repository.storage().createAccess();
         try {
+            rootEntries = parent.isPresent()
+                    ? readTree(rootTreeId(parent.get(), readObject(parent.get()))) : Map.of();
             bytes = storage.newPack(packId);
             bytes.write(0, ByteBuffer.allocate(8).putInt(0x4f52504b).putInt(1).flip());
-        } catch (IOException | RuntimeException | Error failure) {
+        } catch (IOException | GitOperationException | RuntimeException | Error failure) {
             try {
                 storage.discard();
             } catch (Exception cleanup) {
@@ -105,6 +105,51 @@ public final class GitFileAccess {
             }
             throw failure;
         }
+    }
+
+    public byte[] readBytes(String path) throws IOException, GitOperationException {
+        requireOpen();
+        String normalized = gitPath(path);
+        for (int slash = normalized.indexOf('/'); slash >= 0; slash = normalized.indexOf('/', slash + 1)) {
+            String ancestor = normalized.substring(0, slash);
+            if (deleted.contains(ancestor) || entries.containsKey(ancestor)) {
+                throw new GitRepositoryFileNotFoundException("File not found: " + normalized);
+            }
+        }
+        if (deleted.contains(normalized)) {
+            throw new GitRepositoryFileNotFoundException("File not found: " + normalized);
+        }
+        TreeEntry entry = entries.get(normalized);
+        if (entry == null) {
+            for (String changed : entries.keySet()) {
+                if (changed.startsWith(normalized + "/")) {
+                    throw new GitOperationException("Path is not a file: " + normalized);
+                }
+            }
+            Map<String, TreeEntry> directory = rootEntries;
+            String[] segments = normalized.split("/");
+            for (int position = 0; position < segments.length; position++) {
+                entry = directory.get(segments[position]);
+                if (entry == null) {
+                    throw new GitRepositoryFileNotFoundException("File not found: " + normalized);
+                }
+                if (position < segments.length - 1) {
+                    if (entry.mode() != FileMode.TREE) {
+                        throw new GitRepositoryFileNotFoundException("File not found: " + normalized);
+                    }
+                    directory = readTree(entry.objectId());
+                }
+            }
+        }
+        if (entry.mode() == FileMode.TREE || entry.mode() == FileMode.GITLINK) {
+            throw new GitOperationException("Path is not a file: " + normalized);
+        }
+        return readObject(entry.objectId(), (type, size, base, input) -> {
+            if (type != GitObjectType.BLOB) {
+                throw new IOException("File target is not a blob: " + normalized);
+            }
+            return input.newInputStream().readAllBytes();
+        });
     }
 
     public void write(String path, FileMode mode, long size, BufferedByteInputV2 input) throws IOException {
@@ -139,20 +184,17 @@ public final class GitFileAccess {
         if (entries.containsKey(normalized)) {
             throw new IllegalArgumentException("Git file is both saved and deleted: " + normalized);
         }
-        entries.remove(normalized);
         deleted.add(normalized);
     }
 
-    public PackMetadata pack() throws IOException {
-        requireOpen();
-        if (pack != null) {
-            return pack;
-        }
+    public void prepare(VcChangeDescription description) throws IOException {
+        requireEditable();
+        Objects.requireNonNull(description, "description");
         try {
             Set<String> changedPaths = new HashSet<>(entries.keySet());
             changedPaths.addAll(deleted);
             ObjectId tree = writeTree("", null, changedPaths).orElseThrow();
-            ObjectId commit = writeCommit(tree, parent.orElse(null), getChangeMetadata());
+            ObjectId commit = writeCommit(tree, parent.orElse(null), description);
             List<RefUpdate> prepared = new ArrayList<>();
             prepared.add(new RefUpdate(ref, parent, Optional.of(commit)));
             headToInitialize.ifPresent(target ->
@@ -165,7 +207,6 @@ public final class GitFileAccess {
                 writer.writeObjects(storage, indexed);
                 pack = new PackMetadata(packId, writer.finish(), packId.toString(), indexed.size(), writer.size());
             }
-            return pack;
         } catch (IOException | RuntimeException | Error failure) {
             try {
                 discard();
@@ -174,6 +215,14 @@ public final class GitFileAccess {
             }
             throw failure;
         }
+    }
+
+    public PackMetadata pack() throws IOException {
+        requireOpen();
+        if (pack == null) {
+            throw new IOException("File changes are not prepared");
+        }
+        return pack;
     }
 
     public List<RefUpdate> refUpdates() throws IOException {
@@ -191,7 +240,6 @@ public final class GitFileAccess {
         }
     }
 
-    @Override
     public void apply() throws IOException {
         requireOpen();
         Throwable primary = null;
@@ -229,24 +277,10 @@ public final class GitFileAccess {
         }
     }
 
-    @Override
     public void discard() throws IOException {
         if (!finished) {
             finished = true;
-            Throwable primary = null;
-            try {
-                storage.discard();
-            } catch (IOException | RuntimeException | Error failure) {
-                primary = failure;
-                throw failure;
-            } finally {
-                try {
-                    index.discard();
-                } catch (IOException | RuntimeException | Error cleanup) {
-                    if (primary == null) throw cleanup;
-                    primary.addSuppressed(cleanup);
-                }
-            }
+            storage.discard();
         }
     }
 
@@ -287,11 +321,10 @@ public final class GitFileAccess {
                 bytes.write(bytes.size(), ByteBuffer.wrap(compressed, 0, length));
             }
             ObjectId id = new ObjectId(hash.digest());
-            if (objects.contains(id) || !index.locations(id).isEmpty()) {
+            if (index.findObject(packId, id).isPresent() || !index.locations(id).isEmpty()) {
                 bytes.truncate(start);
             } else {
                 index.addObject(new IndexedObject(packId, id, type, size, start, bytes.size() - start, Optional.empty()));
-                objects.add(id);
             }
             return id;
         } catch (IOException | RuntimeException | Error failure) {
@@ -399,7 +432,7 @@ public final class GitFileAccess {
         return Optional.of(writeObject(GitObjectType.TREE, output.toByteArray()));
     }
 
-    private Map<String, TreeEntry> readTree(ObjectId treeId) throws GitOperationException {
+    private Map<String, TreeEntry> readTree(ObjectId treeId) throws IOException, GitOperationException {
         Map<String, TreeEntry> directory = new HashMap<>();
         if (treeId == null) {
             return directory;
@@ -426,8 +459,7 @@ public final class GitFileAccess {
             ObjectId treeId,
             ObjectId parent,
             VcChangeDescription metadata) throws IOException {
-        VcChangeDescription commitMetadata = Objects.requireNonNullElse(metadata, VcChangeDescription.EMPTY);
-        VcChangeAuthor commitAuthor = commitMetadata.author();
+        VcChangeAuthor commitAuthor = metadata.author();
         String identity = commitAuthor.name() + " <" + commitAuthor.email() + "> 0 +0000";
         StringBuilder data = new StringBuilder()
                 .append("tree ")
@@ -439,15 +471,27 @@ public final class GitFileAccess {
         data.append("author ").append(identity).append('\n')
                 .append("committer ").append(identity).append('\n')
                 .append('\n')
-                .append(commitMessage(commitMetadata.message()))
+                .append(commitMessage(metadata.message()))
                 .append('\n');
         return writeObject(
                 GitObjectType.COMMIT,
                 data.toString().getBytes(StandardCharsets.UTF_8));
     }
 
-    private LooseObject readObject(ObjectId objectId) throws GitOperationException {
-        return repository.readObject(objectId)
+    private LooseObject readObject(ObjectId objectId) throws IOException, GitOperationException {
+        return readObject(objectId, (type, size, base, input) ->
+                new LooseObject(objectId, type, input.newInputStream().readAllBytes()));
+    }
+
+    private <T> T readObject(ObjectId objectId, GitObjectRead<T> consumer)
+            throws IOException, GitOperationException {
+        ResolvedGitObjectRead<T> reader = new ResolvedGitObjectRead<>(storage, index,
+                Optional.of(packId), consumer);
+        Optional<IndexedObject> pendingObject = index.findObject(packId, objectId);
+        if (pendingObject.isPresent()) {
+            return GitObjectRead.read(storage, pendingObject.orElseThrow(), reader);
+        }
+        return GitObjectRead.read(storage, index, objectId, reader)
                 .orElseThrow(() -> new GitOperationException("Object not found: " + objectId));
     }
 

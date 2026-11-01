@@ -70,8 +70,9 @@ public final class GitFile {
         MessageDigest hash = repository.hashAlgorithm().newDigest();
         hash.update(("blob " + bytes.length + "\0").getBytes(StandardCharsets.US_ASCII));
         ObjectId content = new ObjectId(hash.digest(bytes));
-        return repository.files().withAccess(ref, head, metadata, access -> {
+        return repository.files().withAccess(ref, head, access -> {
             if (!content.equals(currentFile)) access.write(path, bytes);
+            access.prepare(metadata);
             CommitId saved = new CommitId(access.refUpdates().getFirst().newId().orElseThrow().toHex());
             access.apply();
             return saved;

@@ -159,8 +159,7 @@ final class OrionGitWorkTree implements GitWorkTree {
         if (stagedPaths.isEmpty()) {
             throw new IllegalStateException("Orion native commit requires staged files");
         }
-        repository.files().withAccess(currentBranch, new VcChangeDescription(
-                new VcChangeAuthor(GitScenarioContext.IDENTITY_NAME, GitScenarioContext.IDENTITY_EMAIL), message), access -> {
+        repository.files().withAccess(currentBranch, access -> {
             for (String path : stagedPaths) {
                 Path source = directory.resolve(path);
                 if (Files.isSymbolicLink(source)) {
@@ -191,6 +190,8 @@ final class OrionGitWorkTree implements GitWorkTree {
                     access.write(path, mode, Files.size(source), input);
                 }
             }
+            access.prepare(new VcChangeDescription(
+                    new VcChangeAuthor(GitScenarioContext.IDENTITY_NAME, GitScenarioContext.IDENTITY_EMAIL), message));
             access.apply();
             return null;
         });
