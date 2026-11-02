@@ -108,6 +108,19 @@ check. Use `make test` for the full quiet Maven/JVM suite and for routine
 verification after Change integration. Both forms enable Maven's `-q`; prefer
 them over direct `mvn test` invocations.
 
+The test-duration listener saves JVM thread dumps for failed tests and, every
+30 seconds, for tests still running past that threshold. Dumps include active test
+IDs, elapsed times, and child processes. They are written to `test-diagnostics/`
+beside the duration JSONL output (by default `.test-durations/test-diagnostics/`);
+the test output prints their paths. For a faster diagnostic run, pass
+`MAVEN='mvn -Dorion.testDiagnostics.thresholdMillis=2000'` to the focused Make
+command. Use `make test-jfr` when a recording of preceding activity is needed.
+
+`make test` and `make test-all` limit the whole invocation, including waiting for
+the build lock, to 20 minutes (`TEST_TIMEOUT=20m`). GNU `timeout` sends TERM at
+the deadline and KILL after another 10 seconds if needed. It must be on `PATH`
+(on macOS it is supplied by Coreutils).
+
 ### Quick workflow
 
 Quick produces one coherent commit in the current worktree and branch. A result

@@ -1,6 +1,9 @@
 package pro.deta.orion.agent.server.journal;
 
 import com.github.luben.zstd.ZstdOutputStream;
+import jdk.jfr.Recording;
+import jdk.jfr.consumer.RecordedEvent;
+import jdk.jfr.consumer.RecordingFile;
 import org.apache.commons.compress.compressors.zstandard.ZstdCompressorOutputStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -19,6 +22,7 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.List;
@@ -43,6 +47,42 @@ class SegmentCompressionTest {
     private static final SessionId SESSION = new SessionId("session-1");
     private static final SessionEventCodec CODEC =
             new SessionEventCodec(AgentProtocolLimits.defaults());
+
+    @Test
+    void writesCompressedSegmentsInBlocks() throws Exception {
+        SessionEventRecord first = randomEvent(1, 100_000);
+        Path storageRoot = root.toRealPath();
+        Path compressed = storageRoot.resolve("session-1/00000001.cbor.zst");
+        Path recordingFile = storageRoot.resolve("writes.jfr");
+        try (Recording recording = new Recording()) {
+            recording.enable("jdk.FileWrite").withThreshold(Duration.ZERO);
+            recording.start();
+            try (FileSystemSessionJournalStorage storage = FileSystemSessionJournalStorage.withMaintenanceExecutor(
+                    storageRoot, segmentConfig(first.encodedRecord().size()),
+                    new DurableFileOperations(), Runnable::run)) {
+                storage.append(SESSION, List.of(first, event(2)));
+                storage.awaitMaintenanceForTest();
+            }
+            recording.stop();
+            recording.dump(recordingFile);
+        }
+        long written = 0;
+        long writes = 0;
+        boolean wroteBlock = false;
+        try (RecordingFile recording = new RecordingFile(recordingFile)) {
+            while (recording.hasMoreEvents()) {
+                RecordedEvent event = recording.readEvent();
+                if (!event.getEventType().getName().equals("jdk.FileWrite")) continue;
+                if (!(compressed + ".tmp").equals(event.getString("path"))) continue;
+                long bytes = event.getLong("bytesWritten");
+                written += bytes;
+                writes++;
+                wroteBlock |= bytes > 1;
+            }
+        }
+        assertThat(written).isEqualTo(Files.size(compressed));
+        assertThat(wroteBlock).as("compressed bytes must use block writes; observed %s writes", writes).isTrue();
+    }
 
     @TempDir
     Path root;
@@ -924,19 +964,24 @@ class SegmentCompressionTest {
         try (var storage = FileSystemSessionJournalStorage.withMaintenanceExecutor(
                 root, config, operations, maintenanceExecutor);
                 ExecutorService readerExecutor = Executors.newSingleThreadExecutor()) {
-            storage.append(SESSION, List.of(first, second));
-            maintenanceExecutor.awaitPending(1);
-            var read = readerExecutor.submit(() -> storage.readAfter(SESSION, Optional.empty()));
-            assertThat(operations.readStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            try {
+                storage.append(SESSION, List.of(first, second));
+                maintenanceExecutor.awaitPending(1);
+                Future<JournalReadResult> read = readerExecutor.submit(
+                        () -> storage.readAfter(SESSION, Optional.empty()));
+                assertThat(operations.readStarted.await(10, TimeUnit.SECONDS)).isTrue();
 
-            maintenanceExecutor.runNext();
+                maintenanceExecutor.runNext();
 
-            assertThat(Files.exists(root.resolve("session-1/00000001.cbor.zst"))).isTrue();
-            assertThat(Files.exists(root.resolve("session-1/00000001.cbor"))).isTrue();
-            operations.releaseRead.countDown();
-            assertThat(read.get(10, TimeUnit.SECONDS).records()).containsExactly(first, second);
-            maintenanceExecutor.runAll();
-            assertThat(Files.exists(root.resolve("session-1/00000001.cbor"))).isFalse();
+                assertThat(Files.exists(root.resolve("session-1/00000001.cbor.zst"))).isTrue();
+                assertThat(Files.exists(root.resolve("session-1/00000001.cbor"))).isTrue();
+                operations.releaseRead.countDown();
+                assertThat(read.get(10, TimeUnit.SECONDS).records()).containsExactly(first, second);
+                maintenanceExecutor.runAll();
+                assertThat(Files.exists(root.resolve("session-1/00000001.cbor"))).isFalse();
+            } finally {
+                operations.releaseRead.countDown();
+            }
         }
     }
 
@@ -952,29 +997,31 @@ class SegmentCompressionTest {
                 root, config, operations, maintenanceExecutor);
                 ExecutorService oldReader = namedReader("old-source-reader");
                 ExecutorService newReader = namedReader("new-compressed-reader")) {
-            storage.append(SESSION, List.of(first, second));
-            maintenanceExecutor.awaitPending(1);
-            Future<JournalReadResult> oldRead = oldReader.submit(
-                    () -> storage.readAfter(SESSION, Optional.empty()));
-            assertThat(operations.oldReadStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            try {
+                storage.append(SESSION, List.of(first, second));
+                maintenanceExecutor.awaitPending(1);
+                Future<JournalReadResult> oldRead = oldReader.submit(
+                        () -> storage.readAfter(SESSION, Optional.empty()));
+                assertThat(operations.oldReadStarted.await(10, TimeUnit.SECONDS)).isTrue();
 
-            maintenanceExecutor.runNext();
-            assertThat(Files.exists(root.resolve("session-1/00000001.cbor.zst"))).isTrue();
-            Future<JournalReadResult> newRead = newReader.submit(
-                    () -> storage.readAfter(SESSION, Optional.empty()));
-            assertThat(operations.newReadStarted.await(10, TimeUnit.SECONDS)).isTrue();
+                maintenanceExecutor.runNext();
+                assertThat(Files.exists(root.resolve("session-1/00000001.cbor.zst"))).isTrue();
+                Future<JournalReadResult> newRead = newReader.submit(
+                        () -> storage.readAfter(SESSION, Optional.empty()));
+                assertThat(operations.newReadStarted.await(10, TimeUnit.SECONDS)).isTrue();
 
-            operations.releaseOldRead.countDown();
-            assertThat(oldRead.get(10, TimeUnit.SECONDS).records()).containsExactly(first, second);
-            maintenanceExecutor.awaitPending(1);
-            maintenanceExecutor.runAll();
+                operations.releaseOldRead.countDown();
+                assertThat(oldRead.get(10, TimeUnit.SECONDS).records()).containsExactly(first, second);
+                maintenanceExecutor.awaitPending(1);
+                maintenanceExecutor.runAll();
 
-            assertThat(Files.exists(root.resolve("session-1/00000001.cbor"))).isFalse();
-            operations.releaseNewRead.countDown();
-            assertThat(newRead.get(10, TimeUnit.SECONDS).records()).containsExactly(first, second);
-        } finally {
-            operations.releaseOldRead.countDown();
-            operations.releaseNewRead.countDown();
+                assertThat(Files.exists(root.resolve("session-1/00000001.cbor"))).isFalse();
+                operations.releaseNewRead.countDown();
+                assertThat(newRead.get(10, TimeUnit.SECONDS).records()).containsExactly(first, second);
+            } finally {
+                operations.releaseOldRead.countDown();
+                operations.releaseNewRead.countDown();
+            }
         }
     }
 

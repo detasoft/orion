@@ -1,5 +1,6 @@
 package pro.deta.orion.test.duration;
 
+import com.sun.management.HotSpotDiagnosticMXBean;
 import org.junit.platform.engine.TestExecutionResult;
 import org.junit.platform.launcher.TestExecutionListener;
 import org.junit.platform.launcher.TestIdentifier;
@@ -18,22 +19,39 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public final class TestDurationRecorder implements TestExecutionListener {
     static final String ENABLED_PROPERTY = "orion.testDurations.enabled";
     static final String OUTPUT_PROPERTY = "orion.testDurations.output";
     static final String RUN_ID_PROPERTY = "orion.testDurations.runId";
+    static final String DIAGNOSTIC_THRESHOLD_PROPERTY = "orion.testDiagnostics.thresholdMillis";
     private static final String DEFAULT_RUN_ID = Instant.now().toString() + "-" + processId();
 
     private final ConcurrentMap<String, StartedTest> startedTests = new ConcurrentHashMap<>();
     private final List<String> records = new ArrayList<>();
+    private ScheduledExecutorService watchdog;
 
     @Override
     public void testPlanExecutionStarted(TestPlan testPlan) {
         records.clear();
         startedTests.clear();
+        if (isEnabled()) {
+            long thresholdMillis = Math.max(1, Long.getLong(DIAGNOSTIC_THRESHOLD_PROPERTY, 30_000L));
+            watchdog = Executors.newSingleThreadScheduledExecutor(task -> {
+                Thread thread = new Thread(task, "orion-test-watchdog");
+                thread.setDaemon(true);
+                return thread;
+            });
+            watchdog.scheduleAtFixedRate(() -> diagnoseSlowTests(thresholdMillis),
+                    thresholdMillis, thresholdMillis, TimeUnit.MILLISECONDS);
+        }
     }
 
     @Override
@@ -66,6 +84,9 @@ public final class TestDurationRecorder implements TestExecutionListener {
             return;
         }
 
+        if (testExecutionResult.getStatus() == TestExecutionResult.Status.FAILED) {
+            writeDiagnostics("Failed test: " + testId(testIdentifier));
+        }
         Instant finishedAt = Instant.now();
         StartedTest started = startedTests.remove(testIdentifier.getUniqueId());
         long durationMillis = 0;
@@ -86,6 +107,10 @@ public final class TestDurationRecorder implements TestExecutionListener {
 
     @Override
     public void testPlanExecutionFinished(TestPlan testPlan) {
+        if (watchdog != null) {
+            watchdog.shutdownNow();
+            watchdog = null;
+        }
         if (!isEnabled()) {
             return;
         }
@@ -109,6 +134,48 @@ public final class TestDurationRecorder implements TestExecutionListener {
         } catch (IOException e) {
             System.err.printf("[orion-test-durations] failed to write test durations to %s: %s%n",
                     output.toAbsolutePath().normalize(), e);
+        }
+    }
+
+    private void diagnoseSlowTests(long thresholdMillis) {
+        long now = System.nanoTime();
+        for (StartedTest started : startedTests.values()) {
+            if (now - started.nanoTime() >= TimeUnit.MILLISECONDS.toNanos(thresholdMillis)) {
+                writeDiagnostics("Test exceeded " + thresholdMillis + " ms");
+                return;
+            }
+        }
+    }
+
+    private void writeDiagnostics(String reason) {
+        Path directory = outputPath().toAbsolutePath().resolveSibling("test-diagnostics");
+        Path dump = directory.resolve("threads-" + processId() + "-" + UUID.randomUUID() + ".txt");
+        try {
+            Files.createDirectories(directory);
+            ManagementFactory.getPlatformMXBean(HotSpotDiagnosticMXBean.class)
+                    .dumpThreads(dump.toString(), HotSpotDiagnosticMXBean.ThreadDumpFormat.TEXT_PLAIN);
+            StringBuilder context = new StringBuilder("\nReason: ").append(reason)
+                    .append("\nModule: ").append(moduleName()).append("\nActive tests:\n");
+            long now = System.nanoTime();
+            for (Map.Entry<String, StartedTest> entry : startedTests.entrySet()) {
+                StartedTest started = entry.getValue();
+                context.append(entry.getKey()).append(" started=").append(started.instant())
+                        .append(" elapsedMillis=")
+                        .append(TimeUnit.NANOSECONDS.toMillis(now - started.nanoTime())).append('\n');
+            }
+            context.append("Child processes:\n");
+            for (ProcessHandle process : ProcessHandle.current().descendants().toList()) {
+                ProcessHandle.Info info = process.info();
+                context.append("pid=").append(process.pid()).append(" parent=")
+                        .append(process.parent().map(ProcessHandle::pid).orElse(-1L))
+                        .append(" command=").append(info.command().orElse("unknown"))
+                        .append(" started=").append(info.startInstant().orElse(null))
+                        .append(" cpu=").append(info.totalCpuDuration().orElse(null)).append('\n');
+            }
+            Files.writeString(dump, context, StandardCharsets.UTF_8, StandardOpenOption.APPEND);
+            System.err.printf("[orion-test-diagnostics] %s: %s%n", reason, dump);
+        } catch (IOException | RuntimeException failure) {
+            System.err.printf("[orion-test-diagnostics] cannot write %s: %s%n", dump, failure);
         }
     }
 

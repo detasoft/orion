@@ -12,6 +12,8 @@ import org.junit.platform.launcher.Launcher;
 import org.junit.platform.launcher.LauncherDiscoveryRequest;
 import org.junit.platform.launcher.core.LauncherDiscoveryRequestBuilder;
 import org.junit.platform.launcher.core.LauncherFactory;
+import org.junit.platform.launcher.core.LauncherConfig;
+import org.junit.platform.launcher.listeners.SummaryGeneratingListener;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -19,12 +21,75 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.platform.engine.discovery.DiscoverySelectors.selectClass;
+import static org.junit.platform.engine.discovery.DiscoverySelectors.selectMethod;
 
 class TestDurationRecorderTest {
+    @Test
+    void savesThreadDumpsWhileATestIsBlockedAndWhenATestFails(@TempDir Path temp) throws Exception {
+        String originalEnabled = System.getProperty(TestDurationRecorder.ENABLED_PROPERTY);
+        String originalOutput = System.getProperty(TestDurationRecorder.OUTPUT_PROPERTY);
+        String originalThreshold = System.getProperty(TestDurationRecorder.DIAGNOSTIC_THRESHOLD_PROPERTY);
+        DiagnosticSamples.entered = new CountDownLatch(1);
+        DiagnosticSamples.release = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            System.setProperty(TestDurationRecorder.ENABLED_PROPERTY, "true");
+            System.setProperty(TestDurationRecorder.OUTPUT_PROPERTY, temp.resolve("durations.jsonl").toString());
+            System.setProperty(TestDurationRecorder.DIAGNOSTIC_THRESHOLD_PROPERTY, "25");
+            Launcher launcher = LauncherFactory.create(LauncherConfig.builder()
+                    .enableTestExecutionListenerAutoRegistration(false).build());
+            SummaryGeneratingListener summary = new SummaryGeneratingListener();
+            launcher.registerTestExecutionListeners(new TestDurationRecorder(), summary);
+            Future<?> execution = executor.submit(() -> launcher.execute(LauncherDiscoveryRequestBuilder.request()
+                    .selectors(selectMethod(DiagnosticSamples.class, "blockedFixture")).build()));
+            try {
+                assertTrue(DiagnosticSamples.entered.await(5, TimeUnit.SECONDS));
+                Path directory = temp.resolve("test-diagnostics");
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                Path dump;
+                while ((dump = diagnosticContaining(directory, "Test exceeded")) == null
+                        && System.nanoTime() < deadline) {
+                    Thread.sleep(10);
+                }
+                assertTrue(dump != null, "The blocked test must be diagnosed before it finishes");
+                String content = Files.readString(dump);
+                assertTrue(content.contains("blockedFixture"));
+                assertTrue(content.contains("elapsedMillis="));
+            } finally {
+                DiagnosticSamples.release.countDown();
+            }
+            execution.get(5, TimeUnit.SECONDS);
+            assertEquals(1, summary.getSummary().getTestsSucceededCount());
+            launcher.execute(LauncherDiscoveryRequestBuilder.request()
+                    .selectors(selectMethod(DiagnosticSamples.class, "failedFixture")).build());
+            assertEquals(1, summary.getSummary().getTestsFailedCount());
+            assertTrue(diagnosticContaining(temp.resolve("test-diagnostics"), "Failed test:") != null);
+        } finally {
+            DiagnosticSamples.release.countDown();
+            restoreProperty(TestDurationRecorder.ENABLED_PROPERTY, originalEnabled);
+            restoreProperty(TestDurationRecorder.OUTPUT_PROPERTY, originalOutput);
+            restoreProperty(TestDurationRecorder.DIAGNOSTIC_THRESHOLD_PROPERTY, originalThreshold);
+        }
+    }
+
+    private static Path diagnosticContaining(Path directory, String marker) throws IOException {
+        if (!Files.isDirectory(directory)) return null;
+        try (java.nio.file.DirectoryStream<Path> files = Files.newDirectoryStream(directory, "*.txt")) {
+            for (Path file : files) {
+                if (Files.readString(file).contains(marker)) return file;
+            }
+        }
+        return null;
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void recordsJsonDurationsAndJfrEvents(boolean basename, @TempDir Path temp) throws Exception {
@@ -125,6 +190,22 @@ class TestDurationRecorderTest {
         @Test
         @Disabled("sample skip")
         void skippedTest() {
+        }
+    }
+
+    static class DiagnosticSamples {
+        private static CountDownLatch entered;
+        private static CountDownLatch release;
+
+        @Test
+        void blockedFixture() throws InterruptedException {
+            entered.countDown();
+            assertTrue(release.await(5, TimeUnit.SECONDS));
+        }
+
+        @Test
+        void failedFixture() {
+            throw new IllegalStateException("intentional diagnostic fixture failure");
         }
     }
 }

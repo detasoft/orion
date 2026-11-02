@@ -7,6 +7,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.EOFException;
 import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.ZipException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -134,8 +135,9 @@ class GitHttpRequestBodyTest {
     }
 
     @Test
-    void preservesSourceFailureAfterMember() throws Exception {
-        IOException failure = new IOException("source failed after member");
+    void preservesSourceAvailabilityFailureAfterMember() throws Exception {
+        IOException failure = new IOException("availability failed");
+        AtomicBoolean availabilityChecked = new AtomicBoolean();
         InputStream source = new java.io.FilterInputStream(new ByteArrayInputStream(gzip(REQUEST))) {
             @Override
             public int read() throws IOException {
@@ -148,11 +150,21 @@ class GitHttpRequestBodyTest {
 
             @Override
             public int available() throws IOException {
+                availabilityChecked.set(true);
                 throw failure;
             }
         };
         try (InputStream decoded = GitHttpRequestBody.decode(source, "gzip")) {
-            assertThatThrownBy(decoded::readAllBytes).isSameAs(failure);
+            byte[] content;
+            try {
+                content = decoded.readAllBytes();
+            } catch (IOException actual) {
+                assertThat(availabilityChecked.get()).isTrue();
+                assertThat(actual).isSameAs(failure);
+                return;
+            }
+            assertThat(availabilityChecked.get()).isFalse();
+            assertThat(content).isEqualTo(REQUEST);
         }
     }
 

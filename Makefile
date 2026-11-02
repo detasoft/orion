@@ -1,4 +1,5 @@
 MAVEN ?= mvn
+TEST_TIMEOUT ?= 20m
 UV ?= uv
 INTEGRATION_TEST_ARGS ?=
 TEST_ANALYTICS_RUN_ID ?= $(shell date -u +%Y%m%dT%H%M%SZ)
@@ -68,7 +69,7 @@ test test-all:
 		|| { [ -z '$(strip $(value MODULE))' ] && [ -n '$(strip $(value TEST))' ]; }; then \
 		echo 'Set both MODULE and TEST for focused tests.' >&2; exit 2; \
 	fi
-	$(ORION_MAVEN_LOCK_RUN) \
+	timeout --verbose --kill-after=10s $(TEST_TIMEOUT) $(ORION_MAVEN_LOCK_RUN) \
 	$(MAVEN) $(if $(filter test-all,$@),verify,package) -Pdev -T 4 -q \
 		$(if $(strip $(value MODULE)),-pl '$(value MODULE)' -am \
 		$(if $(filter test-all,$@),-Dit.test='$(value TEST)' -Dfailsafe.failIfNoSpecifiedTests=false,\

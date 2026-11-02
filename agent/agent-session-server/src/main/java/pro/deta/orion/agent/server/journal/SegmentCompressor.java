@@ -111,6 +111,11 @@ final class SegmentCompressor {
             OutputStream channelOutput = new FilterOutputStream(
                     Channels.newOutputStream(temporaryFile.channel())) {
                 @Override
+                public void write(byte[] bytes, int offset, int length) throws IOException {
+                    out.write(bytes, offset, length);
+                }
+
+                @Override
                 public void close() throws IOException {
                     flush();
                 }
