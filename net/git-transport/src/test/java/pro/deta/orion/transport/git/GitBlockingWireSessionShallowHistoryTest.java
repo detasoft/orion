@@ -1,5 +1,9 @@
 package pro.deta.orion.transport.git;
 
+import pro.deta.orion.test.integration.git.FileTestSupport;
+
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
 import pro.deta.orion.util.VcChangeAuthor;
 
 import pro.deta.orion.util.VcChangeDescription;
@@ -153,16 +157,15 @@ class GitBlockingWireSessionShallowHistoryTest {
     void duplicateShallowDeclarationsDoNotDuplicateTheResponse() throws Exception {
         NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
-                        fileAccess -> {
-                            fileAccess.write("file", new byte[] {1});
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("file", new byte[] {1});
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "initial")));
+        }
+
         String tip = repository.refs().get("refs/heads/main");
         try (QueueByteSource input = new QueueByteSource(Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();

@@ -1,9 +1,14 @@
 package pro.deta.orion.keymaterial;
 
-import pro.deta.orion.storage.BlobStorage;
-import pro.deta.orion.storage.InMemoryBlobStorage;
+import pro.deta.orion.keymaterial.KeyMaterialTestRuntime.TestBlobStorage;
 
-import pro.deta.orion.event.OrionEventManager;
+import pro.deta.orion.util.VcChangeDescription;
+
+import pro.deta.orion.util.VcRevision;
+
+import static pro.deta.orion.keymaterial.KeyMaterialTestRuntime.revision;
+
+import pro.deta.orion.storage.InMemoryBlobStorage;
 
 import java.util.Set;
 
@@ -24,11 +29,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class KeyMaterialAdministrationTest {
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final KeyMaterialTestRuntime runtime = new KeyMaterialTestRuntime();
+
     @Test
     void rejectsInvalidCreationMetadataWithoutPublishingMaterial() throws Exception {
-        InMemoryBlobStorage source = new InMemoryBlobStorage();
+        InMemoryBlobStorage source = new TestBlobStorage(runtime.events);
         try (OrionKeyMaterial material = open(source)) {
-            KeyMaterialModification modification = material.modify(material.revision());
+            KeyMaterialOperation modification = material.open(new VcRevision.Stored(material.revision()));
             try {
                 assertThatThrownBy(() -> modification.generateKey("account",
                         Set.of(KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialPurpose.TLS_IDENTITY),
@@ -42,25 +50,25 @@ class KeyMaterialAdministrationTest {
                         .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("AES");
                 assertThatThrownBy(() -> modification.generateKey("empty", Set.of(), KeyMaterialAlgorithm.RSA, 2048))
                         .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("purposes");
-                modification.apply();
+                modification.commit(VcChangeDescription.EMPTY);
                 assertThat(material.inventory()).isEmpty();
-                assertThat(source.load().revision()).isNull();
+                assertThat(revision(source)).isEqualTo("1");
             } finally {
-                modification.discard();
+                modification.close();
             }
         }
     }
 
     @Test
     void generatesAndPersistsSeparateAccountAndTlsKeys() throws Exception {
-        InMemoryBlobStorage store = new InMemoryBlobStorage();
+        InMemoryBlobStorage store = new TestBlobStorage(runtime.events);
         byte[] publicKey;
         try (OrionKeyMaterial material = open(store)) {
-            material.withModification(material.revision(), modification -> {
+            try (KeyMaterialOperation modification = material.open(new VcRevision.Stored(material.revision()))) {
                 modification.generateKey(("account"), Set.of((KeyMaterialPurpose.ACME_ACCOUNT)), KeyMaterialAlgorithm.RSA, 3072);
                 modification.generateKey(("identity"), Set.of((KeyMaterialPurpose.TLS_IDENTITY)), KeyMaterialAlgorithm.RSA, 3072);
-                modification.apply();
-            });
+                modification.commit(VcChangeDescription.EMPTY);
+            }
             publicKey = material.read(new KeyMaterialId("account", 1)).publicKey().getEncoded();
         }
         try (OrionKeyMaterial material = open(store)) {
@@ -82,13 +90,13 @@ class KeyMaterialAdministrationTest {
                 .parsePrivateKey().toASN1Primitive().getEncoded();
         for (String pem : List.of(pem("PRIVATE KEY", original.getPrivate().getEncoded()),
                 pem("RSA PRIVATE KEY", pkcs1))) {
-            InMemoryBlobStorage store = new InMemoryBlobStorage();
+            InMemoryBlobStorage store = new TestBlobStorage(runtime.events);
             char[] input = pem.toCharArray();
             try (OrionKeyMaterial material = open(store)) {
-                material.withModification(material.revision(), modification -> {
+                try (KeyMaterialOperation modification = material.open(new VcRevision.Stored(material.revision()))) {
                     modification.importKey(("imported"), Set.of((KeyMaterialPurpose.ACME_ACCOUNT)), KeyMaterialAlgorithm.RSA, input);
-                    modification.apply();
-                });
+                    modification.commit(VcChangeDescription.EMPTY);
+                }
                 assertThat(input).containsOnly('\0');
             }
             try (OrionKeyMaterial material = open(store)) {
@@ -105,13 +113,13 @@ class KeyMaterialAdministrationTest {
         KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
         generator.initialize(2048);
         KeyPair original = generator.generateKeyPair();
-        InMemoryBlobStorage store = new InMemoryBlobStorage();
+        InMemoryBlobStorage store = new TestBlobStorage(runtime.events);
         char[] input = (" \n" + jwk((RSAPrivateCrtKey) original.getPrivate())).toCharArray();
         try (OrionKeyMaterial material = open(store)) {
-            material.withModification(material.revision(), modification -> {
+            try (KeyMaterialOperation modification = material.open(new VcRevision.Stored(material.revision()))) {
                 modification.importKey(("certbot"), Set.of((KeyMaterialPurpose.ACME_ACCOUNT)), KeyMaterialAlgorithm.RSA, input);
-                modification.apply();
-            });
+                modification.commit(VcChangeDescription.EMPTY);
+            }
             assertThat(input).containsOnly('\0');
         }
         try (OrionKeyMaterial material = open(store)) {
@@ -138,16 +146,27 @@ class KeyMaterialAdministrationTest {
                 valid.replaceFirst("\"e\":\"[^\"]+\"", "\"e\":65537"),
                 valid.replace("\"kty\":\"RSA\"", "\"kty\":\"RSA\",\"oth\":[]"),
                 jwk((RSAPrivateCrtKey) generator.generateKeyPair().getPrivate()));
-        InMemoryBlobStorage store = new InMemoryBlobStorage();
+        InMemoryBlobStorage store = new TestBlobStorage(runtime.events);
         try (OrionKeyMaterial material = open(store)) {
             List<KeyMaterialId> before = material.inventory();
             for (String invalid : invalidKeys) {
                 char[] input = invalid.toCharArray();
-                assertThatThrownBy(() -> material.withModification(material.revision(), modification -> {
-                    modification.importKey(("invalid"), Set.of((KeyMaterialPurpose.ACME_ACCOUNT)), KeyMaterialAlgorithm.RSA, input);
-                    modification.apply();
-                })).isInstanceOf(IllegalArgumentException.class)
-                        .hasMessage("Invalid RSA private key").hasNoCause();
+                assertThatThrownBy(
+                                () -> {
+                                    try (KeyMaterialOperation modification =
+                                            material.open(
+                                                    new VcRevision.Stored(material.revision()))) {
+                                        modification.importKey(
+                                                ("invalid"),
+                                                Set.of((KeyMaterialPurpose.ACME_ACCOUNT)),
+                                                KeyMaterialAlgorithm.RSA,
+                                                input);
+                                        modification.commit(VcChangeDescription.EMPTY);
+                                    }
+                                })
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessage("Invalid RSA private key")
+                        .hasNoCause();
                 assertThat(input).containsOnly('\0');
                 assertThat(material.inventory()).isEqualTo(before);
             }
@@ -178,15 +197,25 @@ class KeyMaterialAdministrationTest {
         rsa.initialize(1024);
         KeyPairGenerator ec = KeyPairGenerator.getInstance("EC");
         ec.initialize(256);
-        try (OrionKeyMaterial material = open(new InMemoryBlobStorage())) {
+        try (OrionKeyMaterial material = open(new TestBlobStorage(runtime.events))) {
             List<KeyMaterialId> before = material.inventory();
             for (String invalid : List.of("not a key", pem("PRIVATE KEY", rsa.generateKeyPair().getPrivate().getEncoded()),
                     pem("PRIVATE KEY", ec.generateKeyPair().getPrivate().getEncoded()))) {
                 char[] input = invalid.toCharArray();
-                assertThatThrownBy(() -> material.withModification(material.revision(), modification -> {
-                    modification.importKey(("invalid"), Set.of((KeyMaterialPurpose.ACME_ACCOUNT)), KeyMaterialAlgorithm.RSA, input);
-                    modification.apply();
-                })).isInstanceOf(IllegalArgumentException.class);
+                assertThatThrownBy(
+                                () -> {
+                                    try (KeyMaterialOperation modification =
+                                            material.open(
+                                                    new VcRevision.Stored(material.revision()))) {
+                                        modification.importKey(
+                                                ("invalid"),
+                                                Set.of((KeyMaterialPurpose.ACME_ACCOUNT)),
+                                                KeyMaterialAlgorithm.RSA,
+                                                input);
+                                        modification.commit(VcChangeDescription.EMPTY);
+                                    }
+                                })
+                        .isInstanceOf(IllegalArgumentException.class);
                 assertThat(input).containsOnly('\0');
                 assertThat(material.inventory()).isEqualTo(before);
             }
@@ -196,21 +225,29 @@ class KeyMaterialAdministrationTest {
     @Test
     void aFailedSaveInvalidatesTheOwnerAndLeavesDurableMaterialUnchanged() throws Exception {
         AtomicBoolean failWrites = new AtomicBoolean();
-        InMemoryBlobStorage store = new InMemoryBlobStorage() {
+        InMemoryBlobStorage store = new TestBlobStorage(runtime.events) {
             @Override
-            public synchronized String write(BlobStorage.Modification modification) throws IOException {
-                byte[] bytes = modification.bytes();
-                String expectedVersion = modification.expectedRevision();
+            protected VcRevision.Stored commitSnapshot(BlobStorageOperations operation,
+                    VcChangeDescription description) throws IOException {
                 if (failWrites.get()) throw new IOException("Storage unavailable");
-                return super.write(new BlobStorage.Modification(expectedVersion, bytes));
+                return super.commitSnapshot(operation, description);
             }
         };
         try (OrionKeyMaterial material = open(store)) {
             failWrites.set(true);
-            assertThatThrownBy(() -> material.withModification(material.revision(), modification -> {
-                modification.generateKey(("unsaved"), Set.of((KeyMaterialPurpose.ACME_ACCOUNT)), KeyMaterialAlgorithm.RSA, 3072);
-                modification.apply();
-            })).isInstanceOf(IOException.class);
+            assertThatThrownBy(
+                            () -> {
+                                try (KeyMaterialOperation modification =
+                                        material.open(new VcRevision.Stored(material.revision()))) {
+                                    modification.generateKey(
+                                            ("unsaved"),
+                                            Set.of((KeyMaterialPurpose.ACME_ACCOUNT)),
+                                            KeyMaterialAlgorithm.RSA,
+                                            3072);
+                                    modification.commit(VcChangeDescription.EMPTY);
+                                }
+                            })
+                    .isInstanceOf(java.io.UncheckedIOException.class);
             assertThatThrownBy(() -> material.inventory())
                     .isInstanceOf(IllegalStateException.class);
         }
@@ -225,12 +262,12 @@ class KeyMaterialAdministrationTest {
                 .encodeToString(bytes) + "\n-----END " + type + "-----\n";
     }
 
-    private static OrionKeyMaterial open(InMemoryBlobStorage store) throws Exception {
-        try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
+    private OrionKeyMaterial open(InMemoryBlobStorage store) throws Exception {
+        try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password())) {
             return OrionKeyMaterial.open(new KeyMaterialRepository(
                     store,
                     new KeyMaterialCodec(options),
-                    new OrionEventManager()));
+                    runtime.events));
         }
     }
 

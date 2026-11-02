@@ -3,7 +3,6 @@ package pro.deta.orion.transport.http;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
-
 import jakarta.inject.Inject;
 import jakarta.inject.Provider;
 import jakarta.inject.Singleton;
@@ -12,7 +11,7 @@ import pro.deta.orion.config.ConfigurationChanged;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.keymaterial.KeyMaterialChanged;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
-import pro.deta.orion.util.Subscription;
+import java.util.function.Consumer;
 
 /**
  * @AiRule This standalone transport adapter intentionally exposes its raw StateMachine as production API.
@@ -31,8 +30,8 @@ public final class JettyHTTPServerStateMachine extends ServiceLifecycleStateMach
             private final ReentrantLock activationExecution = new ReentrantLock();
             private volatile boolean activationEnabled;
             private ScheduledFuture<?> activationRetry;
-            private Subscription keyMaterialChanges;
-            private Subscription configurationChanges;
+            private Consumer<KeyMaterialChanged> keyMaterialChanges;
+            private Consumer<ConfigurationChanged> configurationChanges;
 
             @Override
             public void onStart() {
@@ -40,11 +39,12 @@ public final class JettyHTTPServerStateMachine extends ServiceLifecycleStateMach
                 server.onStart();
                 if (server.isRunning()) {
                     activationEnabled = true;
-                    keyMaterialChanges = events.subscribe(KeyMaterialChanged.class,
-                            event -> keyMaterialChanged(event.resources()));
-                    configurationChanges = events.subscribe(ConfigurationChanged.class, event -> {
+                    keyMaterialChanges = event -> keyMaterialChanged(event.resources());
+                    events.forTarget(keyMaterialChanges).subscribe(KeyMaterialChanged.class, null, keyMaterialChanges);
+                    configurationChanges = event -> {
                         if (server.usesConfiguration(event.snapshot())) configurationChanged();
-                    });
+                    };
+                    events.forTarget(configurationChanges).subscribe(ConfigurationChanged.class, null, configurationChanges);
                     cleanup = cleanupProvider.get();
                     cleanup.start();
                 }
@@ -108,11 +108,11 @@ public final class JettyHTTPServerStateMachine extends ServiceLifecycleStateMach
                 synchronized (this) {
                     activationEnabled = false;
                     if (keyMaterialChanges != null) {
-                        keyMaterialChanges.close();
+                        events.forTarget(keyMaterialChanges).unsubscribe(KeyMaterialChanged.class, null);
                         keyMaterialChanges = null;
                     }
                     if (configurationChanges != null) {
-                        configurationChanges.close();
+                        events.forTarget(configurationChanges).unsubscribe(ConfigurationChanged.class, null);
                         configurationChanges = null;
                     }
                     if (activationRetry != null) activationRetry.cancel(true);

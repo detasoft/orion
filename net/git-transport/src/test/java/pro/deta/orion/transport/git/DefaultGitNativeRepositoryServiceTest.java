@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.git;
 
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
 import pro.deta.orion.util.VcChangeDescription;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
@@ -199,7 +201,7 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
     void publishesIndependentUpdatesAndAbortsAtomicGroupOnStaleRef(boolean atomic) throws Exception {
         NativeGitRepository repository = createRepository(backend, "demo");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
-        FileTestSupport.Prepared prepared = FileTestSupport.prepared(repository.files(), "feature", "update",
+        FileTestSupport.Prepared prepared = FileTestSupport.prepared(repository, "feature", "update",
                 VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("a", new byte[]{1});
             return null;
@@ -230,18 +232,17 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
     void keepsPersistedPackWhenAtomicRefTransactionIsStale(@TempDir Path directory) throws Exception {
         backend = NativeGitRepositoryProvider.file(directory, testRuntime.events());
         NativeGitRepository repository = createRepository(backend, "demo");
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
-                        fileAccess -> {
-                            fileAccess.write("a", new byte[] {0});
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("a", new byte[] {0});
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "initial")));
+        }
+
         String initial = repository.refs().get("refs/heads/main");
-        FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "update",
+        FileTestSupport.Prepared update = FileTestSupport.prepared(repository, "main", "update",
                 VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("a", new byte[]{1});
             return null;
@@ -276,7 +277,7 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
     void publishesThroughProviderAndRetainsProviderRejection() throws Exception {
         NativeGitRepository repository = createRepository(backend, "demo");
         rejectPublication = true;
-        FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "update",
+        FileTestSupport.Prepared update = FileTestSupport.prepared(repository, "main", "update",
                 VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("a", new byte[]{1});
             return null;
@@ -321,18 +322,17 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
     @Test
     void distinguishesFastForwardAndForcedUpdatesForAuthorization() throws Exception {
         NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "first"),
-                        fileAccess -> {
-                            fileAccess.write("a", new byte[] {1});
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("a", new byte[] {1});
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "first")));
+        }
+
         String first = repository.refs().get("refs/heads/main");
-        FileTestSupport.Prepared next = FileTestSupport.prepared(repository.files(), "main", "next",
+        FileTestSupport.Prepared next = FileTestSupport.prepared(repository, "main", "next",
                 VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("a", new byte[]{2});
             return null;
@@ -400,26 +400,24 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
     void keepsAuthorizedTargetWhenWantedRefMovesDuringAccessCheck(String wantedRef, boolean detached)
             throws Exception {
         NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "allowed"),
-                        fileAccess -> {
-                            fileAccess.write("a", new byte[] {1});
-                            fileAccess.apply();
-                            return null;
-                        });
-        repository
-                .files()
-                .withAccess(
-                        "secret",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "denied"),
-                        fileAccess -> {
-                            fileAccess.write("a", new byte[] {2});
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("a", new byte[] {1});
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "allowed")));
+        }
+
+        FileTestSupport.initialize(repository, "secret");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("secret"))) {
+            fileAccess.write("a", new byte[] {2});
+            repository.refUpdate(
+                    repository.ref("secret"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "denied")));
+        }
+
         ObjectId allowed = new ObjectId(repository.refs().get("refs/heads/main"));
         ObjectId denied = new ObjectId(repository.refs().get("refs/heads/secret"));
         if (!wantedRef.equals("HEAD")) {
@@ -480,16 +478,15 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
     @ValueSource(booleans = {false, true})
     void authorizesNestedTagByItsTargetAndPreservesAccessDenial(boolean v2) throws Exception {
         NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
-                        fileAccess -> {
-                            fileAccess.write("a", new byte[] {1});
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("a", new byte[] {1});
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "initial")));
+        }
+
         String target = repository.refs().get("refs/heads/main");
         ObjectId inner = repository.writeObject(GitObjectType.TAG,
                 ("object " + target + "\ntype commit\ntag inner\n\nmessage\n")
@@ -535,16 +532,15 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
     @CsvSource({"false,main", "true,main", "false,tag", "false,HEAD"})
     void authorizesReachableBlobsAndPreservesAccessDenial(boolean v2, String ref) throws Exception {
         NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
-                        fileAccess -> {
-                            fileAccess.write("a", new byte[] {1});
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("a", new byte[] {1});
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "initial")));
+        }
+
         if (!ref.equals("main")) {
             String tip = repository.refs().get("refs/heads/main");
             if (ref.equals("tag")) {

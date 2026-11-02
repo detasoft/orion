@@ -1,5 +1,9 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.fileapi.GitFileTestSupport;
+
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
 import pro.deta.orion.util.VcChangeAuthor;
 
 import pro.deta.orion.util.VcChangeDescription;
@@ -54,36 +58,33 @@ class NativeGitFileModesTest {
                 "run.sh", script,
                 "next.sh", script,
                 "link", bytes("run.sh"));
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "create"),
-                        fileAccess -> {
-                            fileAccess.write("run.sh", EXECUTABLE_FILE, script);
-                            fileAccess.write("next.sh", script);
-                            fileAccess.write("link", SYMLINK, bytes("run.sh"));
-                            fileAccess.apply();
-                            return null;
-                        });
+        GitFileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("run.sh", EXECUTABLE_FILE, script);
+            fileAccess.write("next.sh", script);
+            fileAccess.write("link", SYMLINK, bytes("run.sh"));
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "create")));
+        }
+
         assertContents(repository, initial);
 
         Map<String, byte[]> updated = Map.of(
                 "run.sh", bytes("updated"),
                 "next.sh", script,
                 "link", bytes("next.sh"));
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "update"),
-                        fileAccess -> {
-                            fileAccess.write("run.sh", bytes("updated"));
-                            fileAccess.write("next.sh", EXECUTABLE_FILE, script);
-                            fileAccess.write("link", SYMLINK, bytes("next.sh"));
-                            fileAccess.apply();
-                            return null;
-                        });
+        GitFileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("run.sh", bytes("updated"));
+            fileAccess.write("next.sh", EXECUTABLE_FILE, script);
+            fileAccess.write("link", SYMLINK, bytes("next.sh"));
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "update")));
+        }
 
         NativeGitRepository reopened = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .find("demo").valueOrFailure("repository");
@@ -137,18 +138,19 @@ class NativeGitFileModesTest {
                 .isEqualTo(RefUpdateResult.Status.APPLIED);
 
         assertThatCode(
-                        () ->
-                                repository
-                                        .files()
-                                        .withAccess(
-                                                "main",
-                                                new VcChangeDescription(VcChangeAuthor.EMPTY, "update"),
-                                                fileAccess -> {
-                                                    fileAccess.write(
-                                                            "config.txt", bytes("updated"));
-                                                    fileAccess.apply();
-                                                    return null;
-                                                }))
+                        () -> {
+                            GitFileTestSupport.initialize(repository, "main");
+                            try (GitFileAccess fileAccess =
+                                    repository.files().open(repository.ref("main"))) {
+                                fileAccess.write("config.txt", bytes("updated"));
+                                repository.refUpdate(
+                                        repository.ref("main"),
+                                        fileAccess.revision(),
+                                        fileAccess.commit(
+                                                new VcChangeDescription(
+                                                        VcChangeAuthor.EMPTY, "update")));
+                            }
+                        })
                 .doesNotThrowAnyException();
 
         NativeGitRepository reopened = NativeGitRepositoryProvider.file(directory, testRuntime.events())
@@ -185,40 +187,35 @@ class NativeGitFileModesTest {
                 "nested/\uD800\uDC00", FileMode.SYMLINK);
         try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
-            repository
-                    .files()
-                    .withAccess(
-                            "main",
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "create"),
-                            fileAccess -> {
-                                for (Map.Entry<String, byte[]> fileEntry : files.entrySet()) {
-                                    pro.deta.orion.git.parser.v2.data.FileMode mode =
-                                            switch (fileEntry.getKey()) {
-                                                case "\uE000" -> EXECUTABLE_FILE;
-                                                case "nested/\uD800\uDC00" -> SYMLINK;
-                                                default ->
-                                                        pro.deta.orion.git.parser.v2.data.FileMode
-                                                                .REGULAR_FILE;
-                                            };
-                                    fileAccess.write(
-                                            fileEntry.getKey(), mode, fileEntry.getValue());
-                                }
-                                fileAccess.apply();
-                                return null;
-                            });
+            GitFileTestSupport.initialize(repository, "main");
+            try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+                for (Map.Entry<String, byte[]> fileEntry : files.entrySet()) {
+                    pro.deta.orion.git.parser.v2.data.FileMode mode =
+                            switch (fileEntry.getKey()) {
+                                case "\uE000" -> EXECUTABLE_FILE;
+                                case "nested/\uD800\uDC00" -> SYMLINK;
+                                default -> pro.deta.orion.git.parser.v2.data.FileMode.REGULAR_FILE;
+                            };
+                    fileAccess.write(fileEntry.getKey(), mode, fileEntry.getValue());
+                }
+                repository.refUpdate(
+                        repository.ref("main"),
+                        fileAccess.revision(),
+                        fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "create")));
+            }
+
             assertGitTreeOrdering(repository);
             assertContents(repository, files, modes);
 
-            repository
-                    .files()
-                    .withAccess(
-                            "main",
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "update"),
-                            fileAccess -> {
-                                fileAccess.write("a/x", updated);
-                                fileAccess.apply();
-                                return null;
-                            });
+            GitFileTestSupport.initialize(repository, "main");
+            try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+                fileAccess.write("a/x", updated);
+                repository.refUpdate(
+                        repository.ref("main"),
+                        fileAccess.revision(),
+                        fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "update")));
+            }
+
             assertGitTreeOrdering(repository);
             assertContents(repository, expected, modes);
         }
@@ -261,16 +258,15 @@ class NativeGitFileModesTest {
                     .isEqualTo(RefUpdateResult.Status.APPLIED);
             assertContents(repository, files, modes);
 
-            repository
-                    .files()
-                    .withAccess(
-                            "main",
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "update"),
-                            fileAccess -> {
-                                fileAccess.write("config.txt", configuration);
-                                fileAccess.apply();
-                                return null;
-                            });
+            GitFileTestSupport.initialize(repository, "main");
+            try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+                fileAccess.write("config.txt", configuration);
+                repository.refUpdate(
+                        repository.ref("main"),
+                        fileAccess.revision(),
+                        fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "update")));
+            }
+
             assertGitTreeOrdering(repository);
             assertContents(repository, expected, modes);
         }
@@ -284,7 +280,13 @@ class NativeGitFileModesTest {
     private static void assertContents(NativeGitRepository repository, Map<String, byte[]> expected)
             throws Exception {
         for (Map.Entry<String, byte[]> entry : expected.entrySet()) {
-            assertThat(repository.files().readBytes("main", entry.getKey())).isEqualTo(entry.getValue());
+            assertThat(
+                            repository
+                                    .files()
+                                    .<byte[], Exception>read(
+                                            repository.ref("main"),
+                                            file -> file.readBytes(entry.getKey())))
+                    .isEqualTo(entry.getValue());
         }
     }
 

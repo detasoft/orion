@@ -1,5 +1,7 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
 import pro.deta.orion.util.VcChangeDescription;
 
 import org.junit.jupiter.api.Test;
@@ -48,18 +50,18 @@ class ProxyNativeGitRepositoryTest {
         BootstrapGitLocation location = fileLocation();
         NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create(location.proxyName()).valueOrFailure("create proxy");
-        repository
-                .files()
-                .withAccess(
-                        location.refName(),
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "first"),
-                        fileAccess -> {
-                            fileAccess.write("orion.xml", "first".getBytes());
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, location.refName());
+        try (GitFileAccess fileAccess =
+                repository.files().open(repository.ref(location.refName()))) {
+            fileAccess.write("orion.xml", "first".getBytes());
+            repository.refUpdate(
+                    repository.ref(location.refName()),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "first")));
+        }
+
         String oldId = repository.refs().get(location.refName());
-        FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), location.refName(),
+        FileTestSupport.Prepared update = FileTestSupport.prepared(repository, location.refName(),
                 "second", VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", "second".getBytes());
             return null;
@@ -87,18 +89,18 @@ class ProxyNativeGitRepositoryTest {
         BootstrapGitLocation location = fileLocation();
         NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create(location.proxyName()).valueOrFailure("create proxy");
-        repository
-                .files()
-                .withAccess(
-                        location.refName(),
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "first"),
-                        fileAccess -> {
-                            fileAccess.write("file", new byte[] {1});
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, location.refName());
+        try (GitFileAccess fileAccess =
+                repository.files().open(repository.ref(location.refName()))) {
+            fileAccess.write("file", new byte[] {1});
+            repository.refUpdate(
+                    repository.ref(location.refName()),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "first")));
+        }
+
         String previous = repository.refs().get(location.refName());
-        FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), location.refName(),
+        FileTestSupport.Prepared update = FileTestSupport.prepared(repository, location.refName(),
                 "second", VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("file", new byte[]{2});
             return null;

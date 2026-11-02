@@ -1,5 +1,7 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
+
 
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -375,10 +377,11 @@ class OrionStartupIT {
 
     private static byte[] readFileFromAclRepository(Path orionRoot) throws IOException {
         try {
-            return repositoryProvider(orionRoot)
-                    .openForRead("orion")
-                    .valueOrFailure("ACL repository should exist")
-                    .files().readBytes(Constants.R_HEADS + BRANCH, ACL_FILE);
+            NativeGitRepository repository = repositoryProvider(orionRoot).openForRead("orion").valueOrFailure("repository");
+            try (pro.deta.orion.git.fileapi.GitFileAccess operation =
+                         repository.files().open(repository.ref(Constants.R_HEADS + BRANCH))) {
+                return operation.readBytes(ACL_FILE);
+            }
         } catch (GitOperationException failure) {
             throw new IOException("Cannot read ACL repository", failure);
         }

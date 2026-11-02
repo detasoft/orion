@@ -1,7 +1,5 @@
 package pro.deta.orion.transport.git;
 
-import pro.deta.orion.storage.InMemoryBlobStorage;
-
 import pro.deta.orion.acl.RootPasswordReset;
 
 import pro.deta.orion.config.OrionConfigurationEditor;
@@ -57,7 +55,7 @@ class ConfiguredStorageManagementTest {
     @BeforeEach
     void setUp() throws Exception {
         material = OrionKeyMaterial.open(new KeyMaterialRepository(
-                new InMemoryBlobStorage(),
+                testRuntime.pkcs12Store("test-password".toCharArray()),
                 new KeyMaterialCodec(KeyMaterialOptions.pkcs12("test-password".toCharArray())),
                 testRuntime.unstartedEvents()));
         User user = new User("alice", "", "", "", List.of(), List.of(), List.of(

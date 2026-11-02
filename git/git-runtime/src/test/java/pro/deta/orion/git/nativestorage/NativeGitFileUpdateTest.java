@@ -1,5 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
 import pro.deta.orion.util.VcChangeDescription;
 
 import org.eclipse.jgit.internal.storage.dfs.DfsRepositoryDescription;
@@ -42,35 +44,42 @@ class NativeGitFileUpdateTest {
     void nestedWriteCannotReplaceAnExistingFileWithADirectory() throws Exception {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
-            repository
-                    .files()
-                    .withAccess(
-                            "main",
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
-                            access -> {
-                                access.write("folder", bytes("original"));
-                                access.apply();
-                                return null;
-                            });
+            FileTestSupport.initialize(repository, "main");
+            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+                access.write("folder", bytes("original"));
+                repository.refUpdate(
+                        repository.ref("main"),
+                        access.revision(),
+                        access.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "initial")));
+            }
+
             String initial = repository.refs().get("refs/heads/main");
 
             assertThatThrownBy(
-                            () ->
-                                    repository
-                                            .files()
-                                            .withAccess(
-                                                    "main",
-                                                    new VcChangeDescription(VcChangeAuthor.EMPTY, "invalid"),
-                                                    access -> {
-                                                        access.write(
-                                                                "folder/child.txt", bytes("new"));
-                                                        access.apply();
-                                                        return null;
-                                                    }))
-                    .isInstanceOf(IOException.class);
+                            () -> {
+                                FileTestSupport.initialize(repository, "main");
+                                try (GitFileAccess access =
+                                        repository.files().open(repository.ref("main"))) {
+                                    access.write("folder/child.txt", bytes("new"));
+                                    repository.refUpdate(
+                                            repository.ref("main"),
+                                            access.revision(),
+                                            access.commit(
+                                                    new VcChangeDescription(
+                                                            VcChangeAuthor.EMPTY, "invalid")));
+                                }
+                            })
+                    .isInstanceOf(java.io.UncheckedIOException.class)
+                    .hasCauseInstanceOf(IOException.class);
 
             assertThat(repository.refs()).containsEntry("refs/heads/main", initial);
-            assertThat(repository.files().readBytes("main", "folder")).isEqualTo(bytes("original"));
+            assertThat(
+                            repository
+                                    .files()
+                                    .<byte[], Exception>read(
+                                            repository.ref("main"),
+                                            file -> file.readBytes("folder")))
+                    .isEqualTo(bytes("original"));
         }
     }
 
@@ -78,35 +87,36 @@ class NativeGitFileUpdateTest {
     void writingAFileCannotSilentlyReplaceAnExistingDirectory() throws Exception {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
-            repository
-                    .files()
-                    .withAccess(
-                            "main",
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
-                            access -> {
-                                access.write("folder/keep.txt", bytes("original"));
-                                access.apply();
-                                return null;
-                            });
+            FileTestSupport.initialize(repository, "main");
+            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+                access.write("folder/keep.txt", bytes("original"));
+                repository.refUpdate(
+                        repository.ref("main"),
+                        access.revision(),
+                        access.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "initial")));
+            }
+
             String initial = repository.refs().get("refs/heads/main");
 
             assertThatThrownBy(
-                            () ->
-                                    repository
-                                            .files()
-                                            .withAccess(
-                                                    "main",
-                                                    new VcChangeDescription(VcChangeAuthor.EMPTY, "invalid"),
-                                                    access -> {
-                                                        access.write(
-                                                                "folder", bytes("replacement"));
-                                                        access.apply();
-                                                        return null;
-                                                    }))
-                    .isInstanceOf(IOException.class);
+                            () -> {
+                                FileTestSupport.initialize(repository, "main");
+                                try (GitFileAccess access =
+                                        repository.files().open(repository.ref("main"))) {
+                                    access.write("folder", bytes("replacement"));
+                                    repository.refUpdate(
+                                            repository.ref("main"),
+                                            access.revision(),
+                                            access.commit(
+                                                    new VcChangeDescription(
+                                                            VcChangeAuthor.EMPTY, "invalid")));
+                                }
+                            })
+                    .isInstanceOf(java.io.UncheckedIOException.class)
+                    .hasCauseInstanceOf(IOException.class);
 
             assertThat(repository.refs()).containsEntry("refs/heads/main", initial);
-            assertThat(repository.files().readBytes("main", "folder/keep.txt"))
+            assertThat(repository.files().<byte[], Exception>read(repository.ref("main"), file -> file.readBytes("folder/keep.txt")))
                     .isEqualTo(bytes("original"));
         }
     }
@@ -115,32 +125,54 @@ class NativeGitFileUpdateTest {
     void nestedWritePreservesUntouchedSubtreeWithoutPackingItsObjects() throws Exception {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
-            repository
-                    .files()
-                    .withAccess(
-                            "main",
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
-                            access -> {
-                                access.write("left/config.txt", bytes("before"));
-                                access.write("right/keep.txt", bytes("keep"));
-                                access.apply();
-                                return null;
-                            });
+            FileTestSupport.initialize(repository, "main");
+            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+                access.write("left/config.txt", bytes("before"));
+                access.write("right/keep.txt", bytes("keep"));
+                repository.refUpdate(
+                        repository.ref("main"),
+                        access.revision(),
+                        access.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "initial")));
+            }
 
-            repository
-                    .files()
-                    .withAccess(
-                            "main",
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "update"),
-                            access -> {
-                                access.write("left/config.txt", bytes("after"));
-                                assertThat(access.pack().objectCount()).isEqualTo(4);
-                                access.apply();
-                                return null;
-                            });
+            FileTestSupport.initialize(repository, "main");
+            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+                access.write("left/config.txt", bytes("after"));
+                repository.refUpdate(
+                        repository.ref("main"),
+                        access.revision(),
+                        access.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "update")));
+                pro.deta.orion.git.parser.v2.id.ObjectId created =
+                        new pro.deta.orion.git.parser.v2.id.ObjectId(
+                                repository.refs().get("refs/heads/main"));
+                long count =
+                        repository
+                                .index()
+                                .withAccess(
+                                        index ->
+                                                index.findPack(
+                                                                index.locations(created)
+                                                                        .getFirst()
+                                                                        .packId())
+                                                        .orElseThrow()
+                                                        .objectCount());
+                assertThat(count).isEqualTo(4);
+            }
 
-            assertThat(repository.files().readBytes("main", "left/config.txt")).isEqualTo(bytes("after"));
-            assertThat(repository.files().readBytes("main", "right/keep.txt")).isEqualTo(bytes("keep"));
+            assertThat(
+                            repository
+                                    .files()
+                                    .<byte[], Exception>read(
+                                            repository.ref("main"),
+                                            file -> file.readBytes("left/config.txt")))
+                    .isEqualTo(bytes("after"));
+            assertThat(
+                            repository
+                                    .files()
+                                    .<byte[], Exception>read(
+                                            repository.ref("main"),
+                                            file -> file.readBytes("right/keep.txt")))
+                    .isEqualTo(bytes("keep"));
         }
     }
 
@@ -148,41 +180,54 @@ class NativeGitFileUpdateTest {
     void explicitChangesCanReplaceAFileWithADirectoryAndBack() throws Exception {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
-            repository
-                    .files()
-                    .withAccess(
-                            "main",
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
-                            access -> {
-                                access.write("entry", bytes("file"));
-                                access.apply();
-                                return null;
-                            });
-            repository
-                    .files()
-                    .withAccess(
-                            "main",
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "file to directory"),
-                            access -> {
-                                access.delete("entry");
-                                access.write("entry/child", bytes("nested"));
-                                access.apply();
-                                return null;
-                            });
-            assertThat(repository.files().readBytes("main", "entry/child")).isEqualTo(bytes("nested"));
+            FileTestSupport.initialize(repository, "main");
+            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+                access.write("entry", bytes("file"));
+                repository.refUpdate(
+                        repository.ref("main"),
+                        access.revision(),
+                        access.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "initial")));
+            }
 
-            repository
-                    .files()
-                    .withAccess(
-                            "main",
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "directory to file"),
-                            access -> {
-                                access.delete("entry/child");
-                                access.write("entry", bytes("file again"));
-                                access.apply();
-                                return null;
-                            });
-            assertThat(repository.files().readBytes("main", "entry")).isEqualTo(bytes("file again"));
+            FileTestSupport.initialize(repository, "main");
+            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+                access.delete("entry");
+                access.write("entry/child", bytes("nested"));
+                repository.refUpdate(
+                        repository.ref("main"),
+                        access.revision(),
+                        access.commit(
+                                new VcChangeDescription(
+                                        VcChangeAuthor.EMPTY, "file to directory")));
+            }
+
+            assertThat(
+                            repository
+                                    .files()
+                                    .<byte[], Exception>read(
+                                            repository.ref("main"),
+                                            file -> file.readBytes("entry/child")))
+                    .isEqualTo(bytes("nested"));
+
+            FileTestSupport.initialize(repository, "main");
+            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+                access.delete("entry/child");
+                access.write("entry", bytes("file again"));
+                repository.refUpdate(
+                        repository.ref("main"),
+                        access.revision(),
+                        access.commit(
+                                new VcChangeDescription(
+                                        VcChangeAuthor.EMPTY, "directory to file")));
+            }
+
+            assertThat(
+                            repository
+                                    .files()
+                                    .<byte[], Exception>read(
+                                            repository.ref("main"),
+                                            file -> file.readBytes("entry")))
+                    .isEqualTo(bytes("file again"));
         }
     }
 
@@ -190,20 +235,20 @@ class NativeGitFileUpdateTest {
     void deletionAndReplacementPublishTogetherAndPreserveOtherFiles() throws Exception {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
-            repository
-                    .files()
-                    .withAccess(
-                            "main",
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
-                            fileAccess -> {
-                                fileAccess.write("nested/remove.txt", new byte[] {1});
-                                fileAccess.write("keep.txt", new byte[] {2});
-                                fileAccess.write("change.txt", new byte[] {3});
-                                fileAccess.apply();
-                                return null;
-                            });
+            FileTestSupport.initialize(repository, "main");
+            try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+                fileAccess.write("nested/remove.txt", new byte[] {1});
+                fileAccess.write("keep.txt", new byte[] {2});
+                fileAccess.write("change.txt", new byte[] {3});
+                repository.refUpdate(
+                        repository.ref("main"),
+                        fileAccess.revision(),
+                        fileAccess.commit(
+                                new VcChangeDescription(VcChangeAuthor.EMPTY, "initial")));
+            }
+
             String initial = repository.refs().get("refs/heads/main");
-            FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main",
+            FileTestSupport.Prepared update = FileTestSupport.prepared(repository, "main",
                     "delete and replace", VcChangeAuthor.EMPTY, fileAccess -> {
                 fileAccess.delete("nested/remove.txt");
                 fileAccess.write("change.txt", new byte[]{4});
@@ -213,23 +258,36 @@ class NativeGitFileUpdateTest {
             assertThat(repository.publishPack(update.pack(), update.refUpdates(), true,
                     GitNativeRepositoryAccessHook.ALLOW_ALL))
                     .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
-            assertThat(repository.files().readBytes("main", "keep.txt")).isEqualTo(new byte[]{2});
-            assertThat(repository.files().readBytes("main", "change.txt")).isEqualTo(new byte[]{4});
-            assertThatThrownBy(() -> repository.files().readBytes("main", "nested/remove.txt"))
+            assertThat(
+                            repository
+                                    .files()
+                                    .<byte[], Exception>read(
+                                            repository.ref("main"),
+                                            file -> file.readBytes("keep.txt")))
+                    .isEqualTo(new byte[] {2});
+            assertThat(
+                            repository
+                                    .files()
+                                    .<byte[], Exception>read(
+                                            repository.ref("main"),
+                                            file -> file.readBytes("change.txt")))
+                    .isEqualTo(new byte[] {4});
+            assertThatThrownBy(() -> repository.files().read(repository.ref("main"), file -> file.readBytes("nested/remove.txt")))
                     .isInstanceOf(GitOperationException.class);
-            repository
-                    .files()
-                    .withAccess(
-                            "main",
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "delete remaining files"),
-                            fileAccess -> {
-                                fileAccess.delete("keep.txt");
-                                fileAccess.delete("change.txt");
-                                fileAccess.apply();
-                                return null;
-                            });
+            FileTestSupport.initialize(repository, "main");
+            try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+                fileAccess.delete("keep.txt");
+                fileAccess.delete("change.txt");
+                repository.refUpdate(
+                        repository.ref("main"),
+                        fileAccess.revision(),
+                        fileAccess.commit(
+                                new VcChangeDescription(
+                                        VcChangeAuthor.EMPTY, "delete remaining files")));
+            }
+
             for (String path : List.of("keep.txt", "change.txt")) {
-                assertThatThrownBy(() -> repository.files().readBytes("main", path))
+                assertThatThrownBy(() -> repository.files().read(repository.ref("main"), file -> file.readBytes(path)))
                         .isInstanceOf(GitOperationException.class);
             }
         }
@@ -239,16 +297,16 @@ class NativeGitFileUpdateTest {
     void invalidOrConflictingDeletionDoesNotPublishAnything() throws Exception {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
-            repository
-                    .files()
-                    .withAccess(
-                            "main",
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
-                            fileAccess -> {
-                                fileAccess.write("config.txt", bytes("initial"));
-                                fileAccess.apply();
-                                return null;
-                            });
+            FileTestSupport.initialize(repository, "main");
+            try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+                fileAccess.write("config.txt", bytes("initial"));
+                repository.refUpdate(
+                        repository.ref("main"),
+                        fileAccess.revision(),
+                        fileAccess.commit(
+                                new VcChangeDescription(VcChangeAuthor.EMPTY, "initial")));
+            }
+
             Map<String, String> refs = repository.refs();
             repository
                     .index()
@@ -257,23 +315,28 @@ class NativeGitFileUpdateTest {
                                 Set<PackMetadata> packs = Set.copyOf(access1.packs());
                                 for (String path : List.of("../config.txt", "./config.txt")) {
                                     assertThatThrownBy(
-                                                    () ->
-                                                            repository
-                                                                    .files()
-                                                                    .withAccess(
-                                                                            "main",
+                                                    () -> {
+                                                        FileTestSupport.initialize(
+                                                                repository, "main");
+                                                        try (GitFileAccess fileAccess =
+                                                                repository
+                                                                        .files()
+                                                                        .open(
+                                                                                repository.ref(
+                                                                                        "main"))) {
+                                                            fileAccess.delete(path);
+                                                            fileAccess.write(
+                                                                    "config.txt", bytes("changed"));
+                                                            repository.refUpdate(
+                                                                    repository.ref("main"),
+                                                                    fileAccess.revision(),
+                                                                    fileAccess.commit(
                                                                             new VcChangeDescription(
-                                                                                    VcChangeAuthor.EMPTY, "invalid"),
-                                                                            fileAccess -> {
-                                                                                fileAccess.delete(
-                                                                                        path);
-                                                                                fileAccess.write(
-                                                                                        "config.txt",
-                                                                                        bytes(
-                                                                                                "changed"));
-                                                                                fileAccess.apply();
-                                                                                return null;
-                                                                            }))
+                                                                                    VcChangeAuthor
+                                                                                            .EMPTY,
+                                                                                    "invalid")));
+                                                        }
+                                                    })
                                             .isInstanceOf(IllegalArgumentException.class);
                                     assertThat(repository.refs()).isEqualTo(refs);
                                     assertThat(access1.packs())
@@ -289,18 +352,17 @@ class NativeGitFileUpdateTest {
         try (NativeGitRepositoryProvider provider =
                 NativeGitRepositoryProvider.file(directory, testRuntime.events())) {
             NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
-            repository
-                    .files()
-                    .withAccess(
-                            "main",
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "first"),
-                            fileAccess -> {
-                                fileAccess.write("config.txt", bytes("first"));
-                                fileAccess.apply();
-                                return null;
-                            });
+            FileTestSupport.initialize(repository, "main");
+            try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+                fileAccess.write("config.txt", bytes("first"));
+                repository.refUpdate(
+                        repository.ref("main"),
+                        fileAccess.revision(),
+                        fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "first")));
+            }
+
             repository.index().withAccess(access -> {
-                assertThat(access.packs()).hasSize(1);
+                assertThat(access.packs()).hasSize(3);
                 PackMetadata metadata = access.packs().getFirst();
                 ByteArrayOutputStream exported = new ByteArrayOutputStream();
                 repository.writePack(metadata, new OutputStreamBufferedByteOutput(exported));
@@ -312,7 +374,12 @@ class NativeGitFileUpdateTest {
         try (NativeGitRepositoryProvider provider =
                 NativeGitRepositoryProvider.file(directory, testRuntime.events())) {
             NativeGitRepository reopened = provider.find("demo").valueOrFailure("repository");
-            assertThat(reopened.files().readBytes("main", "config.txt")).isEqualTo(bytes("first"));
+            assertThat(
+                            reopened.files()
+                                    .<byte[], Exception>read(
+                                            reopened.ref("main"),
+                                            file -> file.readBytes("config.txt")))
+                    .isEqualTo(bytes("first"));
         }
     }
 
@@ -320,32 +387,30 @@ class NativeGitFileUpdateTest {
     void staleFileSaveRetainsValidatedPackWithoutChangingTheBranch() throws Exception {
         NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository");
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "first"),
-                        fileAccess -> {
-                            fileAccess.write("config.txt", bytes("first"));
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("config.txt", bytes("first"));
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "first")));
+        }
+
         String expected = repository.refs().get("refs/heads/main");
-        FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", expected,
+        FileTestSupport.Prepared update = FileTestSupport.prepared(repository, "main", expected,
                 "stale", VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("config.txt", bytes("stale"));
             return null;
         });
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "second"),
-                        fileAccess -> {
-                            fileAccess.write("config.txt", bytes("second"));
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("config.txt", bytes("second"));
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "second")));
+        }
+
         String current = repository.refs().get("refs/heads/main");
 
         List<RefUpdateResult> results = repository.publishPack(
@@ -357,10 +422,10 @@ class NativeGitFileUpdateTest {
                 .isInstanceOf(GitRepositoryConcurrentUpdateException.class);
 
         assertThat(repository.refs()).containsEntry("refs/heads/main", current);
-        assertThat(repository.files().readBytes("main", "config.txt"))
+        assertThat(repository.files().<byte[], Exception>read(repository.ref("main"), file -> file.readBytes("config.txt")))
                 .isEqualTo(bytes("second"));
         repository.index().withAccess(access3 -> {
-            assertThat(access3.packs()).hasSize(3);
+            assertThat(access3.packs()).hasSize(5);
             assertThat(repository.readObject(update.refUpdates().getFirst().newId().orElseThrow())).isPresent();
             return null;
         });
@@ -370,7 +435,7 @@ class NativeGitFileUpdateTest {
     void preparedPackIsIndependentOfItsReadersAndUnderstoodByJGit() throws Exception {
         NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository");
-        FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "prepared",
+        FileTestSupport.Prepared update = FileTestSupport.prepared(repository, "main", "prepared",
                 VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("config.txt", bytes("prepared"));
             return null;
@@ -400,7 +465,7 @@ class NativeGitFileUpdateTest {
         for (NativeGitRepository target : List.of(repository, another)) {
             assertThat(target.publishPack(update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
                     .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
-            assertThat(target.files().readBytes("main", "config.txt"))
+            assertThat(target.files().<byte[], Exception>read(target.ref("main"), file -> file.readBytes("config.txt")))
                     .isEqualTo(bytes("prepared"));
         }
     }
@@ -409,7 +474,7 @@ class NativeGitFileUpdateTest {
     void corruptOrIncompletePackCannotPublishRefs() throws Exception {
         NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository");
-        FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "prepared",
+        FileTestSupport.Prepared update = FileTestSupport.prepared(repository, "main", "prepared",
                 VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("config.txt", bytes("prepared"));
             return null;

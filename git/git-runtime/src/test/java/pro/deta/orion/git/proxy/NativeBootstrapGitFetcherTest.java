@@ -1,5 +1,7 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
 import pro.deta.orion.util.VcChangeDescription;
 
 import org.eclipse.jgit.api.Git;
@@ -59,7 +61,12 @@ class NativeBootstrapGitFetcherTest {
 
         try {
             fetcher.fetch(location, new GitFileClientTransport(), repository);
-            assertThat(repository.files().readBytes(location.refName(), "orion.xml"))
+            assertThat(
+                            repository
+                                    .files()
+                                    .<byte[], Exception>read(
+                                            repository.ref(location.refName()),
+                                            file -> file.readBytes("orion.xml")))
                     .isEqualTo("first".getBytes());
 
             Files.writeString(upstream.worktree().resolve("orion.xml"), "second");
@@ -68,7 +75,12 @@ class NativeBootstrapGitFetcherTest {
             upstream.git().push().setRemote(upstream.bare().toUri().toString()).call();
 
             fetcher.fetch(location, new GitFileClientTransport(), repository);
-            assertThat(repository.files().readBytes(location.refName(), "orion.xml"))
+            assertThat(
+                            repository
+                                    .files()
+                                    .<byte[], Exception>read(
+                                            repository.ref(location.refName()),
+                                            file -> file.readBytes("orion.xml")))
                     .isEqualTo("second".getBytes());
         } finally {
             upstream.git().close();
@@ -121,7 +133,12 @@ class NativeBootstrapGitFetcherTest {
             fetcher.fetch(location, discoveryOnly, repository);
 
             assertThat(repository.refs()).containsEntry(location.refName(), firstId);
-            assertThat(repository.files().readBytes(location.refName(), "orion.xml"))
+            assertThat(
+                            repository
+                                    .files()
+                                    .<byte[], Exception>read(
+                                            repository.ref(location.refName()),
+                                            file -> file.readBytes("orion.xml")))
                     .isEqualTo("first".getBytes());
         } finally {
             upstream.git().close();
@@ -159,7 +176,7 @@ class NativeBootstrapGitFetcherTest {
         FileTestSupport.Prepared prepared;
         try (NativeGitRepository source = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("source").valueOrFailure("source")) {
-            prepared = FileTestSupport.prepared(source.files(), "main", "initial", VcChangeAuthor.EMPTY,
+            prepared = FileTestSupport.prepared(source, "main", "initial", VcChangeAuthor.EMPTY,
                     fileAccess -> {
                 fileAccess.write("orion.xml", new byte[]{1, 2, 3});
                 return null;
@@ -193,26 +210,26 @@ class NativeBootstrapGitFetcherTest {
         BootstrapGitLocation location = location(upstream.bare());
         NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("proxy").valueOrFailure("create proxy");
-        repository
-                .files()
-                .withAccess(
-                        "refs/heads/main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "local"),
-                        fileAccess -> {
-                            fileAccess.write("orion.xml", new byte[] {1});
-                            fileAccess.apply();
-                            return null;
-                        });
-        repository
-                .files()
-                .withAccess(
-                        "refs/heads/incoming",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "remote"),
-                        fileAccess -> {
-                            fileAccess.write("orion.xml", new byte[] {2});
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "refs/heads/main");
+        try (GitFileAccess fileAccess =
+                repository.files().open(repository.ref("refs/heads/main"))) {
+            fileAccess.write("orion.xml", new byte[] {1});
+            repository.refUpdate(
+                    repository.ref("refs/heads/main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "local")));
+        }
+
+        FileTestSupport.initialize(repository, "refs/heads/incoming");
+        try (GitFileAccess fileAccess =
+                repository.files().open(repository.ref("refs/heads/incoming"))) {
+            fileAccess.write("orion.xml", new byte[] {2});
+            repository.refUpdate(
+                    repository.ref("refs/heads/incoming"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "remote")));
+        }
+
         Map<String, String> before = repository.refs();
         String concurrent = before.get("refs/heads/incoming");
         AtomicInteger connections = new AtomicInteger();

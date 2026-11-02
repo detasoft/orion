@@ -235,7 +235,7 @@ class AgentSessionAcceptanceIT {
         private final Path directory;
         private final boolean allowUnsecure;
         private final Path local = Files.createTempDirectory(Path.of("/tmp"), "orion-acceptance-");
-        final JettyHTTPServerIT.MaterialFixture material = JettyHTTPServerIT.material();
+        final JettyHTTPServerIT.MaterialFixture material = JettyHTTPServerIT.material(runtime);
         private final List<Process> processes = new ArrayList<>();
         private final List<SessionId> started = new ArrayList<>();
         private final Path trustStore;

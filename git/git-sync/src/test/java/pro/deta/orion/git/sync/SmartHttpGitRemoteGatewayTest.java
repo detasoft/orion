@@ -1,5 +1,7 @@
 package pro.deta.orion.git.sync;
 
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
 import pro.deta.orion.util.VcChangeDescription;
 
 import pro.deta.orion.git.parser.v2.id.RefId;
@@ -85,12 +87,19 @@ class SmartHttpGitRemoteGatewayTest {
 
                 assertThat(local.updateRef("refs/heads/main", NULL_ID, seed.main()).status())
                         .isEqualTo(RefUpdateResult.Status.APPLIED);
-                local.files().withAccess("main", new VcChangeDescription(
-                        new VcChangeAuthor("Orion", "orion@example.invalid"), "Orion outbound"), fileAccess -> {
-                    fileAccess.write("orion.txt", "outbound\n".getBytes());
-                    fileAccess.apply();
-                    return null;
-                });
+                {
+                    try (GitFileAccess fileAccess = local.files().open(local.ref("main"))) {
+                        fileAccess.write("orion.txt", "outbound\n".getBytes());
+                        local.refUpdate(
+                                local.ref("main"),
+                                fileAccess.revision(),
+                                fileAccess.commit(
+                                        new VcChangeDescription(
+                                                new VcChangeAuthor(
+                                                        "Orion", "orion@example.invalid"),
+                                                "Orion outbound")));
+                    }
+        }
                 String desired = local.refs().get("refs/heads/main");
 
                 assertThat(gateway.pushHead(
@@ -138,12 +147,19 @@ class SmartHttpGitRemoteGatewayTest {
                 gateway.fetchHeads(local);
                 assertThat(local.updateRef("refs/heads/main", NULL_ID, seed.main()).status())
                         .isEqualTo(RefUpdateResult.Status.APPLIED);
-                local.files().withAccess("main", new VcChangeDescription(
-                        new VcChangeAuthor("Orion", "orion@example.invalid"), "Outbound"), fileAccess -> {
-                    fileAccess.write("outbound.txt", "outbound\n".getBytes());
-                    fileAccess.apply();
-                    return null;
-                });
+                {
+                    try (GitFileAccess fileAccess = local.files().open(local.ref("main"))) {
+                        fileAccess.write("outbound.txt", "outbound\n".getBytes());
+                        local.refUpdate(
+                                local.ref("main"),
+                                fileAccess.revision(),
+                                fileAccess.commit(
+                                        new VcChangeDescription(
+                                                new VcChangeAuthor(
+                                                        "Orion", "orion@example.invalid"),
+                                                "Outbound")));
+                    }
+        }
                 String desired = local.refs().get("refs/heads/main");
                 String trackingRef = "refs/remotes/upstream/main";
                 if (remoteAlreadyCurrent) {

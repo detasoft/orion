@@ -1,6 +1,10 @@
 package pro.deta.orion.test;
 
-import pro.deta.orion.storage.BlobStorage;
+import pro.deta.orion.test.integration.git.FileTestSupport;
+
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.KeyMaterialBootstrap;
 
 import pro.deta.orion.util.VcChangeAuthor;
@@ -71,8 +75,8 @@ class S3BootstrapRestartIT {
                     PASSWORD_ENV, "bootstrap-test-password", "S3_BOOTSTRAP_SECRET", s3.secretAccessKey());
             BootstrapConfiguration configuration = configuration(s3, tempDir);
             configuration.getBootstrap().getConfiguration().setCreateDefaultIfMissing(false);
-            InMemoryBlobStorage materialStore = new InMemoryBlobStorage();
-            materialStore.write(new BlobStorage.Modification(null, materialBytes(configuration, environment)));
+            InMemoryBlobStorage materialStore = new InMemoryBlobStorage(
+                            materialBytes(configuration, environment), false, testRuntime.events());
             byte[] payload = "preseeded S3 server identity".getBytes(StandardCharsets.UTF_8);
             byte[] signature;
             String signingKeyId;
@@ -91,32 +95,35 @@ class S3BootstrapRestartIT {
                 OrionXml.write(secrets.createSystem(document, SECRET_ID, SECRET_VALUE.toCharArray()), output);
                 xml = output.toByteArray();
             }
-            byte[] material = materialStore.load().bytes();
+            byte[] material = materialStore.readBytes(new VcRevision.Latest());
             Map<String, String> refs;
             try (NativeGitRepositoryProvider provider = S3NativeGitRepositoryFactory.repositories(
                     configuration.getStorage().getLocation(), configuration.getStorage().getEndpoint(),
                     configuration.getStorage().getAuth(), environment, testRuntime.events())) {
                 NativeGitRepository repository = provider.create("orion").valueOrFailure("seed S3 bootstrap");
-                repository
-                        .files()
-                        .withAccess(
-                                CONFIGURATION_REF,
-                                new VcChangeDescription(VcChangeAuthor.EMPTY, "Seed bootstrap configuration"),
-                                access -> {
-                                    access.write(CONFIGURATION_PATH, xml);
-                                    access.apply();
-                                    return null;
-                                });
-                repository
-                        .files()
-                        .withAccess(
-                                MATERIAL_REF,
-                                new VcChangeDescription(VcChangeAuthor.EMPTY, "Seed bootstrap key material"),
-                                access -> {
-                                    access.write(MATERIAL_PATH, material);
-                                    access.apply();
-                                    return null;
-                                });
+                FileTestSupport.initialize(repository, CONFIGURATION_REF);
+                try (GitFileAccess access =
+                        repository.files().open(repository.ref(CONFIGURATION_REF))) {
+                    access.write(CONFIGURATION_PATH, xml);
+                    repository.refUpdate(
+                            repository.ref(CONFIGURATION_REF),
+                            access.revision(),
+                            access.commit(
+                                    new VcChangeDescription(
+                                            VcChangeAuthor.EMPTY, "Seed bootstrap configuration")));
+                }
+
+                FileTestSupport.initialize(repository, MATERIAL_REF);
+                try (GitFileAccess access = repository.files().open(repository.ref(MATERIAL_REF))) {
+                    access.write(MATERIAL_PATH, material);
+                    repository.refUpdate(
+                            repository.ref(MATERIAL_REF),
+                            access.revision(),
+                            access.commit(
+                                    new VcChangeDescription(
+                                            VcChangeAuthor.EMPTY, "Seed bootstrap key material")));
+                }
+
                 refs = Map.copyOf(repository.refs());
             }
 
@@ -144,7 +151,13 @@ class S3BootstrapRestartIT {
                     assertThat(secrets.resolveSystem(SECRET_ID)).isEqualTo(SECRET_VALUE.toCharArray());
                     NativeGitRepository repository = bootstrap.repositoryProvider().find("orion")
                             .valueOrFailure("loaded S3 bootstrap repository");
-                    assertThat(repository.files().readBytes(MATERIAL_REF, MATERIAL_PATH)).isEqualTo(material);
+                    assertThat(
+                                    repository
+                                            .files()
+                                            .<byte[], Exception>read(
+                                                    repository.ref(MATERIAL_REF),
+                                                    file -> file.readBytes(MATERIAL_PATH)))
+                            .isEqualTo(material);
                     assertThat(repository.refs()).containsEntry(MATERIAL_REF, refs.get(MATERIAL_REF));
                 } finally {
                     lifecycle.shutdownApplication();
@@ -198,7 +211,7 @@ class S3BootstrapRestartIT {
                             .contains(SECRET_ID).doesNotContain(SECRET_VALUE);
                     NativeGitRepository repository = bootstrap.repositoryProvider().find("orion")
                             .valueOrFailure("S3 bootstrap repository");
-                    savedMaterial = repository.files().readBytes(MATERIAL_REF, MATERIAL_PATH);
+                    savedMaterial = repository.files().read(repository.ref(MATERIAL_REF), file -> file.readBytes(MATERIAL_PATH));
                     savedRefs = Map.copyOf(repository.refs());
                     assertThat(savedRefs).containsKeys(CONFIGURATION_REF, MATERIAL_REF);
                     signingKeyId = bootstrap.signingMaterial().active().alias();
@@ -250,7 +263,13 @@ class S3BootstrapRestartIT {
                     assertThat(secrets.resolveSystem(SECRET_ID)).isEqualTo(SECRET_VALUE.toCharArray());
                     NativeGitRepository repository = bootstrap.repositoryProvider().find("orion")
                             .valueOrFailure("reopened S3 bootstrap repository");
-                    assertThat(repository.files().readBytes(MATERIAL_REF, MATERIAL_PATH)).isEqualTo(savedMaterial);
+                    assertThat(
+                                    repository
+                                            .files()
+                                            .<byte[], Exception>read(
+                                                    repository.ref(MATERIAL_REF),
+                                                    file -> file.readBytes(MATERIAL_PATH)))
+                            .isEqualTo(savedMaterial);
                     assertThat(repository.refs()).isEqualTo(savedRefs);
                 } finally {
                     lifecycle.shutdownApplication();

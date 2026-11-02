@@ -1,12 +1,14 @@
 package pro.deta.orion.acl;
 
-import pro.deta.orion.keymaterial.KeyMaterialModification;
+import pro.deta.orion.util.VcChangeDescription;
+
+import pro.deta.orion.util.VcRevision;
+
+import pro.deta.orion.keymaterial.KeyMaterialOperation;
 import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
 import pro.deta.orion.keymaterial.KeyMaterialRepository;
-
-import pro.deta.orion.event.OrionEventManager;
 
 import java.util.Set;
 
@@ -18,7 +20,6 @@ import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
-import pro.deta.orion.storage.InMemoryBlobStorage;
 
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
@@ -39,6 +40,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class JwtAccessTokenServiceTest {
     private static final Clock CLOCK = Clock.fixed(
             Instant.parse("2026-09-02T21:00:00Z"), ZoneOffset.UTC);
+
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime runtime = new pro.deta.orion.test.util.OrionTestRuntime();
 
     private final List<OrionKeyMaterial> materials = new ArrayList<>();
 
@@ -226,10 +230,10 @@ class JwtAccessTokenServiceTest {
         TestIdentity identity = single("signing");
         JwtAccessTokenService original = service(identity, CLOCK);
         String old = original.issue("alice", 600, null).value();
-        KeyMaterialModification rotation =
-                identity.material.modify(identity.material.revision());
+        KeyMaterialOperation rotation =
+                identity.material.open(new VcRevision.Stored(identity.material.revision()));
         KeyMaterialId next = rotation.importKey(identity.signing.active(), rsaKeyPair());
-        rotation.apply();
+        rotation.commit(VcChangeDescription.EMPTY);
         JwtAccessTokenService current = new JwtAccessTokenService(identity.material,
                 new SigningMaterialSet(identity.material.read(next).id(),
                         List.of(identity.signing.active())), CLOCK);
@@ -269,10 +273,10 @@ class JwtAccessTokenServiceTest {
         JwtAccessTokenService oldService = service(identity, CLOCK);
         String oldToken = oldService.issue("alice", 600, null).value();
         KeyMaterialId next = new KeyMaterialId("server-signing-v2", 1);
-        identity.material.withModification(identity.material.revision(), modification -> {
+        try (KeyMaterialOperation modification = identity.material.open(new VcRevision.Stored(identity.material.revision()))) {
             modification.importKey(("server-signing-v2"), Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, newKey);
-            modification.apply();
-        });
+            modification.commit(VcChangeDescription.EMPTY);
+        }
 
         String stagedToken = oldService.issue("alice", 600, null).value();
         assertThat(header(stagedToken)).contains("\"kid\":\"server-signing-v1:1\"");
@@ -435,22 +439,22 @@ class JwtAccessTokenServiceTest {
         private TestIdentity(String activeKeyId, Map<String, KeyPair> keys) throws Exception {
             try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray())) {
                 material = OrionKeyMaterial.open(new KeyMaterialRepository(
-                        new InMemoryBlobStorage(),
+                        runtime.pkcs12Store("test-password".toCharArray()),
                         new KeyMaterialCodec(options),
-                        new OrionEventManager()));
+                        runtime.events()));
             }
             materials.add(material);
             List<KeyMaterialId> retained = new ArrayList<>();
             KeyMaterialId active = new KeyMaterialId(activeKeyId, 1);
-            material.withModification(material.revision(), modification -> {
+            try (KeyMaterialOperation modification = material.open(new VcRevision.Stored(material.revision()))) {
                 for (Map.Entry<String, KeyPair> entry : keys.entrySet()) {
                     KeyMaterialId descriptor = entry.getKey().equals(activeKeyId)
                             ? active : new KeyMaterialId((entry.getKey()), 1);
                     if (!descriptor.equals(active)) retained.add(descriptor);
                     modification.importKey(descriptor.alias(), Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, entry.getValue());
                 }
-                modification.apply();
-            });
+                modification.commit(VcChangeDescription.EMPTY);
+            }
             signing = new SigningMaterialSet(active, retained);
         }
 

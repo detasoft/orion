@@ -11,7 +11,6 @@ import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
-import pro.deta.orion.util.VcChangeDescription;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationHandler;
@@ -37,6 +36,14 @@ class GitFileAccessLifecycleTest {
         IOException packFailure = new IOException("pack close failed");
         IOException indexFailure = new IOException("index discard failed");
         try (InMemoryStorage storage = new InMemoryStorage(); InMemoryIndex owner = new InMemoryIndex(new RefId("refs/heads/main"))) {
+            NativeGitRepository seed = new NativeGitRepository("demo", storage, owner, testRuntime.events());
+            pro.deta.orion.git.parser.v2.id.ObjectId tree = seed.writeObject(
+                    pro.deta.orion.git.parser.v2.data.GitObjectType.TREE, new byte[0]);
+            pro.deta.orion.git.parser.v2.id.ObjectId commit = seed.writeObject(
+                    pro.deta.orion.git.parser.v2.data.GitObjectType.COMMIT,
+                    ("tree " + tree.toHex() + "\nauthor Test <test@example.invalid> 1 +0000\n"
+                            + "committer Test <test@example.invalid> 1 +0000\n\nseed\n")
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
             GitIndexAccess delegate = owner.createAccess(Optional.of(PackId.create()));
             GitIndexAccess index = proxy(GitIndexAccess.class, (ignored, method, args) -> {
                 if (method.getName().equals("discard")) {
@@ -63,18 +70,18 @@ class GitFileAccessLifecycleTest {
                 });
             });
             NativeGitRepository repository = new NativeGitRepository("demo", observed, owner, testRuntime.events());
-            GitFileAccess access = new GitFileAccess(repository, index, "main", Optional.empty(),
-                    VcChangeDescription.EMPTY, false, owner.getHEAD());
+            GitFileAccess access = new GitFileAccess(repository.files(), index,
+                    new pro.deta.orion.util.VcRevision.Stored(commit.toHex()));
             try {
                 if (failPack || failIndex) {
                     IOException expected = failPack ? packFailure : indexFailure;
-                    assertThatThrownBy(access::discard).isSameAs(expected);
+                    assertThatThrownBy(access::close).isInstanceOf(java.io.UncheckedIOException.class)
+                            .hasCause(expected);
                     assertThat(expected.getSuppressed()).containsExactly(
                             failPack && failIndex ? new Throwable[]{indexFailure} : new Throwable[0]);
                 } else {
-                    access.discard();
+                    access.close();
                 }
-                access.discard();
                 assertThat(calls).containsExactly("storage", "index");
                 assertThatThrownBy(() -> delegate.snapshotRefs(new RefSelection.All())).isInstanceOf(IOException.class);
             } finally {

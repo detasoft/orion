@@ -10,14 +10,12 @@ import pro.deta.orion.lifecycle.state.ActionId;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.lifecycle.state.StateMachineEventType;
-import pro.deta.orion.util.Subscription;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.util.OrionProvider;
-
+import pro.deta.orion.util.Subscription;
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.FIN;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 
@@ -72,8 +70,8 @@ public class OrionApplicationLifecycle {
     }
 
     private void registerLifecycleEventHandlers() {
-        orionProvider.getEventManager().subscribe(
-                ApplicationShutdownRequestedEvent.class,
+        orionProvider.getEventManager().forTarget(this).subscribe(
+                ApplicationShutdownRequestedEvent.class, null,
                 this::handleShutdownRequested);
     }
 

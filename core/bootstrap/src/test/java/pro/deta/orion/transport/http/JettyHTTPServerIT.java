@@ -1,7 +1,9 @@
 package pro.deta.orion.transport.http;
 
-import pro.deta.orion.storage.BlobStorage;
-import pro.deta.orion.keymaterial.KeyMaterialModification;
+import pro.deta.orion.util.VcChangeDescription;
+
+import pro.deta.orion.util.VcRevision;
+import pro.deta.orion.keymaterial.KeyMaterialOperation;
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
 import pro.deta.orion.keymaterial.KeyMaterialRepository;
@@ -167,7 +169,7 @@ class JettyHTTPServerIT {
         discovery.reconcile();
         ObservedAgentControlHandler observed = new ObservedAgentControlHandler(agentServer);
 
-        try (MaterialFixture material = material()) {
+        try (MaterialFixture material = material(testRuntime)) {
             agentServer.onStart();
             agentServer.registerAgent(agentLabel, "Live worker");
             JettyHTTPServer firstServer = startHttps(
@@ -252,7 +254,7 @@ class JettyHTTPServerIT {
 
     @Test
     void negotiatesTheHttp11WireProtocolAlongsideHttp2() throws Exception {
-        try (MaterialFixture material = material()) {
+        try (MaterialFixture material = material(testRuntime)) {
             JettyHTTPServer server = startHttps(material, false,
                     OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), new OkRoute());
             SslContextFactory.Client tls = agentdTls(material.serverCertificate());
@@ -279,7 +281,7 @@ class JettyHTTPServerIT {
 
     @Test
     void rejectsReplicationBeforeControlHandshakeOnTheMainConnection() throws Exception {
-        try (MaterialFixture material = material()) {
+        try (MaterialFixture material = material(testRuntime)) {
             JettyHTTPServer server = startHttps(material, false,
                     OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(),
                     new AgentControlRoute(connection -> new AgentControlHandler.Session() {
@@ -308,7 +310,7 @@ class JettyHTTPServerIT {
 
     @Test
     void servesMaterialBackedHttpsWithoutRootInTheServerChain() throws Exception {
-        try (MaterialFixture material = material()) {
+        try (MaterialFixture material = material(testRuntime)) {
             JettyHTTPServer server = startHttps(
                     material,
                     true,
@@ -336,7 +338,7 @@ class JettyHTTPServerIT {
 
     @Test
     void appliesDisabledWantAndRequiredClientAuthenticationWithRoleSeparatedRoots() throws Exception {
-        try (MaterialFixture material = material()) {
+        try (MaterialFixture material = material(testRuntime)) {
             SSLContext anonymous = clientContext(null, null);
             SSLContext trusted = clientContext(material.trustedClientKey(), material.trustedClientCertificate());
             SSLContext serverIssuerClient = clientContext(
@@ -366,11 +368,11 @@ class JettyHTTPServerIT {
 
     @Test
     void failsHttpsStartupForStorageOnlyIdentity() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryBlobStorage())) {
-            owner.withModification(owner.revision(), modification -> {
+        try (OrionKeyMaterial owner = owner(testRuntime.pkcs12Store("test-password".toCharArray()))) {
+            try (KeyMaterialOperation modification = owner.open(new VcRevision.Stored(owner.revision()))) {
                 modification.generateKey(("https-identity-v1"), Set.of((KeyMaterialPurpose.TLS_IDENTITY)), KeyMaterialAlgorithm.RSA, 2048);
-                modification.apply();
-            });
+                modification.commit(VcChangeDescription.EMPTY);
+            }
             JettyHTTPServer server = server(
                     httpConfiguration(false),
                     desiredState(testRuntime, Optional.of(new OrionHttpsConfiguration(true, "localhost",
@@ -389,7 +391,7 @@ class JettyHTTPServerIT {
     @Test
     void retriesHttpsFixtureAfterBindCollision() throws Exception {
         AtomicInteger selections = new AtomicInteger();
-        try (MaterialFixture material = material();
+        try (MaterialFixture material = material(testRuntime);
              ServerSocket occupied = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
             JettyHTTPServer server = startHttps(
                     material,
@@ -520,7 +522,7 @@ class JettyHTTPServerIT {
                 }
             };
         };
-        try (MaterialFixture material = material()) {
+        try (MaterialFixture material = material(testRuntime)) {
             AgentControlRoute control = new AgentControlRoute(
                     handler, AgentProtocolLimits.defaults(), Duration.ofMillis(200));
             JettyHTTPServer server = startHttps(
@@ -560,7 +562,7 @@ class JettyHTTPServerIT {
 
     @Test
     void rejectsMalformedControlInputAfterSuccessfulHeaders() throws Exception {
-        try (MaterialFixture material = material()) {
+        try (MaterialFixture material = material(testRuntime)) {
             CompletableFuture<Throwable> closed = new CompletableFuture<>();
             AgentControlHandler handler = connection -> new AgentControlHandler.Session() {
                 @Override
@@ -601,7 +603,7 @@ class JettyHTTPServerIT {
                 closed.complete(failure);
             }
         };
-        try (MaterialFixture material = material()) {
+        try (MaterialFixture material = material(testRuntime)) {
             AgentControlRoute control = new AgentControlRoute(
                     handler, AgentProtocolLimits.defaults(), Duration.ofMillis(200));
             JettyHTTPServer server = startHttps(
@@ -641,7 +643,7 @@ class JettyHTTPServerIT {
                 closed.complete(failure);
             }
         };
-        try (MaterialFixture material = material()) {
+        try (MaterialFixture material = material(testRuntime)) {
             AgentControlRoute control = new AgentControlRoute(
                     handler, AgentProtocolLimits.defaults().withMaxMessageBytes(8), Duration.ofSeconds(5));
             JettyHTTPServer server = startHttps(
@@ -699,7 +701,7 @@ class JettyHTTPServerIT {
                 closed.complete(failure);
             }
         };
-        try (MaterialFixture material = material()) {
+        try (MaterialFixture material = material(testRuntime)) {
             AgentControlRoute control = new AgentControlRoute(
                     handler, AgentProtocolLimits.defaults(), Duration.ofMillis(300));
             JettyHTTPServer server = startHttps(
@@ -756,7 +758,7 @@ class JettyHTTPServerIT {
                 }
             };
         };
-        try (MaterialFixture material = material()) {
+        try (MaterialFixture material = material(testRuntime)) {
             AgentControlRoute control = new AgentControlRoute(
                     handler, AgentProtocolLimits.defaults(), Duration.ofSeconds(30));
             JettyHTTPServer server = startHttps(
@@ -1041,9 +1043,9 @@ class JettyHTTPServerIT {
         return context;
     }
 
-    static MaterialFixture material() throws Exception {
-        InMemoryBlobStorage store = new InMemoryBlobStorage();
-        store.write(new BlobStorage.Modification(null, SHARED_MATERIAL.snapshot()));
+    static MaterialFixture material(pro.deta.orion.test.util.OrionTestRuntime runtime) throws Exception {
+        InMemoryBlobStorage store =
+                new InMemoryBlobStorage(SHARED_MATERIAL.snapshot(), false, runtime.events());
         OrionKeyMaterial owner = owner(store);
         return new MaterialFixture(
                 owner,
@@ -1055,15 +1057,16 @@ class JettyHTTPServerIT {
     }
 
     private static SharedMaterial sharedMaterial() {
-        try {
-            InMemoryBlobStorage store = new InMemoryBlobStorage();
+        try (pro.deta.orion.test.util.OrionTestRuntime runtime =
+                new pro.deta.orion.test.util.OrionTestRuntime()) {
+            InMemoryBlobStorage store = runtime.pkcs12Store("test-password".toCharArray());
             try (OrionKeyMaterial owner = owner(store)) {
                 TestCertificateChain.Authority serverRoot = TestCertificateChain.root("Server Root");
                 TestCertificateChain.Authority clientRoot = TestCertificateChain.root("Client Root");
-                owner.withModification(owner.revision(), modification -> {
+                try (KeyMaterialOperation modification = owner.open(new VcRevision.Stored(owner.revision()))) {
                     modification.generateKey(("https-identity-v1"), Set.of((KeyMaterialPurpose.TLS_IDENTITY)), KeyMaterialAlgorithm.RSA, 2048);
-                    modification.apply();
-                });
+                    modification.commit(VcChangeDescription.EMPTY);
+                }
                 KeyPair identityKey = owner.read(IDENTITY).keyPair();
                 TlsMaterialConfiguration clientProvisioning = new TlsMaterialConfiguration(
                         IDENTITY, Optional.of(CLIENT_ROOT), List.of(), TlsClientAuthentication.DISABLED);
@@ -1072,20 +1075,20 @@ class JettyHTTPServerIT {
                         Optional.of(clientRoot.certificate()));
                 X509Certificate serverCertificate = TestCertificateChain.leaf(
                         "localhost", identityKey, serverRoot);
-                KeyMaterialModification modification = owner.modify(owner.revision());
+                KeyMaterialOperation modification = owner.open(new VcRevision.Stored(owner.revision()));
                 KeyMaterialId identityId;
                 try {
                     modification.setTrustedCertificate(("server-root-v1"), Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, serverRoot.certificate());
                     identityId = modification.installCertificateChain(IDENTITY, List.of(serverCertificate),
                             Optional.of(SERVER_ROOT));
-                    modification.apply();
+                    modification.commit(VcChangeDescription.EMPTY);
                 } finally {
-                    modification.discard();
+                    modification.close();
                 }
                 KeyPair trustedClientKey = TestCertificateChain.keyPair();
                 KeyPair serverIssuerClientKey = TestCertificateChain.keyPair();
                 return new SharedMaterial(
-                        identityId, store.load().bytes(),
+                        identityId, store.readBytes(new VcRevision.Latest()),
                         serverCertificate,
                         trustedClientKey,
                         TestCertificateChain.leaf("trusted-client", trustedClientKey, clientRoot),
@@ -1104,10 +1107,10 @@ class JettyHTTPServerIT {
                 new OrionEventManager()));
         try {
             if (!material.contains(SIGNING)) {
-                material.withModification(material.revision(), modification -> {
+                try (KeyMaterialOperation modification = material.open(new VcRevision.Stored(material.revision()))) {
                     modification.generateKey(("server-signing-v1"), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
-                    modification.apply();
-                });
+                    modification.commit(VcChangeDescription.EMPTY);
+                }
             }
             return material;
         } catch (Exception failure) {

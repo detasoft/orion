@@ -392,10 +392,9 @@ class RuntimeHttpAdminAclUpdateIT {
     }
 
     private static byte[] readFileFromAclRepository(RuntimeHttpTestSupport.StartedOrion orion) throws Exception {
-        return orion.repositoryProvider()
-                .openForRead("orion")
-                .valueOrFailure("ACL repository should exist")
-                .files().readBytes(orion.configuration().getBootstrap().getConfiguration().selectedRef(),
-                        ACL_FILE);
+        pro.deta.orion.git.nativestorage.NativeGitRepository repository = orion.repositoryProvider()
+                .openForRead("orion").valueOrFailure("repository");
+        return repository.files().read(repository.ref(orion.configuration().getBootstrap().getConfiguration().selectedRef()),
+                file -> file.readBytes(ACL_FILE));
     }
 }

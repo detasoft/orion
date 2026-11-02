@@ -2,7 +2,6 @@ package pro.deta.orion.event;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.event.type.ApplicationShutdownRequestedEvent;
-import pro.deta.orion.util.Subscription;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -14,6 +13,30 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionEventManagerTest {
     @Test
+    void dispatchesEachTargetOnceInRegistrationOrder() {
+        OrionEventManager events = new OrionEventManager();
+        List<Integer> received = new CopyOnWriteArrayList<>();
+        for (int target : List.of(3, 1, 2)) {
+            events.forTarget(target).subscribe(ApplicationShutdownRequestedEvent.class, null,
+                    event -> received.add(target));
+        }
+        OrionEvents first = events.forTarget(3);
+        first.subscribe(ApplicationShutdownRequestedEvent.class, null, event -> received.add(99));
+        events.onStart();
+        try {
+            events.publishAndWait(new ApplicationShutdownRequestedEvent("first"));
+            assertThat(received).containsExactly(3, 1, 2);
+            received.clear();
+            first.unsubscribe(ApplicationShutdownRequestedEvent.class, null);
+            first.subscribe(ApplicationShutdownRequestedEvent.class, null, event -> received.add(3));
+            events.publishAndWait(new ApplicationShutdownRequestedEvent("second"));
+            assertThat(received).containsExactly(1, 2, 3);
+        } finally {
+            events.onStop();
+        }
+    }
+
+    @Test
     void dispatchesNestedEventsInOrderDespiteAnotherHandlerFailure() throws Exception {
         OrionEventManager events = new OrionEventManager();
         ApplicationShutdownRequestedEvent nested = new ApplicationShutdownRequestedEvent("nested");
@@ -21,13 +44,13 @@ class OrionEventManagerTest {
         List<String> received = new CopyOnWriteArrayList<>();
         List<Thread> handlerThreads = new CopyOnWriteArrayList<>();
         CountDownLatch handled = new CountDownLatch(2);
-        events.subscribe(ApplicationShutdownRequestedEvent.class, event -> {
+        events.forTarget(new Object()).subscribe(ApplicationShutdownRequestedEvent.class, null, event -> {
             throw new IllegalStateException("failed subscriber");
         });
-        events.subscribe(ApplicationShutdownRequestedEvent.class, event -> {
+        events.forTarget(new Object()).subscribe(ApplicationShutdownRequestedEvent.class, null, event -> {
             if (event.getSource().equals("parent")) events.publish(nested);
         });
-        events.subscribe(ApplicationShutdownRequestedEvent.class, event -> {
+        events.forTarget(new Object()).subscribe(ApplicationShutdownRequestedEvent.class, null, event -> {
             received.add(event.getSource());
             handlerThreads.add(Thread.currentThread());
             handled.countDown();
@@ -51,16 +74,16 @@ class OrionEventManagerTest {
     void closedSubscriptionDoesNotReceiveLaterEvents() {
         OrionEventManager events = new OrionEventManager();
         AtomicInteger received = new AtomicInteger();
-        Subscription subscription = events.subscribe(ApplicationShutdownRequestedEvent.class,
-                event -> received.incrementAndGet());
+        OrionEvents subscription = events.forTarget(new Object());
+        subscription.subscribe(ApplicationShutdownRequestedEvent.class, null, event -> received.incrementAndGet());
 
         events.onStart();
         try {
             events.publishAndWait(new ApplicationShutdownRequestedEvent("before close"));
-            subscription.close();
+            subscription.unsubscribe(ApplicationShutdownRequestedEvent.class, null);
             events.publishAndWait(new ApplicationShutdownRequestedEvent("after close"));
         } finally {
-            subscription.close();
+            subscription.unsubscribe(ApplicationShutdownRequestedEvent.class, null);
             events.onStop();
         }
 

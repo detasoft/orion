@@ -1,5 +1,11 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.util.VcChangeDescription;
+
+import pro.deta.orion.util.VcRevision;
+
+import pro.deta.orion.keymaterial.KeyMaterialOperation;
+
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
 import pro.deta.orion.keymaterial.KeyMaterialRepository;
@@ -10,7 +16,6 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
@@ -165,14 +170,14 @@ class BootstrapProxyAdoptionTest {
         var signing = new KeyMaterialId("signing", 1);
         try (var options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
             OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
-                    new InMemoryBlobStorage(),
+                    testRuntime.pkcs12Store("password".toCharArray()),
                     new KeyMaterialCodec(options),
                     testRuntime.unstartedEvents()));
             try {
-                material.withModification(material.revision(), modification -> {
+                try (KeyMaterialOperation modification = material.open(new VcRevision.Stored(material.revision()))) {
                     modification.generateKey(signing.alias(), Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
-                    modification.apply();
-                });
+                    modification.commit(VcChangeDescription.EMPTY);
+                }
                 return material;
             } catch (Exception failure) {
                 material.close();

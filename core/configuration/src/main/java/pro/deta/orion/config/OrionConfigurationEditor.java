@@ -1,7 +1,6 @@
 package pro.deta.orion.config;
 
 import java.util.Set;
-
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
@@ -14,8 +13,6 @@ import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.util.Result;
-import pro.deta.orion.util.Subscription;
-
 import java.security.GeneralSecurityException;
 import java.util.Objects;
 import java.util.Optional;
@@ -29,7 +26,7 @@ public final class OrionConfigurationEditor implements ServiceLifecycleStateMach
     private final OrionEventManager events;
     private final OrionKeyMaterial configurationMaterial;
     private volatile OrionDocumentRevision activeConfiguration;
-    private volatile Subscription changeSubscription;
+    private volatile Consumer<ConfigurationChanged> changeSubscription;
 
     @Inject
     public OrionConfigurationEditor(OrionVersionedConfigurationStorage storage,
@@ -48,7 +45,8 @@ public final class OrionConfigurationEditor implements ServiceLifecycleStateMach
         if (changeSubscription != null) {
             throw new IllegalStateException("Configuration editor is already running");
         }
-        changeSubscription = events.subscribe(ConfigurationChanged.class, this::onConfigurationChange);
+        changeSubscription = this::onConfigurationChange;
+        events.forTarget(this).subscribe(ConfigurationChanged.class, null, changeSubscription);
         try {
             OrionDocumentRevision snapshot = load();
             if (snapshot.result() instanceof Result.Failure<OrionDocument> failure
@@ -66,7 +64,7 @@ public final class OrionConfigurationEditor implements ServiceLifecycleStateMach
     @Override
     public synchronized void onStop() {
         if (changeSubscription != null) {
-            changeSubscription.close();
+            events.forTarget(this).unsubscribe(ConfigurationChanged.class, null);
             changeSubscription = null;
         }
     }

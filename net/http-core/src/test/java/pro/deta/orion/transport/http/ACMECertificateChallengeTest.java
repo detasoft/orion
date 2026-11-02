@@ -16,7 +16,6 @@ import pro.deta.orion.test.certificates.TestCertificateChain;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.HttpTransportConfig;
@@ -222,9 +221,9 @@ public class ACMECertificateChallengeTest {
         }
     }
 
-    private static OrionKeyMaterial keyMaterial() throws Exception {
+    private OrionKeyMaterial keyMaterial() throws Exception {
         return OrionKeyMaterial.open(new KeyMaterialRepository(
-                new InMemoryBlobStorage(),
+                events.pkcs12Store("test-password".toCharArray()),
                 new KeyMaterialCodec(KeyMaterialOptions.pkcs12("test-password".toCharArray())),
                 new OrionEventManager()));
     }

@@ -1,12 +1,16 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
+import pro.deta.orion.git.fileapi.GitBlobStorage;
+
 import pro.deta.orion.util.VcChangeDescription;
 
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.BootstrapContext;
-import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
+import pro.deta.orion.config.BlobOrionConfigurationStorage;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import pro.deta.orion.util.VcChangeAuthor;
@@ -14,7 +18,6 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
-import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.OrionXml;
@@ -41,6 +44,10 @@ import pro.deta.orion.test.integration.git.FileTestSupport;
 class BootstrapProxyTransportIT {
     private static final String REF = "refs/heads/main";
 
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
+
     @TempDir
     Path tempDir;
 
@@ -62,18 +69,16 @@ class BootstrapProxyTransportIT {
                     .valueOrFailure("upstream repository");
             byte[] originalConfiguration =
                     TestRuntimeBootstrap.configurationXml(upstream.component().configurationEditor());
-            repository
-                    .files()
-                    .withAccess(
-                            REF,
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "bootstrap inputs"),
-                            fileAccess -> {
-                                fileAccess.write("orion.xml", originalConfiguration);
-                                fileAccess.write(
-                                        "material.p12", materialBytes(configuration, environment));
-                                fileAccess.apply();
-                                return null;
-                            });
+            FileTestSupport.initialize(repository, REF);
+            try (GitFileAccess fileAccess = repository.files().open(repository.ref(REF))) {
+                fileAccess.write("orion.xml", originalConfiguration);
+                fileAccess.write("material.p12", materialBytes(configuration, environment));
+                repository.refUpdate(
+                        repository.ref(REF),
+                        fileAccess.revision(),
+                        fileAccess.commit(
+                                new VcChangeDescription(VcChangeAuthor.EMPTY, "bootstrap inputs")));
+            }
 
             var upstreamProvider = NativeGitRepositoryFactory.bootstrap(
                     NativeGitRepositoryBackend.file(
@@ -84,7 +89,8 @@ class BootstrapProxyTransportIT {
                     "cache-isolation-probe", configuration.getBootstrap().getConfiguration());
             assertCacheIsNotRoutable(configuration, environment, upstreamCache);
             try (var probeMaterial = TestServerIdentityMaterial.openMaterial(
-                    configuration, environment, new InMemoryBlobStorage())) {
+                    configuration, environment,
+                            testRuntime.pkcs12Store(environment.get(PASSWORD_ENV).toCharArray()))) {
                 var probeConfiguration = new AtomicReference<>(OrionXml.read(
                         new ByteArrayInputStream(originalConfiguration)));
                 var probeSecrets = new ConfigurationSecrets(probeConfiguration::get, probeMaterial);
@@ -108,8 +114,8 @@ class BootstrapProxyTransportIT {
 
                     NativeGitRepository retained = provider.openForRead(cache).valueOrFailure("provisional handle");
 
-                    var storage = new NativeGitOrionConfigurationStorage(bootstrap.repositoryFactory().fileEvents(
-                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getConfiguration()));
+                    var storage = new BlobOrionConfigurationStorage(new GitBlobStorage(bootstrap.repositoryFactory().fileEvents(
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getConfiguration())), bootstrapEvents1);
                     var component = runtimeComponent(configuration, bootstrap, bootstrapEvents1);
                     var lifecycle = component.orionApplicationLifecycle();
                     try {
@@ -128,18 +134,20 @@ class BootstrapProxyTransportIT {
                         ByteArrayOutputStream xml = new ByteArrayOutputStream();
                         OrionXml.write(current.get(), xml);
                         byte[] updatedConfiguration = bytes(xml.toString(StandardCharsets.UTF_8) + "\n");
-                        repository
-                                .files()
-                                .withAccess(
-                                        REF,
-                                        new VcChangeDescription(VcChangeAuthor.EMPTY, "upstream edit"),
-                                        fileAccess -> {
-                                            fileAccess.write("orion.xml", updatedConfiguration);
-                                            fileAccess.apply();
-                                            return null;
-                                        });
+                        FileTestSupport.initialize(repository, REF);
+                        try (GitFileAccess fileAccess =
+                                repository.files().open(repository.ref(REF))) {
+                            fileAccess.write("orion.xml", updatedConfiguration);
+                            repository.refUpdate(
+                                    repository.ref(REF),
+                                    fileAccess.revision(),
+                                    fileAccess.commit(
+                                            new VcChangeDescription(
+                                                    VcChangeAuthor.EMPTY, "upstream edit")));
+                        }
+
                         provider.openForRead(cache).valueOrFailure("refreshed proxy");
-                        assertThat(retained.files().readBytes(REF, "orion.xml"))
+                        assertThat(retained.files().<byte[], Exception>read(retained.ref(REF), file -> file.readBytes("orion.xml")))
                                 .isEqualTo(updatedConfiguration);
 
                         Path credentialFile = Path.of(URI.create(configuration.getBootstrap()
@@ -165,42 +173,54 @@ class BootstrapProxyTransportIT {
                         configureSources(tempDir, configuration, upstream, transport);
                         provider.openForRead(cache).valueOrFailure("rotated credential");
 
-                        retained.files()
-                                .withAccess(
-                                        REF,
-                                        new VcChangeDescription(VcChangeAuthor.EMPTY, "proxy edit"),
-                                        fileAccess -> {
-                                            fileAccess.write("marker.txt", bytes("proxy edit"));
-                                            fileAccess.apply();
-                                            return null;
-                                        });
-                        assertThat(repository.files().readBytes(REF, "marker.txt"))
+                        FileTestSupport.initialize(retained, REF);
+                        try (GitFileAccess fileAccess = retained.files().open(retained.ref(REF))) {
+                            fileAccess.write("marker.txt", bytes("proxy edit"));
+                            retained.refUpdate(
+                                    retained.ref(REF),
+                                    fileAccess.revision(),
+                                    fileAccess.commit(
+                                            new VcChangeDescription(
+                                                    VcChangeAuthor.EMPTY, "proxy edit")));
+                        }
+
+                        assertThat(
+                                        repository
+                                                .files()
+                                                .<byte[], Exception>read(
+                                                        repository.ref(REF),
+                                                        file -> file.readBytes("marker.txt")))
                                 .isEqualTo(bytes("proxy edit"));
 
-                        var stale = FileTestSupport.prepared(retained.files(), REF, "stale candidate",
+                        var stale = FileTestSupport.prepared(retained, REF, "stale candidate",
                                 VcChangeAuthor.EMPTY, fileAccess -> {
                             fileAccess.write("marker.txt", bytes("stale edit"));
                             return null;
                         });
-                        repository
-                                .files()
-                                .withAccess(
-                                        REF,
-                                        new VcChangeDescription(VcChangeAuthor.EMPTY, "concurrent edit"),
-                                        fileAccess -> {
-                                            fileAccess.write(
-                                                    "marker.txt",
-                                                    bytes("concurrent upstream edit"));
-                                            fileAccess.apply();
-                                            return null;
-                                        });
+                        FileTestSupport.initialize(repository, REF);
+                        try (GitFileAccess fileAccess =
+                                repository.files().open(repository.ref(REF))) {
+                            fileAccess.write("marker.txt", bytes("concurrent upstream edit"));
+                            repository.refUpdate(
+                                    repository.ref(REF),
+                                    fileAccess.revision(),
+                                    fileAccess.commit(
+                                            new VcChangeDescription(
+                                                    VcChangeAuthor.EMPTY, "concurrent edit")));
+                        }
+
                         String upstreamRevision = repository.refs().get(REF);
                         assertThat(provider.publishPack(cache, stale.pack(), stale.refUpdates(), true,
                                 GitNativeRepositoryAccessHook.ALLOW_ALL))
                                 .extracting(RefUpdateResult::status)
                                 .containsExactly(RefUpdateResult.Status.EXPECTED_OLD_MISMATCH);
                         assertThat(repository.refs()).containsEntry(REF, upstreamRevision);
-                        assertThat(repository.files().readBytes(REF, "marker.txt"))
+                        assertThat(
+                                        repository
+                                                .files()
+                                                .<byte[], Exception>read(
+                                                        repository.ref(REF),
+                                                        file -> file.readBytes("marker.txt")))
                                 .isEqualTo(bytes("concurrent upstream edit"));
                     } finally {
                         lifecycle.shutdownApplication();
@@ -216,8 +236,8 @@ class BootstrapProxyTransportIT {
                     String cache = restarted.repositoryFactory()
                             .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE).orElseThrow();
                     var provider = restarted.repositoryProvider();
-                    var storage = new NativeGitOrionConfigurationStorage(restarted.repositoryFactory().fileEvents(
-                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getConfiguration()));
+                    var storage = new BlobOrionConfigurationStorage(new GitBlobStorage(restarted.repositoryFactory().fileEvents(
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getConfiguration())), bootstrapEvents2);
                     var before =
                             storage.load()
                                     .revision();

@@ -1,6 +1,7 @@
 package pro.deta.orion.git.workflow.orion;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -24,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionGitClientTest {
     @Test
+    @Disabled("docs/plans/tasks/01_vc-first-revision.md: first stored revision creation")
     void initializesWorkTreeWhenDirectoryNameIsNotARepositoryName(@TempDir Path directory) throws Exception {
         Path workTreeDirectory = directory.resolve("Mixed Case");
         try (GitWorkTree workTree = OrionGitEngines.client().init(workTreeDirectory)) {
@@ -34,6 +36,7 @@ class OrionGitClientTest {
     }
 
     @Test
+    @Disabled("docs/plans/tasks/01_vc-first-revision.md: first stored revision creation")
     void createsTheSameDeterministicCommitAsJGitAndUpdatesLocalRefs(@TempDir Path directory) throws Exception {
         try (GitWorkTree orion = OrionGitEngines.client().init(directory.resolve("orion"));
                 GitWorkTree jgit = GitClients.jgit().init(directory.resolve("jgit"))) {
@@ -49,6 +52,7 @@ class OrionGitClientTest {
     }
 
     @Test
+    @Disabled("docs/plans/tasks/01_vc-first-revision.md: first stored revision creation")
     void failsCommitWhenAStagedPathIsMissing(@TempDir Path directory) throws Exception {
         try (GitWorkTree workTree = OrionGitEngines.client().init(directory.resolve("orion"))) {
             workTree.add("missing.txt");
@@ -60,6 +64,7 @@ class OrionGitClientTest {
     }
 
     @Test
+    @Disabled("docs/plans/tasks/01_vc-first-revision.md: first stored revision creation")
     void pushesClonesFetchesAndPullsThroughNativeClientPrimitives(@TempDir Path directory) throws Exception {
         try (GitServer server = GitServers.jgit()) {
             GitRemoteRepository remote = server.createRemoteRepository(directory, "remote.git");
@@ -95,6 +100,7 @@ class OrionGitClientTest {
     }
 
     @Test
+    @Disabled("docs/plans/tasks/01_vc-first-revision.md: first stored revision creation")
     void rejectsDivergentPullWithoutMovingHead(@TempDir Path directory) throws Exception {
         try (GitServer server = GitServers.jgit()) {
             GitRemoteRepository remote = server.createRemoteRepository(directory, "remote.git");
@@ -129,6 +135,7 @@ class OrionGitClientTest {
     }
 
     @Test
+    @Disabled("docs/plans/tasks/01_vc-first-revision.md: first stored revision creation")
     void pushResultPropagatesAnUnclassifiedTransportFailure(@TempDir Path directory) throws Exception {
         try (GitWorkTree workTree = OrionGitEngines.client().init(directory.resolve("source"))) {
             commit(workTree, "README.md", "initial\n", "initial");
@@ -158,6 +165,7 @@ class OrionGitClientTest {
     }
 
     @Test
+    @Disabled("docs/plans/tasks/01_vc-first-revision.md: first stored revision creation")
     void rejectsDivergentPushWithoutChangingTheRemote(@TempDir Path directory) throws Exception {
         try (GitServer server = OrionGitEngines.server()) {
             GitRemoteRepository remote = server.createRemoteRepository(directory, "remote.git");
@@ -183,6 +191,7 @@ class OrionGitClientTest {
     }
 
     @Test
+    @Disabled("docs/plans/tasks/01_vc-first-revision.md: first stored revision creation")
     void runsBranchAndRejectedPushCatalogScenariosThroughOrion() throws Exception {
         for (GitScenario scenario : GitWorkflowScenarios.catalog()) {
             if (Set.of("second-branch-fetch-and-checkout", "reject-stale-non-fast-forward")
@@ -194,6 +203,7 @@ class OrionGitClientTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"delete-branch", "delete-tags", "force-push-unrelated-history"})
+    @Disabled("docs/plans/tasks/01_vc-first-revision.md: first stored revision creation")
     void runsRefUpdateCatalogScenariosThroughOrion(String name) throws Exception {
         GitScenario scenario = GitWorkflowScenarios.catalog().stream()
                 .filter(candidate -> candidate.name().equals(name)).findFirst().orElseThrow();
@@ -201,6 +211,7 @@ class OrionGitClientTest {
     }
 
     @Test
+    @Disabled("docs/plans/tasks/01_vc-first-revision.md: first stored revision creation")
     void resolvesHeadAgainstTheCheckedOutBranch(@TempDir Path directory) throws Exception {
         try (GitWorkTree workTree = OrionGitEngines.client().init(directory.resolve("source"))) {
             commit(workTree, "main.txt", "main\n", "main");

@@ -50,7 +50,7 @@ class NativeBootstrapGitPusherTest {
         NativeGitRepository repository = repository(location);
         NativeBootstrapGitFetcher fetcher = new NativeBootstrapGitFetcher();
         fetcher.fetch(location, new GitFileClientTransport(), repository);
-        FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), location.refName(),
+        FileTestSupport.Prepared update = FileTestSupport.prepared(repository, location.refName(),
                 "proxy update", VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", "from proxy".getBytes());
             fileAccess.write("run.sh", FileMode.EXECUTABLE_FILE, "#!/bin/sh\n".getBytes());
@@ -93,7 +93,7 @@ class NativeBootstrapGitPusherTest {
         NativeGitRepository repository = repository(location);
         new NativeBootstrapGitFetcher().fetch(location, new GitFileClientTransport(), repository);
         String localOldId = repository.refs().get(location.refName());
-        FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), location.refName(),
+        FileTestSupport.Prepared update = FileTestSupport.prepared(repository, location.refName(),
                 "proxy update", VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", "proxy change".getBytes());
             return null;
@@ -129,7 +129,7 @@ class NativeBootstrapGitPusherTest {
     void runtimeRecordsNativePushAuthenticationFailureAndPreservesItsCause() throws Exception {
         BootstrapGitLocation location = location(tempDir.resolve("upstream.git"));
         NativeGitRepository repository = repository(location);
-        FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), location.refName(),
+        FileTestSupport.Prepared update = FileTestSupport.prepared(repository, location.refName(),
                 "update", VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", new byte[]{1});
             return null;

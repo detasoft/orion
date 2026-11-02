@@ -103,12 +103,12 @@ class OrionApplicationLifecycleTest {
                 }
             }
         };
-        events.subscribe(earlier.getClass(), event -> {
+        events.forTarget(new Object()).subscribe(earlier.getClass(), null, event -> {
             enteredEarlier.countDown();
             await(releaseEarlier);
             events.publish(nested);
         });
-        events.subscribe(later.getClass(), event -> {
+        events.forTarget(new Object()).subscribe(later.getClass(), null, event -> {
             enteredLater.countDown();
             await(releaseLater);
         });

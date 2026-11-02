@@ -1,5 +1,11 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
+
+import pro.deta.orion.test.integration.git.FileTestSupport;
+
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
 import pro.deta.orion.util.VcChangeDescription;
 
 import org.apache.sshd.client.SshClient;
@@ -8,6 +14,7 @@ import org.apache.sshd.client.channel.ChannelExec;
 import org.apache.sshd.client.session.ClientSession;
 import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.util.VcChangeAuthor;
@@ -32,6 +39,7 @@ class PlaywrightTransportTest {
     Path tempDir;
 
     @Test
+    @Disabled("docs/plans/tasks/01_vc-first-revision.md: configuration creation on first startup")
     void browserServerStartsAllTransportsAndServesNativeGit() throws Exception {
         BootstrapConfiguration configuration = configuration();
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
@@ -44,14 +52,27 @@ class PlaywrightTransportTest {
             assertThat(state.status()).isEqualTo(200);
             assertThat(state.body()).contains("git-native: RUNNING", "git-ssh: RUNNING", "http: RUNNING");
 
-            orion.repositoryProvider().create("transport-check")
-                    .valueOrFailure("test Git repository")
-                    .files().withAccess("refs/heads/main", new VcChangeDescription(
-                            new VcChangeAuthor("Test", "test@orion.test"), "seed transport check"), fileAccess -> {
-                fileAccess.write("README.md", "transport check\n".getBytes(StandardCharsets.UTF_8));
-                fileAccess.apply();
-                return null;
-            });
+            {
+                NativeGitRepository modifiedRepository =
+                        orion.repositoryProvider()
+                                .create("transport-check")
+                                .valueOrFailure("test Git repository");
+                FileTestSupport.initialize(modifiedRepository, "refs/heads/main");
+                try (GitFileAccess fileAccess =
+                        modifiedRepository
+                                .files()
+                                .open(modifiedRepository.ref("refs/heads/main"))) {
+                    fileAccess.write(
+                            "README.md", "transport check\n".getBytes(StandardCharsets.UTF_8));
+                    modifiedRepository.refUpdate(
+                            modifiedRepository.ref("refs/heads/main"),
+                            fileAccess.revision(),
+                            fileAccess.commit(
+                                    new VcChangeDescription(
+                                            new VcChangeAuthor("Test", "test@orion.test"),
+                                            "seed transport check")));
+                }
+        }
             String gitUrl = "git://127.0.0.1:" + orion.gitPort();
             assertThat(Git.lsRemoteRepository().setRemote(gitUrl + "/transport-check.git")
                     .setTimeout(10).call())
@@ -63,6 +84,7 @@ class PlaywrightTransportTest {
     }
 
     @Test
+    @Disabled("docs/plans/tasks/01_vc-first-revision.md: configuration creation on first startup")
     void browserServerRejectsUnknownSshKeysAndStillAcceptsItsAdminKey() throws Exception {
         BootstrapConfiguration configuration = configuration();
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {

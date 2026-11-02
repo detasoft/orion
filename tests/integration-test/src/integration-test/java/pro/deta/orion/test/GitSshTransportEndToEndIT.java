@@ -1,5 +1,11 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
+
+import pro.deta.orion.test.integration.git.FileTestSupport;
+
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
 import pro.deta.orion.util.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -1547,16 +1553,28 @@ class GitSshTransportEndToEndIT {
          */
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         OrionXml.write(OrionDocument.withAccessControl(accessControl), output);
-        NativeGitRepositoryProvider.file(orionRoot.resolve("repos"), new pro.deta.orion.event.OrionEventManager())
-                .create("orion")
-                .valueOrFailure("ACL repository should be created")
-                .files().withAccess("refs/heads/" + BRANCH,
-                        new VcChangeDescription(
-                                new VcChangeAuthor("E2E Test", "e2e@example.test"), "seed e2e access control"), fileAccess -> {
-            fileAccess.write("orion.xml", output.toByteArray());
-            fileAccess.apply();
-            return null;
-        });
+        {
+            NativeGitRepository modifiedRepository =
+                    NativeGitRepositoryProvider.file(
+                                    orionRoot.resolve("repos"),
+                                    new pro.deta.orion.event.OrionEventManager())
+                            .create("orion")
+                            .valueOrFailure("ACL repository should be created");
+            FileTestSupport.initialize(modifiedRepository, "refs/heads/" + BRANCH);
+            try (GitFileAccess fileAccess =
+                    modifiedRepository
+                            .files()
+                            .open(modifiedRepository.ref("refs/heads/" + BRANCH))) {
+                fileAccess.write("orion.xml", output.toByteArray());
+                modifiedRepository.refUpdate(
+                        modifiedRepository.ref("refs/heads/" + BRANCH),
+                        fileAccess.revision(),
+                        fileAccess.commit(
+                                new VcChangeDescription(
+                                        new VcChangeAuthor("E2E Test", "e2e@example.test"),
+                                        "seed e2e access control")));
+            }
+        }
     }
 
     private static AccessControl accessControlFor(PublicKey userPublicKey) {
@@ -1622,16 +1640,28 @@ class GitSshTransportEndToEndIT {
     }
 
     private static void seedProjectRepository(Path orionRoot, String repositoryName, String content) throws Exception {
-        NativeGitRepositoryProvider.file(orionRoot.resolve("repos"), new pro.deta.orion.event.OrionEventManager())
-                .create(repositoryName)
-                .valueOrFailure("Project repository should be created")
-                .files().withAccess("refs/heads/" + BRANCH,
-                        new VcChangeDescription(
-                                new VcChangeAuthor("E2E Test", "e2e@example.test"), "seed " + repositoryName), fileAccess -> {
-            fileAccess.write("README.md", content.getBytes(StandardCharsets.UTF_8));
-            fileAccess.apply();
-            return null;
-        });
+        {
+            NativeGitRepository modifiedRepository =
+                    NativeGitRepositoryProvider.file(
+                                    orionRoot.resolve("repos"),
+                                    new pro.deta.orion.event.OrionEventManager())
+                            .create(repositoryName)
+                            .valueOrFailure("Project repository should be created");
+            FileTestSupport.initialize(modifiedRepository, "refs/heads/" + BRANCH);
+            try (GitFileAccess fileAccess =
+                    modifiedRepository
+                            .files()
+                            .open(modifiedRepository.ref("refs/heads/" + BRANCH))) {
+                fileAccess.write("README.md", content.getBytes(StandardCharsets.UTF_8));
+                modifiedRepository.refUpdate(
+                        modifiedRepository.ref("refs/heads/" + BRANCH),
+                        fileAccess.revision(),
+                        fileAccess.commit(
+                                new VcChangeDescription(
+                                        new VcChangeAuthor("E2E Test", "e2e@example.test"),
+                                        "seed " + repositoryName)));
+            }
+        }
     }
 
     private static Git initRepository(Path directory) throws Exception {

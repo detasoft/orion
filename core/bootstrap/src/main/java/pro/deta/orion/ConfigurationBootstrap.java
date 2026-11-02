@@ -2,13 +2,14 @@ package pro.deta.orion;
 
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.BootstrapConfigurationSourceConfig;
-import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
+import pro.deta.orion.config.BlobOrionConfigurationStorage;
+import pro.deta.orion.git.fileapi.GitBlobStorage;
+import pro.deta.orion.git.fileapi.GitFileEvents;
 import pro.deta.orion.config.OrionVersionedConfigurationStorage;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.ResourceLocation;
 import pro.deta.orion.util.ResourceScheme;
-
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Map;
@@ -30,9 +31,10 @@ public final class ConfigurationBootstrap {
     public static OrionVersionedConfigurationStorage open(
             BootstrapConfiguration configuration,
             NativeGitRepositoryFactory repositoryFactory) {
-        return new NativeGitOrionConfigurationStorage(repositoryFactory.fileEvents(
+        GitFileEvents fileEvents = repositoryFactory.fileEvents(
 //                AI_TODO зачем тут configuration.getBootstrap().getAccessControl() - он создаётся сильно позже bootstrap - надо же сначала сделать конфигурацию, (репозитории вот это всё) и только потом настраивать ACL?
-                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getConfiguration()));
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration.getBootstrap().getConfiguration());
+        return new BlobOrionConfigurationStorage(new GitBlobStorage(fileEvents), fileEvents.events());
     }
 
     private static BootstrapConfigurationSourceConfig repositoryConfiguration(

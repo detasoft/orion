@@ -1,5 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
 import pro.deta.orion.util.VcChangeDescription;
 
 import org.junit.jupiter.api.Test;
@@ -94,27 +96,25 @@ class NativeGitReceivePackTest {
     @Test
     void allowAllStillRejectsAStaleOldId() throws Exception {
         NativeGitRepository repository = repository();
-        repository
-                .files()
-                .withAccess(
-                        MAIN,
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
-                        fileAccess -> {
-                            fileAccess.write("config.txt", bytes("initial"));
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, MAIN);
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref(MAIN))) {
+            fileAccess.write("config.txt", bytes("initial"));
+            repository.refUpdate(
+                    repository.ref(MAIN),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "initial")));
+        }
+
         FileTestSupport.Prepared stale = prepare(repository, "stale");
-        repository
-                .files()
-                .withAccess(
-                        MAIN,
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "concurrent"),
-                        fileAccess -> {
-                            fileAccess.write("config.txt", bytes("concurrent"));
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, MAIN);
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref(MAIN))) {
+            fileAccess.write("config.txt", bytes("concurrent"));
+            repository.refUpdate(
+                    repository.ref(MAIN),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "concurrent")));
+        }
+
         String current = repository.refs().get(MAIN);
 
         assertThat(repository.publishPack(stale.pack(), stale.refUpdates(), true,
@@ -140,36 +140,38 @@ class NativeGitReceivePackTest {
     @Test
     void checksAllCommitParentsAndRejectsForcedRewrites() throws Exception {
         NativeGitRepository repository = repository();
-        repository
-                .files()
-                .withAccess(
-                        MAIN,
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
-                        fileAccess -> {
-                            fileAccess.write("config.txt", bytes("initial"));
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, MAIN);
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref(MAIN))) {
+            fileAccess.write("config.txt", bytes("initial"));
+            repository.refUpdate(
+                    repository.ref(MAIN),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "initial")));
+        }
+
         String initial = repository.refs().get(MAIN);
         for (int index = 0; index < 8; index++) {
             String next = "next" + index;
-            repository.files().withAccess(MAIN, new VcChangeDescription(VcChangeAuthor.EMPTY, "next" + index), fileAccess -> {
+            FileTestSupport.initialize(repository, MAIN);
+            try (GitFileAccess fileAccess = repository.files().open(repository.ref(MAIN))) {
                 fileAccess.write("config.txt", bytes(next));
-                fileAccess.apply();
-                return null;
-            });
+                repository.refUpdate(
+                        repository.ref(MAIN),
+                        fileAccess.revision(),
+                        fileAccess.commit(
+                                new VcChangeDescription(VcChangeAuthor.EMPTY, "next" + index)));
+            }
         }
         String descendant = repository.refs().get(MAIN);
-        repository
-                .files()
-                .withAccess(
-                        "side",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "side"),
-                        fileAccess -> {
-                            fileAccess.write("config.txt", bytes("side"));
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "side");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("side"))) {
+            fileAccess.write("config.txt", bytes("side"));
+            repository.refUpdate(
+                    repository.ref("side"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "side")));
+        }
+
         String side = repository.refs().get("refs/heads/side");
         String treeLine = new String(repository.readObject(new ObjectId(descendant)).orElseThrow().data(),
                 java.nio.charset.StandardCharsets.UTF_8).split("\n")[0];
@@ -209,28 +211,26 @@ class NativeGitReceivePackTest {
     @Test
     void comparesOldIdAgainAfterAuthorization() throws Exception {
         NativeGitRepository repository = repository();
-        repository
-                .files()
-                .withAccess(
-                        MAIN,
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
-                        fileAccess -> {
-                            fileAccess.write("config.txt", bytes("initial"));
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, MAIN);
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref(MAIN))) {
+            fileAccess.write("config.txt", bytes("initial"));
+            repository.refUpdate(
+                    repository.ref(MAIN),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "initial")));
+        }
+
         FileTestSupport.Prepared prepared = prepare(repository, "prepared");
         String expected = repository.refs().get(MAIN);
-        repository
-                .files()
-                .withAccess(
-                        "side",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "concurrent"),
-                        fileAccess -> {
-                            fileAccess.write("config.txt", bytes("concurrent"));
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "side");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("side"))) {
+            fileAccess.write("config.txt", bytes("concurrent"));
+            repository.refUpdate(
+                    repository.ref("side"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "concurrent")));
+        }
+
         String concurrent = repository.refs().get("refs/heads/side");
         GitNativeRepositoryAccessHook hook = new GitNativeRepositoryAccessHook() {
             @Override
@@ -253,7 +253,7 @@ class NativeGitReceivePackTest {
 
     private static FileTestSupport.Prepared prepare(NativeGitRepository repository, String value)
             throws Exception {
-        return FileTestSupport.prepared(repository.files(), MAIN, value, VcChangeAuthor.EMPTY, fileAccess -> {
+        return FileTestSupport.prepared(repository, MAIN, value, VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("config.txt", bytes(value));
             return null;
         });

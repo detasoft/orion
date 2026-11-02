@@ -13,10 +13,12 @@ import pro.deta.orion.event.OrionEventManager;
 public final class GitFileEvents implements AutoCloseable {
     private final UUID id = UUID.randomUUID();
     private final GitFile file;
+    private final OrionEventManager eventManager;
 
     public GitFileEvents(GitFile file) {
         this.file = Objects.requireNonNull(file, "file");
-        file.events().forTarget(this).subscribe(RepositoryRefChanged.class, null, this::accept);
+        eventManager = file.events();
+        eventManager.forTarget(this).subscribe(RepositoryRefChanged.class, null, this::accept);
     }
 
     public GitFile file() {
@@ -24,7 +26,7 @@ public final class GitFileEvents implements AutoCloseable {
     }
 
     public OrionEventManager events() {
-        return file.events();
+        return eventManager;
     }
 
     public UUID source() {
@@ -59,6 +61,6 @@ public final class GitFileEvents implements AutoCloseable {
 
     @Override
     public void close() {
-        file.events().forTarget(this).unsubscribe(RepositoryRefChanged.class, null);
+        eventManager.forTarget(this).unsubscribe(RepositoryRefChanged.class, null);
     }
 }

@@ -59,7 +59,6 @@ import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.test.util.OrionTestRuntime;
-import pro.deta.orion.util.Subscription;
 import pro.deta.orion.config.ConfigurationChanged;
 import pro.deta.orion.config.OrionConfigurationModification;
 import pro.deta.orion.config.OrionDocumentRevision;
@@ -271,9 +270,9 @@ class OrionAccessControlServiceImplTest {
         AclFixture initial = new AclFixture();
         initial.getUsers().add(user("alice"));
         List<OrionDocumentRevision> published = new ArrayList<>();
-        try (ServiceFixture fixture = fixture(initial);
-                Subscription subscription = fixture.storage.events.subscribe(ConfigurationChanged.class,
-                        event -> published.add(event.snapshot()))) {
+        try (ServiceFixture fixture = fixture(initial)) {
+            fixture.storage.events.forTarget(this).subscribe(ConfigurationChanged.class, null,
+                    event -> published.add(event.snapshot()));
             fixture.withAccess(
                     fixture.editor.edit(
                             fixture.storage.snapshot.revision(),
@@ -337,9 +336,9 @@ class OrionAccessControlServiceImplTest {
         AclFixture initial = new AclFixture();
         initial.getUsers().add(user("alice"));
         List<OrionDocumentRevision> published = new ArrayList<>();
-        try (ServiceFixture fixture = fixture(initial);
-                Subscription subscription = fixture.storage.events.subscribe(ConfigurationChanged.class,
-                        event -> published.add(event.snapshot()))) {
+        try (ServiceFixture fixture = fixture(initial)) {
+            fixture.storage.events.forTarget(this).subscribe(ConfigurationChanged.class, null,
+                    event -> published.add(event.snapshot()));
             fixture.withAccess(
                     fixture.editor.edit(
                             fixture.storage.snapshot.revision(),
@@ -382,8 +381,9 @@ class OrionAccessControlServiceImplTest {
             editor.onStart();
             OrionConfigurationModification modification =
                     editor.edit(storage.snapshot.revision(), ChangeMetadata.EMPTY);
-            try (Subscription subscription = storage.events.subscribe(ConfigurationChanged.class,
-                    event -> published.add(event.snapshot()))) {
+            storage.events.forTarget(this).subscribe(ConfigurationChanged.class, null,
+                    event -> published.add(event.snapshot()));
+            try {
                 modification.update(document -> new OrionDocument(new OrionDocument.SystemConfiguration(
                         document.system().accessControl(), document.system().https(),
                         List.of(new ConfigurationSecret("credential", testEnvelope())),

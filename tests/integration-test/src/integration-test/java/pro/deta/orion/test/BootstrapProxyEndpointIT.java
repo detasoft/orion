@@ -1,5 +1,11 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
+
+import pro.deta.orion.test.integration.git.FileTestSupport;
+
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
 import pro.deta.orion.util.VcChangeAuthor;
 
 import pro.deta.orion.util.VcChangeDescription;
@@ -114,18 +120,17 @@ class BootstrapProxyEndpointIT {
             var xml = new ByteArrayOutputStream();
             OrionXml.write(document.replaceAccessControl(
                     new AccessControl(users, currentAcl.roles(), currentAcl.grants())), xml);
-            repository
-                    .files()
-                    .withAccess(
-                            REF,
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "seed inputs"),
-                            fileAccess -> {
-                                fileAccess.write("orion.xml", xml.toByteArray());
-                                fileAccess.write(
-                                        "material.p12", materialBytes(target, environment));
-                                fileAccess.apply();
-                                return null;
-                            });
+            FileTestSupport.initialize(repository, REF);
+            try (GitFileAccess fileAccess = repository.files().open(repository.ref(REF))) {
+                fileAccess.write("orion.xml", xml.toByteArray());
+                fileAccess.write("material.p12", materialBytes(target, environment));
+                repository.refUpdate(
+                        repository.ref(REF),
+                        fileAccess.revision(),
+                        fileAccess.commit(
+                                new VcChangeDescription(VcChangeAuthor.EMPTY, "seed inputs")));
+            }
+
             for (int launch = 0; launch < 2; launch++) {
                 pro.deta.orion.event.OrionEventManager bootstrapEvents1 =
                         new pro.deta.orion.event.OrionEventManager();
@@ -191,19 +196,27 @@ class BootstrapProxyEndpointIT {
                                             return null;
                                         });
                             }
-                            bootstrap
-                                    .repositoryProvider()
-                                    .create("ordinary")
-                                    .valueOrFailure("ordinary repository")
-                                    .files()
-                                    .withAccess(
-                                            REF,
-                                            new VcChangeDescription(VcChangeAuthor.EMPTY, "ordinary seed"),
-                                            fileAccess -> {
-                                                fileAccess.write("file", new byte[] {1});
-                                                fileAccess.apply();
-                                                return null;
-                                            });
+                            {
+                                NativeGitRepository modifiedRepository =
+                                        bootstrap
+                                                .repositoryProvider()
+                                                .create("ordinary")
+                                                .valueOrFailure("ordinary repository");
+                                FileTestSupport.initialize(modifiedRepository, REF);
+                                try (GitFileAccess fileAccess =
+                                        modifiedRepository
+                                                .files()
+                                                .open(modifiedRepository.ref(REF))) {
+                                    fileAccess.write("file", new byte[] {1});
+                                    modifiedRepository.refUpdate(
+                                            modifiedRepository.ref(REF),
+                                            fileAccess.revision(),
+                                            fileAccess.commit(
+                                                    new VcChangeDescription(
+                                                            VcChangeAuthor.EMPTY,
+                                                            "ordinary seed")));
+                                }
+        }
                         }
                         String cache = bootstrap.repositoryFactory()
                                 .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE)
@@ -258,8 +271,17 @@ class BootstrapProxyEndpointIT {
                                             .extracting(RemoteRefUpdate::getStatus).isEqualTo(RemoteRefUpdate.Status.OK);
                                 }
                                 assertThat(repository.refs()).containsEntry(REF, commit.name());
-                                assertThat(repository.files().readBytes(REF, "client-marker"))
-                                        .isEqualTo(("launch " + launch).getBytes(StandardCharsets.UTF_8));
+                                assertThat(
+                                                repository
+                                                        .files()
+                                                        .<byte[], Exception>read(
+                                                                repository.ref(REF),
+                                                                file ->
+                                                                        file.readBytes(
+                                                                                "client-marker")))
+                                        .isEqualTo(
+                                                ("launch " + launch)
+                                                        .getBytes(StandardCharsets.UTF_8));
                                 assertThat(Git.lsRemoteRepository().setRemote(reader.uri(ENDPOINT))
                                         .setTransportConfigCallback(reader.callback()).call())
                                         .anySatisfy(ref -> {

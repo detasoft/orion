@@ -9,6 +9,8 @@ import pro.deta.orion.event.type.OrionEvent;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 
 import java.util.ArrayDeque;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -24,7 +26,8 @@ import java.util.function.Supplier;
  * the data their handlers need, because handlers run later and outside the original request flow.</p>
  *
  * <p>The manager owns a single root Disruptor and starts/stops it with the application lifecycle. Event dispatch is
- * based on matching the concrete event class and source.</p>
+ * based on matching the concrete event class and source. Handlers for the same route run in
+ * registration order.</p>
  *
  * <p>Handlers run on the Disruptor daemon thread, so they should be quick and should not rely on request-thread
  * ThreadLocals. If a handler needs request context, the publisher must copy the required data into the event object.</p>
@@ -37,7 +40,7 @@ import java.util.function.Supplier;
 public class OrionEventManager implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
     public static final int RING_BUFFER_SIZE = 32_768;
     private final OrionDisruptor rootDisruptor = new OrionDisruptor(RING_BUFFER_SIZE);
-    private final ConcurrentHashMap<Route, ConcurrentHashMap<Object, Consumer<OrionEvent>>> registrations
+    private final ConcurrentHashMap<Route, Map<Object, Consumer<OrionEvent>>> registrations
             = new ConcurrentHashMap<>();
     private final ArrayDeque<OrionEvent> pendingEvents = new ArrayDeque<>();
     private volatile Thread dispatchThread;
@@ -121,9 +124,10 @@ public class OrionEventManager implements ServiceLifecycleStateMachineAdapter.Se
         Objects.requireNonNull(target, "target");
         Objects.requireNonNull(handler, "handler");
         registrations.compute(new Route(type, source), (route, targets) -> {
-            if (targets == null) targets = new ConcurrentHashMap<>();
-            targets.putIfAbsent(target, event -> handler.accept(type.cast(event)));
-            return targets;
+            Map<Object, Consumer<OrionEvent>> updated = targets == null
+                    ? new LinkedHashMap<>() : new LinkedHashMap<>(targets);
+            updated.putIfAbsent(target, event -> handler.accept(type.cast(event)));
+            return updated;
         });
     }
 
@@ -139,13 +143,14 @@ public class OrionEventManager implements ServiceLifecycleStateMachineAdapter.Se
 
     private void removeTarget(Route route, Object target) {
         registrations.computeIfPresent(route, (key, targets) -> {
-            targets.remove(target);
-            return targets.isEmpty() ? null : targets;
+            Map<Object, Consumer<OrionEvent>> updated = new LinkedHashMap<>(targets);
+            updated.remove(target);
+            return updated.isEmpty() ? null : updated;
         });
     }
 
     private void dispatch(OrionEvent event) {
-        ConcurrentHashMap<Object, Consumer<OrionEvent>> targets = registrations.get(
+        Map<Object, Consumer<OrionEvent>> targets = registrations.get(
                 new Route(event.getClass(), event.source()));
         if (targets == null) return;
         for (Consumer<OrionEvent> target : targets.values()) {

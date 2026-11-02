@@ -3,6 +3,7 @@ package pro.deta.orion.acme;
 import pro.deta.orion.util.VcChangeDescription;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.URI;
 import java.security.GeneralSecurityException;
 import java.security.KeyPair;
@@ -266,7 +267,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
             prepareMaterial(settings.material());
             accountKeyPair = keyMaterial.read(settings.material().account()).keyPair();
             domainKeyPair = keyMaterial.read(settings.material().identity()).keyPair();
-        } catch (IOException | GeneralSecurityException failure) {
+        } catch (IOException | UncheckedIOException | GeneralSecurityException failure) {
             throw new AcmeCertificateIssueException("Cannot acquire ACME key material", failure);
         }
         char[] eabKey = settings.eabSecret() == null ? null
@@ -325,7 +326,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
             OrionHttpsConfiguration activated = activateCertificate(settings, identityId, issuerId);
             renewalAttempt = new RenewalAttempt(Optional.of(activated), now, now, "");
             return new IssuedAcmeCertificate(issued.domains(), certificates.chain());
-        } catch (IOException | GeneralSecurityException failure) {
+        } catch (IOException | UncheckedIOException | GeneralSecurityException failure) {
             throw new AcmeCertificateIssueException("Cannot store issued ACME certificate", failure);
         }
     }
@@ -551,7 +552,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
     private void prepareMaterial(OrionHttpsConfiguration https) {
         try {
             prepareMaterial(materialFrom(https));
-        } catch (IOException | GeneralSecurityException failure) {
+        } catch (IOException | UncheckedIOException | GeneralSecurityException failure) {
             throw new AcmeCertificateIssueException("Cannot prepare ACME key material", failure);
         }
     }

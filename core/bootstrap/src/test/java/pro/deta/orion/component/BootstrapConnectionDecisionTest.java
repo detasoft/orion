@@ -1,5 +1,11 @@
 package pro.deta.orion.component;
 
+import pro.deta.orion.util.VcChangeDescription;
+
+import pro.deta.orion.keymaterial.KeyMaterialOperation;
+
+import pro.deta.orion.git.fileapi.GitBlobStorage;
+
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
 import pro.deta.orion.keymaterial.KeyMaterialRepository;
@@ -11,14 +17,13 @@ import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
+import pro.deta.orion.config.BlobOrionConfigurationStorage;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.decision.DecisionRequest;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
@@ -219,18 +224,18 @@ class BootstrapConnectionDecisionTest {
             configuration.setLocation(source.getLocation());
             configuration.setPath(source.getPath());
             provider.resolveProvisional(NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration, false);
-            storage = new NativeGitOrionConfigurationStorage(provider.fileEvents(
-                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration));
+            storage = new BlobOrionConfigurationStorage(new GitBlobStorage(provider.fileEvents(
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration)), testRuntime.unstartedEvents());
             KeyMaterialId signing = new KeyMaterialId("signing", 1);
             try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
                 material = OrionKeyMaterial.open(new KeyMaterialRepository(
-                        new InMemoryBlobStorage(),
+                        testRuntime.pkcs12Store("password".toCharArray()),
                         new KeyMaterialCodec(options),
                         testRuntime.unstartedEvents()));
-                material.withModification(material.revision(), modification -> {
+                try (KeyMaterialOperation modification = material.open(new VcRevision.Stored(material.revision()))) {
                     modification.generateKey("signing", Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
-                    modification.apply();
-                });
+                    modification.commit(VcChangeDescription.EMPTY);
+                }
             }
             editor = new OrionConfigurationEditor(storage,
                 material,

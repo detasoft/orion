@@ -1,5 +1,9 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.fileapi.GitFileTestSupport;
+
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
 import pro.deta.orion.util.VcChangeAuthor;
 
 import pro.deta.orion.util.VcChangeDescription;
@@ -22,22 +26,28 @@ class GitFileTest {
         byte[] content = new byte[]{1, 2};
         try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
-            repository
-                    .files()
-                    .withAccess(
-                            "main",
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
-                            access -> {
-                                access.write("run", FileMode.EXECUTABLE_FILE, content);
-                                content[0] = 3;
-                                access.apply();
-                                return null;
-                            });
-            byte[] loaded = repository.files().readBytes("main", "run");
+            GitFileTestSupport.initialize(repository, "main");
+            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+                access.write("run", FileMode.EXECUTABLE_FILE, content);
+                content[0] = 3;
+                repository.refUpdate(
+                        repository.ref("main"),
+                        access.revision(),
+                        access.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "initial")));
+            }
+
+            byte[] loaded = repository.files().read(repository.ref("main"), file -> file.readBytes("run"));
             assertThat(loaded).containsExactly(1, 2);
             loaded[0] = 5;
             ObjectId revision = new ObjectId(repository.refs().get("refs/heads/main"));
-            assertThat(repository.files().readBytes(revision, "run")).containsExactly(1, 2);
+            assertThat(
+                            repository
+                                    .files()
+                                    .<byte[], Exception>read(
+                                            new pro.deta.orion.util.VcRevision.Stored(
+                                                    revision.toHex()),
+                                            file -> file.readBytes("run")))
+                    .containsExactly(1, 2);
         }
     }
 
@@ -45,22 +55,26 @@ class GitFileTest {
     void rejectsModesWhosePayloadIsNotFileContentWithoutPublishing() throws Exception {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
+            GitFileTestSupport.initialize(repository, "main");
+            String base = repository.refs().get("refs/heads/main");
             for (FileMode mode : new FileMode[]{FileMode.TREE, FileMode.GITLINK}) {
                 assertThatThrownBy(
-                                () ->
-                                        repository
-                                                .files()
-                                                .withAccess(
-                                                        "main",
-                                                        new VcChangeDescription(VcChangeAuthor.EMPTY, "invalid"),
-                                                        access -> {
-                                                            access.write("file", mode, new byte[0]);
-                                                            access.apply();
-                                                            return null;
-                                                        }))
+                                () -> {
+                                    GitFileTestSupport.initialize(repository, "main");
+                                    try (GitFileAccess access =
+                                            repository.files().open(repository.ref("main"))) {
+                                        access.write("file", mode, new byte[0]);
+                                        repository.refUpdate(
+                                                repository.ref("main"),
+                                                access.revision(),
+                                                access.commit(
+                                                        new VcChangeDescription(
+                                                                VcChangeAuthor.EMPTY, "invalid")));
+                                    }
+                                })
                         .isInstanceOf(IllegalArgumentException.class);
             }
-            assertThat(repository.refs()).isEmpty();
+            assertThat(repository.refs()).containsEntry("refs/heads/main", base);
         }
     }
 }

@@ -30,6 +30,26 @@ public final class OrionTestRuntime implements AfterEachCallback, AutoCloseable 
         return manager;
     }
 
+    public pro.deta.orion.storage.InMemoryBlobStorage pkcs12Store(char[] password) {
+        byte[] bytes = pkcs12Content(password);
+        try {
+            return new pro.deta.orion.storage.InMemoryBlobStorage(bytes, false, events());
+        } finally {
+            java.util.Arrays.fill(bytes, (byte) 0);
+        }
+    }
+
+    public static byte[] pkcs12Content(char[] password) {
+        try (java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream()) {
+            java.security.KeyStore store = java.security.KeyStore.getInstance("PKCS12");
+            store.load(null, password);
+            store.store(output, password);
+            return output.toByteArray();
+        } catch (java.io.IOException | java.security.GeneralSecurityException failure) {
+            throw new IllegalStateException("Cannot initialize test key store", failure);
+        }
+    }
+
     public OrionExecutor executor() {
         if (executor == null) {
             executor = new OrionExecutor(2, new OrionThreadFactory());

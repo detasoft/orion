@@ -1,5 +1,4 @@
 package pro.deta.orion.git.parser.v2.index;
-import pro.deta.orion.util.Modification;
 import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
@@ -24,7 +23,11 @@ import java.util.Optional;
  * An access created for a pack owns that pack until apply or discard. Close the pack's storage
  * before finishing the access.
  */
-public interface GitIndexAccess extends Modification {
+public interface GitIndexAccess {
+    void apply() throws IOException;
+
+    void discard() throws IOException;
+
     Optional<PackId> packId();
 
     void addObject(IndexedObject object) throws IOException;

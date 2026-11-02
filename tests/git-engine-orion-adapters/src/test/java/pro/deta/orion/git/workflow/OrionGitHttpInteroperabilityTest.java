@@ -1,5 +1,7 @@
 package pro.deta.orion.git.workflow;
 
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
 import pro.deta.orion.util.VcChangeDescription;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -110,17 +112,22 @@ class OrionGitHttpInteroperabilityTest {
             client.getRepository().getConfig().setString("protocol", null, "version", "2");
             server.start();
             URI remote = URI.create("http://127.0.0.1:" + connector.getLocalPort() + "/r/project.git");
+            initialize(repository);
+            history.add(repository.refs().get("refs/heads/main"));
             if (divergence > 0) {
                 for (int number = 0; number < 64; number++) {
                     String version = "history " + number;
-                    repository.files().withAccess("main", new VcChangeDescription(
-                            VcChangeAuthor.EMPTY, "history " + number),
-                            fileAccess -> {
-                        fileAccess.write("README.md", version.getBytes(
-                                    StandardCharsets.UTF_8));
-                        fileAccess.apply();
-                        return null;
-                    });
+                    try (GitFileAccess fileAccess =
+                            repository.files().open(repository.ref("main"))) {
+                        fileAccess.write("README.md", version.getBytes(StandardCharsets.UTF_8));
+                        repository.refUpdate(
+                                repository.ref("main"),
+                                fileAccess.revision(),
+                                fileAccess.commit(
+                                        new VcChangeDescription(
+                                                VcChangeAuthor.EMPTY, "history " + number)));
+                    }
+
                     history.addFirst(repository.refs().get("refs/heads/main"));
                 }
             }
@@ -128,17 +135,15 @@ class OrionGitHttpInteroperabilityTest {
             List<String> updates = divergence > 0 ? List.of("base\n", "initial\n", "updated\n")
                     : List.of("initial\n", "updated\n");
             for (String content : updates) {
-                repository
-                        .files()
-                        .withAccess(
-                                "main",
-                                new VcChangeDescription(VcChangeAuthor.EMPTY, "update"),
-                                fileAccess -> {
-                                    fileAccess.write(
-                                            "README.md", content.getBytes(StandardCharsets.UTF_8));
-                                    fileAccess.apply();
-                                    return null;
-                                });
+                try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+                    fileAccess.write("README.md", content.getBytes(StandardCharsets.UTF_8));
+                    repository.refUpdate(
+                            repository.ref("main"),
+                            fileAccess.revision(),
+                            fileAccess.commit(
+                                    new VcChangeDescription(VcChangeAuthor.EMPTY, "update")));
+                }
+
                 String commit = repository.refs().get("refs/heads/main");
                 history.addFirst(commit);
                 int requestsBeforeFetch = uploadRequests.get();
@@ -201,7 +206,7 @@ class OrionGitHttpInteroperabilityTest {
                         GitUploadPackRequest.of(commit, received::ingestAndPublish));
                 assertThat(result).isInstanceOf(GitClientResult.Success.class);
                 received.updateRef("refs/heads/main", "0".repeat(40), commit);
-                assertThat(new String(received.files().readBytes("main", "README.md"),
+                assertThat(new String(received.files().read(received.ref("main"), file -> file.readBytes("README.md")),
                         StandardCharsets.UTF_8)).isEqualTo(content);
             }
         }
@@ -212,5 +217,24 @@ class OrionGitHttpInteroperabilityTest {
                 "-c", "fetch.negotiationAlgorithm=consecutive"));
         command.addAll(List.of(arguments));
         return GIT.run(local, command.toArray(String[]::new)).output();
+    }
+
+    private static void initialize(NativeGitRepository repository) throws Exception {
+        if (repository.refs().containsKey("refs/heads/main")) return;
+        pro.deta.orion.git.parser.v2.id.ObjectId tree =
+                repository.writeObject(
+                        pro.deta.orion.git.parser.v2.data.GitObjectType.TREE, new byte[0]);
+        String content =
+                "tree "
+                        + tree.toHex()
+                        + "\n"
+                        + "author Test <test@example.invalid> 1 +0000\n"
+                        + "committer Test <test@example.invalid> 1 +0000\n\nseed\n";
+        pro.deta.orion.git.parser.v2.id.ObjectId commit =
+                repository.writeObject(
+                        pro.deta.orion.git.parser.v2.data.GitObjectType.COMMIT,
+                        content.getBytes(StandardCharsets.UTF_8));
+        pro.deta.orion.git.nativestorage.GitOperationException.requireSuccess(
+                List.of(repository.updateRef("refs/heads/main", "0".repeat(40), commit.toHex())));
     }
 }

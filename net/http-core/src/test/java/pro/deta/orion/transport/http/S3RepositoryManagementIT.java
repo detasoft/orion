@@ -1,7 +1,5 @@
 package pro.deta.orion.transport.http;
 
-import pro.deta.orion.storage.InMemoryBlobStorage;
-
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import pro.deta.orion.auth.*;
@@ -34,7 +32,7 @@ class S3RepositoryManagementIT {
     void encryptedManagementPersistsActivatesCreatesAndReopensMetadataInMinio() throws Exception {
         try (MinioS3TestServer server = MinioS3TestServer.start("orion-management-" + UUID.randomUUID());
              OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
-                     new InMemoryBlobStorage(),
+                     testRuntime.pkcs12Store("test-password".toCharArray()),
                      new KeyMaterialCodec(KeyMaterialOptions.pkcs12("test-password".toCharArray())),
                      testRuntime.unstartedEvents()));
              S3Transport transport = new S3Transport();

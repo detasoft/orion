@@ -1,15 +1,13 @@
 package pro.deta.orion.config;
 
 import pro.deta.orion.schema.orion.v2.OrionDocument;
-import pro.deta.orion.util.Modification;
 import pro.deta.orion.util.VcRevision;
-
 import java.util.Objects;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
 
 /** Owns a configuration candidate and completes it through a single persistence callback. */
-public class OrionConfigurationModification implements Modification {
+public class OrionConfigurationModification {
     private final Function<OrionDocument, VcRevision.Stored> onSave;
     private OrionDocument document;
     private VcRevision revision;
@@ -42,7 +40,6 @@ public class OrionConfigurationModification implements Modification {
         return this;
     }
 
-    @Override
     public synchronized void apply() {
         requireOpen();
         try {
@@ -52,7 +49,6 @@ public class OrionConfigurationModification implements Modification {
         }
     }
 
-    @Override
     public synchronized void discard() {
         document = null;
     }

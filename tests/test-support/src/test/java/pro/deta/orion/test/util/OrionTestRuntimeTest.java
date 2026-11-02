@@ -27,7 +27,7 @@ class OrionTestRuntimeTest {
         List<String> operations = new ArrayList<>();
         OrionTestRuntime events = new OrionTestRuntime();
         OrionEventManager manager = events.events();
-        manager.subscribe(Message.class, ignored -> operations.add("event"));
+        manager.forTarget(new Object()).subscribe(Message.class, null, ignored -> operations.add("event"));
         events.own(() -> operations.add("close"));
         manager.publish(new Message());
 
@@ -71,7 +71,7 @@ class OrionTestRuntimeTest {
             release.countDown();
             throw resourceFailure;
         });
-        manager.subscribe(Message.class, ignored -> {
+        manager.forTarget(new Object()).subscribe(Message.class, null, ignored -> {
             try {
                 release.await(10, TimeUnit.SECONDS);
             } catch (InterruptedException failure) {
@@ -162,7 +162,7 @@ class OrionTestRuntimeTest {
             List<String> operations = new ArrayList<>();
             OrionEventManager events = runtime.events();
             Resources resources = new Resources(events, runtime.executor(), operations);
-            events.subscribe(Message.class, ignored -> operations.add("event"));
+            events.forTarget(new Object()).subscribe(Message.class, null, ignored -> operations.add("event"));
             runtime.own(() -> {
                 operations.add("close");
                 completed.put(name, resources);

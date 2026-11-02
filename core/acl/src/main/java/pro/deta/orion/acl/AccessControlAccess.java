@@ -22,7 +22,6 @@ import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OidcProvider;
 import pro.deta.orion.util.KeyUtils;
-import pro.deta.orion.util.Modification;
 import java.security.PublicKey;
 import java.util.*;
 import java.util.function.UnaryOperator;
@@ -31,7 +30,7 @@ import static pro.deta.orion.crypto.PasswordHashingAlgorithm.ARGON2;
 
 /** Edits ACL data through the same configuration candidate and completion boundary. */
 @Slf4j
-public class AccessControlAccess implements Modification {
+public class AccessControlAccess {
     static final String ROOT_USER_ID = "root";
     static final String ROOT_AUTH_GENERATION_PREFIX = "root-auth-generation:";
     static final String ROOT_LOCKED_GENERATION_PREFIX = "root-auth-locked:";
@@ -52,12 +51,10 @@ public class AccessControlAccess implements Modification {
         return this;
     }
 
-    @Override
     public void apply() {
         edit.apply();
     }
 
-    @Override
     public void discard() {
         edit.discard();
     }

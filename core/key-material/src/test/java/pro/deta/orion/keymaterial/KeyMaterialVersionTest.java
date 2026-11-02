@@ -1,10 +1,17 @@
 package pro.deta.orion.keymaterial;
 
+import pro.deta.orion.keymaterial.KeyMaterialTestRuntime.TestBlobStorage;
+
+import pro.deta.orion.util.VcChangeDescription;
+
+import pro.deta.orion.util.VcRevision;
+
+import static pro.deta.orion.keymaterial.KeyMaterialTestRuntime.revision;
+
 import pro.deta.orion.storage.BlobStorage;
 import pro.deta.orion.storage.InMemoryBlobStorage;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.event.OrionEventManager;
 
 import java.security.GeneralSecurityException;
 import java.security.KeyPairGenerator;
@@ -15,22 +22,25 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class KeyMaterialVersionTest {
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final KeyMaterialTestRuntime runtime = new KeyMaterialTestRuntime();
+
     @Test
     void retainsExactCertificateVersionsAcrossReloadAndBlocksDeletedHistory() throws Exception {
-        InMemoryBlobStorage source = new InMemoryBlobStorage();
+        InMemoryBlobStorage source = new TestBlobStorage(runtime.events);
         KeyMaterialId root = new KeyMaterialId("root", 1);
         X509Certificate first = TestCertificateChain.root("First").certificate();
         X509Certificate second = TestCertificateChain.root("Second").certificate();
         KeyMaterialId firstId;
         KeyMaterialId secondId;
         try (OrionKeyMaterial material = open(source)) {
-            KeyMaterialModification initial = material.modify(material.revision());
+            KeyMaterialOperation initial = material.open(new VcRevision.Stored(material.revision()));
             firstId = initial.setTrustedCertificate("root", Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, first);
-            initial.apply();
+            initial.commit(VcChangeDescription.EMPTY);
             String revision = material.revision();
-            KeyMaterialModification renewal = material.modify(revision);
+            KeyMaterialOperation renewal = material.open(new VcRevision.Stored(revision));
             secondId = renewal.setTrustedCertificate(root, second);
-            renewal.apply();
+            renewal.commit(VcChangeDescription.EMPTY);
             assertThat(firstId).isEqualTo(new KeyMaterialId("root", 1));
             assertThat(secondId).isEqualTo(new KeyMaterialId("root", 2));
             assertThat(material.revision()).isNotEqualTo(revision);
@@ -41,9 +51,9 @@ class KeyMaterialVersionTest {
         try (OrionKeyMaterial material = open(source)) {
             assertThat(material.read(firstId).trustedCertificate()).isEqualTo(first);
             assertThat(material.read(secondId).trustedCertificate()).isEqualTo(second);
-            KeyMaterialModification deletion = material.modify(material.revision());
+            KeyMaterialOperation deletion = material.open(new VcRevision.Stored(material.revision()));
             deletion.delete(root);
-            deletion.apply();
+            deletion.commit(VcChangeDescription.EMPTY);
             assertThatThrownBy(() -> material.read(firstId)).isInstanceOf(GeneralSecurityException.class);
             assertThatThrownBy(() -> material.read(secondId)).isInstanceOf(GeneralSecurityException.class);
         }
@@ -53,22 +63,22 @@ class KeyMaterialVersionTest {
     void rotatesOneSigningAliasWithoutChangingOtherEntryIds() throws Exception {
         KeyMaterialId signing = new KeyMaterialId("signing", 1);
         KeyMaterialId other = new KeyMaterialId("other", 1);
-        InMemoryBlobStorage source = new InMemoryBlobStorage();
+        InMemoryBlobStorage source = new TestBlobStorage(runtime.events);
         byte[] payload = new byte[]{1, 2, 3};
         byte[] oldSignature;
         KeyMaterialId next;
         try (OrionKeyMaterial material = open(source)) {
-            KeyMaterialModification initial = material.modify(material.revision());
+            KeyMaterialOperation initial = material.open(new VcRevision.Stored(material.revision()));
             initial.generateKey("signing", Set.of(KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialPurpose.SSH_HOST), KeyMaterialAlgorithm.RSA, 2048);
             initial.generateKey("other", Set.of(KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialPurpose.SSH_HOST), KeyMaterialAlgorithm.RSA, 2048);
-            initial.apply();
+            initial.commit(VcChangeDescription.EMPTY);
             oldSignature = material.sign(signing, payload);
             KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
             generator.initialize(2048);
-            KeyMaterialModification rotation = material.modify(material.revision());
+            KeyMaterialOperation rotation = material.open(new VcRevision.Stored(material.revision()));
             KeyMaterialId subset = new KeyMaterialId(signing.alias(), signing.version());
             next = rotation.importKey(subset, generator.generateKeyPair());
-            rotation.apply();
+            rotation.commit(VcChangeDescription.EMPTY);
             KeyMaterialId active = material.read(next).id();
             assertThat(next).isEqualTo(new KeyMaterialId("signing", 2));
             assertThat(material.read(next).purposes()).isEqualTo(Set.of(KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialPurpose.SSH_HOST));
@@ -86,10 +96,10 @@ class KeyMaterialVersionTest {
         }
     }
 
-    private static OrionKeyMaterial open(BlobStorage source) throws Exception {
+    private OrionKeyMaterial open(BlobStorage source) throws Exception {
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password())) {
             return OrionKeyMaterial.open(new KeyMaterialRepository(source,
-                    new KeyMaterialCodec(options), new OrionEventManager()));
+                    new KeyMaterialCodec(options), runtime.events));
         }
     }
 }

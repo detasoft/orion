@@ -4,8 +4,6 @@ import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
 import pro.deta.orion.keymaterial.KeyMaterialRepository;
 
-import pro.deta.orion.event.OrionEventManager;
-
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,7 +14,6 @@ import pro.deta.orion.git.client.GitClientTransport;
 import pro.deta.orion.git.client.GitClientTransportException;
 import pro.deta.orion.git.client.GitClientTransportSession;
 import pro.deta.orion.git.client.GitCredentials;
-import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -45,6 +42,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitHubRemoteProfileTest {
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime runtime = new pro.deta.orion.test.util.OrionTestRuntime();
+
     private static final RepositoryAddress REPOSITORY = RepositoryAddress.parse("acme/platform/api");
     private final AtomicReference<OrionDocument> current = new AtomicReference<>();
     private final AtomicInteger resolutions = new AtomicInteger();
@@ -54,9 +54,9 @@ class GitHubRemoteProfileTest {
     @BeforeEach
     void configureStoredCredential() throws Exception {
         material = OrionKeyMaterial.open(new KeyMaterialRepository(
-                new InMemoryBlobStorage(),
+                runtime.pkcs12Store("test-password".toCharArray()),
                 new KeyMaterialCodec(KeyMaterialOptions.pkcs12("test-password".toCharArray())),
-                new OrionEventManager()));
+                runtime.events()));
         secrets = new ConfigurationSecrets(() -> {
             resolutions.incrementAndGet();
             return current.get();

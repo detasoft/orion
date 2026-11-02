@@ -1,14 +1,16 @@
 package pro.deta.orion.config;
 
-import pro.deta.orion.keymaterial.KeyMaterialModification;
+import pro.deta.orion.util.VcChangeDescription;
+
+import pro.deta.orion.util.VcRevision;
+
+import pro.deta.orion.keymaterial.KeyMaterialOperation;
 import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
 import pro.deta.orion.keymaterial.KeyMaterialRepository;
 
 import pro.deta.orion.event.OrionEventManager;
-
-import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,10 +20,8 @@ import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
 import pro.deta.orion.storage.InMemoryBlobStorage;
-import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
-import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
@@ -55,7 +55,8 @@ class ConfigurationSecretsTest {
     private static final ConfigurationSecretReference REFERENCE = new ConfigurationSecretReference(
             ConfigurationSecretReference.Scope.REPOSITORY, "github-token");
     private static final KeyMaterialId CIPHER = new KeyMaterialId("configuration-v1", 1);
-    private final InMemoryBlobStorage material = new InMemoryBlobStorage();
+    private InMemoryBlobStorage material;
+    private final OrionEventManager events = new OrionEventManager();
     private final AtomicReference<OrionDocument> current = new AtomicReference<>(document());
     private final AtomicReference<byte[]> cipherInput = new AtomicReference<>();
     private final AtomicReference<byte[]> cipherOutput = new AtomicReference<>();
@@ -64,16 +65,33 @@ class ConfigurationSecretsTest {
 
     @BeforeEach
     void open() throws Exception {
+        events.onStart();
+        java.security.KeyStore initial = java.security.KeyStore.getInstance("PKCS12");
+        try (pro.deta.orion.keymaterial.KeyMaterialOptions settings = options();
+                ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
+            char[] password = settings.password();
+            try {
+                initial.load(null, password);
+                initial.store(bytes, password);
+                material = new InMemoryBlobStorage(bytes.toByteArray(), false, events);
+            } finally {
+                java.util.Arrays.fill(password, '\0');
+            }
+        }
         keyMaterial = OrionKeyMaterial.open(new KeyMaterialRepository(
                 material,
                 new KeyMaterialCodec(options()),
-                new OrionEventManager()));
+                events));
         secrets = resolver(keyMaterial);
     }
 
     @AfterEach
     void close() {
-        keyMaterial.close();
+        try {
+            if (keyMaterial != null) keyMaterial.close();
+        } finally {
+            events.onStop();
+        }
     }
 
     @Test
@@ -146,9 +164,9 @@ class ConfigurationSecretsTest {
         current.set(secrets.createSystem(current.get(), "github-token", "old-secret".toCharArray()));
         javax.crypto.KeyGenerator generator = javax.crypto.KeyGenerator.getInstance("AES");
         generator.init(256);
-        KeyMaterialModification rotation = keyMaterial.modify(keyMaterial.revision());
+        KeyMaterialOperation rotation = keyMaterial.open(new VcRevision.Stored(keyMaterial.revision()));
         KeyMaterialId next = rotation.importSecretKey(CIPHER, generator.generateKey());
-        rotation.apply();
+        rotation.commit(VcChangeDescription.EMPTY);
         assertThat(next.version()).isEqualTo(2);
         assertThat(secrets.resolveSystem("github-token")).isEqualTo("old-secret".toCharArray());
 

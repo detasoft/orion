@@ -1,5 +1,13 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.test.integration.git.FileTestSupport;
+
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
+import pro.deta.orion.util.VcRevision;
+
+import pro.deta.orion.keymaterial.KeyMaterialOperation;
+
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
 import pro.deta.orion.keymaterial.KeyMaterialRepository;
@@ -7,6 +15,9 @@ import pro.deta.orion.keymaterial.KeyMaterialRepository;
 import pro.deta.orion.util.VcChangeAuthor;
 
 import pro.deta.orion.util.VcChangeDescription;
+import java.util.Set;
+import pro.deta.orion.keymaterial.KeyMaterialPurpose;
+import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import com.sun.net.httpserver.HttpServer;
@@ -14,7 +25,6 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitUploadPackClient;
-import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
@@ -101,15 +111,15 @@ class PersistentProxyActivationTest {
 
             provider.activate(fixture.current::get, fixture.secrets);
             fixture.authorization.clear();
-            retained.files()
-                    .withAccess(
-                            "main",
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "save"),
-                            fileAccess -> {
-                                fileAccess.write("orion.xml", new byte[] {1});
-                                fileAccess.apply();
-                                return null;
-                            });
+            FileTestSupport.initialize(retained, "main");
+            try (GitFileAccess fileAccess = retained.files().open(retained.ref("main"))) {
+                fileAccess.write("orion.xml", new byte[] {1});
+                retained.refUpdate(
+                        retained.ref("main"),
+                        fileAccess.revision(),
+                        fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "save")));
+            }
+
             assertThat(fixture.authorization).containsExactly("Bearer stored-token", "Bearer stored-token");
 
             fixture.rotate("rotated-token");
@@ -265,16 +275,19 @@ class PersistentProxyActivationTest {
             assertThat(provider.provider().openForRead(name)).isInstanceOf(Result.Failure.class);
             assertThatThrownBy(retained::refs).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(
-                            () ->
-                                    retained.files()
-                                            .withAccess(
-                                                    "main",
-                                                    new VcChangeDescription(VcChangeAuthor.EMPTY, "save"),
-                                                    fileAccess -> {
-                                                        fileAccess.write("file", new byte[] {1});
-                                                        fileAccess.apply();
-                                                        return null;
-                                                    }))
+                            () -> {
+                                FileTestSupport.initialize(retained, "main");
+                                try (GitFileAccess fileAccess =
+                                        retained.files().open(retained.ref("main"))) {
+                                    fileAccess.write("file", new byte[] {1});
+                                    retained.refUpdate(
+                                            retained.ref("main"),
+                                            fileAccess.revision(),
+                                            fileAccess.commit(
+                                                    new VcChangeDescription(
+                                                            VcChangeAuthor.EMPTY, "save")));
+                                }
+                            })
                     .isInstanceOf(IllegalStateException.class);
             assertThat(provider.provider().repositoryNames()).doesNotContain(name);
             assertThat(provider.provider().isPublicRepositoryName(name)).isFalse();
@@ -301,13 +314,13 @@ class PersistentProxyActivationTest {
             var signing = new KeyMaterialId("signing", 1);
             try (var options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
                 material = OrionKeyMaterial.open(new KeyMaterialRepository(
-                        new InMemoryBlobStorage(),
+                        testRuntime.pkcs12Store("password".toCharArray()),
                         new KeyMaterialCodec(options),
                         testRuntime.unstartedEvents()));
-                material.withModification(material.revision(), modification -> {
+                try (KeyMaterialOperation modification = material.open(new VcRevision.Stored(material.revision()))) {
                     modification.generateKey(signing.alias(), Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
-                    modification.apply();
-                });
+                    modification.commit(VcChangeDescription.EMPTY);
+                }
             }
             secrets = new ConfigurationSecrets(current::get, material);
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);

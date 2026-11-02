@@ -2,7 +2,6 @@ package pro.deta.orion.config;
 
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;

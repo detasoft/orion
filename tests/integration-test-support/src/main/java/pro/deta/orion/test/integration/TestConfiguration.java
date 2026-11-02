@@ -1,11 +1,8 @@
 package pro.deta.orion.test.integration;
 
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
-
 import pro.deta.orion.keymaterial.KeyMaterialRepository;
-
 import java.util.Set;
-
 import java.util.Optional;
 import java.util.List;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
@@ -79,7 +76,7 @@ public final class TestConfiguration implements AutoCloseable {
     private static OrionKeyMaterial defaultMaterial(OrionTestRuntime events) {
         try {
             OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
-                    new InMemoryBlobStorage(),
+                    events.pkcs12Store("test-password".toCharArray()),
                     new KeyMaterialCodec(KeyMaterialOptions.pkcs12("test-password".toCharArray())),
                     events.unstartedEvents()));
             events.own(material);

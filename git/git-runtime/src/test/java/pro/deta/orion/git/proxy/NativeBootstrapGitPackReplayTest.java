@@ -1,5 +1,7 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
 import pro.deta.orion.util.VcChangeDescription;
 
 import io.netty.buffer.ByteBuf;
@@ -133,18 +135,17 @@ class NativeBootstrapGitPackReplayTest {
     void buildsMissingObjectsWhenIncomingPackDoesNotCoverTheRequestedCommit() throws Exception {
         NativeGitRepository repository =
                 NativeGitRepository.createInMemory(RepositoryName.parse("proxy"), testRuntime.events());
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "local"),
-                        fileAccess -> {
-                            fileAccess.write("config.txt", new byte[] {1});
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("config.txt", new byte[] {1});
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "local")));
+        }
+
         String commit = repository.refs().get("refs/heads/main");
-        var unrelated = FileTestSupport.prepared(repository.files(), "other", "unrelated",
+        var unrelated = FileTestSupport.prepared(repository, "other", "unrelated",
                 VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("other.txt", new byte[]{2});
             return null;

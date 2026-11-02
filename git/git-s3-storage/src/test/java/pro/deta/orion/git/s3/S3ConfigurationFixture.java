@@ -7,7 +7,6 @@ import pro.deta.orion.keymaterial.KeyMaterialRepository;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
-import pro.deta.orion.storage.InMemoryBlobStorage;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -54,7 +53,7 @@ final class S3ConfigurationFixture implements AutoCloseable {
         provider = new NativeGitRepositoryProvider(factory);
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-material".toCharArray())) {
             material = OrionKeyMaterial.open(new KeyMaterialRepository(
-                    new InMemoryBlobStorage(),
+                    EVENTS.pkcs12Store("test-material".toCharArray()),
                     new KeyMaterialCodec(options),
                     EVENTS.unstartedEvents()));
         }

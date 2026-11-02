@@ -1,5 +1,11 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.util.VcChangeDescription;
+
+import pro.deta.orion.util.VcRevision;
+
+import pro.deta.orion.keymaterial.KeyMaterialOperation;
+
 import pro.deta.orion.KeyMaterialBootstrap;
 
 import java.security.KeyPair;
@@ -110,18 +116,31 @@ final class RemoteBootstrapTestSupport {
 
     static byte[] materialBytes(BootstrapConfiguration configuration, Map<String, String> environment)
             throws Exception {
-        InMemoryBlobStorage store = new InMemoryBlobStorage();
+        try (pro.deta.orion.test.util.OrionTestRuntime runtime =
+                new pro.deta.orion.test.util.OrionTestRuntime()) {
+            char[] password =
+                    pro.deta.orion.KeyMaterialResourceResolver.standard(environment)
+                            .resolvePassword(
+                                    configuration.getBootstrap().getKeyMaterial().getPassword());
+            InMemoryBlobStorage store = runtime.pkcs12Store(password);
+            java.util.Arrays.fill(password, (char) 0);
         try (OrionKeyMaterial material = TestServerIdentityMaterial.openMaterial(
                 configuration, environment, store)) {
-            material.withModification(material.revision(), modification -> {
+            try (KeyMaterialOperation modification = material.open(new VcRevision.Stored(material.revision()))) {
                 modification.generateKey(KeyMaterialBootstrap.signingMaterial(
-                        configuration.getBootstrap().getKeyMaterial()).active(),
+                        configuration.getBootstrap().getKeyMaterial()).active()
+                                    .alias(),
+                            java.util.Set.of(
+                                    pro.deta.orion.keymaterial.KeyMaterialPurpose.SERVER_SIGNING),
+                            pro.deta.orion.keymaterial.KeyMaterialAlgorithm.RSA,
                         KeyMaterialConstants.RSA_KEY_SIZE_BITS);
-                modification.apply();
-            });
+                modification.commit(VcChangeDescription.EMPTY);
+            }
             TestServerIdentityMaterial.hostKeys(material);
         }
-        return store.load().bytes();
+        return store.readBytes(new VcRevision.Latest());
     }
+
+}
 
 }

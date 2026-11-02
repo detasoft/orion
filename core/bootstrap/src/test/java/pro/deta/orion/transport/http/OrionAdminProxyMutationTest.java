@@ -1,6 +1,8 @@
 package pro.deta.orion.transport.http;
 
-import pro.deta.orion.storage.InMemoryBlobStorage;
+import pro.deta.orion.util.VcChangeDescription;
+
+import pro.deta.orion.keymaterial.KeyMaterialOperation;
 
 import pro.deta.orion.config.OrionConfigurationEditor;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -756,13 +758,13 @@ class OrionAdminProxyMutationTest {
             var signing = new KeyMaterialId("signing", 1);
             try (var options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
                 material = OrionKeyMaterial.open(new KeyMaterialRepository(
-                        new InMemoryBlobStorage(),
+                        testRuntime.pkcs12Store("password".toCharArray()),
                         new KeyMaterialCodec(options),
                         testRuntime.unstartedEvents()));
-                material.withModification(material.revision(), modification -> {
+                try (KeyMaterialOperation modification = material.open(new VcRevision.Stored(material.revision()))) {
                     modification.generateKey(signing.alias(), Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
-                    modification.apply();
-                });
+                    modification.commit(VcChangeDescription.EMPTY);
+                }
             }
             editor = new OrionConfigurationEditor(storage,
                 material,

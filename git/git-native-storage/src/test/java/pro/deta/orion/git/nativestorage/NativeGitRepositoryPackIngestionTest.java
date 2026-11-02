@@ -1,9 +1,5 @@
 package pro.deta.orion.git.nativestorage;
 
-import pro.deta.orion.util.VcChangeAuthor;
-
-import pro.deta.orion.util.VcChangeDescription;
-
 import pro.deta.orion.git.parser.v2.id.RefId;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.parser.v2.id.PackId;
@@ -55,7 +51,7 @@ class NativeGitRepositoryPackIngestionTest {
         storage.missing = true;
         try (NativeGitRepository repository = new NativeGitRepository(
                 "project.git", storage, index, testRuntime.events())) {
-            byte[] bytes = preparedPack(repository);
+            byte[] bytes = preparedPack();
             try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
                 assertThatThrownBy(() -> repository.ingestAndPublish(input)).isInstanceOf(IOException.class)
                         .hasMessageContaining("Cannot publish missing pack");
@@ -75,7 +71,7 @@ class NativeGitRepositoryPackIngestionTest {
         InMemoryStorage storage = new InMemoryStorage();
         try (NativeGitRepository repository = new NativeGitRepository(
                 "project.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), testRuntime.events())) {
-            byte[] bytes = preparedPack(repository);
+            byte[] bytes = preparedPack();
             try (BufferedByteInputV2 firstInput = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
                  BufferedByteInputV2 secondInput = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
                 PackMetadata first = repository.ingestAndPublish(firstInput);
@@ -90,18 +86,15 @@ class NativeGitRepositoryPackIngestionTest {
             }
         }
     }
-    private static byte[] preparedPack(NativeGitRepository repository) throws Exception {
-        return repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
-                        access -> {
-                            access.write("file", new byte[] {1});
-                            ByteArrayOutputStream output = new ByteArrayOutputStream();
-                            access.writePack(new OutputStreamBufferedByteOutput(output));
-                            return output.toByteArray();
-                        });
+    private static byte[] preparedPack() throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (pro.deta.orion.git.parser.v2.pack.PackWriter writer =
+                     new pro.deta.orion.git.parser.v2.pack.PackWriter(new OutputStreamBufferedByteOutput(output), 1);
+             BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(new byte[]{1}))) {
+            writer.writeObject(pro.deta.orion.git.parser.v2.data.GitObjectType.BLOB, 1, input);
+            writer.finish();
+        }
+        return output.toByteArray();
     }
 
     private static final class TrackingStorage implements GitStorageApi {

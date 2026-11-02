@@ -1,8 +1,10 @@
 package pro.deta.orion.keymaterial;
 
-import pro.deta.orion.storage.LocalBlobStorage;
+import pro.deta.orion.util.VcChangeDescription;
 
-import pro.deta.orion.event.OrionEventManager;
+import pro.deta.orion.util.VcRevision;
+
+import pro.deta.orion.storage.LocalBlobStorage;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.OS;
@@ -17,6 +19,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class KeyMaterialToolCompatibilityTest {
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final KeyMaterialTestRuntime runtime = new KeyMaterialTestRuntime();
+
     @TempDir
     private Path tempDir;
 
@@ -63,15 +68,20 @@ class KeyMaterialToolCompatibilityTest {
 
     private Path createLocalPkcs12(String alias) throws Exception {
         Path keyStorePath = tempDir.resolve(alias + KeyMaterialTestConstants.PKCS12_EXTENSION);
-        LocalBlobStorage store = new LocalBlobStorage(keyStorePath);
+        java.nio.file.Files.write(keyStorePath, KeyMaterialTestRuntime.emptyContent());
+        if (java.nio.file.Files.getFileStore(keyStorePath).supportsFileAttributeView("posix")) {
+            java.nio.file.Files.setPosixFilePermissions(keyStorePath,
+                    java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+        }
+        LocalBlobStorage store = new LocalBlobStorage(keyStorePath, runtime.events);
         try (OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
                 store,
                 new KeyMaterialCodec(KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password())),
-                new OrionEventManager()))) {
-            material.withModification(material.revision(), modification -> {
+                runtime.events))) {
+            try (KeyMaterialOperation modification = material.open(new VcRevision.Stored(material.revision()))) {
                 modification.generateKey(alias, java.util.Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 2048);
-                modification.apply();
-            });
+                modification.commit(VcChangeDescription.EMPTY);
+            }
         }
         return keyStorePath;
     }

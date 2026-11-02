@@ -55,7 +55,7 @@ class VcResourceTest {
         }
 
         @Override
-        protected Access createOperation(VcRevision revision) {
+        protected Access createOperation(VcRevision.ReadTarget revision) {
             return new Access((VcRevision.Stored) revision);
         }
 

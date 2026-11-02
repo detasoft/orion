@@ -1,5 +1,4 @@
 package pro.deta.orion.git.parser.v2.storage;
-import pro.deta.orion.util.Modification;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.read.GitPackRead;
 import pro.deta.orion.git.parser.v2.storage.shared.PackHandle;
@@ -12,7 +11,11 @@ import java.util.Set;
  * Finish storage before publishing its index. Reads borrow a bounded input only for the callback.
  * Missing or truncated bytes fail with IOException.
  */
-public interface GitStorageAccess extends Modification {
+public interface GitStorageAccess {
+    void apply() throws IOException;
+
+    void discard() throws IOException;
+
     PackHandle newPack(PackId packId) throws IOException;
 
     <R> R readPack(PackId packId, long offset, long length, GitPackRead<R> reader) throws IOException;

@@ -1,5 +1,9 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.util.VcChangeDescription;
+
+import pro.deta.orion.keymaterial.KeyMaterialOperation;
+
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
@@ -65,11 +69,11 @@ class PlaywrightExternalServicesIT {
         KeyMaterialId account = new KeyMaterialId("acme-account", 1);
         KeyMaterialId certificateIdentity = new KeyMaterialId("acme-identity", 1);
         try (TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(configuration)) {
-            identity.material().withModification(identity.material().revision(), modification -> {
+            try (KeyMaterialOperation modification = identity.material().open(new VcRevision.Stored(identity.material().revision()))) {
                 modification.generateKey("acme-account", Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 2048);
                 modification.generateKey("acme-identity", Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 2048);
-                modification.apply();
-            });
+                modification.commit(VcChangeDescription.EMPTY);
+            }
             runPlaywright(configuration, identity, rootKey, fixtureRoot, caRoot);
         }
         try (TestServerIdentityMaterial reopened = TestServerIdentityMaterial.open(configuration)) {

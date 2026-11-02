@@ -1,5 +1,9 @@
 package pro.deta.orion.component;
 
+import pro.deta.orion.test.integration.git.FileTestSupport;
+
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
 import pro.deta.orion.KeyMaterialBootstrap;
 
 import pro.deta.orion.util.*;
@@ -183,7 +187,12 @@ class InternalConfigurationRepositoryLifecycleIT {
                         .isInstanceOf(TokenIssueResult.Failure.class);
                 assertThat(first.nativeGitRepositoryProvider().repositoryNames())
                         .containsExactly(REPOSITORY_NAME);
-                byte[] content = repository(first).files().readBytes(CONFIGURATION_REF, ACL_PATH);
+                byte[] content =
+                        repository(first)
+                                .files()
+                                .read(
+                                        repository(first).ref(CONFIGURATION_REF),
+                                        file -> file.readBytes(ACL_PATH));
                 firstVersion = repository(first).refs().get(CONFIGURATION_REF);
                 AccessControl acl = OrionXml.read(
                         new ByteArrayInputStream(content))
@@ -364,7 +373,12 @@ class InternalConfigurationRepositoryLifecycleIT {
                     .isInstanceOf(TokenAuthenticationResult.Success.class);
             assertThat(reset.orionAccessControlService().userExists("alice")).isTrue();
 
-            byte[] content = repository(reset).files().readBytes(CONFIGURATION_REF, ACL_PATH);
+            byte[] content =
+                    repository(reset)
+                            .files()
+                            .read(
+                                    repository(reset).ref(CONFIGURATION_REF),
+                                    file -> file.readBytes(ACL_PATH));
             assertThat(repository(reset).refs().get(CONFIGURATION_REF)).isNotNull().isNotEqualTo(versionBeforeReset);
             AccessControl acl = OrionXml.read(
                     new ByteArrayInputStream(content))
@@ -556,17 +570,18 @@ class InternalConfigurationRepositoryLifecycleIT {
         NativeGitRepository repository = reset.nativeGitRepositoryProvider()
                 .openForWrite(REPOSITORY_NAME)
                 .valueOrFailure("configuration repository");
-        repository
-                .files()
-                .withAccess(
-                        CONFIGURATION_REF,
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "seed configuration and unrelated XML"),
-                        fileAccess -> {
-                            fileAccess.write(ACL_PATH, primaryAcl);
-                            fileAccess.write(secondaryPath, secondaryAcl);
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, CONFIGURATION_REF);
+        try (GitFileAccess fileAccess =
+                repository.files().open(repository.ref(CONFIGURATION_REF))) {
+            fileAccess.write(ACL_PATH, primaryAcl);
+            fileAccess.write(secondaryPath, secondaryAcl);
+            repository.refUpdate(
+                    repository.ref(CONFIGURATION_REF),
+                    fileAccess.revision(),
+                    fileAccess.commit(
+                            new VcChangeDescription(
+                                    VcChangeAuthor.EMPTY, "seed configuration and unrelated XML")));
+        }
 
         OrionApplicationLifecycle lifecycle = reset.orionApplicationLifecycle();
         String newPassword;
@@ -581,8 +596,20 @@ class InternalConfigurationRepositoryLifecycleIT {
                     "old-root-password".getBytes(StandardCharsets.UTF_8)))
                     .isInstanceOf(AuthenticationResult.Failure.class);
 
-            Map<String, byte[]> snapshot = Map.of(ACL_PATH, repository.files().readBytes(CONFIGURATION_REF,
-                    ACL_PATH), secondaryPath, repository.files().readBytes(CONFIGURATION_REF, secondaryPath));
+            Map<String, byte[]> snapshot =
+                    Map.of(
+                            ACL_PATH,
+                            repository
+                                    .files()
+                                    .read(
+                                            repository.ref(CONFIGURATION_REF),
+                                            file -> file.readBytes(ACL_PATH)),
+                            secondaryPath,
+                            repository
+                                    .files()
+                                    .read(
+                                            repository.ref(CONFIGURATION_REF),
+                                            file -> file.readBytes(secondaryPath)));
             AccessControl primary = OrionXml.read(
                     new ByteArrayInputStream(snapshot.get(ACL_PATH)))
                             .system().accessControl();
@@ -636,16 +663,20 @@ class InternalConfigurationRepositoryLifecycleIT {
         String versionBeforeReset;
         try {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
-            repository(first)
-                    .files()
-                    .withAccess(
-                            CONFIGURATION_REF,
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "seed noncanonical root ACL"),
-                            fileAccess -> {
-                                fileAccess.write(ACL_PATH, noncanonicalRootAclBytes());
-                                fileAccess.apply();
-                                return null;
-                            });
+            FileTestSupport.initialize(repository(first), CONFIGURATION_REF);
+            try (GitFileAccess fileAccess =
+                    repository(first).files().open(repository(first).ref(CONFIGURATION_REF))) {
+                fileAccess.write(ACL_PATH, noncanonicalRootAclBytes());
+                repository(first)
+                        .refUpdate(
+                                repository(first).ref(CONFIGURATION_REF),
+                                fileAccess.revision(),
+                                fileAccess.commit(
+                                        new VcChangeDescription(
+                                                VcChangeAuthor.EMPTY,
+                                                "seed noncanonical root ACL")));
+            }
+
             versionBeforeReset = repository(first).refs().get(CONFIGURATION_REF);
         } finally {
             assertThat(firstLifecycle.shutdownApplication()).isEqualTo(FIN);
@@ -1008,13 +1039,17 @@ class InternalConfigurationRepositoryLifecycleIT {
             String candidateName,
             byte[] content) throws Exception {
         String candidateRef = "refs/heads/candidate-" + candidateName;
-        repository.files().withAccess(candidateRef, new VcChangeDescription(
-                VcChangeAuthor.EMPTY, "candidate " + candidateName),
-                fileAccess -> {
+        FileTestSupport.initialize(repository, candidateRef);
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref(candidateRef))) {
             fileAccess.write(ACL_PATH, content);
-            fileAccess.apply();
-            return null;
-        });
+            repository.refUpdate(
+                    repository.ref(candidateRef),
+                    fileAccess.revision(),
+                    fileAccess.commit(
+                            new VcChangeDescription(
+                                    VcChangeAuthor.EMPTY, "candidate " + candidateName)));
+        }
+
         return repository.refs().get(candidateRef);
     }
 

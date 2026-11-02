@@ -1,5 +1,11 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.util.VcChangeDescription;
+
+import pro.deta.orion.util.VcRevision;
+
+import pro.deta.orion.keymaterial.KeyMaterialOperation;
+
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
 import pro.deta.orion.keymaterial.KeyMaterialRepository;
@@ -51,11 +57,11 @@ class AcmeCertificateSettingsTest {
 
     @Test
     void selectsStoredAccountKeyPersistsItsReferenceAndReusesItForIssuance() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryBlobStorage())) {
-            owner.withModification(owner.revision(), modification -> {
+        try (OrionKeyMaterial owner = owner(events.pkcs12Store("password".toCharArray()))) {
+            try (KeyMaterialOperation modification = owner.open(new VcRevision.Stored(owner.revision()))) {
                 modification.generateKey("existing-account", Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 3072);
-                modification.apply();
-            });
+                modification.commit(VcChangeDescription.EMPTY);
+            }
             KeyMaterialId reference = new KeyMaterialId("existing-account", 1);
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
             TestConfiguration desired = new TestConfiguration(events, bootstrap,
@@ -134,7 +140,7 @@ class AcmeCertificateSettingsTest {
 
     @Test
     void savesThroughTheConfigurationRepositoryAndRejectsStaleRevisions() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryBlobStorage())) {
+        try (OrionKeyMaterial owner = owner(events.pkcs12Store("password".toCharArray()))) {
             BootstrapConfiguration bootstrap = new BootstrapConfiguration();
             TestConfiguration desired = new TestConfiguration(events, bootstrap,
                     owner);

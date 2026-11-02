@@ -1,6 +1,10 @@
 package pro.deta.orion.acme;
 
-import pro.deta.orion.storage.BlobStorage;
+import pro.deta.orion.util.VcChangeDescription;
+
+import pro.deta.orion.util.VcRevision;
+
+import pro.deta.orion.keymaterial.KeyMaterialOperation;
 import java.util.concurrent.atomic.AtomicReference;
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
@@ -86,13 +90,12 @@ class AcmeCertificateServiceTest {
 
     @Test
     void preparesBothKeysOnlyAfterTheStoreAcceptsThem() throws Exception {
-        class ObservingStore extends InMemoryBlobStorage {
+        class ObservingStore extends TestBlobStorage {
             private OrionKeyMaterial material;
 
             @Override
-            public synchronized String write(BlobStorage.Modification modification) throws IOException {
-                byte[] bytes = modification.bytes();
-                String expectedVersion = modification.expectedRevision();
+            protected VcRevision.Stored commitSnapshot(BlobStorageOperations operation,
+                    VcChangeDescription description) throws IOException {
                 if (material != null) {
                     try {
                         assertThat(material.contains(ACCOUNT)).isFalse();
@@ -101,7 +104,7 @@ class AcmeCertificateServiceTest {
                         throw new IOException(failure);
                     }
                 }
-                return super.write(new BlobStorage.Modification(expectedVersion, bytes));
+                return super.commitSnapshot(operation, description);
             }
         }
         ObservingStore store = new ObservingStore();
@@ -113,22 +116,21 @@ class AcmeCertificateServiceTest {
             saveSettings(service);
             assertThat(material.contains(ACCOUNT)).isTrue();
             assertThat(material.contains(IDENTITY)).isTrue();
-            assertThat(material.revision()).isEqualTo("1");
-            byte[] before = store.load().bytes();
+            assertThat(material.revision()).isEqualTo("2");
+            byte[] before = store.readBytes(new VcRevision.Latest());
             saveSettings(service);
-            assertThat(store.load().bytes()).isEqualTo(before);
+            assertThat(store.readBytes(new VcRevision.Latest())).isEqualTo(before);
         }
     }
 
     @Test
     void publishesCertificateAndRootTogetherAndReusesTheKeysAfterReopening() throws Exception {
-        class ObservingStore extends InMemoryBlobStorage {
+        class ObservingStore extends TestBlobStorage {
             private OrionKeyMaterial material;
 
             @Override
-            public synchronized String write(BlobStorage.Modification modification) throws IOException {
-                byte[] bytes = modification.bytes();
-                String expectedVersion = modification.expectedRevision();
+            protected VcRevision.Stored commitSnapshot(BlobStorageOperations operation,
+                    VcChangeDescription description) throws IOException {
                 if (material != null) {
                     try {
                         assertThat(material.read(IDENTITY).issuedCertificateChain()).isEmpty();
@@ -137,7 +139,7 @@ class AcmeCertificateServiceTest {
                         throw new IOException(failure);
                     }
                 }
-                return super.write(new BlobStorage.Modification(expectedVersion, bytes));
+                return super.commitSnapshot(operation, description);
             }
         }
         ObservingStore store = new ObservingStore();
@@ -158,7 +160,7 @@ class AcmeCertificateServiceTest {
             assertThat(material.read(new KeyMaterialId(IDENTITY.alias(), 2)).certificateChain())
                     .containsExactlyElementsOf(issued.certificateChain());
             assertThat(material.read(ROOT).trustedCertificate()).isEqualTo(issuer.root.certificate());
-            assertThat(material.revision()).isEqualTo("2");
+            assertThat(material.revision()).isEqualTo("3");
             accountPublic = issuer.lastRequest.accountKeyPair().getPublic().getEncoded();
             identityPublic = issuer.lastRequest.domainKeyPair().getPublic().getEncoded();
             store.material = null;
@@ -171,25 +173,24 @@ class AcmeCertificateServiceTest {
             issue(service, AcmeCertificateService.IssueRequest.EMPTY);
             assertThat(issuer.lastRequest.accountKeyPair().getPublic().getEncoded()).isEqualTo(accountPublic);
             assertThat(issuer.lastRequest.domainKeyPair().getPublic().getEncoded()).isEqualTo(identityPublic);
-            assertThat(reloaded.revision()).isEqualTo("3");
+            assertThat(reloaded.revision()).isEqualTo("4");
         }
     }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void failedCertificateWriteRecoversTheChainAndRootAsOneVersion(boolean committed) throws Exception {
-        class FailingStore extends InMemoryBlobStorage {
+        class FailingStore extends TestBlobStorage {
             private boolean fail;
 
             @Override
-            public synchronized String write(BlobStorage.Modification modification) throws IOException {
-                byte[] bytes = modification.bytes();
-                String expectedVersion = modification.expectedRevision();
+            protected VcRevision.Stored commitSnapshot(BlobStorageOperations operation,
+                    VcChangeDescription description) throws IOException {
                 if (fail) {
-                    if (committed) super.write(new BlobStorage.Modification(expectedVersion, bytes));
+                    if (committed) super.commitSnapshot(operation, description);
                     throw new IOException("certificate save failed");
                 }
-                return super.write(new BlobStorage.Modification(expectedVersion, bytes));
+                return super.commitSnapshot(operation, description);
             }
         }
         FailingStore store = new FailingStore();
@@ -221,7 +222,7 @@ class AcmeCertificateServiceTest {
             loaded.verify(expectedRoot.getPublicKey());
             assertThat(reloaded.read(new KeyMaterialId(ROOT.alias(), committed ? 2 : 1)).trustedCertificate())
                     .isEqualTo(expectedRoot);
-            assertThat(reloaded.revision()).isEqualTo(committed ? "3" : "2");
+            assertThat(reloaded.revision()).isEqualTo(committed ? "4" : "3");
             if (committed) assertThat(loaded).isNotEqualTo(original);
             else assertThat(loaded).isEqualTo(original);
         }
@@ -229,7 +230,7 @@ class AcmeCertificateServiceTest {
 
     @Test
     void savesTheCertificateAfterAnIndependentMaterialChangeDuringIssuance() throws Exception {
-        InMemoryBlobStorage store = new InMemoryBlobStorage();
+        InMemoryBlobStorage store = events.pkcs12Store("test-password".toCharArray());
         try (OrionKeyMaterial material = owner(store)) {
             KeyMaterialId other = new KeyMaterialId("other-account", 1);
             AcmeCertificateIssuer issuer = new AcmeCertificateIssuer(new AcmeHttpChallengeService()) {
@@ -238,10 +239,10 @@ class AcmeCertificateServiceTest {
                     try {
                         assertThat(material.contains(ACCOUNT)).isTrue();
                         assertThat(material.contains(IDENTITY)).isTrue();
-                        material.withModification(material.revision(), modification -> {
+                        try (KeyMaterialOperation modification = material.open(new VcRevision.Stored(material.revision()))) {
                             modification.generateKey(("other-account"), Set.of((KeyMaterialPurpose.ACME_ACCOUNT)), KeyMaterialAlgorithm.RSA, 2048);
-                            modification.apply();
-                        });
+                            modification.commit(VcChangeDescription.EMPTY);
+                        }
                     } catch (IOException | GeneralSecurityException failure) {
                         throw new AssertionError(failure);
                     }
@@ -253,18 +254,18 @@ class AcmeCertificateServiceTest {
             issue(service, AcmeCertificateService.IssueRequest.EMPTY);
             assertThat(material.contains(other)).isTrue();
             assertThat(service.savedCertificate()).isPresent();
-            assertThat(material.revision()).isEqualTo("3");
+            assertThat(material.revision()).isEqualTo("4");
         }
     }
 
     @Test
     void rejectsAnAccountAliasOwnedByAnotherPurposeBeforeContactingTheCa() throws Exception {
-        try (OrionKeyMaterial material = owner(new InMemoryBlobStorage())) {
+        try (OrionKeyMaterial material = owner(events.pkcs12Store("test-password".toCharArray()))) {
             KeyMaterialId signing = new KeyMaterialId((ACCOUNT.alias()), 1);
-            material.withModification(material.revision(), modification -> {
+            try (KeyMaterialOperation modification = material.open(new VcRevision.Stored(material.revision()))) {
                 modification.generateKey((ACCOUNT.alias()), Set.of((KeyMaterialPurpose.SERVER_SIGNING)), KeyMaterialAlgorithm.RSA, 2048);
-                modification.apply();
-            });
+                modification.commit(VcChangeDescription.EMPTY);
+            }
             String version = material.revision();
             RecordingIssuer issuer = new RecordingIssuer(false);
             AcmeCertificateService service = new AcmeCertificateService(
@@ -281,15 +282,15 @@ class AcmeCertificateServiceTest {
 
     @Test
     void rejectsMismatchedIssuerMetadataBeforeGeneratingKeysOrContactingTheCa() throws Exception {
-        InMemoryBlobStorage store = new InMemoryBlobStorage();
+        InMemoryBlobStorage store = events.pkcs12Store("test-password".toCharArray());
         RecordingIssuer issuer = new RecordingIssuer(false);
         issuer.root = TestCertificateChain.root("Root");
         try (OrionKeyMaterial material = owner(store)) {
-            material.withModification(material.revision(), modification -> {
+            try (KeyMaterialOperation modification = material.open(new VcRevision.Stored(material.revision()))) {
                 KeyMaterialId mismatched = new KeyMaterialId(ROOT.alias(), 1);
                 modification.setTrustedCertificate(ROOT.alias(), Set.of(KeyMaterialPurpose.TRUST_ANCHOR), KeyMaterialAlgorithm.RSA, issuer.root.certificate());
-                modification.apply();
-            });
+                modification.commit(VcChangeDescription.EMPTY);
+            }
             AcmeCertificateService service = new AcmeCertificateService(desiredState(false,
                     Optional.of(new KeyMaterialId("issuer-root-v1", 2))).editor(),
                     material, issuer, null, events.executor());
@@ -298,14 +299,14 @@ class AcmeCertificateServiceTest {
                     .hasMessage("Cannot acquire ACME key material");
             assertThat(material.contains(ACCOUNT)).isFalse();
             assertThat(material.contains(IDENTITY)).isFalse();
-            assertThat(material.revision()).isEqualTo("1");
+            assertThat(material.revision()).isEqualTo("2");
             assertThat(issuer.calls).isZero();
         }
     }
 
     @Test
     void rejectsAnIssuerAliasThatIsAlsoAnAcmeKeyBeforeContactingTheCa() throws Exception {
-        try (OrionKeyMaterial material = owner(new InMemoryBlobStorage())) {
+        try (OrionKeyMaterial material = owner(events.pkcs12Store("test-password".toCharArray()))) {
             RecordingIssuer issuer = new RecordingIssuer(false);
             AcmeCertificateService service = new AcmeCertificateService(desiredState(false,
                     Optional.of(new KeyMaterialId("acme-account-v1", 1))).editor(),
@@ -313,14 +314,14 @@ class AcmeCertificateServiceTest {
             assertThatThrownBy(() -> issue(service, AcmeCertificateService.IssueRequest.EMPTY))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThat(material.inventory()).isEmpty();
-            assertThat(material.revision()).isNull();
+            assertThat(material.revision()).isEqualTo("1");
             assertThat(issuer.calls).isZero();
         }
     }
 
     @Test
     void issuesFromDesiredStatePersistsInMaterialStoreAndReloads() throws Exception {
-        InMemoryBlobStorage store = new InMemoryBlobStorage();
+        InMemoryBlobStorage store = events.pkcs12Store("test-password".toCharArray());
         TestConfiguration desiredState = desiredState(false);
 
         try (OrionKeyMaterial owner = owner(store)) {
@@ -352,7 +353,7 @@ class AcmeCertificateServiceTest {
 
     @Test
     void rejectsRequestedDomainsUnlessDesiredStateAllowsIt() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryBlobStorage())) {
+        try (OrionKeyMaterial owner = owner(events.pkcs12Store("test-password".toCharArray()))) {
             AcmeCertificateService service = new AcmeCertificateService(
                     desiredState(false).editor(), owner, new RecordingIssuer(false), null, events.executor());
 
@@ -365,7 +366,7 @@ class AcmeCertificateServiceTest {
 
     @Test
     void allowsRequestedDomainsWhenDesiredStateAllowsIt() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryBlobStorage())) {
+        try (OrionKeyMaterial owner = owner(events.pkcs12Store("test-password".toCharArray()))) {
             RecordingIssuer issuer = new RecordingIssuer(false);
             AcmeCertificateService service = new AcmeCertificateService(
                     desiredState(true).editor(), owner, issuer, null, events.executor());
@@ -379,7 +380,7 @@ class AcmeCertificateServiceTest {
 
     @Test
     void invalidIssuedChainDoesNotBecomeSavedMaterial() throws Exception {
-        InMemoryBlobStorage store = new InMemoryBlobStorage();
+        InMemoryBlobStorage store = events.pkcs12Store("test-password".toCharArray());
         try (OrionKeyMaterial owner = owner(store)) {
             RecordingIssuer issuer = new RecordingIssuer(true);
             issuer.root = TestCertificateChain.root("Root for invalid chain");
@@ -392,13 +393,13 @@ class AcmeCertificateServiceTest {
                     .hasMessageContaining("store issued ACME certificate");
             assertThat(service.savedCertificate()).isEmpty();
             assertThat(owner.contains(ROOT)).isFalse();
-            assertThat(owner.revision()).isEqualTo("1");
+            assertThat(owner.revision()).isEqualTo("2");
         }
     }
 
     @Test
     void rejectsConcurrentIssuanceWithoutChangingStoredMaterialAndReopensAfterSuccess() throws Exception {
-        InMemoryBlobStorage store = new InMemoryBlobStorage();
+        InMemoryBlobStorage store = events.pkcs12Store("test-password".toCharArray());
         try (OrionKeyMaterial owner = owner(store);
                 ExecutorService executor = Executors.newSingleThreadExecutor()) {
             BlockingFirstIssuer issuer = new BlockingFirstIssuer();
@@ -408,14 +409,14 @@ class AcmeCertificateServiceTest {
                     () -> issue(service, AcmeCertificateService.IssueRequest.EMPTY));
 
             assertThat(issuer.awaitStarted()).isTrue();
-            byte[] before = store.load().bytes();
+            byte[] before = store.readBytes(new VcRevision.Latest());
             String beforeVersion = owner.revision();
             try {
                 assertTimeoutPreemptively(Duration.ofSeconds(1), () -> assertThatThrownBy(
                         () -> issue(service, AcmeCertificateService.IssueRequest.EMPTY))
                         .isInstanceOf(AcmeCertificateService.IssuanceBusyException.class));
                 maintain(service, Instant.now().plus(Duration.ofDays(90)));
-                assertThat(store.load().bytes()).isEqualTo(before);
+                assertThat(store.readBytes(new VcRevision.Latest())).isEqualTo(before);
                 assertThat(owner.revision()).isEqualTo(beforeVersion);
                 assertThat(issuer.issueCalls()).isEqualTo(1);
             } finally {
@@ -430,7 +431,7 @@ class AcmeCertificateServiceTest {
 
     @Test
     void reopensIssuanceAdmissionAfterFailure() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryBlobStorage())) {
+        try (OrionKeyMaterial owner = owner(events.pkcs12Store("test-password".toCharArray()))) {
             FailFirstIssuer issuer = new FailFirstIssuer();
             AcmeCertificateService service = new AcmeCertificateService(
                     desiredState(false).editor(), owner, issuer, null, events.executor());
@@ -458,7 +459,7 @@ class AcmeCertificateServiceTest {
         };
         appender.start();
         logger.addAppender(appender);
-        try (OrionKeyMaterial owner = owner(new InMemoryBlobStorage())) {
+        try (OrionKeyMaterial owner = owner(events.pkcs12Store("test-password".toCharArray()))) {
             RecordingIssuer issuer = new RecordingIssuer(false);
             AcmeCertificateService service = new AcmeCertificateService(
                     desiredState(false).editor(), owner, issuer, null, events.executor());
@@ -491,7 +492,7 @@ class AcmeCertificateServiceTest {
 
     @Test
     void renewsOnlyWhenDueAndReusesTheStoredAccount() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryBlobStorage())) {
+        try (OrionKeyMaterial owner = owner(events.pkcs12Store("test-password".toCharArray()))) {
             RecordingIssuer issuer = new RecordingIssuer(false);
             AcmeCertificateService service = new AcmeCertificateService(
                     desiredState(false).editor(), owner, issuer, null, events.executor());
@@ -513,7 +514,7 @@ class AcmeCertificateServiceTest {
 
     @Test
     void retriesFailureAfterOneHourAndKeepsOldCertificate() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryBlobStorage())) {
+        try (OrionKeyMaterial owner = owner(events.pkcs12Store("test-password".toCharArray()))) {
             RecordingIssuer issuer = new RecordingIssuer(false);
             AcmeCertificateService service = new AcmeCertificateService(
                     desiredState(false).editor(), owner, issuer, null, events.executor());
@@ -543,7 +544,7 @@ class AcmeCertificateServiceTest {
 
     @Test
     void disablesRenewalWhenConfigurationIsRemoved() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryBlobStorage())) {
+        try (OrionKeyMaterial owner = owner(events.pkcs12Store("test-password".toCharArray()))) {
             RecordingIssuer issuer = new RecordingIssuer(false);
             TestConfiguration desired = desiredState(false);
             AcmeCertificateService service =
@@ -559,7 +560,7 @@ class AcmeCertificateServiceTest {
 
     @Test
     void activatesRenewedCertificateOnTheRunningHttpsListener() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryBlobStorage(),
+        try (OrionKeyMaterial owner = owner(events.pkcs12Store("test-password".toCharArray()),
                 events.events())) {
             BootstrapConfiguration bootstrap = bootstrap();
             bootstrap.getTransport().getHttp().setEnabled(false);
@@ -630,7 +631,7 @@ class AcmeCertificateServiceTest {
 
     @Test
     void lifecycleRunsRenewalAndCancelsAnOutstandingOrderBeforeInstallation() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryBlobStorage())) {
+        try (OrionKeyMaterial owner = owner(events.pkcs12Store("test-password".toCharArray()))) {
             CountDownLatch started = new CountDownLatch(1);
             CountDownLatch blocked = new CountDownLatch(1);
             AtomicInteger calls = new AtomicInteger();
@@ -680,12 +681,11 @@ class AcmeCertificateServiceTest {
     @Test
     void retainsTheActiveVersionWhenConfigurationChangesAfterMaterialPublication() throws Exception {
         AtomicReference<Runnable> afterWrite = new AtomicReference<>();
-        InMemoryBlobStorage source = new InMemoryBlobStorage() {
+        InMemoryBlobStorage source = new TestBlobStorage() {
             @Override
-            public synchronized String write(BlobStorage.Modification modification) throws IOException {
-                byte[] bytes = modification.bytes();
-                String expected = modification.expectedRevision();
-                String saved = super.write(new BlobStorage.Modification(expected, bytes));
+            protected VcRevision.Stored commitSnapshot(BlobStorageOperations operation,
+                    VcChangeDescription description) throws IOException {
+                VcRevision.Stored saved = super.commitSnapshot(operation, description);
                 Runnable action = afterWrite.getAndSet(null);
                 if (action != null) action.run();
                 return saved;
@@ -724,7 +724,7 @@ class AcmeCertificateServiceTest {
 
     @Test
     void discardsCertificateIfSettingsChangeDuringIssuance() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryBlobStorage());
+        try (OrionKeyMaterial owner = owner(events.pkcs12Store("test-password".toCharArray()));
                 ExecutorService executor = Executors.newSingleThreadExecutor()) {
             TestConfiguration desired = desiredState(false);
             OrionDocument initial = desired.editor().current().result()
@@ -746,7 +746,7 @@ class AcmeCertificateServiceTest {
 
     @Test
     void capsRenewalLeadTimeAtThirtyDays() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryBlobStorage())) {
+        try (OrionKeyMaterial owner = owner(events.pkcs12Store("test-password".toCharArray()))) {
             RecordingIssuer issuer = new RecordingIssuer(false);
             issuer.before = Instant.now().minus(Duration.ofDays(90));
             issuer.after = Instant.now().plus(Duration.ofDays(90));
@@ -765,7 +765,7 @@ class AcmeCertificateServiceTest {
 
     @Test
     void renewalLifecycleRunsEvenWhenHttpIsDisabled() throws Exception {
-        try (OrionKeyMaterial owner = owner(new InMemoryBlobStorage())) {
+        try (OrionKeyMaterial owner = owner(events.pkcs12Store("test-password".toCharArray()))) {
             BootstrapConfiguration bootstrap = bootstrap();
             bootstrap.getTransport().getHttp().setEnabled(false);
             TestConfiguration desired = desiredState(false);
@@ -797,7 +797,7 @@ class AcmeCertificateServiceTest {
     @Test
     void schedulesRenewalChecksAndCancelsOnlyItsOwnFuture() throws Exception {
         try (RecordingScheduler scheduler = new RecordingScheduler();
-                OrionKeyMaterial owner = owner(new InMemoryBlobStorage())) {
+                OrionKeyMaterial owner = owner(events.pkcs12Store("test-password".toCharArray()))) {
             RecordingIssuer issuer = new RecordingIssuer(false);
             issuer.before = Instant.now().minus(Duration.ofDays(80));
             issuer.after = Instant.now().plus(Duration.ofDays(10));
@@ -1029,6 +1029,43 @@ class AcmeCertificateServiceTest {
             return new IssuedAcmeCertificate(request.domains(), List.of(leaf));
         } catch (Exception failure) {
             throw new AssertionError(failure);
+        }
+    }
+
+    private class TestBlobStorage extends InMemoryBlobStorage {
+        TestBlobStorage() {
+            super(pro.deta.orion.test.util.OrionTestRuntime.pkcs12Content("test-password".toCharArray()),
+                    false,
+                    AcmeCertificateServiceTest.this.events.events());
+        }
+
+        @Override
+        protected BlobStorageOperations createOperation(VcRevision.ReadTarget revision) {
+            BlobStorageOperations delegate = super.createOperation(revision);
+            return new BlobStorageOperations(delegate.revision()) {
+                @Override
+                public byte[] readContent() { return delegate.readContent(); }
+
+                @Override
+                public void write(byte[] bytes) { delegate.write(bytes); }
+
+                @Override
+                protected VcRevision.Stored commitChanges(VcChangeDescription description) {
+                    try {
+                        return commitSnapshot(delegate, description);
+                    } catch (IOException failure) {
+                        throw new java.io.UncheckedIOException(failure);
+                    }
+                }
+
+                @Override
+                public void close() { delegate.close(); }
+            };
+        }
+
+        protected VcRevision.Stored commitSnapshot(BlobStorageOperations operation,
+                VcChangeDescription description) throws IOException {
+            return operation.commit(description);
         }
     }
 }

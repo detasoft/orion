@@ -1,5 +1,11 @@
 package pro.deta.orion.config;
 
+import pro.deta.orion.test.integration.git.FileTestSupport;
+
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
+import pro.deta.orion.git.fileapi.GitBlobStorage;
+
 import pro.deta.orion.git.fileapi.GitFile;
 
 import pro.deta.orion.git.fileapi.GitFileEvents;
@@ -50,13 +56,13 @@ class NativeSshCredentialPersistenceTest {
         NativeGitRepositoryProvider provider =
                 NativeGitRepositoryProvider.file(root, testRuntime.events());
         NativeGitRepository repository = provider.create("acl").valueOrFailure("create repository");
-        OrionVersionedConfigurationStorage storage = new NativeGitOrionConfigurationStorage(
+        OrionVersionedConfigurationStorage storage = new BlobOrionConfigurationStorage(new GitBlobStorage(
                 new GitFileEvents(
                 new GitFile(
                     provider,
                     "acl",
                     "refs/heads/main",
-                    "users.xml")));
+                    "users.xml"))), testRuntime.unstartedEvents());
         User alice = new User("alice", null, null, "alice@example.test",
                 List.of(), List.of(), List.of());
         AccessControl primary = new AccessControl(List.of(alice), List.of(), List.of());
@@ -65,17 +71,16 @@ class NativeSshCredentialPersistenceTest {
         ByteArrayOutputStream roles = new ByteArrayOutputStream();
         OrionXml.write(OrionDocument.withAccessControl(new AccessControl()), roles);
         byte[] unchanged = roles.toByteArray();
-        repository
-                .files()
-                .withAccess(
-                        "refs/heads/main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "seed"),
-                        access -> {
-                            access.write("users.xml", users.toByteArray());
-                            access.write("roles.xml", unchanged);
-                            access.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "refs/heads/main");
+        try (GitFileAccess access = repository.files().open(repository.ref("refs/heads/main"))) {
+            access.write("users.xml", users.toByteArray());
+            access.write("roles.xml", unchanged);
+            repository.refUpdate(
+                    repository.ref("refs/heads/main"),
+                    access.revision(),
+                    access.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "seed")));
+        }
+
         KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
         generator.initialize(2048);
         KeyPair key = generator.generateKeyPair();
@@ -110,12 +115,12 @@ class NativeSshCredentialPersistenceTest {
             editor.onStop();
         }
         OrionConfigurationEditor reopenedEditor = new OrionConfigurationEditor(
-                        new NativeGitOrionConfigurationStorage(new GitFileEvents(
+                        new BlobOrionConfigurationStorage(new GitBlobStorage(new GitFileEvents(
                                 new GitFile(
                                     NativeGitRepositoryProvider.file(root, testRuntime.events()),
                                     "acl",
                                     "refs/heads/main",
-                                    "users.xml"))),
+                                    "users.xml"))), testRuntime.unstartedEvents()),
                         pro.deta.orion.keymaterial.OrionKeyMaterial.unavailable(),
                         testRuntime.events());
         OrionAccessControlServiceImpl reopened = service(reopenedEditor);
@@ -124,7 +129,12 @@ class NativeSshCredentialPersistenceTest {
             reopened.onStart();
             assertThat(reopened.authenticateSshUser("alice", key.getPublic().getEncoded()))
                     .isInstanceOf(AuthenticationResult.Success.class);
-            assertThat(repository.files().readBytes("refs/heads/main", "roles.xml"))
+            assertThat(
+                            repository
+                                    .files()
+                                    .<byte[], Exception>read(
+                                            repository.ref("refs/heads/main"),
+                                            file -> file.readBytes("roles.xml")))
                     .containsExactly(unchanged);
         } finally {
             reopened.onStop();

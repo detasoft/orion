@@ -1,6 +1,10 @@
 package pro.deta.orion.test;
 
-import pro.deta.orion.storage.BlobStorage;
+import pro.deta.orion.test.integration.git.FileTestSupport;
+
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
+import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.KeyMaterialBootstrap;
 
 import pro.deta.orion.util.VcChangeAuthor;
@@ -85,9 +89,11 @@ class S3BootstrapProxyColdStartIT {
             String refreshedRevision;
             try (RuntimeHttpTestSupport.StartedOrion upstream = RuntimeHttpTestSupport.start(upstreamConfiguration)) {
                 environment.putAll(configureSources(tempDir, configuration, upstream, "http"));
-                InMemoryBlobStorage materialStore = new InMemoryBlobStorage();
-                materialStore.write(new BlobStorage.Modification(null, materialBytes(configuration,
-                        environment)));
+                InMemoryBlobStorage materialStore = new InMemoryBlobStorage(
+                                materialBytes(configuration,
+                        environment),
+                                false,
+                                testRuntime.events());
                 byte[] payload = "preseeded proxy server identity".getBytes(StandardCharsets.UTF_8);
                 String signingKeyId;
                 byte[] signature;
@@ -105,20 +111,21 @@ class S3BootstrapProxyColdStartIT {
                     OrionXml.write(secrets.createSystem(document, SECRET_ID, SECRET_VALUE.toCharArray()), output);
                     xml = output.toByteArray();
                 }
-                material = materialStore.load().bytes();
+                material = materialStore.readBytes(new VcRevision.Latest());
                 NativeGitRepository repository = upstream.repositoryProvider().create("bootstrap-inputs")
                         .valueOrFailure("seed remote bootstrap repository");
-                repository
-                        .files()
-                        .withAccess(
-                                REF,
-                                new VcChangeDescription(VcChangeAuthor.EMPTY, "Seed remote bootstrap inputs"),
-                                access -> {
-                                    access.write(CONFIGURATION_PATH, xml);
-                                    access.write(MATERIAL_PATH, material);
-                                    access.apply();
-                                    return null;
-                                });
+                FileTestSupport.initialize(repository, REF);
+                try (GitFileAccess access = repository.files().open(repository.ref(REF))) {
+                    access.write(CONFIGURATION_PATH, xml);
+                    access.write(MATERIAL_PATH, material);
+                    repository.refUpdate(
+                            repository.ref(REF),
+                            access.revision(),
+                            access.commit(
+                                    new VcChangeDescription(
+                                            VcChangeAuthor.EMPTY, "Seed remote bootstrap inputs")));
+                }
+
                 try (NativeGitRepositoryProvider empty = S3NativeGitRepositoryFactory.repositories(
                         configuration.getStorage().getLocation(), configuration.getStorage().getEndpoint(),
                         configuration.getStorage().getAuth(), environment, testRuntime.events())) {
@@ -151,23 +158,34 @@ class S3BootstrapProxyColdStartIT {
                         assertThat(bootstrap.repositoryProvider().repositoryNames()).doesNotContain(cacheName);
                         NativeGitRepository cache = bootstrap.repositoryProvider().openForRead(cacheName)
                                 .valueOrFailure("hydrated S3 proxy cache");
-                        assertThat(cache.files().readBytes(REF, MATERIAL_PATH)).isEqualTo(material);
+                        assertThat(
+                                        cache.files()
+                                                .<byte[], Exception>read(
+                                                        cache.ref(REF),
+                                                        file -> file.readBytes(MATERIAL_PATH)))
+                                .isEqualTo(material);
                         String initialRevision = cache.refs().get(REF);
-                        repository
-                                .files()
-                                .withAccess(
-                                        REF,
-                                        new VcChangeDescription(
-                                                VcChangeAuthor.EMPTY, "Change upstream after cold start"),
-                                        access -> {
-                                            access.write("marker.txt", marker);
-                                            access.apply();
-                                            return null;
-                                        });
+                        FileTestSupport.initialize(repository, REF);
+                        try (GitFileAccess access = repository.files().open(repository.ref(REF))) {
+                            access.write("marker.txt", marker);
+                            repository.refUpdate(
+                                    repository.ref(REF),
+                                    access.revision(),
+                                    access.commit(
+                                            new VcChangeDescription(
+                                                    VcChangeAuthor.EMPTY,
+                                                    "Change upstream after cold start")));
+                        }
+
                         refreshedRevision = repository.refs().get(REF);
                         assertThat(refreshedRevision).isNotEqualTo(initialRevision);
                         bootstrap.repositoryProvider().openForRead(cacheName).valueOrFailure("refresh S3 proxy cache");
-                        assertThat(cache.files().readBytes(REF, "marker.txt")).isEqualTo(marker);
+                        assertThat(
+                                        cache.files()
+                                                .<byte[], Exception>read(
+                                                        cache.ref(REF),
+                                                        file -> file.readBytes("marker.txt")))
+                                .isEqualTo(marker);
                         assertThat(cache.refs()).containsEntry(REF, refreshedRevision);
                     } finally {
                         lifecycle.shutdownApplication();
@@ -179,9 +197,27 @@ class S3BootstrapProxyColdStartIT {
                     configuration.getStorage().getLocation(), configuration.getStorage().getEndpoint(),
                     configuration.getStorage().getAuth(), environment, testRuntime.events())) {
                 NativeGitRepository persisted = reopened.find(cacheName).valueOrFailure("persisted S3 proxy cache");
-                assertThat(persisted.files().readBytes(REF, CONFIGURATION_PATH)).isEqualTo(loadedConfiguration);
-                assertThat(persisted.files().readBytes(REF, MATERIAL_PATH)).isEqualTo(material);
-                assertThat(persisted.files().readBytes(REF, "marker.txt")).isEqualTo(marker);
+                assertThat(
+                                persisted
+                                        .files()
+                                        .<byte[], Exception>read(
+                                                persisted.ref(REF),
+                                                file -> file.readBytes(CONFIGURATION_PATH)))
+                        .isEqualTo(loadedConfiguration);
+                assertThat(
+                                persisted
+                                        .files()
+                                        .<byte[], Exception>read(
+                                                persisted.ref(REF),
+                                                file -> file.readBytes(MATERIAL_PATH)))
+                        .isEqualTo(material);
+                assertThat(
+                                persisted
+                                        .files()
+                                        .<byte[], Exception>read(
+                                                persisted.ref(REF),
+                                                file -> file.readBytes("marker.txt")))
+                        .isEqualTo(marker);
                 assertThat(persisted.refs()).containsEntry(REF, refreshedRevision);
             }
         }

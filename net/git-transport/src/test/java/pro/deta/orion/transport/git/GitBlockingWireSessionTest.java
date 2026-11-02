@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.git;
 
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
 import pro.deta.orion.util.VcChangeDescription;
 
 import org.junit.jupiter.api.Test;
@@ -317,7 +319,7 @@ class GitBlockingWireSessionTest {
     void receivePreservesOriginalPackThroughTheWireAndProvider() throws Exception {
         NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository = backend.create("project").valueOrFailure("repository");
-        FileTestSupport.Prepared prepared = FileTestSupport.prepared(repository.files(), "main", "prepared",
+        FileTestSupport.Prepared prepared = FileTestSupport.prepared(repository, "main", "prepared",
                 VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("config.txt", new byte[]{1});
             return null;
@@ -521,17 +523,15 @@ class GitBlockingWireSessionTest {
                 NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initial"),
-                        fileAccess -> {
-                            fileAccess.write(
-                                    "README.md", "payload".getBytes(StandardCharsets.US_ASCII));
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("README.md", "payload".getBytes(StandardCharsets.US_ASCII));
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "initial")));
+        }
+
         String mainId = repository.refs().get("refs/heads/main");
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
@@ -727,29 +727,25 @@ class GitBlockingWireSessionTest {
                 NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "base"),
-                        fileAccess -> {
-                            fileAccess.write(
-                                    "README.md", "base".getBytes(StandardCharsets.US_ASCII));
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("README.md", "base".getBytes(StandardCharsets.US_ASCII));
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "base")));
+        }
+
         String have = repository.refs().get("refs/heads/main");
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "next"),
-                        fileAccess -> {
-                            fileAccess.write(
-                                    "README.md", "next".getBytes(StandardCharsets.US_ASCII));
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("README.md", "next".getBytes(StandardCharsets.US_ASCII));
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "next")));
+        }
+
         String want = repository.refs().get("refs/heads/main");
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
@@ -775,26 +771,24 @@ class GitBlockingWireSessionTest {
                 NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "first"),
-                        fileAccess -> {
-                            fileAccess.write("first", new byte[] {1});
-                            fileAccess.apply();
-                            return null;
-                        });
-        repository
-                .files()
-                .withAccess(
-                        "second",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "second"),
-                        fileAccess -> {
-                            fileAccess.write("second", new byte[] {2});
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("first", new byte[] {1});
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "first")));
+        }
+
+        FileTestSupport.initialize(repository, "second");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("second"))) {
+            fileAccess.write("second", new byte[] {2});
+            repository.refUpdate(
+                    repository.ref("second"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "second")));
+        }
+
         ObjectId firstWant = new ObjectId(repository.refs().get("refs/heads/main"));
         ObjectId secondWant = new ObjectId(repository.refs().get("refs/heads/second"));
         try (QueueByteSource input = new QueueByteSource(
@@ -823,29 +817,25 @@ class GitBlockingWireSessionTest {
                 NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "base"),
-                        fileAccess -> {
-                            fileAccess.write(
-                                    "README.md", "base".getBytes(StandardCharsets.US_ASCII));
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("README.md", "base".getBytes(StandardCharsets.US_ASCII));
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "base")));
+        }
+
         String have = repository.refs().get("refs/heads/main");
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "next"),
-                        fileAccess -> {
-                            fileAccess.write(
-                                    "README.md", "next".getBytes(StandardCharsets.US_ASCII));
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("README.md", "next".getBytes(StandardCharsets.US_ASCII));
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "next")));
+        }
+
         String want = repository.refs().get("refs/heads/main");
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
@@ -977,28 +967,24 @@ class GitBlockingWireSessionTest {
                 NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "root"),
-                        fileAccess -> {
-                            fileAccess.write(
-                                    "README.md", "root".getBytes(StandardCharsets.US_ASCII));
-                            fileAccess.apply();
-                            return null;
-                        });
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "tip"),
-                        fileAccess -> {
-                            fileAccess.write(
-                                    "README.md", "tip".getBytes(StandardCharsets.US_ASCII));
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("README.md", "root".getBytes(StandardCharsets.US_ASCII));
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "root")));
+        }
+
+        FileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("README.md", "tip".getBytes(StandardCharsets.US_ASCII));
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "tip")));
+        }
+
         String tip = repository.refs().get("refs/heads/main");
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {

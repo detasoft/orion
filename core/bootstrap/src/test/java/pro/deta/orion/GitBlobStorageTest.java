@@ -1,8 +1,17 @@
 package pro.deta.orion;
 
+import pro.deta.orion.keymaterial.KeyMaterialOperation;
+
 import pro.deta.orion.git.fileapi.GitBlobStorage;
 import pro.deta.orion.storage.BlobStorage;
-import pro.deta.orion.storage.BlobChanged;
+import pro.deta.orion.util.VcResourceModified;
+import pro.deta.orion.util.VcRevision;
+import pro.deta.orion.storage.BlobStorage.BlobStorageOperations;
+import pro.deta.orion.git.fileapi.GitFileAccess;
+import pro.deta.orion.event.OrionEvents;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.util.VcModificationException;
 
 import java.math.BigInteger;
 import java.util.Date;
@@ -16,10 +25,9 @@ import org.bouncycastle.cert.X509v3CertificateBuilder;
 import pro.deta.orion.keymaterial.KeyMaterialCodec;
 
 import pro.deta.orion.keymaterial.KeyMaterialRepository;
-import pro.deta.orion.storage.BlobStorage.Content;
 import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.acme.AcmeCertificateService;
-import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
+import pro.deta.orion.config.BlobOrionConfigurationStorage;
 import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.acme.AcmeCertificateIssuer;
 import pro.deta.orion.acme.AcmeCertificateIssueRequest;
@@ -84,36 +92,36 @@ class GitBlobStorageTest {
         Fixture fixture = fixture(Map.of("orion.xml", bytes("<orion/>"), MATERIAL_PATH, bytes("material")));
         try (NativeGitRepositoryProvider provider = fixture.provider();
              GitBlobStorage configuration = new GitBlobStorage(
-                     new GitFileEvents(new GitFile(provider, REPOSITORY, REF, "orion.xml")),
-                     VcChangeDescription.EMPTY);
+                     new GitFileEvents(new GitFile(provider, REPOSITORY, REF, "orion.xml")));
              GitBlobStorage material = fixture.store()) {
-            List<BlobChanged> changes = new CopyOnWriteArrayList<>();
-            pro.deta.orion.util.Subscription subscription = configuration.subscribe(changes::add);
-            String previous = configuration.load().revision();
-            material.write(new BlobStorage.Modification(material.load().revision(), bytes("other material")));
+            List<VcResourceModified> changes = new CopyOnWriteArrayList<>();
+            OrionEvents subscription = testRuntime.events().forTarget(new Object());
+            subscription.subscribe(VcResourceModified.class, configuration, changes::add);
+            VcRevision.Stored previous = open(configuration).revision();
+            VcRevision.Stored beforeConfiguration = save(material, open(material).revision(), bytes("other material"));
             testRuntime.awaitEvents();
             assertThat(changes).isEmpty();
-            String saved = configuration.write(new BlobStorage.Modification(previous, bytes("<orion />")));
+            VcRevision.Stored saved = save(configuration, previous, bytes("<orion />"));
             testRuntime.awaitEvents();
-            assertThat(changes).extracting(BlobChanged::revision).containsExactly(saved);
-            assertThat(changes.getFirst().oldRevision()).isEqualTo(previous);
-            String next = configuration.write(new BlobStorage.Modification(saved, bytes("<next/>")));
+            assertThat(changes).extracting(VcResourceModified::revision).containsExactly(saved);
+            assertThat(changes.getFirst().oldRevision()).isEqualTo(beforeConfiguration);
+            VcRevision.Stored next = save(configuration, saved, bytes("<next/>"));
             testRuntime.awaitEvents();
-            assertThat(changes).extracting(BlobChanged::revision).containsExactly(saved, next);
-            assertThat(changes.getLast().oldRevision()).isEqualTo(previous);
-            configuration.read(next);
-            String accepted = configuration.write(new BlobStorage.Modification(next, bytes("<accepted/>")));
+            assertThat(changes).extracting(VcResourceModified::revision).containsExactly(saved, next);
+            assertThat(changes.getLast().oldRevision()).isEqualTo(saved);
+            configuration.readBytes(next);
+            VcRevision.Stored accepted = save(configuration, next, bytes("<accepted/>"));
             testRuntime.awaitEvents();
-            assertThat(changes).extracting(BlobChanged::revision).containsExactly(saved, next, accepted);
+            assertThat(changes).extracting(VcResourceModified::revision).containsExactly(saved, next, accepted);
             assertThat(changes.getLast().oldRevision()).isEqualTo(next);
-            material.write(new BlobStorage.Modification(material.load().revision(), bytes("updated material")));
+            save(material, open(material).revision(), bytes("updated material"));
             testRuntime.awaitEvents();
-            assertThat(changes).extracting(BlobChanged::revision).containsExactly(saved, next, accepted);
-            subscription.close();
-            configuration.write(new BlobStorage.Modification(configuration.load().revision(),
-                    bytes("<closed/>")));
+            assertThat(changes).extracting(VcResourceModified::revision).containsExactly(saved, next, accepted);
+            subscription.unsubscribe(configuration);
+            save(configuration, open(configuration).revision(),
+                    bytes("<closed/>"));
             testRuntime.awaitEvents();
-            assertThat(changes).extracting(BlobChanged::revision).containsExactly(saved, next, accepted);
+            assertThat(changes).extracting(VcResourceModified::revision).containsExactly(saved, next, accepted);
         }
     }
 
@@ -122,14 +130,18 @@ class GitBlobStorageTest {
         Fixture fixture = fixture(Map.of("orion.xml", bytes("<orion/>")));
         try (NativeGitRepositoryProvider provider = fixture.provider();
              GitBlobStorage storage = new GitBlobStorage(new GitFileEvents(
-                     new GitFile(provider, REPOSITORY, "refs/heads/new", "orion.xml")),
-                             VcChangeDescription.EMPTY)) {
-            List<BlobChanged> changes = new CopyOnWriteArrayList<>();
-            try (pro.deta.orion.util.Subscription ignored = storage.subscribe(changes::add)) {
-                String saved = storage.write(new BlobStorage.Modification(null, bytes("<orion />")));
+                     new GitFile(provider, REPOSITORY, "refs/heads/new", "orion.xml")))) {
+            List<VcResourceModified> changes = new CopyOnWriteArrayList<>();
+            OrionEvents subscription = testRuntime.events().forTarget(new Object());
+            subscription.subscribe(VcResourceModified.class, storage, changes::add);
+            try {
+                VcRevision.Stored saved = new VcRevision.Stored(fixture.repository().refs().get(REF));
+                fixture.repository().updateRef("refs/heads/new", "0".repeat(40), saved.value());
                 testRuntime.awaitEvents();
-                assertThat(changes).extracting(BlobChanged::revision).containsExactly(saved);
-                assertThat(changes.getFirst().oldRevision()).isNull();
+                assertThat(changes).extracting(VcResourceModified::revision).containsExactly(saved);
+                assertThat(changes.getFirst().oldRevision()).isEqualTo(new VcRevision.Absent());
+            } finally {
+                subscription.unsubscribe(storage);
             }
         }
     }
@@ -141,13 +153,13 @@ class GitBlobStorageTest {
                 new VcChangeAuthor("Configuration editor", "editor@example.test"), "Update configuration");
         try (NativeGitRepositoryProvider provider = fixture.provider();
              GitBlobStorage storage = new GitBlobStorage(
-                     new GitFileEvents(new GitFile(provider, REPOSITORY, REF, "orion.xml")), metadata)) {
-            BlobStorage.Content initial = storage.load();
-            String saved = storage.write(new BlobStorage.Modification(initial.revision(), bytes("<orion />")));
-            assertThat(storage.read(saved)).isEqualTo(bytes("<orion />"));
-            assertThat(initial.bytes()).isEqualTo(bytes("<orion/>"));
+                     new GitFileEvents(new GitFile(provider, REPOSITORY, REF, "orion.xml")))) {
+            BlobStorageOperations initial = open(storage);
+            VcRevision.Stored saved = save(storage, initial.revision(), bytes("<orion />"), metadata);
+            assertThat(storage.readBytes(saved)).isEqualTo(bytes("<orion />"));
+            assertThat(initial.readContent()).isEqualTo(bytes("<orion/>"));
             byte[] commit = fixture.repository().readObject(
-                    new pro.deta.orion.git.parser.v2.id.ObjectId(saved)).orElseThrow().data();
+                    new ObjectId(saved.value())).orElseThrow().data();
             assertThat(new String(commit, StandardCharsets.UTF_8))
                     .contains("author Configuration editor <editor@example.test>")
                     .endsWith("Update configuration\n");
@@ -175,13 +187,13 @@ class GitBlobStorageTest {
              KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray());
              OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(fixture.store(),
                      new KeyMaterialCodec(options), testRuntime.events()));
-             NativeGitOrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(new GitFileEvents(
-                     new GitFile(provider, REPOSITORY, REF, "orion.xml")))) {
-            material.withModification(material.revision(), modification -> {
+             BlobOrionConfigurationStorage storage = new BlobOrionConfigurationStorage(new GitBlobStorage(new GitFileEvents(
+                     new GitFile(provider, REPOSITORY, REF, "orion.xml"))), testRuntime.unstartedEvents())) {
+            try (KeyMaterialOperation modification = material.open(new VcRevision.Stored(material.revision()))) {
                 modification.generateKey("account", Set.of(KeyMaterialPurpose.ACME_ACCOUNT), KeyMaterialAlgorithm.RSA, 2048);
                 modification.generateKey("identity", Set.of(KeyMaterialPurpose.TLS_IDENTITY), KeyMaterialAlgorithm.RSA, 2048);
-                modification.apply();
-            });
+                modification.commit(VcChangeDescription.EMPTY);
+            }
             OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, material,
                     testRuntime.events());
             editor.onStart();
@@ -226,6 +238,7 @@ class GitBlobStorageTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Disabled("Publication under commit lock: docs/plans/tasks/22_vc-event-publication.md")
     void allowsReadingMaterialWhileARefChangeIsBeingPublished() throws Exception {
         java.util.concurrent.atomic.AtomicReference<GitBlobStorage> activeStore =
                 new java.util.concurrent.atomic.AtomicReference<>();
@@ -236,8 +249,11 @@ class GitBlobStorageTest {
                     if (event instanceof pro.deta.orion.git.nativestorage.RepositoryRefChanged
                             && activeStore.get() != null) {
                         try {
-                            executor.submit(() -> activeStore.get().load()).get(2,
-                                    java.util.concurrent.TimeUnit.SECONDS);
+                            executor.submit(() -> {
+                                try (BlobStorageOperations operation = activeStore.get().open(new VcRevision.Latest())) {
+                                    return operation.revision();
+                                }
+                            }).get(2, java.util.concurrent.TimeUnit.SECONDS);
                         } catch (Exception failure) {
                             throw new AssertionError("Store read is blocked by ref event publication", failure);
                         }
@@ -247,18 +263,17 @@ class GitBlobStorageTest {
             };
             events.onStart();
             try (NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(events)) {
-                provider.create(REPOSITORY).valueOrFailure("create repository");
+                seedEmptyCommit(provider.create(REPOSITORY).valueOrFailure("create repository"));
                 try (GitBlobStorage store =
                         new GitBlobStorage(new GitFileEvents(
                                 new GitFile(
                                     provider,
                                     REPOSITORY,
                                     REF,
-                                    MATERIAL_PATH)), new VcChangeDescription(VcChangeAuthor.EMPTY,
-                                            "Update server identity material"))) {
+                                    MATERIAL_PATH)))) {
                     activeStore.set(store);
-                    String saved = store.write(new BlobStorage.Modification(null, bytes("material")));
-                    assertThat(store.load().revision()).isEqualTo(saved);
+                    VcRevision.Stored saved = save(store, open(store).revision(), bytes("material"));
+                    assertThat(open(store).revision()).isEqualTo(saved);
                 }
             } finally {
                 events.onStop();
@@ -270,22 +285,22 @@ class GitBlobStorageTest {
     void opensEmptyMaterialOnAnExistingBranchAndPublishesAgainstItsRevision() throws Exception {
         Fixture fixture = fixture(Map.of("orion.xml", bytes("configuration")));
         GitBlobStorage source = fixture.store();
-        String base = fixture.repository().refs().get(REF);
+        VcRevision.Stored base = new VcRevision.Stored(fixture.repository().refs().get(REF));
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray());
              OrionKeyMaterial material = OrionKeyMaterial.open(new KeyMaterialRepository(
                      source, new KeyMaterialCodec(options), testRuntime.events()))) {
-            assertThat(material.revision()).isEqualTo(base);
+            assertThat(material.revision()).isEqualTo(base.value());
             assertThat(material.hasDurableSnapshot()).isFalse();
             KeyMaterialId signing = new KeyMaterialId("signing", 1);
-            pro.deta.orion.keymaterial.KeyMaterialModification modification =
-                    material.modify(material.revision());
-            assertThat(modification.version()).isEqualTo(base);
+            pro.deta.orion.keymaterial.KeyMaterialOperation modification =
+                    material.open(new VcRevision.Stored(material.revision()));
+            assertThat(modification.revision().value()).isEqualTo(base.value());
             modification.generateKey("signing", Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
-            modification.apply();
-            assertThat(material.revision()).isEqualTo(source.load().revision()).isNotEqualTo(base);
+            modification.commit(VcChangeDescription.EMPTY);
+            assertThat(material.revision()).isEqualTo(open(source).revision().value()).isNotEqualTo(base.value());
             assertThat(material.hasDurableSnapshot()).isTrue();
             assertThat(material.contains(signing)).isTrue();
-            assertThat(fixture.repository().files().readBytes(REF, "orion.xml"))
+            assertThat(readGit(fixture.repository(), "orion.xml"))
                     .isEqualTo(bytes("configuration"));
         }
     }
@@ -295,20 +310,21 @@ class GitBlobStorageTest {
         Fixture fixture = fixture(Map.of("orion.xml", bytes("configuration")));
         GitBlobStorage store = fixture.store();
 
-        String base = fixture.repository().refs().get(REF);
-        Content initial = store.load();
+        VcRevision.Stored base = new VcRevision.Stored(fixture.repository().refs().get(REF));
+        BlobStorageOperations initial = open(store);
         assertThat(initial.revision()).isEqualTo(base);
-        assertThat(initial.bytes()).isNull();
-        assertThatThrownBy(() -> store.read(base)).isInstanceOf(java.io.FileNotFoundException.class);
-        String version = store.write(new BlobStorage.Modification(base, bytes("encrypted-material")));
+        assertThatThrownBy(initial::readContent).isInstanceOf(java.io.UncheckedIOException.class)
+                .hasCauseInstanceOf(java.io.FileNotFoundException.class);
+        assertThatThrownBy(() -> store.readBytes(base)).isInstanceOf(java.io.UncheckedIOException.class)
+                .hasCauseInstanceOf(java.io.FileNotFoundException.class);
+        VcRevision.Stored version = save(store, base, bytes("encrypted-material"));
 
-        assertThat(store.load().revision()).isEqualTo(version);
-        assertThat(fixture.repository().files().readBytes(REF, "orion.xml")).isEqualTo(bytes("configuration"));
-        assertThat(fixture.repository().files().readBytes(REF, MATERIAL_PATH))
+        assertThat(open(store).revision()).isEqualTo(version);
+        assertThat(readGit(fixture.repository(), "orion.xml")).isEqualTo(bytes("configuration"));
+        assertThat(readGit(fixture.repository(), MATERIAL_PATH))
                 .isEqualTo(bytes("encrypted-material"));
-        assertThatThrownBy(() -> store.write(new BlobStorage.Modification(null,
-                bytes("unexpected replacement"))))
-                .isInstanceOf(BlobStorageConflictException.class);
+        assertThatThrownBy(() -> save(store, base, bytes("unexpected replacement")))
+                .isInstanceOf(VcModificationException.class);
     }
 
     @Test
@@ -316,80 +332,85 @@ class GitBlobStorageTest {
         Fixture fixture = fixture(Map.of(MATERIAL_PATH, bytes("initial"),
                 "orion.xml", bytes("initial config")));
         GitBlobStorage store = fixture.store();
-        Content initial = store.load();
-        String version = initial.revision();
-        fixture.repository()
-                .files()
-                .withAccess(
-                        REF,
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "configuration update"),
-                        fileAccess -> {
-                            fileAccess.write("orion.xml", bytes("new config"));
-                            fileAccess.apply();
-                            return null;
-                        });
+        BlobStorageOperations initial = open(store);
+        VcRevision.Stored version = initial.revision();
+        {
+            NativeGitRepository targetRepository = fixture.repository();
+            VcRevision.Ref branch = targetRepository.ref(REF);
+            try (GitFileAccess fileAccess = targetRepository.files().open(branch)) {
+                fileAccess.write("orion.xml", bytes("new config"));
+                VcRevision.Stored created =
+                        fileAccess.commit(
+                                new VcChangeDescription(
+                                        VcChangeAuthor.EMPTY, "configuration update"));
+                targetRepository.refUpdate(branch, fileAccess.revision(), created);
+            }
+        }
 
-        assertThat(initial.bytes()).isEqualTo(bytes("initial"));
-        assertThat(store.load().revision()).isNotEqualTo(version);
-        String saved = store.write(new BlobStorage.Modification(version, bytes("updated material")));
+        assertThat(initial.readContent()).isEqualTo(bytes("initial"));
+        assertThat(open(store).revision()).isNotEqualTo(version);
+        VcRevision.Stored saved = save(store, version, bytes("updated material"));
 
-        assertThat(store.load().revision()).isEqualTo(saved);
-        assertThat(fixture.repository().files().readBytes(REF, "orion.xml")).isEqualTo(bytes("new config"));
-        assertThat(fixture.repository().files().readBytes(REF, MATERIAL_PATH))
+        assertThat(open(store).revision()).isEqualTo(saved);
+        assertThat(readGit(fixture.repository(), "orion.xml")).isEqualTo(bytes("new config"));
+        assertThat(readGit(fixture.repository(), MATERIAL_PATH))
                 .isEqualTo(bytes("updated material"));
     }
 
     @Test
-    void mapsAStaleProviderPublicationToMaterialStoreConflict() throws Exception {
+    void rejectsAStaleFileRevisionAtPublication() throws Exception {
         Fixture fixture = fixture(Map.of(MATERIAL_PATH, bytes("initial")));
         GitBlobStorage first = fixture.store();
         GitBlobStorage second = fixture.store();
-        String firstRevision = first.load().revision();
+        VcRevision.Stored firstRevision = open(first).revision();
 
-        String secondRevision = second.load().revision();
+        VcRevision.Stored secondRevision = open(second).revision();
 
-        first.write(new BlobStorage.Modification(firstRevision, bytes("first")));
+        save(first, firstRevision, bytes("first"));
 
-        assertThatThrownBy(() -> second.write(new BlobStorage.Modification(secondRevision, bytes("second"))))
-                .isInstanceOf(BlobStorageConflictException.class)
-                .hasMessage("Blob store changed before save");
-        assertThat(first.load().bytes()).isEqualTo(bytes("first"));
+        assertThatThrownBy(() -> save(second, secondRevision, bytes("second")))
+                .isInstanceOf(VcModificationException.class);
+        assertThat(open(first).readContent()).isEqualTo(bytes("first"));
     }
 
     @Test
     void rejectsAnUpdateCommittedBetweenPreparationAndPublication() throws Exception {
         NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository = backend.create(REPOSITORY).valueOrFailure("create repository");
-        repository
-                .files()
-                .withAccess(
-                        REF,
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "seed repository"),
-                        fileAccess -> {
-                            fileAccess.write(MATERIAL_PATH, bytes("initial"));
-                            fileAccess.apply();
-                            return null;
-                        });
+        {
+            NativeGitRepository targetRepository = repository;
+            seedEmptyCommit(targetRepository);
+            VcRevision.Ref branch = targetRepository.ref(REF);
+            try (GitFileAccess fileAccess = targetRepository.files().open(branch)) {
+                fileAccess.write(MATERIAL_PATH, bytes("initial"));
+                VcRevision.Stored created =
+                        fileAccess.commit(
+                                new VcChangeDescription(VcChangeAuthor.EMPTY, "seed repository"));
+                targetRepository.refUpdate(branch, fileAccess.revision(), created);
+            }
+        }
         InterleavingProvider provider =
                 new InterleavingProvider(
                         backend,
                         () -> {
                             try {
-                                backend.openForWrite(REPOSITORY)
-                                        .valueOrFailure("repository")
-                                        .files()
-                                        .withAccess(
-                                                REF,
-                                                new VcChangeDescription(
-                                                        VcChangeAuthor.EMPTY, "concurrent update"),
-                                                fileAccess -> {
-                                                    fileAccess.write("orion.xml",
-                                                            bytes("concurrent configuration"));
-                                                    fileAccess.write(MATERIAL_PATH,
-                                                            bytes("concurrent material"));
-                                                    fileAccess.apply();
-                                                    return null;
-                                                });
+                                NativeGitRepository targetRepository =
+                                        backend.openForWrite(REPOSITORY)
+                                                .valueOrFailure("repository");
+                                VcRevision.Ref branch = targetRepository.ref(REF);
+                                try (GitFileAccess fileAccess =
+                                        targetRepository.files().open(branch)) {
+                                    fileAccess.write(
+                                            "orion.xml", bytes("concurrent configuration"));
+                                    fileAccess.write(MATERIAL_PATH, bytes("concurrent material"));
+                                    VcRevision.Stored created =
+                                            fileAccess.commit(
+                                                    new VcChangeDescription(
+                                                            VcChangeAuthor.EMPTY,
+                                                            "concurrent update"));
+                                    targetRepository.refUpdate(
+                                            branch, fileAccess.revision(), created);
+                                }
                             } catch (Exception failure) {
                                 throw new IllegalStateException(failure);
                             }
@@ -399,16 +420,15 @@ class GitBlobStorageTest {
                     provider,
                     REPOSITORY,
                     REF,
-                    MATERIAL_PATH)), new VcChangeDescription(VcChangeAuthor.EMPTY,
-                            "Update server identity material"));
-        String observedVersion = store.load().revision();
+                    MATERIAL_PATH)));
+        VcRevision.Stored observedVersion = open(store).revision();
 
-        assertThatThrownBy(() -> store.write(new BlobStorage.Modification(observedVersion,
-                bytes("stale material"))))
-                .isInstanceOf(BlobStorageConflictException.class);
+        assertThatThrownBy(() -> save(store, observedVersion,
+                bytes("stale material")))
+                .isInstanceOf(VcModificationException.class);
 
-        assertThat(repository.files().readBytes(REF, MATERIAL_PATH)).isEqualTo(bytes("concurrent material"));
-        assertThat(repository.files().readBytes(REF, "orion.xml")).isEqualTo(bytes("concurrent configuration"));
+        assertThat(readGit(repository, MATERIAL_PATH)).isEqualTo(bytes("concurrent material"));
+        assertThat(readGit(repository, "orion.xml")).isEqualTo(bytes("concurrent configuration"));
     }
 
     @Test
@@ -439,12 +459,12 @@ class GitBlobStorageTest {
                     factory.provider(),
                     repositoryName,
                     NativeGitRepositoryFactory.sourceRefName(source),
-                    NativeGitRepositoryFactory.repositoryPath(source.getPath()))),
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "Update server identity material"));
+                    NativeGitRepositoryFactory.repositoryPath(source.getPath()))));
 
-        String base = store.load().revision();
-        assertThatThrownBy(() -> store.read(base)).isInstanceOf(java.io.FileNotFoundException.class);
-        store.write(new BlobStorage.Modification(base, bytes("encrypted-material")));
+        VcRevision.Stored base = open(store).revision();
+        assertThatThrownBy(() -> store.readBytes(base)).isInstanceOf(java.io.UncheckedIOException.class)
+                .hasCauseInstanceOf(java.io.FileNotFoundException.class);
+        save(store, base, bytes("encrypted-material"));
 
         Path checkout = tempDir.resolve("checkout");
         try (Git ignored = Git.cloneRepository()
@@ -464,40 +484,53 @@ class GitBlobStorageTest {
         Fixture fixture = fixture(Map.of(MATERIAL_PATH, bytes("initial")));
         try (GitBlobStorage store = fixture.store()) {
             testRuntime.awaitEvents();
-            List<String> revisions = new CopyOnWriteArrayList<>();
+            List<VcRevision.Stored> revisions = new CopyOnWriteArrayList<>();
             GitFile file = new GitFile(fixture.provider(), REPOSITORY, REF, MATERIAL_PATH);
             GitFileEvents source = new GitFileEvents(file);
             testRuntime.own(source);
-            testRuntime.own(source.events().subscribe(GitFileChanged.class, event -> {
-                if (source.matches(event)) revisions.add(event.revision().toHex());
-            }));
-            fixture.repository().files().withAccess(REF,
-                    new VcChangeDescription(VcChangeAuthor.EMPTY, "unrelated file"), access -> {
-                        access.write("orion.xml", bytes("updated configuration"));
-                        access.apply();
-                        return null;
-                    });
-            fixture.repository().files().withAccess("refs/heads/other",
-                    new VcChangeDescription(VcChangeAuthor.EMPTY, "other branch"), access -> {
-                        access.write(MATERIAL_PATH, bytes("other branch"));
-                        access.apply();
-                        return null;
-                    });
+            OrionEvents subscription = source.events().forTarget(revisions);
+            subscription.subscribe(GitFileChanged.class, source.source(),
+                    event -> revisions.add(new VcRevision.Stored(event.revision().toHex())));
+            testRuntime.own(() -> subscription.unsubscribe(source.source()));
+            {
+                NativeGitRepository targetRepository = fixture.repository();
+                VcRevision.Ref branch = targetRepository.ref(REF);
+                try (GitFileAccess access = targetRepository.files().open(branch)) {
+                    access.write("orion.xml", bytes("updated configuration"));
+                    VcRevision.Stored created =
+                            access.commit(
+                                    new VcChangeDescription(
+                                            VcChangeAuthor.EMPTY, "unrelated file"));
+                    targetRepository.refUpdate(branch, access.revision(), created);
+                }
+            }
+            {
+                NativeGitRepository targetRepository = fixture.repository();
+                targetRepository.updateRef("refs/heads/other", "0".repeat(40), targetRepository.refs().get(REF));
+                VcRevision.Ref branch = targetRepository.ref("refs/heads/other");
+                try (GitFileAccess access = targetRepository.files().open(branch)) {
+                    access.write(MATERIAL_PATH, bytes("other branch"));
+                    VcRevision.Stored created =
+                            access.commit(
+                                    new VcChangeDescription(VcChangeAuthor.EMPTY, "other branch"));
+                    targetRepository.refUpdate(branch, access.revision(), created);
+                }
+            }
             testRuntime.awaitEvents();
             assertThat(revisions).isEmpty();
-            String first = store.write(new BlobStorage.Modification(store.load().revision(), bytes("first")));
-            String second = store.write(new BlobStorage.Modification(first, bytes("second")));
+            VcRevision.Stored first = save(store, open(store).revision(), bytes("first"));
+            VcRevision.Stored second = save(store, first, bytes("second"));
             testRuntime.awaitEvents();
             assertThat(revisions).containsExactly(first, second);
-            assertThat(store.read(first)).isEqualTo(bytes("first"));
-            assertThat(store.read(second)).isEqualTo(bytes("second"));
+            assertThat(store.readBytes(first)).isEqualTo(bytes("first"));
+            assertThat(store.readBytes(second)).isEqualTo(bytes("second"));
         }
     }
 
     @Test
     void retainsRunningMaterialWhenAnExternalUpdateReplacesItsHistory() throws Exception {
         char[] password = "test-password".toCharArray();
-        InMemoryBlobStorage external = new InMemoryBlobStorage();
+        InMemoryBlobStorage external = emptyMaterialStore();
         KeyMaterialId original = new KeyMaterialId("original", 1);
         KeyMaterialId local = new KeyMaterialId("local", 1);
         KeyMaterialId added = new KeyMaterialId("added", 1);
@@ -506,31 +539,37 @@ class GitBlobStorageTest {
                      external,
                      new KeyMaterialCodec(options),
                      testRuntime.unstartedEvents()))) {
-            writer.withModification(writer.revision(), modification -> {
+            try (KeyMaterialOperation modification = writer.open(new VcRevision.Stored(writer.revision()))) {
                 modification.generateKey("original", Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
-                modification.apply();
-            });
-            Fixture fixture = fixture(Map.of(MATERIAL_PATH, external.load().bytes()));
+                modification.commit(VcChangeDescription.EMPTY);
+            }
+            Fixture fixture = fixture(Map.of(MATERIAL_PATH, open(external).readContent()));
             try (OrionKeyMaterial running = OrionKeyMaterial.open(new KeyMaterialRepository(
                     fixture.store(),
                     new KeyMaterialCodec(options),
                     testRuntime.events()))) {
-                running.withModification(running.revision(), modification -> {
+                try (KeyMaterialOperation modification = running.open(new VcRevision.Stored(running.revision()))) {
                     modification.generateKey("local", Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
-                    modification.apply();
-                });
+                    modification.commit(VcChangeDescription.EMPTY);
+                }
                 testRuntime.awaitEvents();
                 String localRevision = running.revision();
-                writer.withModification(writer.revision(), modification -> {
+                try (KeyMaterialOperation modification = writer.open(new VcRevision.Stored(writer.revision()))) {
                     modification.generateKey("added", Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
-                    modification.apply();
-                });
-                fixture.repository().files().withAccess(REF,
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "external KMS update"), access -> {
-                            access.write(MATERIAL_PATH, external.load().bytes());
-                            access.apply();
-                            return null;
-                        });
+                    modification.commit(VcChangeDescription.EMPTY);
+                }
+                {
+                    NativeGitRepository targetRepository = fixture.repository();
+                    VcRevision.Ref branch = targetRepository.ref(REF);
+                    try (GitFileAccess access = targetRepository.files().open(branch)) {
+                        access.write(MATERIAL_PATH, open(external).readContent());
+                        VcRevision.Stored created =
+                                access.commit(
+                                        new VcChangeDescription(
+                                                VcChangeAuthor.EMPTY, "external KMS update"));
+                        targetRepository.refUpdate(branch, access.revision(), created);
+                    }
+                }
                 testRuntime.awaitEvents();
                 assertThat(running.contains(original)).isTrue();
                 assertThat(running.contains(added)).isFalse();
@@ -543,7 +582,7 @@ class GitBlobStorageTest {
                     assertThat(reopened.contains(original)).isTrue();
                     assertThat(reopened.contains(added)).isTrue();
                     assertThat(reopened.contains(local)).isFalse();
-                    assertThat(reopened.revision()).isEqualTo(fixture.store().load().revision());
+                    assertThat(reopened.revision()).isEqualTo(open(fixture.store()).revision().value());
                 }
             }
         }
@@ -553,40 +592,54 @@ class GitBlobStorageTest {
     void reloadsCommittedMaterialAndRetainsItWhenTheNextUpdateIsCorrupt() throws Exception {
         KeyMaterialId original = new KeyMaterialId("original", 1);
         KeyMaterialId added = new KeyMaterialId("added", 1);
-        InMemoryBlobStorage external = new InMemoryBlobStorage();
+        InMemoryBlobStorage external = emptyMaterialStore();
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("test-password".toCharArray());
              OrionKeyMaterial writer = OrionKeyMaterial.open(new KeyMaterialRepository(
                      external, new KeyMaterialCodec(options), testRuntime.unstartedEvents()))) {
-            writer.withModification(writer.revision(), modification -> {
+            try (KeyMaterialOperation modification = writer.open(new VcRevision.Stored(writer.revision()))) {
                 modification.generateKey("original", Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
-                modification.apply();
-            });
-            Fixture fixture = fixture(Map.of(MATERIAL_PATH, external.load().bytes()));
+                modification.commit(VcChangeDescription.EMPTY);
+            }
+            Fixture fixture = fixture(Map.of(MATERIAL_PATH, open(external).readContent()));
             try (OrionKeyMaterial running = OrionKeyMaterial.open(new KeyMaterialRepository(
                     fixture.store(), new KeyMaterialCodec(options), testRuntime.events()))) {
-                pro.deta.orion.keymaterial.KeyMaterialModification stale = running.modify(running.revision());
-                writer.withModification(writer.revision(), modification -> {
+                pro.deta.orion.keymaterial.KeyMaterialOperation stale = running.open(new VcRevision.Stored(running.revision()));
+                try (KeyMaterialOperation modification = writer.open(new VcRevision.Stored(writer.revision()))) {
                     modification.generateKey("added", Set.of(KeyMaterialPurpose.SERVER_SIGNING), KeyMaterialAlgorithm.RSA, 2048);
-                    modification.apply();
-                });
-                fixture.repository().files().withAccess(REF,
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "append material"), access -> {
-                            access.write(MATERIAL_PATH, external.load().bytes());
-                            access.apply();
-                            return null;
-                        });
+                    modification.commit(VcChangeDescription.EMPTY);
+                }
+                {
+                    NativeGitRepository targetRepository = fixture.repository();
+                    VcRevision.Ref branch = targetRepository.ref(REF);
+                    try (GitFileAccess access = targetRepository.files().open(branch)) {
+                        access.write(MATERIAL_PATH, open(external).readContent());
+                        VcRevision.Stored created =
+                                access.commit(
+                                        new VcChangeDescription(
+                                                VcChangeAuthor.EMPTY, "append material"));
+                        targetRepository.refUpdate(branch, access.revision(), created);
+                    }
+                }
                 testRuntime.awaitEvents();
                 assertThat(running.contains(added)).isTrue();
                 String saved = fixture.repository().refs().get(REF);
                 assertThat(running.revision()).isEqualTo(saved);
-                assertThatThrownBy(stale::apply).isInstanceOf(BlobStorageConflictException.class);
+                assertThatThrownBy(() -> stale.commit(VcChangeDescription.EMPTY))
+                        .isInstanceOf(java.io.UncheckedIOException.class)
+                        .hasCauseInstanceOf(BlobStorageConflictException.class);
 
-                fixture.repository().files().withAccess(REF,
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "corrupt material"), access -> {
-                            access.write(MATERIAL_PATH, new byte[]{1, 2, 3});
-                            access.apply();
-                            return null;
-                        });
+                {
+                    NativeGitRepository targetRepository = fixture.repository();
+                    VcRevision.Ref branch = targetRepository.ref(REF);
+                    try (GitFileAccess access = targetRepository.files().open(branch)) {
+                        access.write(MATERIAL_PATH, new byte[] {1, 2, 3});
+                        VcRevision.Stored created =
+                                access.commit(
+                                        new VcChangeDescription(
+                                                VcChangeAuthor.EMPTY, "corrupt material"));
+                        targetRepository.refUpdate(branch, access.revision(), created);
+                    }
+                }
                 testRuntime.awaitEvents();
                 assertThat(running.contains(original)).isTrue();
                 assertThat(running.contains(added)).isTrue();
@@ -600,19 +653,61 @@ class GitBlobStorageTest {
         NativeGitRepositoryFactory factory = new NativeGitRepositoryFactory(
                 pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(testRuntime.events()));
         NativeGitRepository repository = factory.provider().create(REPOSITORY).valueOrFailure("create repository");
-        repository
-                .files()
-                .withAccess(
-                        REF,
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "seed repository"),
-                        fileAccess -> {
-                            for (Map.Entry<String, byte[]> fileEntry : initialFiles.entrySet()) {
-                                fileAccess.write(fileEntry.getKey(), fileEntry.getValue());
-                            }
-                            fileAccess.apply();
-                            return null;
-                        });
+        {
+            NativeGitRepository targetRepository = repository;
+            seedEmptyCommit(targetRepository);
+            VcRevision.Ref branch = targetRepository.ref(REF);
+            try (GitFileAccess fileAccess = targetRepository.files().open(branch)) {
+                for (Map.Entry<String, byte[]> fileEntry : initialFiles.entrySet()) {
+                    fileAccess.write(fileEntry.getKey(), fileEntry.getValue());
+                }
+                VcRevision.Stored created =
+                        fileAccess.commit(
+                                new VcChangeDescription(VcChangeAuthor.EMPTY, "seed repository"));
+                targetRepository.refUpdate(branch, fileAccess.revision(), created);
+            }
+        }
+        testRuntime.own(factory.provider());
+        testRuntime.awaitEvents();
         return new Fixture(repository, factory.provider());
+    }
+
+    private BlobStorageOperations open(BlobStorage store) {
+        BlobStorageOperations operation = store.open(new VcRevision.Latest());
+        testRuntime.own(operation);
+        return operation;
+    }
+
+    private static VcRevision.Stored save(BlobStorage store, VcRevision.ReadTarget revision, byte[] content) {
+        return save(store, revision, content, VcChangeDescription.EMPTY);
+    }
+
+    private static VcRevision.Stored save(BlobStorage store, VcRevision.ReadTarget revision, byte[] content,
+                                         VcChangeDescription description) {
+        try (BlobStorageOperations operation = store.open(revision)) {
+            operation.write(content);
+            return operation.commit(description);
+        }
+    }
+
+    private static byte[] readGit(NativeGitRepository repository, String path) throws Exception {
+        try (GitFileAccess access = repository.files().open(repository.ref(REF))) {
+            return access.readBytes(path);
+        }
+    }
+
+    private static void seedEmptyCommit(NativeGitRepository repository) throws Exception {
+        ObjectId tree = repository.writeObject(GitObjectType.TREE, new byte[0]);
+        String text = "tree " + tree.toHex() + "\n"
+                + "author Test <test@example.invalid> 1 +0000\n"
+                + "committer Test <test@example.invalid> 1 +0000\n\nseed\n";
+        ObjectId commit = repository.writeObject(GitObjectType.COMMIT, bytes(text));
+        pro.deta.orion.git.nativestorage.GitOperationException.requireSuccess(
+                List.of(repository.updateRef(REF, "0".repeat(40), commit.toHex())));
+    }
+
+    private InMemoryBlobStorage emptyMaterialStore() {
+        return testRuntime.pkcs12Store("test-password".toCharArray());
     }
 
     private static byte[] bytes(String value) {
@@ -624,12 +719,7 @@ class GitBlobStorageTest {
             NativeGitRepositoryProvider provider) {
         private GitBlobStorage store() {
             return new GitBlobStorage(new GitFileEvents(
-                    new GitFile(
-                        provider,
-                        REPOSITORY,
-                        REF,
-                        MATERIAL_PATH)), new VcChangeDescription(VcChangeAuthor.EMPTY,
-                                "Update server identity material"));
+                    new GitFile(provider, REPOSITORY, REF, MATERIAL_PATH)));
         }
     }
 

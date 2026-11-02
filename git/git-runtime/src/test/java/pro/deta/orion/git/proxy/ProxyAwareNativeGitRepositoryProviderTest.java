@@ -1,5 +1,7 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.fileapi.GitFileAccess;
+
 import pro.deta.orion.util.VcChangeDescription;
 
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
@@ -73,16 +75,15 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         provider.activate(() -> empty, secrets(empty));
         assertThat(provider.provider().openForWrite("bootstrap").valueOrFailure("bootstrap")).isSameAs(bootstrap);
         assertThatThrownBy(uiProxy::refs).isInstanceOf(IllegalStateException.class);
-        bootstrap
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "save"),
-                        access -> {
-                            access.write("orion.xml", new byte[] {1});
-                            access.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(bootstrap, "main");
+        try (GitFileAccess access = bootstrap.files().open(bootstrap.ref("main"))) {
+            access.write("orion.xml", new byte[] {1});
+            bootstrap.refUpdate(
+                    bootstrap.ref("main"),
+                    access.revision(),
+                    access.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "save")));
+        }
+
         assertThat(pushes).hasValue(1);
     }
 
@@ -101,7 +102,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         var repository = provider.provider().openForWrite(endpoint).valueOrFailure("public proxy");
         assertThat(repository.name()).isEqualTo(endpoint);
         assertThat(refreshes).hasValue(2);
-        var update = FileTestSupport.prepared(repository.files(), "refs/heads/main", "public push",
+        var update = FileTestSupport.prepared(repository, "refs/heads/main", "public push",
                 VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("file", new byte[]{1});
             return null;
@@ -117,7 +118,13 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         assertThat(statuses).extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
         assertThat(authorizedNames).containsExactly(endpoint);
         assertThat(pushes).hasValue(1);
-        assertThat(repository.files().readBytes("refs/heads/main", "file")).isEqualTo(new byte[]{1});
+        assertThat(
+                        repository
+                                .files()
+                                .<byte[], Exception>read(
+                                        repository.ref("refs/heads/main"),
+                                        file -> file.readBytes("file")))
+                .isEqualTo(new byte[] {1});
         assertThat(provider.provider().isPublicRepositoryName(
                 BootstrapGitLocation.persistent(document.system().proxies().getFirst(), document.system()).proxyName())).isFalse();
     }
@@ -133,16 +140,19 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         provider.retry(new RemoteAlias("configuration"), () -> second, secrets(second));
         assertThatThrownBy(retained::refs).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(
-                        () ->
-                                retained.files()
-                                        .withAccess(
-                                                "refs/heads/main",
-                                                new VcChangeDescription(VcChangeAuthor.EMPTY, "stale handle"),
-                                                fileAccess -> {
-                                                    fileAccess.write("file", new byte[] {1});
-                                                    fileAccess.apply();
-                                                    return null;
-                                                }))
+                        () -> {
+                            FileTestSupport.initialize(retained, "refs/heads/main");
+                            try (GitFileAccess fileAccess =
+                                    retained.files().open(retained.ref("refs/heads/main"))) {
+                                fileAccess.write("file", new byte[] {1});
+                                retained.refUpdate(
+                                        retained.ref("refs/heads/main"),
+                                        fileAccess.revision(),
+                                        fileAccess.commit(
+                                                new VcChangeDescription(
+                                                        VcChangeAuthor.EMPTY, "stale handle")));
+                            }
+                        })
                 .isInstanceOf(IllegalStateException.class);
         var replacement = provider.provider().openForRead(endpoint).valueOrFailure("rebound proxy");
         var empty = OrionDocument.withAccessControl(new AccessControl());
@@ -164,15 +174,16 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         provider.activate(() -> first, secrets(first));
         var retained = provider.provider().openForRead("proxy/system/first").valueOrFailure("active proxy");
         NativeGitRepository local = provider.provider().openBacking("proxy/system/occupied", backend);
-        local.files()
-                .withAccess(
-                        "refs/heads/main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "local content"),
-                        fileAccess -> {
-                            fileAccess.write("local", new byte[] {2});
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(local, "refs/heads/main");
+        try (GitFileAccess fileAccess = local.files().open(local.ref("refs/heads/main"))) {
+            fileAccess.write("local", new byte[] {2});
+            local.refUpdate(
+                    local.ref("refs/heads/main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "local content")));
+        }
+
         var collision = proxyDocument("occupied", "file:///other.git");
 
         assertThatThrownBy(() -> provider.activate(() -> collision, secrets(collision)))
@@ -181,7 +192,12 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("already exists");
         assertThat(provider.provider().exists("proxy/system/first")).isTrue();
         assertThat(retained.refs()).isEmpty();
-        assertThat(local.files().readBytes("refs/heads/main", "local")).isEqualTo(new byte[]{2});
+        assertThat(
+                        local.files()
+                                .<byte[], Exception>read(
+                                        local.ref("refs/heads/main"),
+                                        file -> file.readBytes("local")))
+                .isEqualTo(new byte[] {2});
     }
 
     @Test
@@ -301,7 +317,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 });
         String name = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
         NativeGitRepository repository = provider.provider().openForWrite(name).valueOrFailure("repository");
-        var prepared = FileTestSupport.prepared(repository.files(), "main", "prepared", VcChangeAuthor.EMPTY,
+        var prepared = FileTestSupport.prepared(repository, "main", "prepared", VcChangeAuthor.EMPTY,
                 fileAccess -> {
             fileAccess.write("orion.xml", new byte[]{1});
             return null;
@@ -320,7 +336,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         NativeGitRepositoryFactory provider = provider(new AtomicInteger(), pushes);
         String name = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
         NativeGitRepository repository = provider.provider().openForWrite(name).valueOrFailure("repository");
-        var prepared = FileTestSupport.prepared(repository.files(), "refs/heads/main", "update",
+        var prepared = FileTestSupport.prepared(repository, "refs/heads/main", "update",
                 VcChangeAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", "updated".getBytes(StandardCharsets.UTF_8));
             return null;
@@ -372,18 +388,17 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         NativeGitRepository writable = provider.provider().openForWrite(name.replace("/", "%5C"))
                 .valueOrFailure("repository");
         assertThat(refreshes).hasValue(2);
-        writable.files()
-                .withAccess(
-                        "refs/heads/main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "save through proxy"),
-                        fileAccess -> {
-                            fileAccess.write(
-                                    "orion.xml", "configuration".getBytes(StandardCharsets.UTF_8));
-                            assertThat(refreshes).hasValue(2);
-                            assertThat(publishes).hasValue(0);
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(writable, "refs/heads/main");
+        try (GitFileAccess fileAccess = writable.files().open(writable.ref("refs/heads/main"))) {
+            fileAccess.write("orion.xml", "configuration".getBytes(StandardCharsets.UTF_8));
+            assertThat(refreshes).hasValue(2);
+            assertThat(publishes).hasValue(0);
+            writable.refUpdate(
+                    writable.ref("refs/heads/main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "save through proxy")));
+        }
 
         assertThat(repository.name()).isEqualTo(name);
         assertThat(writable.name()).isEqualTo(name);
@@ -513,18 +528,19 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         assertThat(refreshes).hasValue(1);
         NativeGitRepository writable = provider.provider().openForWrite(repositoryName).valueOrFailure("repository");
         assertThat(refreshes).hasValue(2);
-        writable.files()
-                .withAccess(
-                        "refs/heads/main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "initialize configuration"),
-                        fileAccess -> {
-                            fileAccess.write(
-                                    "orion.xml", "configuration".getBytes(StandardCharsets.UTF_8));
-                            assertThat(refreshes).hasValue(2);
-                            assertThat(pushes).hasValue(0);
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(writable, "refs/heads/main");
+        try (GitFileAccess fileAccess = writable.files().open(writable.ref("refs/heads/main"))) {
+            fileAccess.write("orion.xml", "configuration".getBytes(StandardCharsets.UTF_8));
+            assertThat(refreshes).hasValue(2);
+            assertThat(pushes).hasValue(0);
+            writable.refUpdate(
+                    writable.ref("refs/heads/main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(
+                            new VcChangeDescription(
+                                    VcChangeAuthor.EMPTY, "initialize configuration")));
+        }
+
         assertThat(refreshes).hasValue(3);
         assertThat(pushes).hasValue(1);
 
@@ -532,22 +548,24 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 .valueOrFailure("open local proxy");
         assertThat(pushes).hasValue(1);
         assertThat(refreshes).hasValue(4);
-        assertThat(repository.files().readBytes("refs/heads/main", "orion.xml"))
+        assertThat(repository.files().<byte[], Exception>read(repository.ref("refs/heads/main"), file -> file.readBytes("orion.xml")))
                 .isEqualTo("configuration".getBytes(StandardCharsets.UTF_8));
-        provider.provider()
-                .openForWrite(repositoryName)
-                .valueOrFailure("repository")
-                .files()
-                .withAccess(
-                        "refs/heads/main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "delete configuration"),
-                        fileAccess -> {
-                            fileAccess.delete("orion.xml");
-                            fileAccess.apply();
-                            return null;
-                        });
+        {
+            NativeGitRepository modifiedRepository = provider.provider().openForWrite(repositoryName).valueOrFailure("repository");
+            FileTestSupport.initialize(modifiedRepository, "refs/heads/main");
+            try (GitFileAccess fileAccess =
+                    modifiedRepository.files().open(modifiedRepository.ref("refs/heads/main"))) {
+                fileAccess.delete("orion.xml");
+                modifiedRepository.refUpdate(
+                        modifiedRepository.ref("refs/heads/main"),
+                        fileAccess.revision(),
+                        fileAccess.commit(
+                                new VcChangeDescription(
+                                        VcChangeAuthor.EMPTY, "delete configuration")));
+            }
+        }
         assertThat(pushes).hasValue(2);
-        assertThatThrownBy(() -> repository.files().readBytes("refs/heads/main", "orion.xml"))
+        assertThatThrownBy(() -> repository.files().read(repository.ref("refs/heads/main"), file -> file.readBytes("orion.xml")))
                 .isInstanceOf(GitOperationException.class);
     }
 
@@ -592,31 +610,31 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         String repositoryName = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
         NativeGitRepository repository = provider.provider().find(repositoryName).valueOrFailure("find proxy alias");
 
-        repository
-                .files()
-                .withAccess(
-                        "refs/heads/main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "update configuration"),
-                        fileAccess -> {
-                            fileAccess.write(
-                                    "orion.xml", "updated".getBytes(StandardCharsets.UTF_8));
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "refs/heads/main");
+        try (GitFileAccess fileAccess =
+                repository.files().open(repository.ref("refs/heads/main"))) {
+            fileAccess.write("orion.xml", "updated".getBytes(StandardCharsets.UTF_8));
+            repository.refUpdate(
+                    repository.ref("refs/heads/main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "update configuration")));
+        }
 
         assertThat(pushes).hasValue(1);
-        repository
-                .files()
-                .withAccess(
-                        "refs/heads/main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "delete configuration"),
-                        fileAccess -> {
-                            fileAccess.delete("orion.xml");
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "refs/heads/main");
+        try (GitFileAccess fileAccess =
+                repository.files().open(repository.ref("refs/heads/main"))) {
+            fileAccess.delete("orion.xml");
+            repository.refUpdate(
+                    repository.ref("refs/heads/main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(
+                            new VcChangeDescription(VcChangeAuthor.EMPTY, "delete configuration")));
+        }
+
         assertThat(pushes).hasValue(2);
-        assertThatThrownBy(() -> repository.files().readBytes("refs/heads/main", "orion.xml"))
+        assertThatThrownBy(() -> repository.files().read(repository.ref("refs/heads/main"), file -> file.readBytes("orion.xml")))
                 .isInstanceOf(GitOperationException.class);
     }
 
@@ -630,18 +648,18 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                         Collections.nCopies(updates.size(), true));
         provider.provider().openBacking("local", backend);
 
-        provider.provider()
-                .openForWrite("local")
-                .valueOrFailure("repository")
-                .files()
-                .withAccess(
-                        "refs/heads/main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "direct"),
-                        fileAccess -> {
-                            fileAccess.write("file.txt", new byte[] {1});
-                            fileAccess.apply();
-                            return null;
-                        });
+        {
+            NativeGitRepository modifiedRepository = provider.provider().openForWrite("local").valueOrFailure("repository");
+            FileTestSupport.initialize(modifiedRepository, "refs/heads/main");
+            try (GitFileAccess fileAccess =
+                    modifiedRepository.files().open(modifiedRepository.ref("refs/heads/main"))) {
+                fileAccess.write("file.txt", new byte[] {1});
+                modifiedRepository.refUpdate(
+                        modifiedRepository.ref("refs/heads/main"),
+                        fileAccess.revision(),
+                        fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "direct")));
+            }
+        }
 
         assertThat(refreshes).hasValue(0);
         assertThat(provider.provider().openForRead("local")).isNotNull();
@@ -735,16 +753,19 @@ class ProxyAwareNativeGitRepositoryProviderTest {
 
         assertThatThrownBy(retained::refs).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(
-                        () ->
-                                retained.files()
-                                        .withAccess(
-                                                "refs/heads/main",
-                                                new VcChangeDescription(VcChangeAuthor.EMPTY, "save"),
-                                                fileAccess -> {
-                                                    fileAccess.write("orion.xml", new byte[] {1});
-                                                    fileAccess.apply();
-                                                    return null;
-                                                }))
+                        () -> {
+                            FileTestSupport.initialize(retained, "refs/heads/main");
+                            try (GitFileAccess fileAccess =
+                                    retained.files().open(retained.ref("refs/heads/main"))) {
+                                fileAccess.write("orion.xml", new byte[] {1});
+                                retained.refUpdate(
+                                        retained.ref("refs/heads/main"),
+                                        fileAccess.revision(),
+                                        fileAccess.commit(
+                                                new VcChangeDescription(
+                                                        VcChangeAuthor.EMPTY, "save")));
+                            }
+                        })
                 .isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> retained.publishRefs(List.of(), true))
                 .isInstanceOf(IllegalStateException.class);
@@ -850,16 +871,15 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         String name = "bootstrap";
         NativeGitRepositoryFactory provider = provider(backend);
         NativeGitRepository repository = provider.provider().openBacking(name, backend);
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "seed"),
-                        fileAccess -> {
-                            fileAccess.write("other.xml", new byte[] {1});
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("other.xml", new byte[] {1});
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "seed")));
+        }
+
         assertThatThrownBy(() -> provider.resolveProvisional("configuration", source, false))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Bootstrap source path is unavailable: configuration");
@@ -870,16 +890,15 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         assertThatThrownBy(() -> provider.resolveProvisional("configuration", replacement, false))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Bootstrap source path is unavailable: configuration");
-        repository
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "repair"),
-                        fileAccess -> {
-                            fileAccess.write("orion.xml", new byte[] {2});
-                            fileAccess.apply();
-                            return null;
-                        });
+        FileTestSupport.initialize(repository, "main");
+        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            fileAccess.write("orion.xml", new byte[] {2});
+            repository.refUpdate(
+                    repository.ref("main"),
+                    fileAccess.revision(),
+                    fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "repair")));
+        }
+
         provider.resolveProvisional("configuration", source, false);
         assertThat(repository.refs()).containsKey("refs/heads/main");
     }
@@ -890,17 +909,18 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         BootstrapSourceConfig configuration = remoteSource("orion.xml");
         String name = "bootstrap";
         NativeGitRepositoryFactory provider = provider(backend);
-        provider.provider()
-                .openBacking(name, backend)
-                .files()
-                .withAccess(
-                        "main",
-                        new VcChangeDescription(VcChangeAuthor.EMPTY, "seed"),
-                        fileAccess -> {
-                            fileAccess.write("orion.xml", new byte[] {1});
-                            fileAccess.apply();
-                            return null;
-                        });
+        {
+            NativeGitRepository modifiedRepository = provider.provider().openBacking(name, backend);
+            FileTestSupport.initialize(modifiedRepository, "main");
+            try (GitFileAccess fileAccess =
+                    modifiedRepository.files().open(modifiedRepository.ref("main"))) {
+                fileAccess.write("orion.xml", new byte[] {1});
+                modifiedRepository.refUpdate(
+                        modifiedRepository.ref("main"),
+                        fileAccess.revision(),
+                        fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "seed")));
+            }
+        }
         Optional<String> resolved = provider.resolveProvisional("configuration", configuration, false);
         NativeGitRepository retained = provider.provider().openForRead(name).valueOrFailure("proxy handle");
 
@@ -929,20 +949,25 @@ class ProxyAwareNativeGitRepositoryProviderTest {
             assertThat(provider.provider().create(spelling)).isEqualTo(new Result.Failure<>(
                     Result.FailureCode.NOT_SUPPORTED, "Bootstrap cache is internal"));
             assertThatThrownBy(
-                            () ->
-                                    provider.provider()
-                                            .openForWrite(spelling)
-                                            .valueOrFailure("repository")
-                                            .files()
-                                            .withAccess(
-                                                    "refs/heads/main",
-                                                    new VcChangeDescription(VcChangeAuthor.EMPTY, "save"),
-                                                    fileAccess -> {
-                                                        fileAccess.write(
-                                                                "orion.xml", new byte[] {1});
-                                                        fileAccess.apply();
-                                                        return null;
-                                                    }))
+                            () -> {
+                                NativeGitRepository modifiedRepository =
+                                        provider.provider()
+                                                .openForWrite(spelling)
+                                                .valueOrFailure("repository");
+                                FileTestSupport.initialize(modifiedRepository, "refs/heads/main");
+                                try (GitFileAccess fileAccess =
+                                        modifiedRepository
+                                                .files()
+                                                .open(modifiedRepository.ref("refs/heads/main"))) {
+                                    fileAccess.write("orion.xml", new byte[] {1});
+                                    modifiedRepository.refUpdate(
+                                            modifiedRepository.ref("refs/heads/main"),
+                                            fileAccess.revision(),
+                                            fileAccess.commit(
+                                                    new VcChangeDescription(
+                                                            VcChangeAuthor.EMPTY, "save")));
+                                }
+                            })
                     .isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> provider.resolveProvisional("local", localSource(spelling), true))
                     .isInstanceOfAny(IllegalArgumentException.class, IllegalStateException.class);

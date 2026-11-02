@@ -1,6 +1,8 @@
 package pro.deta.orion;
 
 import pro.deta.orion.storage.BlobStorage;
+import pro.deta.orion.util.VcRevision;
+import pro.deta.orion.util.VcChangeDescription;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 
 import org.junit.jupiter.api.Test;
@@ -19,6 +21,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class KeyMaterialResourceResolverTest {
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime runtime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
+
     @TempDir
     private Path tempDir;
 
@@ -55,22 +61,33 @@ class KeyMaterialResourceResolverTest {
         KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard(
                 Map.of("ORION_KEYSTORE_LOCATION", envPath.toString()));
 
-        BlobStorage plainStore = resolver.resolveSource(plainPath.toString());
+        BlobStorage plainStore = resolver.resolveSource(plainPath.toString(), runtime.events());
         BlobStorage fileStore =
-                resolver.resolveSource("file:" + filePath);
+                resolver.resolveSource("file:" + filePath, runtime.events());
         BlobStorage envStore = resolver.resolveSource(
-                "env:ORION_KEYSTORE_LOCATION");
+                "env:ORION_KEYSTORE_LOCATION", runtime.events());
 
-        String plainVersion = plainStore.write(new BlobStorage.Modification(null, bytes("plain")));
-        String fileVersion = fileStore.write(new BlobStorage.Modification(null, bytes("file")));
-        String envVersion = envStore.write(new BlobStorage.Modification(null, bytes("env")));
-
-        assertThat(Files.readAllBytes(plainPath)).isEqualTo(bytes("plain"));
-        assertThat(Files.readAllBytes(filePath)).isEqualTo(bytes("file"));
-        assertThat(Files.readAllBytes(envPath)).isEqualTo(bytes("env"));
-        assertThat(plainStore.load().revision()).isEqualTo(plainVersion);
-        assertThat(fileStore.load().revision()).isEqualTo(fileVersion);
-        assertThat(envStore.load().revision()).isEqualTo(envVersion);
+        for (Path path : List.of(plainPath, filePath, envPath)) {
+            Files.write(path, bytes("initial"));
+            setOwnerOnly(path);
+        }
+        List<BlobStorage> stores = List.of(plainStore, fileStore, envStore);
+        List<Path> paths = List.of(plainPath, filePath, envPath);
+        List<String> contents = List.of("plain", "file", "env");
+        for (int index = 0; index < stores.size(); index++) {
+            BlobStorage store = stores.get(index);
+            VcRevision.Stored created;
+            try (BlobStorage.BlobStorageOperations operation =
+                    store.open(new VcRevision.Latest())) {
+                operation.write(bytes(contents.get(index)));
+                created = operation.commit(VcChangeDescription.EMPTY);
+            }
+            assertThat(Files.readAllBytes(paths.get(index))).isEqualTo(bytes(contents.get(index)));
+            try (BlobStorage.BlobStorageOperations operation =
+                    store.open(new VcRevision.Latest())) {
+                assertThat(operation.revision()).isEqualTo(created);
+            }
+        }
     }
 
     @Test
@@ -78,12 +95,17 @@ class KeyMaterialResourceResolverTest {
         KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard();
         String reference = contentReference(bytes("inline"));
 
-        BlobStorage store = resolver.resolveSource(reference);
+        BlobStorage store = resolver.resolveSource(reference, runtime.events());
 
-        assertThat(store.load().bytes()).isEqualTo(bytes("inline"));
-        assertThatThrownBy(() -> store.write(new BlobStorage.Modification(store.load().revision(),
-                bytes("update"))))
-                .isInstanceOf(java.io.IOException.class)
+        assertThat(store.readBytes(new VcRevision.Latest())).isEqualTo(bytes("inline"));
+        assertThatThrownBy(() -> {
+                            try (BlobStorage.BlobStorageOperations operation =
+                                    store.open(new VcRevision.Latest())) {
+                                operation.write(bytes("update"));
+                                operation.commit(VcChangeDescription.EMPTY);
+                            }
+                        })
+                .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("read-only")
                 .hasMessageNotContaining(reference);
     }

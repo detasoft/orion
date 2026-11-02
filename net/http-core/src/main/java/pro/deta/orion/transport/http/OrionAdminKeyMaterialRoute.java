@@ -17,6 +17,7 @@ import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.security.GeneralSecurityException;
 import java.util.Map;
 import java.util.Arrays;
@@ -82,7 +83,7 @@ public final class OrionAdminKeyMaterialRoute extends BaseAdminRoute {
         } catch (IllegalArgumentException | JsonProcessingException invalid) {
             return OrionHttpResponse.text(400,
                     "Check the unique key name, purpose and RSA private key PEM or Certbot JSON (2048–8192 bits).");
-        } catch (IOException | GeneralSecurityException | IllegalStateException failure) {
+        } catch (IOException | UncheckedIOException | GeneralSecurityException | IllegalStateException failure) {
             return OrionHttpResponse.text(503, "Could not save key material.");
         } finally {
             if (bytes != null) Arrays.fill(bytes, (byte) 0);

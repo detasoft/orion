@@ -1,6 +1,10 @@
 package pro.deta.orion.test;
 
-import pro.deta.orion.storage.BlobStorage;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
+
+import pro.deta.orion.test.integration.git.FileTestSupport;
+
+import pro.deta.orion.git.fileapi.GitFileAccess;
 import pro.deta.orion.util.VcChangeAuthor;
 
 import pro.deta.orion.util.VcChangeDescription;
@@ -44,6 +48,10 @@ import static pro.deta.orion.test.RemoteBootstrapTestSupport.runtimeComponent;
  * Their auth maps reference external credential files, independently of the material password reference.
  */
 class RemoteBootstrapConfigurationIT {
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
+
     @TempDir
     Path tempDir;
 
@@ -65,17 +73,19 @@ class RemoteBootstrapConfigurationIT {
             byte[] material = materialBytes(target, environment);
             var repository = upstream.repositoryProvider().create("bootstrap-inputs")
                     .valueOrFailure("native bootstrap repository");
-            repository
-                    .files()
-                    .withAccess(
-                            "refs/heads/bootstrap",
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "seed remote bootstrap inputs"),
-                            fileAccess -> {
-                                fileAccess.write("config/acl.xml", xml);
-                                fileAccess.write("keys/server.p12", material);
-                                fileAccess.apply();
-                                return null;
-                            });
+            FileTestSupport.initialize(repository, "refs/heads/bootstrap");
+            try (GitFileAccess fileAccess =
+                    repository.files().open(repository.ref("refs/heads/bootstrap"))) {
+                fileAccess.write("config/acl.xml", xml);
+                fileAccess.write("keys/server.p12", material);
+                repository.refUpdate(
+                        repository.ref("refs/heads/bootstrap"),
+                        fileAccess.revision(),
+                        fileAccess.commit(
+                                new VcChangeDescription(
+                                        VcChangeAuthor.EMPTY, "seed remote bootstrap inputs")));
+            }
+
             target.getBootstrap().getConfiguration().setRef("refs/heads/bootstrap");
             target.getBootstrap().getConfiguration().setPath("config/acl.xml");
             target.getBootstrap().getKeyMaterial().setRef("refs/heads/bootstrap");
@@ -102,8 +112,7 @@ class RemoteBootstrapConfigurationIT {
                 Files.writeString(credential, authorized);
             }
 
-            var materialStore = new InMemoryBlobStorage();
-            materialStore.write(new BlobStorage.Modification(null, material));
+            var materialStore = new InMemoryBlobStorage(material, false, testRuntime.events());
             pro.deta.orion.event.OrionEventManager bootstrapEvents1 =
                     new pro.deta.orion.event.OrionEventManager();
             try (var seededMaterial = TestServerIdentityMaterial.openMaterial(
@@ -209,30 +218,33 @@ class RemoteBootstrapConfigurationIT {
                     .valueOrFailure("configuration upstream");
             var materialRepository = materialServer.repositoryProvider().create("bootstrap-inputs")
                     .valueOrFailure("material upstream");
-            configurationRepository
-                    .files()
-                    .withAccess(
-                            acl.getRef(),
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "seed configuration"),
-                            fileAccess -> {
-                                fileAccess.write(
-                                        acl.getPath(),
-                                        TestRuntimeBootstrap.configurationXml(
-                                                configurationServer.component().configurationEditor()));
-                                fileAccess.apply();
-                                return null;
-                            });
-            materialRepository
-                    .files()
-                    .withAccess(
-                            material.getRef(),
-                            new VcChangeDescription(VcChangeAuthor.EMPTY, "seed material"),
-                            fileAccess -> {
-                                fileAccess.write(
-                                        material.getPath(), materialBytes(target, environment));
-                                fileAccess.apply();
-                                return null;
-                            });
+            FileTestSupport.initialize(configurationRepository, acl.getRef());
+            try (GitFileAccess fileAccess =
+                    configurationRepository
+                            .files()
+                            .open(configurationRepository.ref(acl.getRef()))) {
+                fileAccess.write(
+                        acl.getPath(),
+                        TestRuntimeBootstrap.configurationXml(
+                                configurationServer.component().configurationEditor()));
+                configurationRepository.refUpdate(
+                        configurationRepository.ref(acl.getRef()),
+                        fileAccess.revision(),
+                        fileAccess.commit(
+                                new VcChangeDescription(
+                                        VcChangeAuthor.EMPTY, "seed configuration")));
+            }
+
+            FileTestSupport.initialize(materialRepository, material.getRef());
+            try (GitFileAccess fileAccess =
+                    materialRepository.files().open(materialRepository.ref(material.getRef()))) {
+                fileAccess.write(material.getPath(), materialBytes(target, environment));
+                materialRepository.refUpdate(
+                        materialRepository.ref(material.getRef()),
+                        fileAccess.revision(),
+                        fileAccess.commit(
+                                new VcChangeDescription(VcChangeAuthor.EMPTY, "seed material")));
+            }
 
             String configurationRevision = null;
             String materialRevision = null;
@@ -275,36 +287,66 @@ class RemoteBootstrapConfigurationIT {
                             signature =
                                     bootstrap.keyMaterial().sign(bootstrap.signingMaterial().active(), payload);
                             var materialRefs = materialRepository.refs();
-                            provider.openForWrite(configurationCache)
-                                    .valueOrFailure("configuration proxy")
-                                    .files()
-                                    .withAccess(
-                                            acl.getRef(),
-                                            new VcChangeDescription(
-                                                    VcChangeAuthor.EMPTY, "write configuration upstream"),
-                                            fileAccess -> {
-                                                fileAccess.write("configuration-marker", payload);
-                                                fileAccess.apply();
-                                                return null;
-                                            });
-                            assertThat(configurationRepository.files().readBytes(acl.getRef(),
-                                    "configuration-marker")).isEqualTo(payload);
+                            {
+                                NativeGitRepository modifiedRepository =
+                                        provider.openForWrite(configurationCache)
+                                                .valueOrFailure("configuration proxy");
+                                FileTestSupport.initialize(modifiedRepository, acl.getRef());
+                                try (GitFileAccess fileAccess =
+                                        modifiedRepository
+                                                .files()
+                                                .open(modifiedRepository.ref(acl.getRef()))) {
+                                    fileAccess.write("configuration-marker", payload);
+                                    modifiedRepository.refUpdate(
+                                            modifiedRepository.ref(acl.getRef()),
+                                            fileAccess.revision(),
+                                            fileAccess.commit(
+                                                    new VcChangeDescription(
+                                                            VcChangeAuthor.EMPTY,
+                                                            "write configuration upstream")));
+                                }
+        }
+                            assertThat(
+                                            configurationRepository
+                                                    .files()
+                                                    .<byte[], Exception>read(
+                                                            configurationRepository.ref(
+                                                                    acl.getRef()),
+                                                            file ->
+                                                                    file.readBytes(
+                                                                            "configuration-marker")))
+                                    .isEqualTo(payload);
                             assertThat(materialRepository.refs()).isEqualTo(materialRefs);
                             var configurationRefs = configurationRepository.refs();
-                            provider.openForWrite(materialCache)
-                                    .valueOrFailure("material proxy")
-                                    .files()
-                                    .withAccess(
-                                            material.getRef(),
-                                            new VcChangeDescription(
-                                                    VcChangeAuthor.EMPTY, "write material upstream"),
-                                            fileAccess -> {
-                                                fileAccess.write("material-marker", payload);
-                                                fileAccess.apply();
-                                                return null;
-                                            });
-                            assertThat(materialRepository.files().readBytes(material.getRef(),
-                                    "material-marker")).isEqualTo(payload);
+                            {
+                                NativeGitRepository modifiedRepository =
+                                        provider.openForWrite(materialCache)
+                                                .valueOrFailure("material proxy");
+                                FileTestSupport.initialize(modifiedRepository, material.getRef());
+                                try (GitFileAccess fileAccess =
+                                        modifiedRepository
+                                                .files()
+                                                .open(modifiedRepository.ref(material.getRef()))) {
+                                    fileAccess.write("material-marker", payload);
+                                    modifiedRepository.refUpdate(
+                                            modifiedRepository.ref(material.getRef()),
+                                            fileAccess.revision(),
+                                            fileAccess.commit(
+                                                    new VcChangeDescription(
+                                                            VcChangeAuthor.EMPTY,
+                                                            "write material upstream")));
+                                }
+        }
+                            assertThat(
+                                            materialRepository
+                                                    .files()
+                                                    .<byte[], Exception>read(
+                                                            materialRepository.ref(
+                                                                    material.getRef()),
+                                                            file ->
+                                                                    file.readBytes(
+                                                                            "material-marker")))
+                                    .isEqualTo(payload);
                             assertThat(configurationRepository.refs()).isEqualTo(configurationRefs);
                             configurationRevision = configurationRepository.refs().get(acl.getRef());
                             materialRevision = materialRepository.refs().get(material.getRef());
