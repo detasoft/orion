@@ -139,11 +139,13 @@ class S3NativeGitRepositoryProviderIT {
             for (String invalid : List.of("name=other\ndefaultHead=refs/heads/main\n",
                     "name=last-page\n", "name=../bad\ndefaultHead=refs/heads/main\n", "x".repeat(8193))) {
                 server.putObject(key, invalid.getBytes(StandardCharsets.UTF_8));
-                assertFailure(provider.find("last-page"), Result.FailureCode.GENERAL);
-                assertThatThrownBy(() -> provider.exists("last-page"))
-                        .isInstanceOf(UncheckedIOException.class);
-                assertThatThrownBy(provider::repositoryNames).isInstanceOf(UncheckedIOException.class);
-                assertFailure(provider.create("last-page"), Result.FailureCode.FILE_ALREADY_EXISTS);
+                try (NativeGitRepositoryProvider fresh = provider(server, "repos")) {
+                    assertFailure(fresh.find("last-page"), Result.FailureCode.GENERAL);
+                    assertThatThrownBy(() -> fresh.exists("last-page"))
+                            .isInstanceOf(UncheckedIOException.class);
+                    assertThatThrownBy(fresh::repositoryNames).isInstanceOf(UncheckedIOException.class);
+                    assertFailure(fresh.create("last-page"), Result.FailureCode.FILE_ALREADY_EXISTS);
+                }
             }
         }
     }

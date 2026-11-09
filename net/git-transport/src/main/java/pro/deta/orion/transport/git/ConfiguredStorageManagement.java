@@ -84,6 +84,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                     if (s3.secretKey().isEmpty()) require(admin(actor, document));
                     return bind(document, address, Optional.of(binding));
                 }).apply();
+                awaitRepositoryBinding(name, storage);
             } else if (binding(snapshot.result()
                     .valueOrFailure("Cannot read configuration document"), name).isPresent()) {
                 throw new Conflict();
@@ -139,15 +140,19 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                             requireRepositoryCreate(actor, current, name);
                             return bind(current, address, storage);
                         }).apply();
-                if (!OrionUtils.waitForCondition(() -> repository(editor.current().result()
-                        .valueOrFailure("Cannot read configuration document"), name)
-                        .map(entry -> entry.storage().equals(storage)).orElse(false))) {
-                    throw new IllegalStateException("Repository registration was not activated");
-                }
+                awaitRepositoryBinding(name, storage);
                 return true;
             }
         }
         return false;
+    }
+
+    private void awaitRepositoryBinding(String name, Optional<S3StorageBinding> storage) {
+        if (!OrionUtils.waitForCondition(() -> repository(editor.current().result()
+                .valueOrFailure("Cannot read configuration document"), name)
+                .map(entry -> entry.storage().equals(storage)).orElse(false))) {
+            throw new IllegalStateException("Repository registration was not activated");
+        }
     }
 
     @Override

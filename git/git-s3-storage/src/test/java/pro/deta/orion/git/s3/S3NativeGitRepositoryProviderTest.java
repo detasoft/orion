@@ -1,6 +1,7 @@
 package pro.deta.orion.git.s3;
 
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import org.junit.jupiter.api.Test;
 import com.sun.net.httpserver.HttpServer;
 import pro.deta.orion.util.Result;
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -28,6 +30,36 @@ class S3NativeGitRepositoryProviderTest {
 
     @TempDir
     Path directory;
+
+    @Test
+    void freshProvidersRejectCorruptMetadataWithoutReusingAnOpenRepository() throws Exception {
+        try (S3GitIndexTest.Wire wire = new S3GitIndexTest.Wire();
+             NativeGitRepositoryProvider retained = provider(wire)) {
+            NativeGitRepository repository = retained.create("repo").valueOrFailure("create");
+            String metadata = wire.contents.keySet().stream()
+                    .filter(key -> key.endsWith("/orion-native-repository.properties")).findFirst().orElseThrow();
+            for (String invalid : List.of("name=other\ndefaultHead=refs/heads/main\n", "name=repo\n",
+                    "name=../bad\ndefaultHead=refs/heads/main\n", "x".repeat(8193))) {
+                wire.contents.put(metadata, invalid.getBytes(StandardCharsets.UTF_8));
+                assertThat(retained.find("repo").valueOrFailure("retained owner")).isSameAs(repository);
+                try (NativeGitRepositoryProvider fresh = provider(wire)) {
+                    assertThat(fresh.find("repo")).isInstanceOfSatisfying(Result.Failure.class,
+                            failure -> assertThat(failure.code()).isEqualTo(Result.FailureCode.GENERAL));
+                    assertThatThrownBy(() -> fresh.exists("repo")).isInstanceOf(java.io.UncheckedIOException.class);
+                    assertThatThrownBy(fresh::repositoryNames).isInstanceOf(java.io.UncheckedIOException.class);
+                    assertThat(fresh.create("repo")).isInstanceOfSatisfying(Result.Failure.class,
+                            failure -> assertThat(failure.code()).isEqualTo(Result.FailureCode.FILE_ALREADY_EXISTS));
+                }
+            }
+        }
+    }
+
+    private NativeGitRepositoryProvider provider(S3GitIndexTest.Wire wire) {
+        return S3NativeGitRepositoryFactory.repositories("s3://bucket/repos",
+                "http://127.0.0.1:" + wire.server.getAddress().getPort(),
+                Map.of("accessKeyId", "test", "secretAccessKey", "env:SECRET"),
+                Map.of("SECRET", "test"), testRuntime.events());
+    }
 
     @Test
     void boundsTheResponseBodyEvenWhenTheServerKeepsSendingBytes() throws Exception {

@@ -34,8 +34,15 @@ import pro.deta.orion.util.Result;
 import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.internal.ChangeMetadata;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ConfiguredStorageManagementTest {
     @org.junit.jupiter.api.extension.RegisterExtension
@@ -333,6 +340,47 @@ class ConfiguredStorageManagementTest {
     }
 
     @Test
+    void s3CreationWaitsForBindingActivationBeforeOpeningStorage() throws Exception {
+        management.saveConnection(actor, Optional.of(organization), revision(), true, input("secret".toCharArray()));
+        testRuntime.awaitEvents();
+        MemoryStorage gateSource = new MemoryStorage();
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        pro.deta.orion.event.OrionEvents gate = testRuntime.events().forTarget(new Object());
+        gate.subscribe(ConfigurationChanged.class, null, event -> {
+            if (event.storage() != gateSource) return;
+            entered.countDown();
+            try {
+                if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Event gate was not released");
+            } catch (InterruptedException failure) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError(failure);
+            }
+        });
+        testRuntime.events().publish(new ConfigurationChanged(gateSource, editor.current()));
+        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            storage.saved = new CountDownLatch(1);
+            Future<StorageManagement.Outcome<StorageManagement.Created>> creation = executor.submit(() ->
+                    management.createRepository(actor, "acme/team/archive", Optional.of(s3Binding())));
+            try {
+                assertThat(storage.saved.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThatThrownBy(() -> creation.get(200, TimeUnit.MILLISECONDS))
+                        .isInstanceOf(TimeoutException.class);
+                assertThat(repositories.exists("acme/team/archive")).isFalse();
+            } finally {
+                release.countDown();
+            }
+            assertThat(creation.get(5, TimeUnit.SECONDS)).isInstanceOf(StorageManagement.Success.class);
+            assertThat(editor.current().result().valueOrFailure("active binding").organizations()
+                    .getFirst().teams().getFirst().repositories().getFirst().storage()).contains(s3Binding());
+        } finally {
+            release.countDown();
+            gate.unsubscribe(null);
+        }
+    }
+
+    @Test
     void metadataFailureRetainsBindingAndIdenticalRetryCompletesWithoutLocalFallback() {
         management.saveConnection(actor, Optional.of(organization), revision(), true, input("secret".toCharArray()));
         testRuntime.awaitEvents();
@@ -621,6 +669,7 @@ class ConfiguredStorageManagementTest {
         private OrionDocumentRevision snapshot;
         private int saves;
         private int replacements;
+        private CountDownLatch saved;
 
         void set(OrionDocument document) {
             set(document, true);
@@ -663,6 +712,7 @@ class ConfiguredStorageManagementTest {
             VcRevision.Stored saved = new VcRevision.Stored("v" + ++saves);
             snapshot = new OrionDocumentRevision(Result.of(document), saved);
             testRuntime.events().publish(new ConfigurationChanged(this, snapshot));
+            if (this.saved != null) this.saved.countDown();
             return saved;
         }
     }

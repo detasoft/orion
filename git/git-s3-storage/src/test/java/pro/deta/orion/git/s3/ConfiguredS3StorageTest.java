@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
@@ -35,8 +37,39 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Timeout(30)
 class ConfiguredS3StorageTest {
+    @org.junit.jupiter.api.extension.RegisterExtension
+    final pro.deta.orion.test.util.OrionTestRuntime testRuntime =
+            new pro.deta.orion.test.util.OrionTestRuntime();
+
     @TempDir
     Path directory;
+
+    @Test
+    void reopensRepositoryFromSerializedBindingsAndEncryptedCredentials() throws Exception {
+        try (S3GitIndexTest.Wire wire = new S3GitIndexTest.Wire();
+             S3ConfigurationFixture fixture = new S3ConfigurationFixture(directory)) {
+            String endpoint = "http://127.0.0.1:" + wire.server.getAddress().getPort();
+            fixture.connection(true, "archive", endpoint, "us-east-1", "id", "key", null);
+            fixture.bind("repo", true, "archive", "s3://bucket/prefix");
+            NativeGitRepository created = fixture.provider.create("acme/dev/repo").valueOrFailure("create");
+            ByteArrayOutputStream xml = new ByteArrayOutputStream();
+            OrionXml.write(fixture.current.get(), xml);
+            OrionDocument persisted = OrionXml.read(new ByteArrayInputStream(xml.toByteArray()));
+            ConfiguredNativeGitRepositoryFactory factory = new ConfiguredNativeGitRepositoryFactory(
+                    NativeGitRepositoryBackend.inMemory(testRuntime.events()), new S3Transport(),
+                    testRuntime.events());
+            try (NativeGitRepositoryProvider reopened = new NativeGitRepositoryProvider(factory)) {
+                factory.activate(() -> persisted, new ConfigurationSecrets(() -> persisted, fixture.material),
+                        ignored -> false);
+                NativeGitRepository repository = reopened.find("acme/dev/repo").valueOrFailure("reopen");
+                assertThat(repository).isNotSameAs(created);
+                assertThat(repository.name()).isEqualTo("acme/dev/repo");
+                assertThat(repository.index().getHEAD()).isEqualTo(created.index().getHEAD());
+                assertThat(repository.refs()).isEmpty();
+            }
+            assertThat(fixture.local.repositoryNames()).isEmpty();
+        }
+    }
     @Test
     void retainsTheIndexOwnerThroughCredentialRotationAndSeparatesChangedLocations() throws Exception {
         try (S3GitIndexTest.Wire wire = new S3GitIndexTest.Wire();
