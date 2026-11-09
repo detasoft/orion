@@ -27,7 +27,7 @@ class GitFileTest {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             GitFileTestSupport.initialize(repository, "main");
-            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 access.write("run", FileMode.EXECUTABLE_FILE, content);
                 content[0] = 3;
                 repository.refUpdate(
@@ -36,7 +36,7 @@ class GitFileTest {
                         access.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "initial")));
             }
 
-            byte[] loaded = repository.files().read(repository.ref("main"), file -> file.readBytes("run"));
+            byte[] loaded = repository.files().read(repository.index().resolve(repository.ref("main")), file -> file.readBytes("run"));
             assertThat(loaded).containsExactly(1, 2);
             loaded[0] = 5;
             ObjectId revision = new ObjectId(repository.refs().get("refs/heads/main"));
@@ -62,7 +62,7 @@ class GitFileTest {
                                 () -> {
                                     GitFileTestSupport.initialize(repository, "main");
                                     try (GitFileAccess access =
-                                            repository.files().open(repository.ref("main"))) {
+                                            repository.files().open(repository.index().resolve(repository.ref("main")))) {
                                         access.write("file", mode, new byte[0]);
                                         repository.refUpdate(
                                                 repository.ref("main"),

@@ -67,8 +67,7 @@ public final class OrionAdminKeyMaterialRoute extends BaseAdminRoute {
             String alias = input.alias();
             Set<KeyMaterialPurpose> purposes = Set.of(input.purpose());
             char[] privateKeyPem = input.privateKeyPem();
-            try (KeyMaterialOperation modification = material.open(
-                    new VcRevision.Stored(material.revision()))) {
+            try (KeyMaterialOperation modification = material.open(new VcRevision.Latest())) {
                 if (modification.contains(alias)) {
                     throw new IllegalArgumentException("Key material name already exists");
                 }

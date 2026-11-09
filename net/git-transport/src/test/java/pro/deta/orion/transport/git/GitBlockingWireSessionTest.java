@@ -524,7 +524,7 @@ class GitBlockingWireSessionTest {
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("README.md", "payload".getBytes(StandardCharsets.US_ASCII));
             repository.refUpdate(
                     repository.ref("main"),
@@ -728,7 +728,7 @@ class GitBlockingWireSessionTest {
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("README.md", "base".getBytes(StandardCharsets.US_ASCII));
             repository.refUpdate(
                     repository.ref("main"),
@@ -738,7 +738,7 @@ class GitBlockingWireSessionTest {
 
         String have = repository.refs().get("refs/heads/main");
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("README.md", "next".getBytes(StandardCharsets.US_ASCII));
             repository.refUpdate(
                     repository.ref("main"),
@@ -772,7 +772,7 @@ class GitBlockingWireSessionTest {
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("first", new byte[] {1});
             repository.refUpdate(
                     repository.ref("main"),
@@ -781,7 +781,7 @@ class GitBlockingWireSessionTest {
         }
 
         FileTestSupport.initialize(repository, "second");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("second"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("second")))) {
             fileAccess.write("second", new byte[] {2});
             repository.refUpdate(
                     repository.ref("second"),
@@ -818,7 +818,7 @@ class GitBlockingWireSessionTest {
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("README.md", "base".getBytes(StandardCharsets.US_ASCII));
             repository.refUpdate(
                     repository.ref("main"),
@@ -828,7 +828,7 @@ class GitBlockingWireSessionTest {
 
         String have = repository.refs().get("refs/heads/main");
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("README.md", "next".getBytes(StandardCharsets.US_ASCII));
             repository.refUpdate(
                     repository.ref("main"),
@@ -968,7 +968,7 @@ class GitBlockingWireSessionTest {
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("README.md", "root".getBytes(StandardCharsets.US_ASCII));
             repository.refUpdate(
                     repository.ref("main"),
@@ -977,7 +977,7 @@ class GitBlockingWireSessionTest {
         }
 
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("README.md", "tip".getBytes(StandardCharsets.US_ASCII));
             repository.refUpdate(
                     repository.ref("main"),

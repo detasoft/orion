@@ -48,7 +48,7 @@ public final class CertificateIdentity {
         List<X509Certificate> validated = requireX509Chain(certificateChain);
         Optional<X509Certificate> root = requireIssuerCertificate(
                 configuration.serverIssuerTrustAnchor(), issuerTrustAnchor);
-        KeyMaterialOperation modification = material.open(new VcRevision.Stored(material.revision()));
+        KeyMaterialOperation modification = material.open(new VcRevision.Latest());
         try {
             Optional<KeyMaterialId> issuer = configuration.serverIssuerTrustAnchor();
             if (root.isPresent()) {

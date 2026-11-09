@@ -75,7 +75,7 @@ class RemoteBootstrapConfigurationIT {
                     .valueOrFailure("native bootstrap repository");
             FileTestSupport.initialize(repository, "refs/heads/bootstrap");
             try (GitFileAccess fileAccess =
-                    repository.files().open(repository.ref("refs/heads/bootstrap"))) {
+                    repository.files().open(repository.index().resolve(repository.ref("refs/heads/bootstrap")))) {
                 fileAccess.write("config/acl.xml", xml);
                 fileAccess.write("keys/server.p12", material);
                 repository.refUpdate(
@@ -222,7 +222,7 @@ class RemoteBootstrapConfigurationIT {
             try (GitFileAccess fileAccess =
                     configurationRepository
                             .files()
-                            .open(configurationRepository.ref(acl.getRef()))) {
+                            .open(configurationRepository.index().resolve(configurationRepository.ref(acl.getRef())))) {
                 fileAccess.write(
                         acl.getPath(),
                         TestRuntimeBootstrap.configurationXml(
@@ -237,7 +237,7 @@ class RemoteBootstrapConfigurationIT {
 
             FileTestSupport.initialize(materialRepository, material.getRef());
             try (GitFileAccess fileAccess =
-                    materialRepository.files().open(materialRepository.ref(material.getRef()))) {
+                    materialRepository.files().open(materialRepository.index().resolve(materialRepository.ref(material.getRef())))) {
                 fileAccess.write(material.getPath(), materialBytes(target, environment));
                 materialRepository.refUpdate(
                         materialRepository.ref(material.getRef()),
@@ -295,7 +295,7 @@ class RemoteBootstrapConfigurationIT {
                                 try (GitFileAccess fileAccess =
                                         modifiedRepository
                                                 .files()
-                                                .open(modifiedRepository.ref(acl.getRef()))) {
+                                                .open(modifiedRepository.index().resolve(modifiedRepository.ref(acl.getRef())))) {
                                     fileAccess.write("configuration-marker", payload);
                                     modifiedRepository.refUpdate(
                                             modifiedRepository.ref(acl.getRef()),
@@ -310,8 +310,8 @@ class RemoteBootstrapConfigurationIT {
                                             configurationRepository
                                                     .files()
                                                     .<byte[], Exception>read(
-                                                            configurationRepository.ref(
-                                                                    acl.getRef()),
+                                                            configurationRepository.index().resolve(configurationRepository.ref(
+                                                                    acl.getRef())),
                                                             file ->
                                                                     file.readBytes(
                                                                             "configuration-marker")))
@@ -326,7 +326,7 @@ class RemoteBootstrapConfigurationIT {
                                 try (GitFileAccess fileAccess =
                                         modifiedRepository
                                                 .files()
-                                                .open(modifiedRepository.ref(material.getRef()))) {
+                                                .open(modifiedRepository.index().resolve(modifiedRepository.ref(material.getRef())))) {
                                     fileAccess.write("material-marker", payload);
                                     modifiedRepository.refUpdate(
                                             modifiedRepository.ref(material.getRef()),
@@ -341,8 +341,8 @@ class RemoteBootstrapConfigurationIT {
                                             materialRepository
                                                     .files()
                                                     .<byte[], Exception>read(
-                                                            materialRepository.ref(
-                                                                    material.getRef()),
+                                                            materialRepository.index().resolve(materialRepository.ref(
+                                                                    material.getRef())),
                                                             file ->
                                                                     file.readBytes(
                                                                             "material-marker")))

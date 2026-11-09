@@ -3,9 +3,13 @@ package pro.deta.orion.git.parser.v2.index;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.util.VcRevision;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
@@ -40,6 +44,20 @@ public interface GitIndexApi extends AutoCloseable {
     GitIndexAccess createAccess(List<RefUpdate> updates, Optional<PackId> packId) throws IOException;
 
     GitHashAlgorithm hashAlgorithm();
+
+    default VcRevision.Stored resolve(VcRevision.Ref ref) throws IOException {
+        return withAccess(access -> new VcRevision.Stored(access.findRef(new RefId(ref.value()))
+                .orElseThrow(() -> new FileNotFoundException("Ref not found: " + ref.value())).toHex()));
+    }
+
+    default VcRevision resolve(VcRevision.Latest latest) throws IOException {
+        return withAccess(access -> {
+            RefsSnapshot snapshot = access.snapshotRefs(new RefSelection.All());
+            ObjectId current = snapshot.head() instanceof Head.Detached detached
+                    ? detached.target() : snapshot.refs().get(((Head.Symbolic) snapshot.head()).target());
+            return current == null ? new VcRevision.Absent() : new VcRevision.Stored(current.toHex());
+        });
+    }
 
     /** Reads the current symbolic or detached HEAD from the index. */
     default Head getHEAD() throws IOException {

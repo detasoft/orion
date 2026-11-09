@@ -295,7 +295,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
         }
         try {
             CertificateMaterial certificates = certificateMaterial(settings.material(), issued.certificateChain());
-            KeyMaterialOperation modification = keyMaterial.open(new VcRevision.Stored(keyMaterial.revision()));
+            KeyMaterialOperation modification = keyMaterial.open(new VcRevision.Latest());
             KeyMaterialId identityId;
             Optional<KeyMaterialId> issuerId = Optional.empty();
             try {
@@ -559,8 +559,7 @@ public class AcmeCertificateService implements ServiceLifecycle {
 
     private void prepareMaterial(Material configuration)
             throws IOException, GeneralSecurityException {
-        try (KeyMaterialOperation modification = keyMaterial.open(
-                    new VcRevision.Stored(keyMaterial.revision()))) {
+        try (KeyMaterialOperation modification = keyMaterial.open(new VcRevision.Latest())) {
             if (configuration.issuerTrustAnchor().isPresent()) {
                 KeyMaterialId issuer = configuration.issuerTrustAnchor().orElseThrow();
                 String alias = issuer.alias();

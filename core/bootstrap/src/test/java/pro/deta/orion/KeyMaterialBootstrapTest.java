@@ -61,8 +61,6 @@ class KeyMaterialBootstrapTest {
     private Path tempDir;
 
     @Test
-    @org.junit.jupiter.api.Disabled(
-            "First-version creation: docs/plans/tasks/01_vc-first-revision.md")
     void opensConfiguredRelativeStoreAndReloadsRetainedIdentity() throws Exception {
         BootstrapConfiguration configuration = configuration();
         byte[] payload = "jwt-input".getBytes(StandardCharsets.UTF_8);
@@ -73,10 +71,9 @@ class KeyMaterialBootstrapTest {
             KeyMaterialId active = signing(configuration).active();
             signature = material.sign(active, payload);
             assertThat(active.alias()).isEqualTo("cluster-signing-v2");
-            assertThat(material.revision()).isEqualTo(new LocalBlobStorage(
-                    tempDir.resolve("security/orion.p12"), events).read(
-                                            new VcRevision.Latest(),
-                                            operation -> operation.revision().value()));
+            VcRevision localRevision = new LocalBlobStorage(tempDir.resolve("security/orion.p12"), events)
+                    .read(new VcRevision.Latest(), operation -> operation.revision());
+            assertThat(new VcRevision.Stored(material.revision())).isEqualTo(localRevision);
         }
 
         try (OrionKeyMaterial material = openLocal(configuration,
@@ -89,8 +86,6 @@ class KeyMaterialBootstrapTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled(
-            "First-version creation: docs/plans/tasks/01_vc-first-revision.md")
     void resolvesRelativeStoreBelowEnvironmentBaseDirectory() throws Exception {
         BootstrapConfiguration configuration = configuration();
         configuration.getBootstrap().setBaseDir("env:ORION_TEST_ROOT/material-home");
@@ -107,8 +102,6 @@ class KeyMaterialBootstrapTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled(
-            "First-version creation: docs/plans/tasks/01_vc-first-revision.md")
     void resolvesConfiguredRetainedAliases() throws Exception {
         BootstrapConfiguration configuration = configuration();
         try (OrionKeyMaterial ignored = openLocal(configuration,
@@ -141,8 +134,6 @@ class KeyMaterialBootstrapTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled(
-            "First-version creation: docs/plans/tasks/01_vc-first-revision.md")
     void createsAndReopensIdentityInConfiguredGitFile() throws Exception {
         BootstrapConfiguration configuration = configuration();
         configuration.getBootstrap().getKeyMaterial().setLocation("local:material");
@@ -167,7 +158,6 @@ class KeyMaterialBootstrapTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("First-version creation: docs/plans/tasks/01_vc-first-revision.md")
     void requiresExplicitCreationAndDoesNotPopulateAnExistingEmptyStore() throws Exception {
         BootstrapConfiguration configuration = configuration();
         LocalBlobStorage store = new LocalBlobStorage(
@@ -238,7 +228,6 @@ class KeyMaterialBootstrapTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("First-version creation: docs/plans/tasks/01_vc-first-revision.md")
     void rejectsRetainedKeysOnCreationWithoutWritingTheStore() throws Exception {
         BootstrapConfiguration configuration = configuration();
         configuration.getBootstrap().getKeyMaterial().getServerSigning()

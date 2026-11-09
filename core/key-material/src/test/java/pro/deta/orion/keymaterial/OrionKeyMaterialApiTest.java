@@ -355,7 +355,7 @@ class OrionKeyMaterialApiTest {
 
             assertThat(material.hasDurableSnapshot()).isTrue();
             assertThat(material.revision()).isEqualTo("1");
-            assertThat(modification.revision().value()).isEqualTo("1");
+            assertThat(modification.revision()).isEqualTo(new VcRevision.Stored("1"));
             assertThat(material.contains(SIGNING)).isFalse();
             assertThat(material.inventory()).isEmpty();
             assertThat(read(store)).isNotEmpty();

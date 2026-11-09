@@ -1564,7 +1564,7 @@ class GitSshTransportEndToEndIT {
             try (GitFileAccess fileAccess =
                     modifiedRepository
                             .files()
-                            .open(modifiedRepository.ref("refs/heads/" + BRANCH))) {
+                            .open(modifiedRepository.index().resolve(modifiedRepository.ref("refs/heads/" + BRANCH)))) {
                 fileAccess.write("orion.xml", output.toByteArray());
                 modifiedRepository.refUpdate(
                         modifiedRepository.ref("refs/heads/" + BRANCH),
@@ -1651,7 +1651,7 @@ class GitSshTransportEndToEndIT {
             try (GitFileAccess fileAccess =
                     modifiedRepository
                             .files()
-                            .open(modifiedRepository.ref("refs/heads/" + BRANCH))) {
+                            .open(modifiedRepository.index().resolve(modifiedRepository.ref("refs/heads/" + BRANCH)))) {
                 fileAccess.write("README.md", content.getBytes(StandardCharsets.UTF_8));
                 modifiedRepository.refUpdate(
                         modifiedRepository.ref("refs/heads/" + BRANCH),

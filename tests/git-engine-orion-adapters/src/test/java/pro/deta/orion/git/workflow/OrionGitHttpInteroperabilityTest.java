@@ -118,7 +118,7 @@ class OrionGitHttpInteroperabilityTest {
                 for (int number = 0; number < 64; number++) {
                     String version = "history " + number;
                     try (GitFileAccess fileAccess =
-                            repository.files().open(repository.ref("main"))) {
+                            repository.files().open(repository.index().resolve(repository.ref("main")))) {
                         fileAccess.write("README.md", version.getBytes(StandardCharsets.UTF_8));
                         repository.refUpdate(
                                 repository.ref("main"),
@@ -135,7 +135,7 @@ class OrionGitHttpInteroperabilityTest {
             List<String> updates = divergence > 0 ? List.of("base\n", "initial\n", "updated\n")
                     : List.of("initial\n", "updated\n");
             for (String content : updates) {
-                try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+                try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                     fileAccess.write("README.md", content.getBytes(StandardCharsets.UTF_8));
                     repository.refUpdate(
                             repository.ref("main"),
@@ -206,8 +206,15 @@ class OrionGitHttpInteroperabilityTest {
                         GitUploadPackRequest.of(commit, received::ingestAndPublish));
                 assertThat(result).isInstanceOf(GitClientResult.Success.class);
                 received.updateRef("refs/heads/main", "0".repeat(40), commit);
-                assertThat(new String(received.files().read(received.ref("main"), file -> file.readBytes("README.md")),
-                        StandardCharsets.UTF_8)).isEqualTo(content);
+                assertThat(
+                                new String(
+                                        received.files()
+                                                .read(
+                                                        received.index()
+                                                                .resolve(received.ref("main")),
+                                                        file -> file.readBytes("README.md")),
+                                        StandardCharsets.UTF_8))
+                        .isEqualTo(content);
             }
         }
     }

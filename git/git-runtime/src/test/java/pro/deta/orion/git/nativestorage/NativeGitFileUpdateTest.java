@@ -45,7 +45,7 @@ class NativeGitFileUpdateTest {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             FileTestSupport.initialize(repository, "main");
-            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 access.write("folder", bytes("original"));
                 repository.refUpdate(
                         repository.ref("main"),
@@ -59,7 +59,7 @@ class NativeGitFileUpdateTest {
                             () -> {
                                 FileTestSupport.initialize(repository, "main");
                                 try (GitFileAccess access =
-                                        repository.files().open(repository.ref("main"))) {
+                                        repository.files().open(repository.index().resolve(repository.ref("main")))) {
                                     access.write("folder/child.txt", bytes("new"));
                                     repository.refUpdate(
                                             repository.ref("main"),
@@ -77,7 +77,7 @@ class NativeGitFileUpdateTest {
                             repository
                                     .files()
                                     .<byte[], Exception>read(
-                                            repository.ref("main"),
+                                            repository.index().resolve(repository.ref("main")),
                                             file -> file.readBytes("folder")))
                     .isEqualTo(bytes("original"));
         }
@@ -88,7 +88,7 @@ class NativeGitFileUpdateTest {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             FileTestSupport.initialize(repository, "main");
-            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 access.write("folder/keep.txt", bytes("original"));
                 repository.refUpdate(
                         repository.ref("main"),
@@ -102,7 +102,7 @@ class NativeGitFileUpdateTest {
                             () -> {
                                 FileTestSupport.initialize(repository, "main");
                                 try (GitFileAccess access =
-                                        repository.files().open(repository.ref("main"))) {
+                                        repository.files().open(repository.index().resolve(repository.ref("main")))) {
                                     access.write("folder", bytes("replacement"));
                                     repository.refUpdate(
                                             repository.ref("main"),
@@ -116,7 +116,12 @@ class NativeGitFileUpdateTest {
                     .hasCauseInstanceOf(IOException.class);
 
             assertThat(repository.refs()).containsEntry("refs/heads/main", initial);
-            assertThat(repository.files().<byte[], Exception>read(repository.ref("main"), file -> file.readBytes("folder/keep.txt")))
+            assertThat(
+                            repository
+                                    .files()
+                                    .<byte[], Exception>read(
+                                            repository.index().resolve(repository.ref("main")),
+                                            file -> file.readBytes("folder/keep.txt")))
                     .isEqualTo(bytes("original"));
         }
     }
@@ -126,7 +131,7 @@ class NativeGitFileUpdateTest {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             FileTestSupport.initialize(repository, "main");
-            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 access.write("left/config.txt", bytes("before"));
                 access.write("right/keep.txt", bytes("keep"));
                 repository.refUpdate(
@@ -136,7 +141,7 @@ class NativeGitFileUpdateTest {
             }
 
             FileTestSupport.initialize(repository, "main");
-            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 access.write("left/config.txt", bytes("after"));
                 repository.refUpdate(
                         repository.ref("main"),
@@ -163,14 +168,14 @@ class NativeGitFileUpdateTest {
                             repository
                                     .files()
                                     .<byte[], Exception>read(
-                                            repository.ref("main"),
+                                            repository.index().resolve(repository.ref("main")),
                                             file -> file.readBytes("left/config.txt")))
                     .isEqualTo(bytes("after"));
             assertThat(
                             repository
                                     .files()
                                     .<byte[], Exception>read(
-                                            repository.ref("main"),
+                                            repository.index().resolve(repository.ref("main")),
                                             file -> file.readBytes("right/keep.txt")))
                     .isEqualTo(bytes("keep"));
         }
@@ -181,7 +186,7 @@ class NativeGitFileUpdateTest {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             FileTestSupport.initialize(repository, "main");
-            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 access.write("entry", bytes("file"));
                 repository.refUpdate(
                         repository.ref("main"),
@@ -190,7 +195,7 @@ class NativeGitFileUpdateTest {
             }
 
             FileTestSupport.initialize(repository, "main");
-            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 access.delete("entry");
                 access.write("entry/child", bytes("nested"));
                 repository.refUpdate(
@@ -205,12 +210,12 @@ class NativeGitFileUpdateTest {
                             repository
                                     .files()
                                     .<byte[], Exception>read(
-                                            repository.ref("main"),
+                                            repository.index().resolve(repository.ref("main")),
                                             file -> file.readBytes("entry/child")))
                     .isEqualTo(bytes("nested"));
 
             FileTestSupport.initialize(repository, "main");
-            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 access.delete("entry/child");
                 access.write("entry", bytes("file again"));
                 repository.refUpdate(
@@ -225,7 +230,7 @@ class NativeGitFileUpdateTest {
                             repository
                                     .files()
                                     .<byte[], Exception>read(
-                                            repository.ref("main"),
+                                            repository.index().resolve(repository.ref("main")),
                                             file -> file.readBytes("entry")))
                     .isEqualTo(bytes("file again"));
         }
@@ -236,7 +241,7 @@ class NativeGitFileUpdateTest {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             FileTestSupport.initialize(repository, "main");
-            try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 fileAccess.write("nested/remove.txt", new byte[] {1});
                 fileAccess.write("keep.txt", new byte[] {2});
                 fileAccess.write("change.txt", new byte[] {3});
@@ -262,20 +267,28 @@ class NativeGitFileUpdateTest {
                             repository
                                     .files()
                                     .<byte[], Exception>read(
-                                            repository.ref("main"),
+                                            repository.index().resolve(repository.ref("main")),
                                             file -> file.readBytes("keep.txt")))
                     .isEqualTo(new byte[] {2});
             assertThat(
                             repository
                                     .files()
                                     .<byte[], Exception>read(
-                                            repository.ref("main"),
+                                            repository.index().resolve(repository.ref("main")),
                                             file -> file.readBytes("change.txt")))
                     .isEqualTo(new byte[] {4});
-            assertThatThrownBy(() -> repository.files().read(repository.ref("main"), file -> file.readBytes("nested/remove.txt")))
+            assertThatThrownBy(
+                            () ->
+                                    repository
+                                            .files()
+                                            .read(
+                                                    repository
+                                                            .index()
+                                                            .resolve(repository.ref("main")),
+                                                    file -> file.readBytes("nested/remove.txt")))
                     .isInstanceOf(GitOperationException.class);
             FileTestSupport.initialize(repository, "main");
-            try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 fileAccess.delete("keep.txt");
                 fileAccess.delete("change.txt");
                 repository.refUpdate(
@@ -287,7 +300,15 @@ class NativeGitFileUpdateTest {
             }
 
             for (String path : List.of("keep.txt", "change.txt")) {
-                assertThatThrownBy(() -> repository.files().read(repository.ref("main"), file -> file.readBytes(path)))
+                assertThatThrownBy(
+                                () ->
+                                        repository
+                                                .files()
+                                                .read(
+                                                        repository
+                                                                .index()
+                                                                .resolve(repository.ref("main")),
+                                                        file -> file.readBytes(path)))
                         .isInstanceOf(GitOperationException.class);
             }
         }
@@ -298,7 +319,7 @@ class NativeGitFileUpdateTest {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory(testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             FileTestSupport.initialize(repository, "main");
-            try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 fileAccess.write("config.txt", bytes("initial"));
                 repository.refUpdate(
                         repository.ref("main"),
@@ -322,8 +343,8 @@ class NativeGitFileUpdateTest {
                                                                 repository
                                                                         .files()
                                                                         .open(
-                                                                                repository.ref(
-                                                                                        "main"))) {
+                                                                                repository.index().resolve(repository.ref(
+                                                                                        "main")))) {
                                                             fileAccess.delete(path);
                                                             fileAccess.write(
                                                                     "config.txt", bytes("changed"));
@@ -353,7 +374,7 @@ class NativeGitFileUpdateTest {
                 NativeGitRepositoryProvider.file(directory, testRuntime.events())) {
             NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
             FileTestSupport.initialize(repository, "main");
-            try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 fileAccess.write("config.txt", bytes("first"));
                 repository.refUpdate(
                         repository.ref("main"),
@@ -377,7 +398,7 @@ class NativeGitFileUpdateTest {
             assertThat(
                             reopened.files()
                                     .<byte[], Exception>read(
-                                            reopened.ref("main"),
+                                            reopened.index().resolve(reopened.ref("main")),
                                             file -> file.readBytes("config.txt")))
                     .isEqualTo(bytes("first"));
         }
@@ -388,7 +409,7 @@ class NativeGitFileUpdateTest {
         NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository");
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("config.txt", bytes("first"));
             repository.refUpdate(
                     repository.ref("main"),
@@ -403,7 +424,7 @@ class NativeGitFileUpdateTest {
             return null;
         });
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("config.txt", bytes("second"));
             repository.refUpdate(
                     repository.ref("main"),
@@ -422,7 +443,12 @@ class NativeGitFileUpdateTest {
                 .isInstanceOf(GitRepositoryConcurrentUpdateException.class);
 
         assertThat(repository.refs()).containsEntry("refs/heads/main", current);
-        assertThat(repository.files().<byte[], Exception>read(repository.ref("main"), file -> file.readBytes("config.txt")))
+        assertThat(
+                        repository
+                                .files()
+                                .<byte[], Exception>read(
+                                        repository.index().resolve(repository.ref("main")),
+                                        file -> file.readBytes("config.txt")))
                 .isEqualTo(bytes("second"));
         repository.index().withAccess(access3 -> {
             assertThat(access3.packs()).hasSize(5);
@@ -465,7 +491,11 @@ class NativeGitFileUpdateTest {
         for (NativeGitRepository target : List.of(repository, another)) {
             assertThat(target.publishPack(update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
                     .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
-            assertThat(target.files().<byte[], Exception>read(target.ref("main"), file -> file.readBytes("config.txt")))
+            assertThat(
+                            target.files()
+                                    .<byte[], Exception>read(
+                                            target.index().resolve(target.ref("main")),
+                                            file -> file.readBytes("config.txt")))
                     .isEqualTo(bytes("prepared"));
         }
     }

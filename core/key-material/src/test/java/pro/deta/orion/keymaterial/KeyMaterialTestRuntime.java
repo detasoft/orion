@@ -33,7 +33,7 @@ final class KeyMaterialTestRuntime implements AfterEachCallback {
 
     static String revision(BlobStorage store) {
         try (BlobStorage.BlobStorageOperations operation = store.open(new VcRevision.Latest())) {
-            return operation.revision().value();
+            return operation.revision() instanceof VcRevision.Stored stored ? stored.value() : null;
         }
     }
 

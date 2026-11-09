@@ -1,14 +1,15 @@
 package pro.deta.orion.storage;
 
 import pro.deta.orion.util.VcRevision;
+import pro.deta.orion.util.VcModificationException;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
@@ -31,10 +32,8 @@ final class LocalBlobStorageSupport {
     }
 
     static VcRevision revision(Path path) {
-        if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
-            return new VcRevision.Absent();
-        }
         byte[] content = readContent(path, new VcRevision.Latest());
+        if (content == null) return new VcRevision.Absent();
         try {
             return new VcRevision.Stored(BlobRevisions.sha256(content));
         } finally {
@@ -44,18 +43,23 @@ final class LocalBlobStorageSupport {
 
     static byte[] readContent(Path path, VcRevision.ReadTarget revision) {
         Objects.requireNonNull(revision, "revision");
-        if (!(revision instanceof VcRevision.Stored) && !(revision instanceof VcRevision.Latest)) {
-            throw new IllegalArgumentException("Blob reads require a stored or latest revision");
-        }
         try {
             ProtectedFiles.validatePublicationDirectory(path.getParent());
             byte[] content = ProtectedFiles.readOwnerOnlyFile(path, "Blob location");
+            if (revision instanceof VcRevision.Absent absent) {
+                VcRevision.Stored actual = new VcRevision.Stored(BlobRevisions.sha256(content));
+                Arrays.fill(content, (byte) 0);
+                throw new VcModificationException(absent, actual);
+            }
             if (revision instanceof VcRevision.Stored stored
                     && !stored.value().equals(BlobRevisions.sha256(content))) {
                 Arrays.fill(content, (byte) 0);
                 throw new IllegalArgumentException("Blob revision is no longer available: " + stored.value());
             }
             return content;
+        } catch (NoSuchFileException missing) {
+            if (!(revision instanceof VcRevision.Stored)) return null;
+            throw new UncheckedIOException("Cannot read local blob: " + path, missing);
         } catch (IOException failure) {
             throw new UncheckedIOException("Cannot read local blob: " + path, failure);
         }

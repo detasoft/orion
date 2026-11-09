@@ -103,7 +103,7 @@ class S3BootstrapRestartIT {
                 NativeGitRepository repository = provider.create("orion").valueOrFailure("seed S3 bootstrap");
                 FileTestSupport.initialize(repository, CONFIGURATION_REF);
                 try (GitFileAccess access =
-                        repository.files().open(repository.ref(CONFIGURATION_REF))) {
+                        repository.files().open(repository.index().resolve(repository.ref(CONFIGURATION_REF)))) {
                     access.write(CONFIGURATION_PATH, xml);
                     repository.refUpdate(
                             repository.ref(CONFIGURATION_REF),
@@ -114,7 +114,7 @@ class S3BootstrapRestartIT {
                 }
 
                 FileTestSupport.initialize(repository, MATERIAL_REF);
-                try (GitFileAccess access = repository.files().open(repository.ref(MATERIAL_REF))) {
+                try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref(MATERIAL_REF)))) {
                     access.write(MATERIAL_PATH, material);
                     repository.refUpdate(
                             repository.ref(MATERIAL_REF),
@@ -155,7 +155,7 @@ class S3BootstrapRestartIT {
                                     repository
                                             .files()
                                             .<byte[], Exception>read(
-                                                    repository.ref(MATERIAL_REF),
+                                                    repository.index().resolve(repository.ref(MATERIAL_REF)),
                                                     file -> file.readBytes(MATERIAL_PATH)))
                             .isEqualTo(material);
                     assertThat(repository.refs()).containsEntry(MATERIAL_REF, refs.get(MATERIAL_REF));
@@ -211,7 +211,14 @@ class S3BootstrapRestartIT {
                             .contains(SECRET_ID).doesNotContain(SECRET_VALUE);
                     NativeGitRepository repository = bootstrap.repositoryProvider().find("orion")
                             .valueOrFailure("S3 bootstrap repository");
-                    savedMaterial = repository.files().read(repository.ref(MATERIAL_REF), file -> file.readBytes(MATERIAL_PATH));
+                    savedMaterial =
+                            repository
+                                    .files()
+                                    .read(
+                                            repository
+                                                    .index()
+                                                    .resolve(repository.ref(MATERIAL_REF)),
+                                            file -> file.readBytes(MATERIAL_PATH));
                     savedRefs = Map.copyOf(repository.refs());
                     assertThat(savedRefs).containsKeys(CONFIGURATION_REF, MATERIAL_REF);
                     signingKeyId = bootstrap.signingMaterial().active().alias();
@@ -267,7 +274,7 @@ class S3BootstrapRestartIT {
                                     repository
                                             .files()
                                             .<byte[], Exception>read(
-                                                    repository.ref(MATERIAL_REF),
+                                                    repository.index().resolve(repository.ref(MATERIAL_REF)),
                                                     file -> file.readBytes(MATERIAL_PATH)))
                             .isEqualTo(savedMaterial);
                     assertThat(repository.refs()).isEqualTo(savedRefs);

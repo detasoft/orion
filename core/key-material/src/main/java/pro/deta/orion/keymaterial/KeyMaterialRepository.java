@@ -48,7 +48,7 @@ public final class KeyMaterialRepository extends VcResource<KeyMaterialOperation
     private final KeyMaterialCodec codec;
     private final OrionEventManager eventManager;
     private KeyStore keyStore;
-    private String sourceRevision;
+    private VcRevision sourceRevision;
     private boolean sourceChangePending;
     private boolean durableSnapshot;
 
@@ -61,7 +61,7 @@ public final class KeyMaterialRepository extends VcResource<KeyMaterialOperation
         this.eventManager = events;
         try {
             try (BlobStorageOperations initial = source.open(new VcRevision.Latest())) {
-                sourceRevision = initial.revision().value();
+                sourceRevision = initial.revision();
                 byte[] bytes = readAvailableBytes(initial);
                 try {
                     keyStore = bytes == null ? codec.create() : codec.decode(bytes);
@@ -151,7 +151,7 @@ public final class KeyMaterialRepository extends VcResource<KeyMaterialOperation
     }
 
     void addIfAbsent(String alias, KeyStore.Entry entry) throws IOException, GeneralSecurityException {
-        try (KeyMaterialOperation operation = open(new VcRevision.Stored(revision()))) {
+        try (KeyMaterialOperation operation = open(new VcRevision.Latest())) {
             if (operation.contains(alias)) return;
             operation.add(alias, entry, false);
             operation.commit(VcChangeDescription.EMPTY);
@@ -258,12 +258,19 @@ public final class KeyMaterialRepository extends VcResource<KeyMaterialOperation
 
     public synchronized String revision() {
         requireOpen();
-        return sourceRevision;
+        return sourceRevision instanceof VcRevision.Stored stored ? stored.value() : null;
     }
 
     @Override
-    protected KeyMaterialOperation createOperation(VcRevision.ReadTarget revision) {
-        requireOpen();
+    protected KeyMaterialOperation createOperation(VcRevision.ReadTarget target) {
+        VcRevision.ReadTarget revision;
+        synchronized (this) {
+            requireOpen();
+            revision = target instanceof VcRevision.Latest ? switch (sourceRevision) {
+                case VcRevision.Stored stored -> stored;
+                case VcRevision.Absent absent -> absent;
+            } : target;
+        }
         BlobStorageOperations operation = source.open(revision);
         try {
             byte[] bytes = readAvailableBytes(operation);
@@ -318,7 +325,7 @@ public final class KeyMaterialRepository extends VcResource<KeyMaterialOperation
 
     private VcRevision.Stored applyState(BlobStorageOperations operation, KeyStore snapshot,
             Set<String> changedAliases, VcChangeDescription description, Set<String> resources) throws IOException {
-        String expectedRevision = operation.revision().value();
+        VcRevision expectedRevision = operation.revision();
         synchronized (this) {
             writing = true;
         }
@@ -330,7 +337,7 @@ public final class KeyMaterialRepository extends VcResource<KeyMaterialOperation
                 if (!Objects.equals(sourceRevision, expectedRevision)) {
                     throw new BlobStorageConflictException("Key material changed before apply");
                 }
-                if (changedAliases.isEmpty()) return operation.revision();
+                if (changedAliases.isEmpty() && operation.revision() instanceof VcRevision.Stored stored) return stored;
                 try {
                     serialized = codec.encode(snapshot);
                     try {
@@ -364,7 +371,7 @@ public final class KeyMaterialRepository extends VcResource<KeyMaterialOperation
                     if (Objects.equals(sourceRevision, expectedRevision)) {
                         keyStore = publication;
                         resources.addAll(changedAliases);
-                        sourceRevision = saved.value();
+                        sourceRevision = saved;
                         durableSnapshot = true;
                     } else {
                         for (String physical : physicalAliases(publication)) {
@@ -395,7 +402,7 @@ public final class KeyMaterialRepository extends VcResource<KeyMaterialOperation
         synchronized (this) {
             requireOpen();
             Objects.requireNonNull(requestedRevision, "revision");
-            if (Objects.equals(sourceRevision, requestedRevision)) return;
+            if (Objects.equals(sourceRevision, new VcRevision.Stored(requestedRevision))) return;
         }
         reload(new VcRevision.Stored(requestedRevision));
     }
@@ -416,7 +423,7 @@ public final class KeyMaterialRepository extends VcResource<KeyMaterialOperation
         byte[] bytes = readAvailableBytes(content);
         try {
             requireOpen();
-            if (Objects.equals(sourceRevision, content.revision().value())) return Set.of();
+            if (Objects.equals(sourceRevision, content.revision())) return Set.of();
             incoming = bytes == null ? codec.create() : codec.decode(bytes);
         } finally {
             if (bytes != null) Arrays.fill(bytes, (byte) 0);
@@ -443,7 +450,7 @@ public final class KeyMaterialRepository extends VcResource<KeyMaterialOperation
             resources.add(entry.alias());
         }
         keyStore = incoming;
-        sourceRevision = content.revision().value();
+        sourceRevision = content.revision();
         durableSnapshot = bytes != null;
         return Set.copyOf(resources);
     }

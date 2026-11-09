@@ -51,7 +51,7 @@ class GitFileAccessTest {
         for (String message : List.of("first commit", "обновление\nвторая строка")) {
             initialize(repository, "main");
             String revision;
-            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 access.write("file", message.getBytes(StandardCharsets.UTF_8));
                 VcRevision.Stored created = access.commit(new VcChangeDescription(author, message));
                 repository.refUpdate(repository.ref("main"), access.revision(), created);
@@ -73,7 +73,7 @@ class GitFileAccessTest {
         NativeGitRepository repository = provider.create("metadata").valueOrFailure("repository");
         initialize(repository, "main");
         String revision;
-        try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             access.write("file", new byte[] {1});
             VcRevision.Stored created = access.commit(new VcChangeDescription(null, message));
             repository.refUpdate(repository.ref("main"), access.revision(), created);
@@ -87,8 +87,7 @@ class GitFileAccessTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("First-version publication: docs/plans/tasks/01_vc-first-revision.md")
-    void initializesCurrentSymbolicHeadButNotDetachedHead() throws Exception {
+    void publishesOnlyTheSelectedBranchAndPreservesSymbolicOrDetachedHead() throws Exception {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             repository.index().withAccess(index -> {
@@ -98,7 +97,7 @@ class GitFileAccessTest {
             });
             assertThat(repository.index().getHEAD())
                     .isEqualTo(new Head.Symbolic(new RefId("refs/heads/trunk")));
-            try (GitFileAccess access = repository.files().open(repository.ref("topic"))) {
+            try (GitFileAccess access = repository.files().open(new VcRevision.Absent())) {
                 access.write("file", new byte[] {1});
                 repository.refUpdate(
                         repository.ref("topic"),
@@ -106,8 +105,8 @@ class GitFileAccessTest {
                         access.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "first")));
             }
 
-            assertThat(repository.refs()).containsKeys("refs/heads/trunk", "refs/heads/topic")
-                    .doesNotContainKey("refs/heads/main");
+            assertThat(repository.refs()).containsOnlyKeys("refs/heads/topic");
+            assertThat(repository.index().getHEAD()).isEqualTo(new Head.Symbolic(new RefId("refs/heads/trunk")));
 
             CommitId detached = new CommitId(new ObjectId(repository.refs().get("refs/heads/topic")).toBytes());
             repository.index().withAccess(index -> {
@@ -116,7 +115,7 @@ class GitFileAccessTest {
                 return null;
             });
             assertThat(repository.index().getHEAD()).isEqualTo(new Head.Detached(detached));
-            try (GitFileAccess access = repository.files().open(repository.ref("other"))) {
+            try (GitFileAccess access = repository.files().open(new VcRevision.Absent())) {
                 access.write("file", new byte[] {2});
                 repository.refUpdate(
                         repository.ref("other"),
@@ -124,8 +123,7 @@ class GitFileAccessTest {
                         access.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "second")));
             }
 
-            assertThat(repository.refs()).containsKeys("refs/heads/trunk", "refs/heads/topic", "refs/heads/other")
-                    .hasSize(3);
+            assertThat(repository.refs()).containsOnlyKeys("refs/heads/topic", "refs/heads/other");
             assertThat(repository.index().getHEAD()).isEqualTo(new Head.Detached(detached));
         }
     }
@@ -135,7 +133,7 @@ class GitFileAccessTest {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             initialize(repository, "main");
-            try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 fileAccess.write("nested/keep", new byte[] {7});
                 repository.refUpdate(
                         repository.ref("main"),
@@ -145,7 +143,7 @@ class GitFileAccessTest {
             }
 
             initialize(repository, "main");
-            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 access.write("orion.xml", FileMode.REGULAR_FILE, 3, input(1, 2, 3));
                 repository.refUpdate(
                         repository.ref("main"),
@@ -157,14 +155,14 @@ class GitFileAccessTest {
                             repository
                                     .files()
                                     .<byte[], Exception>read(
-                                            repository.ref("main"),
+                                            repository.index().resolve(repository.ref("main")),
                                             file -> file.readBytes("nested/keep")))
                     .isEqualTo(new byte[] {7});
             assertThat(
                             repository
                                     .files()
                                     .<byte[], Exception>read(
-                                            repository.ref("main"),
+                                            repository.index().resolve(repository.ref("main")),
                                             file -> file.readBytes("orion.xml")))
                     .isEqualTo(new byte[] {1, 2, 3});
         }
@@ -184,7 +182,7 @@ class GitFileAccessTest {
             String base = repository.refs().get("refs/heads/main");
             int packs = repository.index().withAccess(index -> index.packs().size());
             IOException failure = new IOException("callback failed");
-            assertThatThrownBy(() -> repository.files().read(repository.ref("main"), access -> {
+            assertThatThrownBy(() -> repository.files().read(repository.index().resolve(repository.ref("main")), access -> {
                 access.write("orion.xml", FileMode.REGULAR_FILE, 1, new BufferedByteInputV2(input));
                 throw failure;
             })).isSameAs(failure);
@@ -201,10 +199,10 @@ class GitFileAccessTest {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             initialize(repository, "main");
-            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 access.write("orion.xml", FileMode.REGULAR_FILE, 1, input(1));
                 initialize(repository, "main");
-                try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+                try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                     fileAccess.write("orion.xml", new byte[] {2});
                     repository.refUpdate(
                             repository.ref("main"),
@@ -226,7 +224,7 @@ class GitFileAccessTest {
                             repository
                                     .files()
                                     .<byte[], Exception>read(
-                                            repository.ref("main"),
+                                            repository.index().resolve(repository.ref("main")),
                                             file -> file.readBytes("orion.xml")))
                     .isEqualTo(new byte[] {2});
         }
@@ -241,7 +239,7 @@ class GitFileAccessTest {
             assertThatThrownBy(
                             () -> {
                                 try (GitFileAccess access =
-                                        repository.files().open(repository.ref("main"))) {
+                                        repository.files().open(repository.index().resolve(repository.ref("main")))) {
                                     access.write("orion.xml", FileMode.REGULAR_FILE, 2, input(1));
                                     repository.refUpdate(
                                             repository.ref("main"),
@@ -270,7 +268,7 @@ class GitFileAccessTest {
                         .create("demo")
                         .valueOrFailure("repository")) {
             initialize(repository, "main");
-            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 for (String name : List.of("first", "second")) {
                     try (BufferedByteInputV2 input =
                             new BufferedByteInputV2(Files.newInputStream(source))) {
@@ -285,7 +283,12 @@ class GitFileAccessTest {
                         access.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "stream")));
             }
 
-            byte[] content = repository.files().read(repository.ref("main"), file -> file.readBytes("second"));
+            byte[] content =
+                    repository
+                            .files()
+                            .read(
+                                    repository.index().resolve(repository.ref("main")),
+                                    file -> file.readBytes("second"));
             assertThat(content).hasSize(8192 * 512).containsOnly((byte) 37);
         }
     }
@@ -295,7 +298,7 @@ class GitFileAccessTest {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             initialize(repository, "main");
-            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 access.write("orion.xml", FileMode.REGULAR_FILE, 1, input(1));
                 repository.refUpdate(
                         repository.ref("main"),
@@ -304,7 +307,7 @@ class GitFileAccessTest {
             }
 
             String winner = repository.refs().get("refs/heads/main");
-            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 access.write("orion.xml", FileMode.REGULAR_FILE, 1, input(2));
                 VcRevision.Stored created = access.commit(VcChangeDescription.EMPTY);
                 assertThatThrownBy(
@@ -328,7 +331,7 @@ class GitFileAccessTest {
                 .create("demo").valueOrFailure("repository")) {
             initialize(repository, "base");
             VcRevision.Stored created;
-            try (GitFileAccess access = repository.files().open(repository.ref("base"))) {
+            try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref("base")))) {
                 access.write("material.p12", FileMode.REGULAR_FILE, 1, input(1));
                 created = access.commit(VcChangeDescription.EMPTY);
                 GitOperationException.requireSuccess(
@@ -348,7 +351,7 @@ class GitFileAccessTest {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             initialize(repository, "main");
-            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 access.write("orion.xml", FileMode.REGULAR_FILE, 3, input(1, 2, 3));
                 repository.refUpdate(
                         repository.ref("main"),
@@ -358,7 +361,7 @@ class GitFileAccessTest {
 
             ObjectId first = new ObjectId(repository.refs().get("refs/heads/main"));
             initialize(repository, "main");
-            try (GitFileAccess access = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 access.write("orion.xml", FileMode.REGULAR_FILE, 1, input(4));
                 repository.refUpdate(
                         repository.ref("main"),
@@ -397,7 +400,7 @@ class GitFileAccessTest {
                 .create("demo").valueOrFailure("repository")) {
             initialize(repository, "main");
             String base = repository.refs().get("refs/heads/main");
-            String result = repository.files().read(repository.ref("main"), access -> {
+            String result = repository.files().read(repository.index().resolve(repository.ref("main")), access -> {
                 try (BufferedByteInputV2 input = input(1)) {
                     access.write("orion.xml", FileMode.REGULAR_FILE, 1, input);
                 }
@@ -405,7 +408,7 @@ class GitFileAccessTest {
             });
             assertThat(result).isEqualTo("result");
             assertThat(repository.refs()).containsEntry("refs/heads/main", base);
-            assertThatThrownBy(() -> repository.files().read(repository.ref("main"),
+            assertThatThrownBy(() -> repository.files().read(repository.index().resolve(repository.ref("main")),
                     access -> access.readBytes("orion.xml"))).isInstanceOf(GitRepositoryFileNotFoundException.class);
         }
     }

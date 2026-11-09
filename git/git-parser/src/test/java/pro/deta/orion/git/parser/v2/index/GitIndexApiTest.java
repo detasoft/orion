@@ -15,6 +15,7 @@ import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
+import pro.deta.orion.util.VcRevision;
 
 import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import java.io.IOException;
@@ -35,6 +36,31 @@ class GitIndexApiTest {
     private static final RefId MAIN = new RefId("refs/heads/main");
     @TempDir
     Path directory;
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void resolvesRefsAndSymbolicOrDetachedHeadWithoutInventingMissingRevisions(boolean local) throws Exception {
+        try (GitIndexApi index = local ? new LocalGitIndex(directory, MAIN) : new InMemoryIndex(MAIN)) {
+            assertThat(index.resolve(new VcRevision.Latest())).isEqualTo(new VcRevision.Absent());
+            assertThatThrownBy(() -> index.resolve(new VcRevision.Ref(MAIN.value())))
+                    .isInstanceOf(java.io.FileNotFoundException.class);
+            CommitId commit = new CommitId("a".repeat(40));
+            RefUpdate create = new RefUpdate(MAIN, Optional.empty(), Optional.of(commit));
+            index.withAccess(List.of(create), access -> {
+                access.apply();
+                return null;
+            });
+            VcRevision.Stored resolved = index.resolve(new VcRevision.Ref(MAIN.value()));
+            assertThat(resolved.value()).isEqualTo(commit.toHex());
+            assertThat(index.resolve(new VcRevision.Latest())).isEqualTo(resolved);
+            index.withAccess(access -> {
+                access.updateHead(new Head.Detached(commit));
+                access.apply();
+                return null;
+            });
+            assertThat(index.resolve(new VcRevision.Latest())).isEqualTo(resolved);
+        }
+    }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})

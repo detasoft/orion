@@ -97,7 +97,7 @@ class NativeGitReceivePackTest {
     void allowAllStillRejectsAStaleOldId() throws Exception {
         NativeGitRepository repository = repository();
         FileTestSupport.initialize(repository, MAIN);
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref(MAIN))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref(MAIN)))) {
             fileAccess.write("config.txt", bytes("initial"));
             repository.refUpdate(
                     repository.ref(MAIN),
@@ -107,7 +107,7 @@ class NativeGitReceivePackTest {
 
         FileTestSupport.Prepared stale = prepare(repository, "stale");
         FileTestSupport.initialize(repository, MAIN);
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref(MAIN))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref(MAIN)))) {
             fileAccess.write("config.txt", bytes("concurrent"));
             repository.refUpdate(
                     repository.ref(MAIN),
@@ -141,7 +141,7 @@ class NativeGitReceivePackTest {
     void checksAllCommitParentsAndRejectsForcedRewrites() throws Exception {
         NativeGitRepository repository = repository();
         FileTestSupport.initialize(repository, MAIN);
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref(MAIN))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref(MAIN)))) {
             fileAccess.write("config.txt", bytes("initial"));
             repository.refUpdate(
                     repository.ref(MAIN),
@@ -153,7 +153,7 @@ class NativeGitReceivePackTest {
         for (int index = 0; index < 8; index++) {
             String next = "next" + index;
             FileTestSupport.initialize(repository, MAIN);
-            try (GitFileAccess fileAccess = repository.files().open(repository.ref(MAIN))) {
+            try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref(MAIN)))) {
                 fileAccess.write("config.txt", bytes(next));
                 repository.refUpdate(
                         repository.ref(MAIN),
@@ -164,7 +164,7 @@ class NativeGitReceivePackTest {
         }
         String descendant = repository.refs().get(MAIN);
         FileTestSupport.initialize(repository, "side");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("side"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("side")))) {
             fileAccess.write("config.txt", bytes("side"));
             repository.refUpdate(
                     repository.ref("side"),
@@ -212,7 +212,7 @@ class NativeGitReceivePackTest {
     void comparesOldIdAgainAfterAuthorization() throws Exception {
         NativeGitRepository repository = repository();
         FileTestSupport.initialize(repository, MAIN);
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref(MAIN))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref(MAIN)))) {
             fileAccess.write("config.txt", bytes("initial"));
             repository.refUpdate(
                     repository.ref(MAIN),
@@ -223,7 +223,7 @@ class NativeGitReceivePackTest {
         FileTestSupport.Prepared prepared = prepare(repository, "prepared");
         String expected = repository.refs().get(MAIN);
         FileTestSupport.initialize(repository, "side");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("side"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("side")))) {
             fileAccess.write("config.txt", bytes("concurrent"));
             repository.refUpdate(
                     repository.ref("side"),

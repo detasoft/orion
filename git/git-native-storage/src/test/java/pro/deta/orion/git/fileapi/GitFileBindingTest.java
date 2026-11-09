@@ -2,6 +2,7 @@ package pro.deta.orion.git.fileapi;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
+import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
@@ -41,7 +42,7 @@ class GitFileBindingTest {
         NativeGitRepository repository = provider.create("repository").valueOrFailure("create repository");
         GitFile file = new GitFile(provider, "repository", REF, "config/material");
         assertThat(file.revision()).isEmpty();
-        CommitId first = file.write(seed(repository, REF), bytes("first"), METADATA);
+        CommitId first = file.write(null, bytes("first"), METADATA);
         CommitId second = file.write(first, bytes("second"), METADATA);
         int refreshed = opens.get();
         assertThat(file.read(first)).isEqualTo(bytes("first"));
@@ -50,6 +51,13 @@ class GitFileBindingTest {
         assertThatThrownBy(() -> file.write(first, bytes("stale"), METADATA))
                 .isInstanceOf(GitRefConflictException.class);
         assertThat(file.revision()).contains(second);
+        GitOperationException.requireSuccess(
+                List.of(repository.updateRef(REF, second.toHex(), "0".repeat(40))));
+        assertThatThrownBy(() -> file.write(second, bytes("stale after deletion"), METADATA))
+                .isInstanceOfSatisfying(GitRefConflictException.class,
+                        conflict -> assertThat(conflict.actual()).isEmpty());
+        assertThat(file.revision()).isEmpty();
+        assertThat(file.read(second)).isEqualTo(bytes("second"));
     }
 
     @Test
@@ -66,14 +74,14 @@ class GitFileBindingTest {
         runtime.events().forTarget(this).subscribe(GitFileChanged.class, events.source(),
                 event -> changes.add(event.revision()));
         try {
-            try (GitFileAccess access = repository.files().open(repository.ref(REF))) {
+            try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref(REF)))) {
                 access.write("other", bytes("unrelated"));
                 repository.refUpdate(
                         repository.ref(REF), access.revision(), access.commit(METADATA));
             }
             seed(repository, "refs/heads/other");
             try (GitFileAccess access =
-                    repository.files().open(repository.ref("refs/heads/other"))) {
+                    repository.files().open(repository.index().resolve(repository.ref("refs/heads/other")))) {
                 access.write("material", bytes("other branch"));
                 repository.refUpdate(
                         repository.ref("refs/heads/other"),
@@ -82,7 +90,7 @@ class GitFileBindingTest {
             }
             NativeGitRepository other = provider.create("other").valueOrFailure("create other repository");
             seed(other, REF);
-            try (GitFileAccess access = other.files().open(other.ref(REF))) {
+            try (GitFileAccess access = other.files().open(other.index().resolve(other.ref(REF)))) {
                 access.write("material", bytes("other repository"));
                 other.refUpdate(other.ref(REF), access.revision(), access.commit(METADATA));
             }
@@ -92,7 +100,7 @@ class GitFileBindingTest {
             CommitId second = file.write(first, bytes("second"), METADATA);
             assertThat(file.isCurrent(first)).isFalse();
             CommitId deleted;
-            try (GitFileAccess access = repository.files().open(repository.ref(REF))) {
+            try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref(REF)))) {
                 access.delete("material");
                 VcRevision.Stored created = access.commit(METADATA);
                 repository.refUpdate(repository.ref(REF), access.revision(), created);

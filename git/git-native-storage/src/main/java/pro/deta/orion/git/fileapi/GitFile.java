@@ -68,8 +68,12 @@ public final class GitFile {
         NativeGitRepository repository = provider.openForWrite(repositoryName)
                 .valueOrFailure("Cannot open Git file repository");
         VcRevision.Ref branch = repository.ref(ref);
-        try (GitFileAccess files = repository.files().open(branch)) {
-            CommitId current = new CommitId(files.revision().value());
+        VcRevision.ReadTarget base = repository.index().withAccess(access -> access.findRef(new RefId(branch.value()))
+                .<VcRevision.ReadTarget>map(id -> new VcRevision.Stored(id.toHex()))
+                .orElseGet(VcRevision.Absent::new));
+        try (GitFileAccess files = repository.files().open(base)) {
+            CommitId current = files.revision() instanceof VcRevision.Stored stored
+                    ? new CommitId(stored.value()) : null;
             ObjectId currentObject;
             try {
                 currentObject = files.objectId(path);
@@ -79,7 +83,8 @@ public final class GitFile {
             if (!Objects.equals(current, expectedRevision)
                     && !Objects.equals(currentObject, objectId(expectedRevision))) {
                 throw new GitRefConflictException(new RefUpdate(new RefId(ref),
-                        Optional.ofNullable(expectedRevision), Optional.of(current)), Optional.of(current));
+                        Optional.ofNullable(expectedRevision), Optional.ofNullable(current)),
+                        Optional.ofNullable(current));
             }
             files.write(path, bytes);
             VcRevision.Stored created = files.commit(metadata);

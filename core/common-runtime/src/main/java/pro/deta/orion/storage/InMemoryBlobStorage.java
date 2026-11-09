@@ -6,6 +6,8 @@ import pro.deta.orion.util.VcModificationException;
 import pro.deta.orion.util.VcRevision;
 
 import java.util.Arrays;
+import java.io.FileNotFoundException;
+import java.io.UncheckedIOException;
 import java.util.LinkedHashMap;
 import java.util.Objects;
 
@@ -25,26 +27,31 @@ public class InMemoryBlobStorage extends BlobStorage {
         versions.put(new VcRevision.Stored("1"), Arrays.copyOf(content, content.length));
     }
 
-    private VcRevision.Stored currentRevision() {
-        if (versions.isEmpty()) throw new IllegalStateException("Blob is absent");
-        return versions.lastEntry().getKey();
+    private VcRevision currentRevision() {
+        return versions.isEmpty() ? new VcRevision.Absent() : versions.lastEntry().getKey();
     }
 
     @Override
     protected BlobStorageOperations createOperation(VcRevision.ReadTarget target) {
-        if (!(target instanceof VcRevision.Stored) && !(target instanceof VcRevision.Latest)) {
-            throw new IllegalArgumentException("Blob reads require a stored or latest revision");
+        VcRevision base = switch (target) {
+            case VcRevision.Latest ignored -> currentRevision();
+            case VcRevision.Stored stored -> stored;
+            case VcRevision.Absent absent -> absent;
+        };
+        if (base instanceof VcRevision.Absent absent) {
+            VcRevision current = currentRevision();
+            if (!absent.equals(current)) throw new VcModificationException(absent, current);
         }
-        VcRevision.Stored base = target instanceof VcRevision.Stored stored ? stored : currentRevision();
         byte[] initial = versions.get(base);
-        if (initial == null) {
-            throw new IllegalArgumentException("Blob revision is not available: " + base.value());
+        if (initial == null && base instanceof VcRevision.Stored stored) {
+            throw new IllegalArgumentException("Blob revision is not available: " + stored.value());
         }
         return new BlobStorageOperations(base) {
             private byte[] content = initial;
 
             @Override
             public byte[] readContent() {
+                if (content == null) throw new UncheckedIOException(new FileNotFoundException("Blob is absent"));
                 return Arrays.copyOf(content, content.length);
             }
 
@@ -56,7 +63,8 @@ public class InMemoryBlobStorage extends BlobStorage {
 
             @Override
             protected VcRevision.Stored commitChanges(VcChangeDescription description) {
-                if (content == initial) return revision();
+                if (content == initial && revision() instanceof VcRevision.Stored stored) return stored;
+                if (content == null) throw new IllegalStateException("No blob content prepared");
                 VcRevision actual = currentRevision();
                 if (!revision().equals(actual)) throw new VcModificationException(revision(), actual);
                 VcRevision.Stored revision = new VcRevision.Stored(Long.toString((long) versions.size() + 1));

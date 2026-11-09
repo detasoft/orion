@@ -149,9 +149,12 @@ public class NativeGitRepository implements AutoCloseable {
         return new VcRevision.Ref(branch.startsWith("refs/") ? branch : "refs/heads/" + branch);
     }
 
-    public void refUpdate(VcRevision.Ref ref, VcRevision.Stored expected, VcRevision.Stored revision)
+    public void refUpdate(VcRevision.Ref ref, VcRevision expected, VcRevision.Stored revision)
             throws GitOperationException, GitRefConflictException {
-        RefUpdate update = new RefUpdate(new RefId(ref.value()), Optional.of(new ObjectId(expected.value())),
+        Objects.requireNonNull(expected, "expected");
+        Optional<ObjectId> old = expected instanceof VcRevision.Stored stored
+                ? Optional.of(new ObjectId(stored.value())) : Optional.empty();
+        RefUpdate update = new RefUpdate(new RefId(ref.value()), old,
                 Optional.of(new ObjectId(revision.value())));
         List<RefUpdateResult> results = publishRefs(List.of(update), true);
         if (results.getFirst().status() == RefUpdateResult.Status.EXPECTED_OLD_MISMATCH) {

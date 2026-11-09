@@ -70,7 +70,7 @@ class BootstrapProxyTransportIT {
             byte[] originalConfiguration =
                     TestRuntimeBootstrap.configurationXml(upstream.component().configurationEditor());
             FileTestSupport.initialize(repository, REF);
-            try (GitFileAccess fileAccess = repository.files().open(repository.ref(REF))) {
+            try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref(REF)))) {
                 fileAccess.write("orion.xml", originalConfiguration);
                 fileAccess.write("material.p12", materialBytes(configuration, environment));
                 repository.refUpdate(
@@ -136,7 +136,7 @@ class BootstrapProxyTransportIT {
                         byte[] updatedConfiguration = bytes(xml.toString(StandardCharsets.UTF_8) + "\n");
                         FileTestSupport.initialize(repository, REF);
                         try (GitFileAccess fileAccess =
-                                repository.files().open(repository.ref(REF))) {
+                                repository.files().open(repository.index().resolve(repository.ref(REF)))) {
                             fileAccess.write("orion.xml", updatedConfiguration);
                             repository.refUpdate(
                                     repository.ref(REF),
@@ -147,7 +147,11 @@ class BootstrapProxyTransportIT {
                         }
 
                         provider.openForRead(cache).valueOrFailure("refreshed proxy");
-                        assertThat(retained.files().<byte[], Exception>read(retained.ref(REF), file -> file.readBytes("orion.xml")))
+                        assertThat(
+                                        retained.files()
+                                                .<byte[], Exception>read(
+                                                        retained.index().resolve(retained.ref(REF)),
+                                                        file -> file.readBytes("orion.xml")))
                                 .isEqualTo(updatedConfiguration);
 
                         Path credentialFile = Path.of(URI.create(configuration.getBootstrap()
@@ -174,7 +178,7 @@ class BootstrapProxyTransportIT {
                         provider.openForRead(cache).valueOrFailure("rotated credential");
 
                         FileTestSupport.initialize(retained, REF);
-                        try (GitFileAccess fileAccess = retained.files().open(retained.ref(REF))) {
+                        try (GitFileAccess fileAccess = retained.files().open(retained.index().resolve(retained.ref(REF)))) {
                             fileAccess.write("marker.txt", bytes("proxy edit"));
                             retained.refUpdate(
                                     retained.ref(REF),
@@ -188,7 +192,7 @@ class BootstrapProxyTransportIT {
                                         repository
                                                 .files()
                                                 .<byte[], Exception>read(
-                                                        repository.ref(REF),
+                                                        repository.index().resolve(repository.ref(REF)),
                                                         file -> file.readBytes("marker.txt")))
                                 .isEqualTo(bytes("proxy edit"));
 
@@ -199,7 +203,7 @@ class BootstrapProxyTransportIT {
                         });
                         FileTestSupport.initialize(repository, REF);
                         try (GitFileAccess fileAccess =
-                                repository.files().open(repository.ref(REF))) {
+                                repository.files().open(repository.index().resolve(repository.ref(REF)))) {
                             fileAccess.write("marker.txt", bytes("concurrent upstream edit"));
                             repository.refUpdate(
                                     repository.ref(REF),
@@ -219,7 +223,7 @@ class BootstrapProxyTransportIT {
                                         repository
                                                 .files()
                                                 .<byte[], Exception>read(
-                                                        repository.ref(REF),
+                                                        repository.index().resolve(repository.ref(REF)),
                                                         file -> file.readBytes("marker.txt")))
                                 .isEqualTo(bytes("concurrent upstream edit"));
                     } finally {

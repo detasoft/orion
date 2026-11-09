@@ -71,11 +71,12 @@ public final class BlobOrionConfigurationStorage implements OrionVersionedConfig
         Objects.requireNonNull(document, "document");
         Objects.requireNonNull(metadata, "metadata");
         Objects.requireNonNull(metadata.author(), "author");
-        if (!(expectedRevision instanceof VcRevision.Stored stored)) {
-            throw new IllegalStateException("Creating the first configuration revision is not supported yet");
-        }
         byte[] content = serialize(document);
-        try (BlobStorageOperations operation = source.open(stored)) {
+        VcRevision.ReadTarget target = switch (expectedRevision) {
+            case VcRevision.Stored stored -> stored;
+            case VcRevision.Absent absent -> absent;
+        };
+        try (BlobStorageOperations operation = source.open(target)) {
             operation.write(content);
             return operation.commit(new VcChangeDescription(
                     new VcChangeAuthor(metadata.author().getUsername(), metadata.author().getEmail()),

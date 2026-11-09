@@ -160,8 +160,8 @@ class OrionAdminKeyMaterialRouteTest {
                     {"alias":"account","purpose":"ACME_ACCOUNT"}
                     """).status()).isEqualTo(201);
             byte[] publicKey = material.read(ACCOUNT).publicKey().getEncoded();
-            String beforeRevision = store.read(new VcRevision.Latest(), operation -> operation.revision().value());
-            byte[] beforeBytes = store.readBytes(new VcRevision.Stored(beforeRevision));
+            VcRevision beforeRevision = store.read(new VcRevision.Latest(), operation -> operation.revision());
+            byte[] beforeBytes = store.readBytes(new VcRevision.Latest());
 
             for (String purpose : List.of("ACME_ACCOUNT", "TLS_IDENTITY")) {
                 String body = new ObjectMapper().writeValueAsString(
@@ -171,11 +171,8 @@ class OrionAdminKeyMaterialRouteTest {
             assertThat(material.read(ACCOUNT).publicKey().getEncoded()).isEqualTo(publicKey);
             assertThat(material.revision()).isEqualTo("2");
             assertThat(store.readBytes(new VcRevision.Latest())).isEqualTo(beforeBytes);
-            assertThat(
-                            store.<String, RuntimeException>read(
-                                    new VcRevision.Latest(),
-                                    operation -> operation.revision().value()))
-                    .isEqualTo(beforeRevision);
+            VcRevision afterRevision = store.read(new VcRevision.Latest(), operation -> operation.revision());
+            assertThat(afterRevision).isEqualTo(beforeRevision);
         }
     }
 

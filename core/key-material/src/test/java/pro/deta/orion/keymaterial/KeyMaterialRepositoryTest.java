@@ -17,10 +17,37 @@ import java.util.Arrays;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 class KeyMaterialRepositoryTest {
     @org.junit.jupiter.api.extension.RegisterExtension
     final KeyMaterialTestRuntime runtime = new KeyMaterialTestRuntime();
+
+    @Test
+    void firstCommitPersistsMaterialAndRejectsAnotherCreator() throws Exception {
+        InMemoryBlobStorage source = new InMemoryBlobStorage(runtime.events);
+        try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password());
+                KeyMaterialRepository repository = new KeyMaterialRepository(
+                        source, new KeyMaterialCodec(options), runtime.events);
+                KeyMaterialOperation first = repository.open(new VcRevision.Latest());
+                KeyMaterialOperation stale = repository.open(new VcRevision.Absent())) {
+            assertThat(first.revision()).isEqualTo(new VcRevision.Absent());
+            assertThat(repository.hasDurableSnapshot()).isFalse();
+            first.generateKey("first", Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES, 256);
+            stale.generateKey("stale", Set.of(KeyMaterialPurpose.CONFIGURATION_CIPHER), KeyMaterialAlgorithm.AES, 256);
+            VcRevision.Stored saved = first.commit(VcChangeDescription.EMPTY);
+            assertThat(repository.revision()).isEqualTo(saved.value());
+            assertThat(repository.hasDurableSnapshot()).isTrue();
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> stale.commit(VcChangeDescription.EMPTY))
+                    .isInstanceOf(java.io.UncheckedIOException.class)
+                    .hasCauseInstanceOf(pro.deta.orion.storage.BlobStorageConflictException.class);
+            try (KeyMaterialRepository reopened = new KeyMaterialRepository(
+                    source, new KeyMaterialCodec(options), runtime.events)) {
+                assertThat(reopened.find("first")).isPresent();
+                assertThat(reopened.find("stale")).isEmpty();
+            }
+        }
+    }
 
     @Test
     void usesTheSourceRevisionAsTheModificationBase() throws Exception {
@@ -34,7 +61,7 @@ class KeyMaterialRepositoryTest {
                         source, new KeyMaterialCodec(options), runtime.events))) {
                     assertThat(material.revision()).isEqualTo(revision);
                     KeyMaterialOperation modification = material.open(new VcRevision.Stored(material.revision()));
-                    assertThat(modification.revision().value()).isEqualTo(revision);
+                    assertThat(modification.revision()).isEqualTo(new VcRevision.Stored(revision));
                     modification.commit(VcChangeDescription.EMPTY);
                     assertThat(material.revision()).isEqualTo(revision);
                 }
@@ -73,7 +100,8 @@ class KeyMaterialRepositoryTest {
                     byte[] bytes = operation.readContent();
                     if (!updatedDuringRead) {
                         updatedDuringRead = true;
-                        try (BlobStorageOperations update = super.createOperation(operation.revision())) {
+                        try (BlobStorageOperations update = super.createOperation(
+                                assertInstanceOf(VcRevision.Stored.class, operation.revision()))) {
                             update.write(nextContent);
                             update.commit(VcChangeDescription.EMPTY);
                         }

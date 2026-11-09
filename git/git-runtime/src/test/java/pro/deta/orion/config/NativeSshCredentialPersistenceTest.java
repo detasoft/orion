@@ -72,7 +72,7 @@ class NativeSshCredentialPersistenceTest {
         OrionXml.write(OrionDocument.withAccessControl(new AccessControl()), roles);
         byte[] unchanged = roles.toByteArray();
         FileTestSupport.initialize(repository, "refs/heads/main");
-        try (GitFileAccess access = repository.files().open(repository.ref("refs/heads/main"))) {
+        try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref("refs/heads/main")))) {
             access.write("users.xml", users.toByteArray());
             access.write("roles.xml", unchanged);
             repository.refUpdate(
@@ -133,7 +133,7 @@ class NativeSshCredentialPersistenceTest {
                             repository
                                     .files()
                                     .<byte[], Exception>read(
-                                            repository.ref("refs/heads/main"),
+                                            repository.index().resolve(repository.ref("refs/heads/main")),
                                             file -> file.readBytes("roles.xml")))
                     .containsExactly(unchanged);
         } finally {

@@ -23,6 +23,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class BlobStorageTest {
@@ -41,19 +42,18 @@ class BlobStorageTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("First-version reads: docs/plans/tasks/01_vc-first-revision.md")
     void loadsAnAbsentSourceWithoutInventingARevision() {
         for (BlobStorage store : List.of(new InMemoryBlobStorage(events),
                 new LocalBlobStorage(tempDir.resolve("missing"), events))) {
             try (BlobStorageOperations operation = store.open(new VcRevision.Latest())) {
                 assertThat(operation.revision()).isInstanceOf(VcRevision.Absent.class);
-                assertThat(operation.readContent()).isNull();
+                assertThatThrownBy(operation::readContent).isInstanceOf(UncheckedIOException.class)
+                        .hasCauseInstanceOf(java.io.FileNotFoundException.class);
             }
         }
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("First-version creation: docs/plans/tasks/01_vc-first-revision.md")
     void localStoreCreatesOwnerOnlyFiles() throws Exception {
         assumeTrue(ProtectedFiles.supportsPosix(tempDir), "POSIX permissions are not available");
         Path path = tempDir.resolve("created");
@@ -67,11 +67,41 @@ class BlobStorageTest {
     }
 
     @Test
+    void onlyOneCreatorCanPublishFromTheAbsentSnapshot() {
+        for (BlobStorage store : List.of(new InMemoryBlobStorage(events),
+                new LocalBlobStorage(tempDir.resolve("first.p12"), events))) {
+            List<VcResourceModified> changes = new CopyOnWriteArrayList<>();
+            OrionEvents subscription = events.forTarget(new Object());
+            subscription.subscribe(VcResourceModified.class, store, changes::add);
+            try (BlobStorageOperations first = store.open(new VcRevision.Absent());
+                    BlobStorageOperations stale = store.open(new VcRevision.Latest())) {
+                first.write(bytes("first"));
+                stale.write(bytes("stale"));
+                VcRevision.Stored saved = first.commit(VcChangeDescription.EMPTY);
+                assertThatThrownBy(() -> stale.commit(VcChangeDescription.EMPTY))
+                        .isInstanceOfSatisfying(VcModificationException.class, failure -> {
+                            assertThat(failure.expectedRevision()).isEqualTo(new VcRevision.Absent());
+                            assertThat(failure.actualRevision()).isEqualTo(saved);
+                        });
+                assertThat(store.readBytes(saved)).isEqualTo(bytes("first"));
+                assertThatThrownBy(() -> store.open(new VcRevision.Absent()))
+                        .isInstanceOf(VcModificationException.class);
+                events.publishAndWait(new Barrier());
+                assertThat(changes).hasSize(1);
+                assertThat(changes.getFirst().oldRevision()).isEqualTo(new VcRevision.Absent());
+                assertThat(changes.getFirst().revision()).isEqualTo(saved);
+            } finally {
+                subscription.unsubscribe(VcResourceModified.class, store);
+            }
+        }
+    }
+
+    @Test
     void openedStateKeepsItsRevisionAndBytesAfterTheSourceChanges() {
         InMemoryBlobStorage source = new InMemoryBlobStorage(bytes("first"), false, events);
         try (BlobStorageOperations snapshot = source.open(new VcRevision.Latest());
              BlobStorageOperations update = source.open(new VcRevision.Latest())) {
-            VcRevision.Stored base = snapshot.revision();
+            VcRevision.Stored base = assertInstanceOf(VcRevision.Stored.class, snapshot.revision());
             update.write(bytes("second"));
             VcRevision.Stored saved = update.commit(VcChangeDescription.EMPTY);
 
@@ -88,8 +118,8 @@ class BlobStorageTest {
     void absentSourceCannotOpenAStoredVersion() {
         InMemoryBlobStorage memory = new InMemoryBlobStorage(events);
         LocalBlobStorage local = new LocalBlobStorage(tempDir.resolve("absent.p12"), events);
-        assertThatThrownBy(() -> memory.open(new VcRevision.Latest())).isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> local.open(new VcRevision.Latest())).isInstanceOf(UncheckedIOException.class);
+        assertThatThrownBy(() -> memory.open(new VcRevision.Stored("missing"))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> local.open(new VcRevision.Stored("missing"))).isInstanceOf(UncheckedIOException.class);
         assertThat(Files.exists(tempDir.resolve("absent.p12"))).isFalse();
     }
 
@@ -122,7 +152,8 @@ class BlobStorageTest {
                         assertThat(failure.expectedRevision()).isEqualTo(stale.revision());
                         assertThat(failure.actualRevision()).isEqualTo(saved);
                     });
-            assertThat(store.readBytes(stale.revision())).isEqualTo(bytes("initial"));
+            assertThat(store.readBytes(assertInstanceOf(VcRevision.Stored.class, stale.revision())))
+                    .isEqualTo(bytes("initial"));
             assertThat(store.readBytes(saved)).isEqualTo(bytes("first"));
         }
         assertThatThrownBy(() -> store.open(new VcRevision.Stored("missing")))
@@ -134,7 +165,7 @@ class BlobStorageTest {
         Path path = seed("initial");
         for (BlobStorage store : List.of(new InMemoryBlobStorage(bytes("initial"), false, events),
                 new LocalBlobStorage(path, events))) {
-            VcRevision.Stored base;
+            VcRevision base;
             try (BlobStorageOperations operation = store.open(new VcRevision.Latest())) {
                 base = operation.revision();
                 operation.write(bytes("uncommitted"));
@@ -194,10 +225,11 @@ class BlobStorageTest {
         Path path = seed("aaaa");
         LocalBlobStorage store = new LocalBlobStorage(path, events);
         try (BlobStorageOperations snapshot = store.open(new VcRevision.Latest())) {
+            VcRevision.Stored base = assertInstanceOf(VcRevision.Stored.class, snapshot.revision());
             Files.writeString(path, "bbbb", StandardCharsets.UTF_8);
             assertThat(snapshot.readContent()).isEqualTo(bytes("aaaa"));
             assertThat(store.readBytes(new VcRevision.Latest())).isEqualTo(bytes("bbbb"));
-            assertThatThrownBy(() -> store.open(snapshot.revision())).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> store.open(base)).isInstanceOf(IllegalArgumentException.class);
             snapshot.write(bytes("cccc"));
             assertThatThrownBy(() -> snapshot.commit(VcChangeDescription.EMPTY))
                     .isInstanceOf(VcModificationException.class);

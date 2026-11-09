@@ -112,7 +112,7 @@ class PersistentProxyActivationTest {
             provider.activate(fixture.current::get, fixture.secrets);
             fixture.authorization.clear();
             FileTestSupport.initialize(retained, "main");
-            try (GitFileAccess fileAccess = retained.files().open(retained.ref("main"))) {
+            try (GitFileAccess fileAccess = retained.files().open(retained.index().resolve(retained.ref("main")))) {
                 fileAccess.write("orion.xml", new byte[] {1});
                 retained.refUpdate(
                         retained.ref("main"),
@@ -278,7 +278,7 @@ class PersistentProxyActivationTest {
                             () -> {
                                 FileTestSupport.initialize(retained, "main");
                                 try (GitFileAccess fileAccess =
-                                        retained.files().open(retained.ref("main"))) {
+                                        retained.files().open(retained.index().resolve(retained.ref("main")))) {
                                     fileAccess.write("file", new byte[] {1});
                                     retained.refUpdate(
                                             retained.ref("main"),

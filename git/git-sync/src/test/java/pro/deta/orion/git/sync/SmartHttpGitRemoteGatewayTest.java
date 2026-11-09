@@ -88,7 +88,7 @@ class SmartHttpGitRemoteGatewayTest {
                 assertThat(local.updateRef("refs/heads/main", NULL_ID, seed.main()).status())
                         .isEqualTo(RefUpdateResult.Status.APPLIED);
                 {
-                    try (GitFileAccess fileAccess = local.files().open(local.ref("main"))) {
+                    try (GitFileAccess fileAccess = local.files().open(local.index().resolve(local.ref("main")))) {
                         fileAccess.write("orion.txt", "outbound\n".getBytes());
                         local.refUpdate(
                                 local.ref("main"),
@@ -148,7 +148,7 @@ class SmartHttpGitRemoteGatewayTest {
                 assertThat(local.updateRef("refs/heads/main", NULL_ID, seed.main()).status())
                         .isEqualTo(RefUpdateResult.Status.APPLIED);
                 {
-                    try (GitFileAccess fileAccess = local.files().open(local.ref("main"))) {
+                    try (GitFileAccess fileAccess = local.files().open(local.index().resolve(local.ref("main")))) {
                         fileAccess.write("outbound.txt", "outbound\n".getBytes());
                         local.refUpdate(
                                 local.ref("main"),

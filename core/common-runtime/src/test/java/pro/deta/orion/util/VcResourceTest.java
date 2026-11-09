@@ -14,9 +14,9 @@ class VcResourceTest {
         TestResource resource = new TestResource();
         VcRevision.Stored revision = new VcRevision.Stored("stored");
 
-        Integer length = resource.read(revision, operation -> operation.revision().value().length());
+        Boolean matches = resource.read(revision, operation -> operation.revision().equals(revision));
 
-        assertThat(length).isEqualTo(6);
+        assertThat(matches).isTrue();
         assertThat(resource.closes).isEqualTo(1);
     }
 

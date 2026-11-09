@@ -67,7 +67,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .valueOrFailure("create proxy alias");
         FileTestSupport.initialize(repository, "refs/heads/main");
         try (GitFileAccess fileAccess =
-                repository.files().open(repository.ref("refs/heads/main"))) {
+                repository.files().open(repository.index().resolve(repository.ref("refs/heads/main")))) {
             fileAccess.write(ACL_PATH, bytes("resolved acl"));
             fileAccess.write(secondaryPath, bytes("resolved roles"));
             repository.refUpdate(
@@ -87,17 +87,24 @@ class NativeGitOrionConfigurationStorageTest {
         assertThat(storage.load().result().valueOrFailure("Cannot read configuration document"))
                 .isEqualTo(document("resolved acl"));
         storage.save(
-                new VcRevision.Stored(repository.refs().get("refs/heads/main")),
+                repository.index().resolve(new VcRevision.Ref("refs/heads/main")),
                 document("updated ACL"),
                 new ChangeMetadata(UserEmail.EMPTY, "update"));
         assertThat(
                         repository
                                 .files()
                                 .<byte[], Exception>read(
-                                        repository.ref("refs/heads/main"),
+                                        repository.index().resolve(repository.ref("refs/heads/main")),
                                         file -> file.readBytes(secondaryPath)))
                 .isEqualTo(bytes("resolved roles"));
-        assertThat(repository.files().<byte[], Exception>read(repository.ref("refs/heads/main"), file -> file.readBytes(ACL_PATH)))
+        assertThat(
+                        repository
+                                .files()
+                                .<byte[], Exception>read(
+                                        repository
+                                                .index()
+                                                .resolve(repository.ref("refs/heads/main")),
+                                        file -> file.readBytes(ACL_PATH)))
                 .isEqualTo(bytes("updated ACL"));
     }
 
@@ -110,7 +117,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .valueOrFailure("selected repository");
         String ref = "refs/heads/configuration";
         FileTestSupport.initialize(selected, ref);
-        try (GitFileAccess fileAccess = selected.files().open(selected.ref(ref))) {
+        try (GitFileAccess fileAccess = selected.files().open(selected.index().resolve(selected.ref(ref)))) {
             fileAccess.write(ACL_PATH, bytes("selected ACL"));
             selected.refUpdate(
                     selected.ref(ref),
@@ -140,7 +147,7 @@ class NativeGitOrionConfigurationStorageTest {
         assertThat(
                         selected.files()
                                 .<byte[], Exception>read(
-                                        selected.ref(ref), file -> file.readBytes(ACL_PATH)))
+                                        selected.index().resolve(selected.ref(ref)), file -> file.readBytes(ACL_PATH)))
                 .isEqualTo(bytes("versioned update"));
         assertThat(provider.provider().repositoryNames()).containsExactly("team/repo");
     }
@@ -156,8 +163,6 @@ class NativeGitOrionConfigurationStorageTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    @org.junit.jupiter.api.Disabled(
-            "First-version creation: docs/plans/tasks/01_vc-first-revision.md")
     void createsConfiguredRepositoryAndCommitsInitialAcl(boolean useDefaults, @TempDir Path rootDirectory) {
         NativeGitRepositoryProvider provider =
                 NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
@@ -193,8 +198,6 @@ class NativeGitOrionConfigurationStorageTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled(
-            "First-version creation: docs/plans/tasks/01_vc-first-revision.md")
     void reusesExistingRepositoryAndConfiguredRefAfterRestart(@TempDir Path rootDirectory) {
         try (NativeGitRepositoryProvider provider =
                 NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events())) {
@@ -225,7 +228,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .valueOrFailure("repository");
         FileTestSupport.initialize(repository, "refs/heads/configuration");
         try (GitFileAccess fileAccess =
-                repository.files().open(repository.ref("refs/heads/configuration"))) {
+                repository.files().open(repository.index().resolve(repository.ref("refs/heads/configuration")))) {
             fileAccess.write("README.md", bytes("not an ACL"));
             repository.refUpdate(
                     repository.ref("refs/heads/configuration"),
@@ -240,8 +243,7 @@ class NativeGitOrionConfigurationStorageTest {
         Result<OrionDocument> result = read.result();
         assertThat(read.revision())
                 .isEqualTo(
-                        new VcRevision.Stored(
-                                repository.refs().get("refs/heads/configuration")));
+                        repository.index().resolve(new VcRevision.Ref("refs/heads/configuration")));
 
         assertThat(result).isInstanceOf(Result.Failure.class);
         assertThat(((Result.Failure<?>) result).code()).isEqualTo(Result.FailureCode.NOT_FOUND);
@@ -256,7 +258,7 @@ class NativeGitOrionConfigurationStorageTest {
                         repository
                                 .files()
                                 .<byte[], Exception>read(
-                                        repository.ref("refs/heads/configuration"),
+                                        repository.index().resolve(repository.ref("refs/heads/configuration")),
                                         file -> file.readBytes("README.md")))
                 .isEqualTo(bytes("not an ACL"));
     }
@@ -269,7 +271,7 @@ class NativeGitOrionConfigurationStorageTest {
                 provider.create("internal/configuration").valueOrFailure("repository");
         FileTestSupport.initialize(repository, "refs/heads/configuration");
         try (GitFileAccess access =
-                repository.files().open(repository.ref("refs/heads/configuration"))) {
+                repository.files().open(repository.index().resolve(repository.ref("refs/heads/configuration")))) {
             access.write("README.md", bytes("existing file"));
             repository.refUpdate(
                     repository.ref("refs/heads/configuration"),
@@ -297,7 +299,7 @@ class NativeGitOrionConfigurationStorageTest {
                         repository
                                 .files()
                                 .<byte[], Exception>read(
-                                        repository.ref("refs/heads/configuration"),
+                                        repository.index().resolve(repository.ref("refs/heads/configuration")),
                                         file -> file.readBytes("README.md")))
                 .isEqualTo(bytes("existing file"));
     }
@@ -317,7 +319,7 @@ class NativeGitOrionConfigurationStorageTest {
                 provider.create("internal/configuration").valueOrFailure("repository");
         FileTestSupport.initialize(repository, "refs/heads/configuration");
         try (GitFileAccess access =
-                repository.files().open(repository.ref("refs/heads/configuration"))) {
+                repository.files().open(repository.index().resolve(repository.ref("refs/heads/configuration")))) {
             access.write(ACL_PATH, "<broken".getBytes(StandardCharsets.UTF_8));
             repository.refUpdate(
                     repository.ref("refs/heads/configuration"),
@@ -335,8 +337,7 @@ class NativeGitOrionConfigurationStorageTest {
                                 assertThat(failure.code()).isEqualTo(Result.FailureCode.GENERAL));
         assertThat(read.revision())
                 .isEqualTo(
-                        new VcRevision.Stored(
-                                repository.refs().get("refs/heads/configuration")));
+                        repository.index().resolve(new VcRevision.Ref("refs/heads/configuration")));
         assertThatThrownBy(() -> editor.edit(new VcRevision.Stored("stale"), ChangeMetadata.EMPTY))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Cannot load configuration for update");
@@ -350,7 +351,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .valueOrFailure("repository");
         FileTestSupport.initialize(repository, "refs/heads/configuration");
         try (GitFileAccess fileAccess =
-                repository.files().open(repository.ref("refs/heads/configuration"))) {
+                repository.files().open(repository.index().resolve(repository.ref("refs/heads/configuration")))) {
             fileAccess.write(ACL_PATH, bytes("primary ACL"));
             repository.refUpdate(
                     repository.ref("refs/heads/configuration"),
@@ -367,8 +368,6 @@ class NativeGitOrionConfigurationStorageTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled(
-            "First-version creation: docs/plans/tasks/01_vc-first-revision.md")
     void reportsExactSnapshotsOfAcceptedUpdatesEvenAfterTheBranchMoves(@TempDir Path rootDirectory)
             throws Exception {
         NativeGitRepositoryProvider provider =
@@ -403,7 +402,7 @@ class NativeGitOrionConfigurationStorageTest {
                     try (GitFileAccess access =
                             modifiedRepository
                                     .files()
-                                    .open(modifiedRepository.ref("refs/heads/other"))) {
+                                    .open(modifiedRepository.index().resolve(modifiedRepository.ref("refs/heads/other")))) {
                         access.write(ACL_PATH, bytes("other"));
                         modifiedRepository.refUpdate(
                                 modifiedRepository.ref("refs/heads/other"),
@@ -433,8 +432,6 @@ class NativeGitOrionConfigurationStorageTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled(
-            "First-version creation: docs/plans/tasks/01_vc-first-revision.md")
     void staleVersionedSaveCannotOverwriteWinningAclOrUnrelatedFiles(@TempDir Path rootDirectory) throws Exception {
         NativeGitRepositoryProvider provider =
                 NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
@@ -447,7 +444,7 @@ class NativeGitOrionConfigurationStorageTest {
         NativeGitRepository repository = provider.find("internal/configuration").valueOrFailure("repository");
         FileTestSupport.initialize(repository, "refs/heads/configuration");
         try (GitFileAccess fileAccess =
-                repository.files().open(repository.ref("refs/heads/configuration"))) {
+                repository.files().open(repository.index().resolve(repository.ref("refs/heads/configuration")))) {
             fileAccess.write(ACL_PATH, bytes("version two"));
             fileAccess.write("winner.txt", bytes("winner"));
             repository.refUpdate(
@@ -472,14 +469,14 @@ class NativeGitOrionConfigurationStorageTest {
                         repository
                                 .files()
                                 .<byte[], Exception>read(
-                                        repository.ref("refs/heads/configuration"),
+                                        repository.index().resolve(repository.ref("refs/heads/configuration")),
                                         file -> file.readBytes(ACL_PATH)))
                 .isEqualTo(bytes("version two"));
         assertThat(
                         repository
                                 .files()
                                 .<byte[], Exception>read(
-                                        repository.ref("refs/heads/configuration"),
+                                        repository.index().resolve(repository.ref("refs/heads/configuration")),
                                         file -> file.readBytes("winner.txt")))
                 .isEqualTo(bytes("winner"));
     }
@@ -492,7 +489,7 @@ class NativeGitOrionConfigurationStorageTest {
         NativeGitRepository repository = provider.create("internal/configuration").valueOrFailure("repository");
         FileTestSupport.initialize(repository, "refs/heads/configuration");
         try (GitFileAccess fileAccess =
-                repository.files().open(repository.ref("refs/heads/configuration"))) {
+                repository.files().open(repository.index().resolve(repository.ref("refs/heads/configuration")))) {
             fileAccess.write("winner.txt", bytes("winner"));
             repository.refUpdate(
                     repository.ref("refs/heads/configuration"),
@@ -503,7 +500,7 @@ class NativeGitOrionConfigurationStorageTest {
         OrionVersionedConfigurationStorage storage = resolvedStorage(provider, ACL_PATH);
 
         storage.save(
-                new VcRevision.Stored(repository.refs().get("refs/heads/configuration")),
+                repository.index().resolve(new VcRevision.Ref("refs/heads/configuration")),
                 document("created"),
                 new ChangeMetadata(UserEmail.EMPTY, "created"));
 
@@ -511,14 +508,14 @@ class NativeGitOrionConfigurationStorageTest {
                         repository
                                 .files()
                                 .<byte[], Exception>read(
-                                        repository.ref("refs/heads/configuration"),
+                                        repository.index().resolve(repository.ref("refs/heads/configuration")),
                                         file -> file.readBytes(ACL_PATH)))
                 .isEqualTo(bytes("created"));
         assertThat(
                         repository
                                 .files()
                                 .<byte[], Exception>read(
-                                        repository.ref("refs/heads/configuration"),
+                                        repository.index().resolve(repository.ref("refs/heads/configuration")),
                                         file -> file.readBytes("winner.txt")))
                 .isEqualTo(bytes("winner"));
     }
@@ -547,7 +544,7 @@ class NativeGitOrionConfigurationStorageTest {
             try (GitFileAccess fileAccess =
                     modifiedRepository
                             .files()
-                            .open(modifiedRepository.ref("refs/heads/configuration"))) {
+                            .open(modifiedRepository.index().resolve(modifiedRepository.ref("refs/heads/configuration")))) {
                 fileAccess.write(ACL_PATH, bytes("provider acl"));
                 modifiedRepository.refUpdate(
                         modifiedRepository.ref("refs/heads/configuration"),
@@ -564,8 +561,6 @@ class NativeGitOrionConfigurationStorageTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled(
-            "First-version creation: docs/plans/tasks/01_vc-first-revision.md")
     void savesConfiguredRefThroughProviderOperation(@TempDir Path rootDirectory) {
         RecordingProvider provider =
                 new RecordingProvider(

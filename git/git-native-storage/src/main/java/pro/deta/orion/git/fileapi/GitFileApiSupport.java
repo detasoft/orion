@@ -1,15 +1,10 @@
 package pro.deta.orion.git.fileapi;
 
 import pro.deta.orion.git.nativestorage.GitOperationException;
-import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.FileMode;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
-import pro.deta.orion.git.parser.v2.data.Head;
-import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
-import pro.deta.orion.git.parser.v2.index.RefSelection;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.util.VcRevision;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
@@ -27,24 +22,17 @@ import java.util.Optional;
 final class GitFileApiSupport {
     private GitFileApiSupport() {}
 
-    static GitFileAccess open(GitFileApi resource, VcRevision.ReadTarget revision) {
+    static GitFileAccess open(GitFileApi resource, VcRevision.ReadTarget target) {
         NativeGitRepository repository = resource.repository;
         try {
+            VcRevision revision = switch (target) {
+                case VcRevision.Latest latest -> repository.index().resolve(latest);
+                case VcRevision.Stored stored -> stored;
+                case VcRevision.Absent absent -> absent;
+            };
             GitIndexAccess index = repository.index().createAccess(Optional.of(PackId.create()));
             try {
-                ObjectId commit = switch (revision) {
-                    case VcRevision.Stored stored -> new ObjectId(stored.value());
-                    case VcRevision.Ref ref -> index.findRef(new RefId(ref.value()))
-                            .orElseThrow(() -> new GitRepositoryFileNotFoundException("Ref not found: " + ref.value()));
-                    case VcRevision.Latest ignored -> {
-                        RefsSnapshot snapshot = index.snapshotRefs(new RefSelection.Head());
-                        ObjectId current = snapshot.head() instanceof Head.Detached detached
-                                ? detached.target() : snapshot.refs().get(((Head.Symbolic) snapshot.head()).target());
-                        if (current == null) throw new GitRepositoryFileNotFoundException("HEAD is unborn");
-                        yield current;
-                    }
-                };
-                return new GitFileAccess(resource, index, new VcRevision.Stored(commit.toHex()));
+                return new GitFileAccess(resource, index, revision);
             } catch (IOException | GitOperationException | RuntimeException | Error failure) {
                 try {
                     index.discard();

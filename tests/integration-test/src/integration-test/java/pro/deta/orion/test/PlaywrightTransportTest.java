@@ -14,7 +14,6 @@ import org.apache.sshd.client.channel.ChannelExec;
 import org.apache.sshd.client.session.ClientSession;
 import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.util.VcChangeAuthor;
@@ -39,7 +38,6 @@ class PlaywrightTransportTest {
     Path tempDir;
 
     @Test
-    @Disabled("docs/plans/tasks/01_vc-first-revision.md: configuration creation on first startup")
     void browserServerStartsAllTransportsAndServesNativeGit() throws Exception {
         BootstrapConfiguration configuration = configuration();
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
@@ -61,7 +59,7 @@ class PlaywrightTransportTest {
                 try (GitFileAccess fileAccess =
                         modifiedRepository
                                 .files()
-                                .open(modifiedRepository.ref("refs/heads/main"))) {
+                                .open(modifiedRepository.index().resolve(modifiedRepository.ref("refs/heads/main")))) {
                     fileAccess.write(
                             "README.md", "transport check\n".getBytes(StandardCharsets.UTF_8));
                     modifiedRepository.refUpdate(
@@ -84,7 +82,6 @@ class PlaywrightTransportTest {
     }
 
     @Test
-    @Disabled("docs/plans/tasks/01_vc-first-revision.md: configuration creation on first startup")
     void browserServerRejectsUnknownSshKeysAndStillAcceptsItsAdminKey() throws Exception {
         BootstrapConfiguration configuration = configuration();
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {

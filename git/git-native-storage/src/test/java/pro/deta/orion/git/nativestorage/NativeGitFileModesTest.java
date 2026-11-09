@@ -59,7 +59,7 @@ class NativeGitFileModesTest {
                 "next.sh", script,
                 "link", bytes("run.sh"));
         GitFileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("run.sh", EXECUTABLE_FILE, script);
             fileAccess.write("next.sh", script);
             fileAccess.write("link", SYMLINK, bytes("run.sh"));
@@ -76,7 +76,7 @@ class NativeGitFileModesTest {
                 "next.sh", script,
                 "link", bytes("next.sh"));
         GitFileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("run.sh", bytes("updated"));
             fileAccess.write("next.sh", EXECUTABLE_FILE, script);
             fileAccess.write("link", SYMLINK, bytes("next.sh"));
@@ -141,7 +141,7 @@ class NativeGitFileModesTest {
                         () -> {
                             GitFileTestSupport.initialize(repository, "main");
                             try (GitFileAccess fileAccess =
-                                    repository.files().open(repository.ref("main"))) {
+                                    repository.files().open(repository.index().resolve(repository.ref("main")))) {
                                 fileAccess.write("config.txt", bytes("updated"));
                                 repository.refUpdate(
                                         repository.ref("main"),
@@ -188,7 +188,7 @@ class NativeGitFileModesTest {
         try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory, testRuntime.events())
                 .create("demo").valueOrFailure("repository")) {
             GitFileTestSupport.initialize(repository, "main");
-            try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 for (Map.Entry<String, byte[]> fileEntry : files.entrySet()) {
                     pro.deta.orion.git.parser.v2.data.FileMode mode =
                             switch (fileEntry.getKey()) {
@@ -208,7 +208,7 @@ class NativeGitFileModesTest {
             assertContents(repository, files, modes);
 
             GitFileTestSupport.initialize(repository, "main");
-            try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 fileAccess.write("a/x", updated);
                 repository.refUpdate(
                         repository.ref("main"),
@@ -259,7 +259,7 @@ class NativeGitFileModesTest {
             assertContents(repository, files, modes);
 
             GitFileTestSupport.initialize(repository, "main");
-            try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 fileAccess.write("config.txt", configuration);
                 repository.refUpdate(
                         repository.ref("main"),
@@ -284,7 +284,7 @@ class NativeGitFileModesTest {
                             repository
                                     .files()
                                     .<byte[], Exception>read(
-                                            repository.ref("main"),
+                                            repository.index().resolve(repository.ref("main")),
                                             file -> file.readBytes(entry.getKey())))
                     .isEqualTo(entry.getValue());
         }

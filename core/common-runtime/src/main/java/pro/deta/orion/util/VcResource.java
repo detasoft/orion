@@ -47,13 +47,13 @@ public abstract class VcResource<O extends VcResource.VcOperation> {
     }
 
     public abstract class VcOperation implements AutoCloseable {
-        private final VcRevision.Stored revision;
+        private final VcRevision revision;
 
-        protected VcOperation(VcRevision.Stored revision) {
+        protected VcOperation(VcRevision revision) {
             this.revision = Objects.requireNonNull(revision, "revision");
         }
 
-        public final VcRevision.Stored revision() {
+        public final VcRevision revision() {
             return revision;
         }
 

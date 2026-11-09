@@ -233,7 +233,7 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
         backend = NativeGitRepositoryProvider.file(directory, testRuntime.events());
         NativeGitRepository repository = createRepository(backend, "demo");
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("a", new byte[] {0});
             repository.refUpdate(
                     repository.ref("main"),
@@ -323,7 +323,7 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
     void distinguishesFastForwardAndForcedUpdatesForAuthorization() throws Exception {
         NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("a", new byte[] {1});
             repository.refUpdate(
                     repository.ref("main"),
@@ -401,7 +401,7 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
             throws Exception {
         NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("a", new byte[] {1});
             repository.refUpdate(
                     repository.ref("main"),
@@ -410,7 +410,7 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
         }
 
         FileTestSupport.initialize(repository, "secret");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("secret"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("secret")))) {
             fileAccess.write("a", new byte[] {2});
             repository.refUpdate(
                     repository.ref("secret"),
@@ -479,7 +479,7 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
     void authorizesNestedTagByItsTargetAndPreservesAccessDenial(boolean v2) throws Exception {
         NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("a", new byte[] {1});
             repository.refUpdate(
                     repository.ref("main"),
@@ -533,7 +533,7 @@ class DefaultGitNativeRepositoryServiceTest implements GitNativeRepositoryAccess
     void authorizesReachableBlobsAndPreservesAccessDenial(boolean v2, String ref) throws Exception {
         NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("a", new byte[] {1});
             repository.refUpdate(
                     repository.ref("main"),

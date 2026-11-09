@@ -1,5 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.util.VcRevision;
+
 import pro.deta.orion.git.fileapi.GitFileAccess;
 
 import pro.deta.orion.util.VcChangeDescription;
@@ -42,7 +44,7 @@ class NativeGitRepositoryTest {
         try (NativeGitRepository repository = repository()) {
             byte[] file = "content".getBytes(StandardCharsets.UTF_8);
             FileTestSupport.initialize(repository, "topic");
-            try (GitFileAccess fileAccess = repository.files().open(repository.ref("topic"))) {
+            try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("topic")))) {
                 fileAccess.write("./каталог//файл.txt", file);
                 repository.refUpdate(
                         repository.ref("topic"),
@@ -54,20 +56,22 @@ class NativeGitRepositoryTest {
                             repository
                                     .files()
                                     .<byte[], Exception>read(
-                                            repository.ref("refs/heads/topic"),
+                                            repository.index().resolve(repository.ref("refs/heads/topic")),
                                             opened -> opened.readBytes("каталог/./файл.txt")))
                     .isEqualTo(file);
-            assertThatThrownBy(() -> repository.files().read(repository.ref("topic"), opened -> opened.readBytes("missing")))
-                    .isInstanceOf(GitRepositoryFileNotFoundException.class);
             assertThatThrownBy(
                             () ->
                                     repository
                                             .files()
                                             .read(
-                                                    repository.ref("missing"),
-                                                    opened -> opened.readBytes("каталог/файл.txt")))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasCauseInstanceOf(GitRepositoryFileNotFoundException.class);
+                                                    repository
+                                                            .index()
+                                                            .resolve(repository.ref("topic")),
+                                                    opened -> opened.readBytes("missing")))
+                    .isInstanceOf(GitRepositoryFileNotFoundException.class);
+            assertThatThrownBy(() -> repository.index().resolve(repository.ref("missing")))
+                    .isInstanceOf(java.io.FileNotFoundException.class)
+                    .hasMessage("Ref not found: refs/heads/missing");
         }
     }
 
@@ -77,7 +81,7 @@ class NativeGitRepositoryTest {
         try (NativeGitRepository repository = repository()) {
             byte[] file = new byte[]{1};
             FileTestSupport.initialize(repository, "main");
-            try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+            try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
                 fileAccess.write("file", file);
                 repository.refUpdate(
                         repository.ref("main"),
@@ -85,13 +89,21 @@ class NativeGitRepositoryTest {
                         fileAccess.commit(new VcChangeDescription(VcChangeAuthor.EMPTY, "create")));
             }
 
-            assertThatThrownBy(() -> repository.files().read(repository.ref("main"), opened -> opened.readBytes(path)))
+            assertThatThrownBy(
+                            () ->
+                                    repository
+                                            .files()
+                                            .read(
+                                                    repository
+                                                            .index()
+                                                            .resolve(repository.ref("main")),
+                                                    opened -> opened.readBytes(path)))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(
                             () -> {
                                 FileTestSupport.initialize(repository, "main");
                                 try (GitFileAccess fileAccess =
-                                        repository.files().open(repository.ref("main"))) {
+                                        repository.files().open(repository.index().resolve(repository.ref("main")))) {
                                     fileAccess.write(path, file);
                                     repository.refUpdate(
                                             repository.ref("main"),
@@ -118,7 +130,7 @@ class NativeGitRepositoryTest {
                                     repository
                                             .files()
                                             .read(
-                                                    repository.ref("main"),
+                                                    repository.index().resolve(repository.ref("main")),
                                                     opened -> opened.readBytes("file")))
                     .isInstanceOf(IllegalStateException.class)
                     .hasCauseInstanceOf(GitOperationException.class)
@@ -153,7 +165,7 @@ class NativeGitRepositoryTest {
                                     repository
                                             .files()
                                             .read(
-                                                    repository.ref("main"),
+                                                    repository.index().resolve(repository.ref("main")),
                                                     opened -> opened.readBytes("file")))
                     .isInstanceOf(IllegalStateException.class)
                     .hasCauseInstanceOf(GitOperationException.class)
@@ -257,7 +269,7 @@ class NativeGitRepositoryTest {
                 "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), testRuntime.events());
 
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("orion.xml", "initial acl".getBytes(StandardCharsets.UTF_8));
             repository.refUpdate(
                     repository.ref("main"),
@@ -266,7 +278,12 @@ class NativeGitRepositoryTest {
                             new VcChangeDescription(VcChangeAuthor.EMPTY, "initial acl")));
         }
 
-        assertThat(repository.files().<byte[], Exception>read(repository.ref("main"), opened -> opened.readBytes("orion.xml")))
+        assertThat(
+                        repository
+                                .files()
+                                .<byte[], Exception>read(
+                                        repository.index().resolve(repository.ref("main")),
+                                        opened -> opened.readBytes("orion.xml")))
                 .isEqualTo("initial acl".getBytes(StandardCharsets.UTF_8));
         assertThat(repository.refs())
                 .containsKey("refs/heads/main");
@@ -288,7 +305,12 @@ class NativeGitRepositoryTest {
         assertThat(repository.publishPack(
                 update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
                 .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
-        assertThat(repository.files().<byte[], Exception>read(repository.ref("main"), opened -> opened.readBytes("orion.xml")))
+        assertThat(
+                        repository
+                                .files()
+                                .<byte[], Exception>read(
+                                        repository.index().resolve(repository.ref("main")),
+                                        opened -> opened.readBytes("orion.xml")))
                 .isEqualTo("prepared acl".getBytes(StandardCharsets.UTF_8));
     }
 
@@ -299,7 +321,7 @@ class NativeGitRepositoryTest {
                 "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), testRuntime.events());
 
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("orion.xml", "initial acl".getBytes(StandardCharsets.UTF_8));
             fileAccess.write("nested/acl.xml", "nested acl".getBytes(StandardCharsets.UTF_8));
             repository.refUpdate(
@@ -310,7 +332,7 @@ class NativeGitRepositoryTest {
         }
 
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("orion.xml", "updated acl".getBytes(StandardCharsets.UTF_8));
             repository.refUpdate(
                     repository.ref("main"),
@@ -319,9 +341,19 @@ class NativeGitRepositoryTest {
                             new VcChangeDescription(VcChangeAuthor.EMPTY, "updated acl")));
         }
 
-        assertThat(repository.files().<byte[], Exception>read(repository.ref("main"), opened -> opened.readBytes("orion.xml")))
+        assertThat(
+                        repository
+                                .files()
+                                .<byte[], Exception>read(
+                                        repository.index().resolve(repository.ref("main")),
+                                        opened -> opened.readBytes("orion.xml")))
                 .isEqualTo("updated acl".getBytes(StandardCharsets.UTF_8));
-        assertThat(repository.files().<byte[], Exception>read(repository.ref("main"), opened -> opened.readBytes("nested/acl.xml")))
+        assertThat(
+                        repository
+                                .files()
+                                .<byte[], Exception>read(
+                                        repository.index().resolve(repository.ref("main")),
+                                        opened -> opened.readBytes("nested/acl.xml")))
                 .isEqualTo("nested acl".getBytes(StandardCharsets.UTF_8));
     }
 
@@ -331,7 +363,7 @@ class NativeGitRepositoryTest {
         NativeGitRepository repository = new NativeGitRepository(
                 "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), testRuntime.events());
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("orion.xml", "version one".getBytes(StandardCharsets.UTF_8));
             repository.refUpdate(
                     repository.ref("main"),
@@ -347,7 +379,7 @@ class NativeGitRepositoryTest {
             return null;
         });
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("orion.xml", "version two".getBytes(StandardCharsets.UTF_8));
             fileAccess.write("winner.txt", "winner".getBytes(StandardCharsets.UTF_8));
             repository.refUpdate(
@@ -368,9 +400,19 @@ class NativeGitRepositoryTest {
                 .isInstanceOf(GitRepositoryConcurrentUpdateException.class);
 
         assertThat(repository.refs().get("refs/heads/main")).isEqualTo(versionTwo);
-        assertThat(repository.files().<byte[], Exception>read(repository.ref("main"), opened -> opened.readBytes("orion.xml")))
+        assertThat(
+                        repository
+                                .files()
+                                .<byte[], Exception>read(
+                                        repository.index().resolve(repository.ref("main")),
+                                        opened -> opened.readBytes("orion.xml")))
                 .isEqualTo("version two".getBytes(StandardCharsets.UTF_8));
-        assertThat(repository.files().<byte[], Exception>read(repository.ref("main"), opened -> opened.readBytes("winner.txt")))
+        assertThat(
+                        repository
+                                .files()
+                                .<byte[], Exception>read(
+                                        repository.index().resolve(repository.ref("main")),
+                                        opened -> opened.readBytes("winner.txt")))
                 .isEqualTo("winner".getBytes(StandardCharsets.UTF_8));
     }
 
@@ -380,7 +422,7 @@ class NativeGitRepositoryTest {
                 NativeGitRepositoryProvider.file(rootDirectory, testRuntime.events());
         NativeGitRepository first = firstProvider.create("demo").valueOrFailure("repository");
         FileTestSupport.initialize(first, "main");
-        try (GitFileAccess fileAccess = first.files().open(first.ref("main"))) {
+        try (GitFileAccess fileAccess = first.files().open(first.index().resolve(first.ref("main")))) {
             fileAccess.write("orion.xml", "version one".getBytes(StandardCharsets.UTF_8));
             first.refUpdate(
                     first.ref("main"),
@@ -399,7 +441,7 @@ class NativeGitRepositoryTest {
             return null;
         });
         FileTestSupport.initialize(first, "main");
-        try (GitFileAccess fileAccess = first.files().open(first.ref("main"))) {
+        try (GitFileAccess fileAccess = first.files().open(first.index().resolve(first.ref("main")))) {
             fileAccess.write("orion.xml", "version two".getBytes(StandardCharsets.UTF_8));
             fileAccess.write("winner.txt", "winner".getBytes(StandardCharsets.UTF_8));
             first.refUpdate(
@@ -420,9 +462,17 @@ class NativeGitRepositoryTest {
                 .isInstanceOf(GitRepositoryConcurrentUpdateException.class);
 
         assertThat(second.refs().get("refs/heads/main")).isEqualTo(versionTwo);
-        assertThat(second.files().<byte[], Exception>read(second.ref("main"), opened -> opened.readBytes("orion.xml")))
+        assertThat(
+                        second.files()
+                                .<byte[], Exception>read(
+                                        second.index().resolve(second.ref("main")),
+                                        opened -> opened.readBytes("orion.xml")))
                 .isEqualTo("version two".getBytes(StandardCharsets.UTF_8));
-        assertThat(second.files().<byte[], Exception>read(second.ref("main"), opened -> opened.readBytes("winner.txt")))
+        assertThat(
+                        second.files()
+                                .<byte[], Exception>read(
+                                        second.index().resolve(second.ref("main")),
+                                        opened -> opened.readBytes("winner.txt")))
                 .isEqualTo("winner".getBytes(StandardCharsets.UTF_8));
     }
 
@@ -432,7 +482,7 @@ class NativeGitRepositoryTest {
         NativeGitRepository repository = new NativeGitRepository(
                 "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), testRuntime.events());
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("orion.xml", "version one".getBytes(StandardCharsets.UTF_8));
             fileAccess.write("preserved.txt", "preserved".getBytes(StandardCharsets.UTF_8));
             repository.refUpdate(
@@ -454,21 +504,30 @@ class NativeGitRepositoryTest {
                 .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
 
         assertThat(repository.refs().get("refs/heads/main")).isNotEqualTo(expectedVersion);
-        assertThat(repository.files().<byte[], Exception>read(repository.ref("main"), opened -> opened.readBytes("orion.xml")))
+        assertThat(
+                        repository
+                                .files()
+                                .<byte[], Exception>read(
+                                        repository.index().resolve(repository.ref("main")),
+                                        opened -> opened.readBytes("orion.xml")))
                 .isEqualTo("version two".getBytes(StandardCharsets.UTF_8));
-        assertThat(repository.files().<byte[], Exception>read(repository.ref("main"), opened -> opened.readBytes("preserved.txt")))
+        assertThat(
+                        repository
+                                .files()
+                                .<byte[], Exception>read(
+                                        repository.index().resolve(repository.ref("main")),
+                                        opened -> opened.readBytes("preserved.txt")))
                 .isEqualTo("preserved".getBytes(StandardCharsets.UTF_8));
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("First-version publication: docs/plans/tasks/01_vc-first-revision.md")
-    void repositoryPopulatesDefaultHeadWhenSavingDifferentFirstBranch() throws Exception {
+    void repositoryPublishesOnlyTheExplicitFirstBranch() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
                 "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")), testRuntime.events());
 
-        FileTestSupport.initialize(repository, "master");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("master"))) {
+        try (GitFileAccess fileAccess = repository.files().open(new VcRevision.Absent())) {
+            assertThat(fileAccess.revision()).isEqualTo(new VcRevision.Absent());
             fileAccess.write("orion.xml", "initial acl".getBytes(StandardCharsets.UTF_8));
             repository.refUpdate(
                     repository.ref("master"),
@@ -477,8 +536,7 @@ class NativeGitRepositoryTest {
                             new VcChangeDescription(VcChangeAuthor.EMPTY, "initial acl")));
         }
 
-        assertThat(repository.refs().get("refs/heads/main"))
-                .isEqualTo(repository.refs().get("refs/heads/master"));
+        assertThat(repository.refs()).containsOnlyKeys("refs/heads/master");
     }
 
     private NativeGitRepository repository() {

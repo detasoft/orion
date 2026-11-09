@@ -81,8 +81,7 @@ public final class KeyMaterialBootstrap {
                         throw new GeneralSecurityException(
                                 "A new material store cannot contain retained server identities");
                     }
-                    try (KeyMaterialOperation modification = keys.open(
-                    new VcRevision.Stored(keys.revision()))) {
+                    try (KeyMaterialOperation modification = keys.open(new VcRevision.Latest())) {
                         if (signingMaterial.active().version() != 1) {
                             throw new GeneralSecurityException("New signing material must start at version 1");
                         }

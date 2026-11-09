@@ -158,7 +158,7 @@ class GitBlockingWireSessionShallowHistoryTest {
         NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory(testRuntime.events());
         NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
         FileTestSupport.initialize(repository, "main");
-        try (GitFileAccess fileAccess = repository.files().open(repository.ref("main"))) {
+        try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref("main")))) {
             fileAccess.write("file", new byte[] {1});
             repository.refUpdate(
                     repository.ref("main"),

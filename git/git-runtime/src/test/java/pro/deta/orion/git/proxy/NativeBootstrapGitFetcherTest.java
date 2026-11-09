@@ -65,7 +65,7 @@ class NativeBootstrapGitFetcherTest {
                             repository
                                     .files()
                                     .<byte[], Exception>read(
-                                            repository.ref(location.refName()),
+                                            repository.index().resolve(repository.ref(location.refName())),
                                             file -> file.readBytes("orion.xml")))
                     .isEqualTo("first".getBytes());
 
@@ -79,7 +79,7 @@ class NativeBootstrapGitFetcherTest {
                             repository
                                     .files()
                                     .<byte[], Exception>read(
-                                            repository.ref(location.refName()),
+                                            repository.index().resolve(repository.ref(location.refName())),
                                             file -> file.readBytes("orion.xml")))
                     .isEqualTo("second".getBytes());
         } finally {
@@ -137,7 +137,7 @@ class NativeBootstrapGitFetcherTest {
                             repository
                                     .files()
                                     .<byte[], Exception>read(
-                                            repository.ref(location.refName()),
+                                            repository.index().resolve(repository.ref(location.refName())),
                                             file -> file.readBytes("orion.xml")))
                     .isEqualTo("first".getBytes());
         } finally {
@@ -212,7 +212,7 @@ class NativeBootstrapGitFetcherTest {
                 .create("proxy").valueOrFailure("create proxy");
         FileTestSupport.initialize(repository, "refs/heads/main");
         try (GitFileAccess fileAccess =
-                repository.files().open(repository.ref("refs/heads/main"))) {
+                repository.files().open(repository.index().resolve(repository.ref("refs/heads/main")))) {
             fileAccess.write("orion.xml", new byte[] {1});
             repository.refUpdate(
                     repository.ref("refs/heads/main"),
@@ -222,7 +222,7 @@ class NativeBootstrapGitFetcherTest {
 
         FileTestSupport.initialize(repository, "refs/heads/incoming");
         try (GitFileAccess fileAccess =
-                repository.files().open(repository.ref("refs/heads/incoming"))) {
+                repository.files().open(repository.index().resolve(repository.ref("refs/heads/incoming")))) {
             fileAccess.write("orion.xml", new byte[] {2});
             repository.refUpdate(
                     repository.ref("refs/heads/incoming"),

@@ -59,7 +59,7 @@ public final class GitFileAccess extends VcResource<GitFileAccess>.VcOperation {
     private final Set<String> deleted = new HashSet<>();
     private final Map<String, TreeEntry> entries = new HashMap<>();
 
-    GitFileAccess(GitFileApi resource, GitIndexAccess index, VcRevision.Stored revision)
+    GitFileAccess(GitFileApi resource, GitIndexAccess index, VcRevision revision)
             throws IOException, GitOperationException {
         resource.super(revision);
         this.repository = resource.repository;
@@ -67,8 +67,12 @@ public final class GitFileAccess extends VcResource<GitFileAccess>.VcOperation {
         this.packId = index.packId().orElseThrow(() -> new IllegalArgumentException("Pack access required"));
         storage = repository.storage().createAccess();
         try {
-            ObjectId parent = new ObjectId(revision.value());
-            rootEntries = readTree(rootTreeId(parent, readObject(parent)));
+            if (revision instanceof VcRevision.Stored stored) {
+                ObjectId parent = new ObjectId(stored.value());
+                rootEntries = readTree(rootTreeId(parent, readObject(parent)));
+            } else {
+                rootEntries = Map.of();
+            }
         } catch (IOException | GitOperationException | RuntimeException | Error failure) {
             try {
                 storage.discard();
@@ -171,12 +175,13 @@ public final class GitFileAccess extends VcResource<GitFileAccess>.VcOperation {
     @Override
     protected VcRevision.Stored commitChanges(VcChangeDescription description) {
         Objects.requireNonNull(description, "description");
-        if (entries.isEmpty() && deleted.isEmpty()) return revision();
+        if (entries.isEmpty() && deleted.isEmpty() && revision() instanceof VcRevision.Stored stored) return stored;
         try {
             Set<String> changedPaths = new HashSet<>(entries.keySet());
             changedPaths.addAll(deleted);
             ObjectId tree = writeTree("", null, changedPaths).orElseThrow();
-            ObjectId commit = writeCommit(tree, new ObjectId(revision().value()), description);
+            ObjectId parent = revision() instanceof VcRevision.Stored stored ? new ObjectId(stored.value()) : null;
+            ObjectId commit = writeCommit(tree, parent, description);
             bytes.flush();
             List<IndexedObject> indexed = index.objects(packId);
             PackMetadata pack;

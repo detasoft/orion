@@ -121,7 +121,7 @@ class BootstrapProxyEndpointIT {
             OrionXml.write(document.replaceAccessControl(
                     new AccessControl(users, currentAcl.roles(), currentAcl.grants())), xml);
             FileTestSupport.initialize(repository, REF);
-            try (GitFileAccess fileAccess = repository.files().open(repository.ref(REF))) {
+            try (GitFileAccess fileAccess = repository.files().open(repository.index().resolve(repository.ref(REF)))) {
                 fileAccess.write("orion.xml", xml.toByteArray());
                 fileAccess.write("material.p12", materialBytes(target, environment));
                 repository.refUpdate(
@@ -206,7 +206,7 @@ class BootstrapProxyEndpointIT {
                                 try (GitFileAccess fileAccess =
                                         modifiedRepository
                                                 .files()
-                                                .open(modifiedRepository.ref(REF))) {
+                                                .open(modifiedRepository.index().resolve(modifiedRepository.ref(REF)))) {
                                     fileAccess.write("file", new byte[] {1});
                                     modifiedRepository.refUpdate(
                                             modifiedRepository.ref(REF),
@@ -275,7 +275,7 @@ class BootstrapProxyEndpointIT {
                                                 repository
                                                         .files()
                                                         .<byte[], Exception>read(
-                                                                repository.ref(REF),
+                                                                repository.index().resolve(repository.ref(REF)),
                                                                 file ->
                                                                         file.readBytes(
                                                                                 "client-marker")))

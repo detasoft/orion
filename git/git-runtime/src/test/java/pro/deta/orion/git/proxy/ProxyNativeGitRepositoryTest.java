@@ -52,7 +52,7 @@ class ProxyNativeGitRepositoryTest {
                 .create(location.proxyName()).valueOrFailure("create proxy");
         FileTestSupport.initialize(repository, location.refName());
         try (GitFileAccess fileAccess =
-                repository.files().open(repository.ref(location.refName()))) {
+                repository.files().open(repository.index().resolve(repository.ref(location.refName())))) {
             fileAccess.write("orion.xml", "first".getBytes());
             repository.refUpdate(
                     repository.ref(location.refName()),
@@ -91,7 +91,7 @@ class ProxyNativeGitRepositoryTest {
                 .create(location.proxyName()).valueOrFailure("create proxy");
         FileTestSupport.initialize(repository, location.refName());
         try (GitFileAccess fileAccess =
-                repository.files().open(repository.ref(location.refName()))) {
+                repository.files().open(repository.index().resolve(repository.ref(location.refName())))) {
             fileAccess.write("file", new byte[] {1});
             repository.refUpdate(
                     repository.ref(location.refName()),

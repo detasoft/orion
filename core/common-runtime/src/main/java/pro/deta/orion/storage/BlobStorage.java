@@ -14,7 +14,7 @@ public abstract class BlobStorage extends VcResource<BlobStorage.BlobStorageOper
     }
 
     public abstract class BlobStorageOperations extends VcOperation {
-        protected BlobStorageOperations(VcRevision.Stored revision) {
+        protected BlobStorageOperations(VcRevision revision) {
             super(revision);
         }
 

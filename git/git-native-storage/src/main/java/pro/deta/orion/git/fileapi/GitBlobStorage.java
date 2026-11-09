@@ -23,9 +23,9 @@ public final class GitBlobStorage extends BlobStorage implements AutoCloseable {
         this.events.subscribe(GitFileChanged.class, events.source(), this::accept);
     }
 
-    private static VcRevision.Stored currentRevision(GitFile file) {
-        return file.revision().map(id -> new VcRevision.Stored(id.toHex()))
-                .orElseThrow(() -> new IllegalStateException("Git branch is absent"));
+    private VcRevision currentRevision() {
+        return fileEvents.file().revision().<VcRevision>map(id -> new VcRevision.Stored(id.toHex()))
+                .orElseGet(VcRevision.Absent::new);
     }
 
     private void accept(GitFileChanged event) {
@@ -36,10 +36,15 @@ public final class GitBlobStorage extends BlobStorage implements AutoCloseable {
 
     @Override
     protected BlobStorageOperations createOperation(VcRevision.ReadTarget target) {
-        if (!(target instanceof VcRevision.Stored) && !(target instanceof VcRevision.Latest)) {
-            throw new IllegalArgumentException("Blob reads require a stored or latest revision");
+        VcRevision base = switch (target) {
+            case VcRevision.Latest ignored -> currentRevision();
+            case VcRevision.Stored stored -> stored;
+            case VcRevision.Absent absent -> absent;
+        };
+        if (base instanceof VcRevision.Absent absent) {
+            VcRevision current = currentRevision();
+            if (!absent.equals(current)) throw new VcModificationException(absent, current);
         }
-        VcRevision.Stored base = target instanceof VcRevision.Stored stored ? stored : currentRevision(fileEvents.file());
         byte[] initial = readSnapshot(base);
         return new BlobStorageOperations(base) {
             private byte[] content = initial;
@@ -59,8 +64,9 @@ public final class GitBlobStorage extends BlobStorage implements AutoCloseable {
 
             @Override
             protected VcRevision.Stored commitChanges(VcChangeDescription description) {
-                if (content == initial) return revision();
-                CommitId expected = new CommitId(revision().value());
+                if (content == initial && revision() instanceof VcRevision.Stored stored) return stored;
+                if (content == null) throw new IllegalStateException("No blob content prepared");
+                CommitId expected = revision() instanceof VcRevision.Stored stored ? new CommitId(stored.value()) : null;
                 try {
                     return new VcRevision.Stored(fileEvents.file().write(expected, content, description).toHex());
                 } catch (GitRefConflictException failure) {
@@ -86,9 +92,10 @@ public final class GitBlobStorage extends BlobStorage implements AutoCloseable {
         };
     }
 
-    private byte[] readSnapshot(VcRevision.Stored revision) {
+    private byte[] readSnapshot(VcRevision revision) {
+        if (!(revision instanceof VcRevision.Stored stored)) return null;
         try {
-            return fileEvents.file().read(new CommitId(revision.value()));
+            return fileEvents.file().read(new CommitId(stored.value()));
         } catch (GitRepositoryFileNotFoundException missing) {
             return null;
         } catch (IOException failure) {

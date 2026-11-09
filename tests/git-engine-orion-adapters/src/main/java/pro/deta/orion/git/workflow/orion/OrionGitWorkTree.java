@@ -163,7 +163,10 @@ final class OrionGitWorkTree implements GitWorkTree {
             throw new IllegalStateException("Orion native commit requires staged files");
         }
         VcRevision.Ref branch = repository.ref(currentBranch);
-        try (GitFileAccess access = repository.files().open(branch)) {
+        VcRevision.ReadTarget base = repository.index().withAccess(index -> index.findRef(new RefId(branch.value()))
+                .<VcRevision.ReadTarget>map(id -> new VcRevision.Stored(id.toHex()))
+                .orElseGet(VcRevision.Absent::new));
+        try (GitFileAccess access = repository.files().open(base)) {
             for (String path : stagedPaths) {
                 Path source = directory.resolve(path);
                 if (Files.isSymbolicLink(source)) {
@@ -177,7 +180,11 @@ final class OrionGitWorkTree implements GitWorkTree {
                     deleted = Files.isRegularFile(parent);
                 }
                 if (deleted) {
-                    access.objectId(path);
+                    try {
+                        access.objectId(path);
+                    } catch (pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException missing) {
+                        throw new IOException("Staged Git path is missing: " + path, missing);
+                    }
                     access.delete(path);
                     continue;
                 }

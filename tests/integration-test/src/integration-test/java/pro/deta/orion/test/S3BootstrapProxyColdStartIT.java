@@ -115,7 +115,7 @@ class S3BootstrapProxyColdStartIT {
                 NativeGitRepository repository = upstream.repositoryProvider().create("bootstrap-inputs")
                         .valueOrFailure("seed remote bootstrap repository");
                 FileTestSupport.initialize(repository, REF);
-                try (GitFileAccess access = repository.files().open(repository.ref(REF))) {
+                try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref(REF)))) {
                     access.write(CONFIGURATION_PATH, xml);
                     access.write(MATERIAL_PATH, material);
                     repository.refUpdate(
@@ -161,12 +161,12 @@ class S3BootstrapProxyColdStartIT {
                         assertThat(
                                         cache.files()
                                                 .<byte[], Exception>read(
-                                                        cache.ref(REF),
+                                                        cache.index().resolve(cache.ref(REF)),
                                                         file -> file.readBytes(MATERIAL_PATH)))
                                 .isEqualTo(material);
                         String initialRevision = cache.refs().get(REF);
                         FileTestSupport.initialize(repository, REF);
-                        try (GitFileAccess access = repository.files().open(repository.ref(REF))) {
+                        try (GitFileAccess access = repository.files().open(repository.index().resolve(repository.ref(REF)))) {
                             access.write("marker.txt", marker);
                             repository.refUpdate(
                                     repository.ref(REF),
@@ -183,7 +183,7 @@ class S3BootstrapProxyColdStartIT {
                         assertThat(
                                         cache.files()
                                                 .<byte[], Exception>read(
-                                                        cache.ref(REF),
+                                                        cache.index().resolve(cache.ref(REF)),
                                                         file -> file.readBytes("marker.txt")))
                                 .isEqualTo(marker);
                         assertThat(cache.refs()).containsEntry(REF, refreshedRevision);
@@ -201,21 +201,21 @@ class S3BootstrapProxyColdStartIT {
                                 persisted
                                         .files()
                                         .<byte[], Exception>read(
-                                                persisted.ref(REF),
+                                                persisted.index().resolve(persisted.ref(REF)),
                                                 file -> file.readBytes(CONFIGURATION_PATH)))
                         .isEqualTo(loadedConfiguration);
                 assertThat(
                                 persisted
                                         .files()
                                         .<byte[], Exception>read(
-                                                persisted.ref(REF),
+                                                persisted.index().resolve(persisted.ref(REF)),
                                                 file -> file.readBytes(MATERIAL_PATH)))
                         .isEqualTo(material);
                 assertThat(
                                 persisted
                                         .files()
                                         .<byte[], Exception>read(
-                                                persisted.ref(REF),
+                                                persisted.index().resolve(persisted.ref(REF)),
                                                 file -> file.readBytes("marker.txt")))
                         .isEqualTo(marker);
                 assertThat(persisted.refs()).containsEntry(REF, refreshedRevision);

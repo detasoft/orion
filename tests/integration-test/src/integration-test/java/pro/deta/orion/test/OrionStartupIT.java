@@ -379,7 +379,7 @@ class OrionStartupIT {
         try {
             NativeGitRepository repository = repositoryProvider(orionRoot).openForRead("orion").valueOrFailure("repository");
             try (pro.deta.orion.git.fileapi.GitFileAccess operation =
-                         repository.files().open(repository.ref(Constants.R_HEADS + BRANCH))) {
+                         repository.files().open(repository.index().resolve(repository.ref(Constants.R_HEADS + BRANCH)))) {
                 return operation.readBytes(ACL_FILE);
             }
         } catch (GitOperationException failure) {

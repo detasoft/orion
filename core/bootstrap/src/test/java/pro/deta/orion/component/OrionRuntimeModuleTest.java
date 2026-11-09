@@ -3,7 +3,6 @@ package pro.deta.orion.component;
 import pro.deta.orion.git.fileapi.GitBlobStorage;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
@@ -327,7 +326,6 @@ class OrionRuntimeModuleTest {
     }
 
     @Test
-    @Disabled("docs/plans/tasks/01_vc-first-revision.md: first stored revision creation")
     void localAclSavesToExternalRepository() {
         BootstrapConfiguration configuration = configurationWithAcl(tempDir.resolve("local-acl").toString());
         OrionVersionedConfigurationStorage storage = runtimeOrionVersionedConfigurationStorage(configuration);
@@ -344,7 +342,6 @@ class OrionRuntimeModuleTest {
     }
 
     @Test
-    @Disabled("docs/plans/tasks/01_vc-first-revision.md: first stored revision creation")
     void localLocatorUsesConfiguredNativeRepository() {
         BootstrapConfiguration configuration = configurationWithAcl("local:internal/settings");
         NativeGitRepositoryFactory provider = new NativeGitRepositoryFactory(
