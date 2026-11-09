@@ -628,8 +628,13 @@ class InternalConfigurationRepositoryLifecycleIT {
     void resetsRootPasswordThroughFileAclStorage() throws Exception {
         Path aclDirectory = tempDir.resolve("file-acl");
         Path aclFile = aclDirectory.resolve(ACL_PATH);
-        Files.createDirectories(aclFile.getParent());
-        Files.write(aclFile, defaultAclBytes("old-root-password"));
+        try (org.eclipse.jgit.api.Git git = org.eclipse.jgit.api.Git.init()
+                .setDirectory(aclDirectory.toFile()).setInitialBranch("configuration").call()) {
+            Files.createDirectories(aclFile.getParent());
+            Files.write(aclFile, defaultAclBytes("old-root-password"));
+            git.add().addFilepattern(ACL_PATH).call();
+            git.commit().setMessage("seed file-backed ACL").setAuthor("Test", "test@example.test").call();
+        }
         BootstrapConfiguration configuration = configuration();
         configuration.getBootstrap().getConfiguration().setLocation(aclDirectory.toUri().toString());
         OrionComponent reset = component(configuration, new RootPasswordReset(true));
@@ -711,7 +716,7 @@ class InternalConfigurationRepositoryLifecycleIT {
     }
 
     @Test
-    void rotationRevokesRetainedServerIdentityFromRootSsh() throws Exception {
+    void replacedEnrolledRootKeyRemainsRevokedAfterRestart() throws Exception {
         BootstrapConfiguration configuration = configuration();
         KeyPair oldIdentity = keyPair();
         KeyPair activeIdentity = keyPair();
@@ -720,12 +725,22 @@ class InternalConfigurationRepositoryLifecycleIT {
         OrionApplicationLifecycle firstLifecycle = first.orionApplicationLifecycle();
         try {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
-            OrionDocument replacement = OrionXml.read(new ByteArrayInputStream(defaultAclBytes("legacy-password")));
-            first.configurationEditor().edit(first.configurationEditor().current().revision(),
-                    new ChangeMetadata(UserEmail.EMPTY, "Prepare configuration"))
-                .update(ignored -> replacement).apply();
-            awaitConfiguration(first);
+            char[] recoveryPassword = first.orionAccessControlService()
+                    .plainRootToken(PlainRootTokenAccessForTests.create());
+            SshKeyEnrollmentAuthentication.Success enrollment = (SshKeyEnrollmentAuthentication.Success)
+                    first.orionAccessControlService().authenticateSshKeyEnrollment(
+                            "root", new String(recoveryPassword).getBytes(StandardCharsets.UTF_8));
+            assertThat(enroll(first, enrollment.rootRecoveryGeneration().orElseThrow(),
+                    List.of(PublicKeyEntry.toString(oldIdentity.getPublic()))))
+                    .isInstanceOf(SshKeyEnrollmentResult.Success.class);
             assertSshAuthenticated(first, "root", oldIdentity);
+            assertSshAuthenticationFailed(first, "root", activeIdentity);
+            addKey(first, "root", PublicKeyEntry.toString(activeIdentity.getPublic()));
+            String fingerprint = org.apache.sshd.common.config.keys.KeyUtils.getFingerPrint(oldIdentity.getPublic());
+            assertThat(removeKey(first, "root", fingerprint, false))
+                    .isInstanceOf(SshCredentialUpdateResult.Success.class);
+            assertSshAuthenticated(first, "root", activeIdentity);
+            assertSshAuthenticationFailed(first, "root", oldIdentity);
         } finally {
             assertThat(firstLifecycle.shutdownApplication()).isEqualTo(FIN);
         }
@@ -753,16 +768,19 @@ class InternalConfigurationRepositoryLifecycleIT {
             NativeGitRepository repository = repository(component);
 
             String validCommit = publishCandidate(repository, "push", aclBytes("push-user", "push-password"));
+            awaitConfiguration(component);
             assertAuthenticated(component, "push-user", "push-password");
 
             publishCandidate(repository, "invalid", "<not-valid-xml".getBytes(StandardCharsets.UTF_8));
             assertAuthenticated(component, "push-user", "push-password");
 
             publishCandidate(repository, "recovery", aclBytes("recovery-user", "recovery-password"));
+            awaitConfiguration(component);
             assertAuthenticated(component, "recovery-user", "recovery-password");
 
             assertThat(publish(repository, repository.refs().get(CONFIGURATION_REF), validCommit))
                     .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
+            awaitConfiguration(component);
             assertAuthenticated(component, "push-user", "push-password");
         } finally {
             assertThat(lifecycle.shutdownApplication()).isEqualTo(FIN);
@@ -804,6 +822,7 @@ class InternalConfigurationRepositoryLifecycleIT {
                         .containsExactlyInAnyOrder(RefUpdateResult.Status.APPLIED, RefUpdateResult.Status.EXPECTED_OLD_MISMATCH);
             }
 
+            awaitConfiguration(component);
             String activeId = repository.refs().get(CONFIGURATION_REF);
             if (alphaId.equals(activeId)) {
                 assertAuthenticated(component, "alpha", "alpha-password");

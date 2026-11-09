@@ -29,6 +29,10 @@ import pro.deta.orion.keymaterial.KeyMaterialId;
 import pro.deta.orion.acme.AcmeCertificateService;
 import pro.deta.orion.config.BlobOrionConfigurationStorage;
 import pro.deta.orion.config.OrionConfigurationEditor;
+import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
+import pro.deta.orion.config.OrionConfigurationModification;
+import pro.deta.orion.config.OrionDocumentRevision;
+import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.acme.AcmeCertificateIssuer;
 import pro.deta.orion.acme.AcmeCertificateIssueRequest;
 import pro.deta.orion.acme.IssuedAcmeCertificate;
@@ -37,6 +41,7 @@ import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.OrionXml;
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
@@ -62,7 +67,13 @@ import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import java.util.Set;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import pro.deta.orion.storage.BlobStorageConflictException;
 import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
 import pro.deta.orion.util.Result;
@@ -86,6 +97,56 @@ class GitBlobStorageTest {
 
     @TempDir
     private Path tempDir;
+
+    @Test
+    @org.junit.jupiter.api.Timeout(10)
+    void concurrentConfigurationEditsActivateOnlyTheWinningAcl() throws Exception {
+        ByteArrayOutputStream xml = new ByteArrayOutputStream();
+        OrionXml.write(OrionDocument.withAccessControl(new AccessControl()), xml);
+        Fixture fixture = fixture(Map.of("orion.xml", xml.toByteArray()));
+        try (BlobOrionConfigurationStorage storage = new BlobOrionConfigurationStorage(
+                new GitBlobStorage(new GitFileEvents(new GitFile(fixture.provider(), REPOSITORY, REF, "orion.xml"))),
+                testRuntime.events());
+             ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            OrionConfigurationEditor editor = new OrionConfigurationEditor(
+                    storage, OrionKeyMaterial.unavailable(), testRuntime.events());
+            testRuntime.own(editor::onStop);
+            editor.onStart();
+            OrionDocumentRevision initial = editor.current();
+            CountDownLatch ready = new CountDownLatch(2);
+            CountDownLatch start = new CountDownLatch(1);
+            List<Future<Boolean>> results = new ArrayList<>();
+            for (String user : List.of("alpha", "beta")) {
+                OrionConfigurationModification edit = editor.edit(initial, ChangeMetadata.EMPTY);
+                edit.update(document -> OrionDocument.withAccessControl(new AccessControl(List.of(
+                        new User(user, null, null, null, List.of(), List.of(), List.of())),
+                        List.of(), List.of())));
+                results.add(executor.submit(() -> {
+                    ready.countDown();
+                    start.await();
+                    try {
+                        edit.apply();
+                        return true;
+                    } catch (OrionConfigurationConcurrentUpdateException conflict) {
+                        return false;
+                    }
+                }));
+            }
+            try {
+                assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            } finally {
+                start.countDown();
+            }
+            assertThat(List.of(results.get(0).get(5, TimeUnit.SECONDS), results.get(1).get(5, TimeUnit.SECONDS)))
+                    .containsExactlyInAnyOrder(true, false);
+            testRuntime.awaitEvents();
+            OrionDocument active = editor.current().result().valueOrFailure("active configuration");
+            assertThat(active.system().accessControl().users()).singleElement()
+                    .extracting(User::id).isIn("alpha", "beta");
+            assertThat(active).isEqualTo(storage.load().result().valueOrFailure("stored configuration"));
+            assertThat(editor.current().revision()).isEqualTo(storage.load().revision());
+        }
+    }
 
     @Test
     void subscribesOnlyToItsBlobAndStopsDeliveryAfterUnsubscribe() throws Exception {

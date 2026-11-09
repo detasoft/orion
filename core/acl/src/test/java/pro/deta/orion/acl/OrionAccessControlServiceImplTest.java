@@ -159,6 +159,60 @@ class OrionAccessControlServiceImplTest {
     private static final KeyPair KEY_THREE = keyPair("RSA", 2048);
 
     @Test
+    void publishedAclChangesAuthenticationAndUnreadableCandidatesRetainTheLastValidUser() {
+        Credential first = new Credential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic()));
+        Credential second = new Credential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_THREE.getPublic()));
+        User alice = new User("alice", null, null, null, List.of(first), List.of(), List.of());
+        User bob = new User("bob", null, null, null, List.of(second), List.of(), List.of());
+        try (ServiceFixture fixture = fixture(OrionDocument.withAccessControl(
+                new AccessControl(List.of(alice), List.of(), List.of())))) {
+            assertThat(fixture.service.authenticateSshUser("alice", KEY_ONE.getPublic().getEncoded()))
+                    .isInstanceOf(AuthenticationResult.Success.class);
+            fixture.storage.save(fixture.storage.snapshot.revision(), OrionDocument.withAccessControl(
+                    new AccessControl(List.of(bob), List.of(), List.of())), ChangeMetadata.EMPTY);
+            fixture.storage.awaitEvents();
+            assertThat(fixture.service.authenticateSshUser("alice", KEY_ONE.getPublic().getEncoded()))
+                    .isInstanceOf(AuthenticationResult.Failure.class);
+            assertThat(fixture.service.authenticateSshUser("bob", KEY_THREE.getPublic().getEncoded()))
+                    .isInstanceOf(AuthenticationResult.Success.class);
+            fixture.storage.snapshot = new OrionDocumentRevision(
+                    new Result.Failure<>(Result.FailureCode.GENERAL, "Malformed configuration"),
+                    new VcRevision.Stored("unreadable"));
+            fixture.storage.publish("unreadable candidate");
+            assertThat(fixture.service.authenticateSshUser("bob", KEY_THREE.getPublic().getEncoded()))
+                    .isInstanceOf(AuthenticationResult.Success.class);
+        }
+    }
+
+    @Test
+    void replacingAnEnrolledRootKeyRevokesTheOldKeyAndSurvivesServiceRestart() {
+        User root = new User("root", null, null, null, List.of(new Credential(CredentialType.OPENSSH_PUBLIC_KEY,
+                "root-auth-generation:first", key(KEY_ONE.getPublic()))), List.of(), List.of());
+        OrionDocument persisted;
+        try (ServiceFixture fixture = fixture(OrionDocument.withAccessControl(
+                new AccessControl(List.of(root), List.of(), List.of())))) {
+            assertThat(fixture.service.authenticateSshUser("root", KEY_ONE.getPublic().getEncoded()))
+                    .isInstanceOf(AuthenticationResult.Success.class);
+            User replacement = new User("root", null, null, null, List.of(new Credential(
+                    CredentialType.OPENSSH_PUBLIC_KEY, "root-auth-generation:second", key(KEY_THREE.getPublic()))),
+                    List.of(), List.of());
+            persisted = OrionDocument.withAccessControl(new AccessControl(List.of(replacement), List.of(), List.of()));
+            fixture.storage.save(fixture.storage.snapshot.revision(), persisted, ChangeMetadata.EMPTY);
+            fixture.storage.awaitEvents();
+            assertThat(fixture.service.authenticateSshUser("root", KEY_ONE.getPublic().getEncoded()))
+                    .isInstanceOf(AuthenticationResult.Failure.class);
+            assertThat(fixture.service.authenticateSshUser("root", KEY_THREE.getPublic().getEncoded()))
+                    .isInstanceOf(AuthenticationResult.Success.class);
+        }
+        try (ServiceFixture restarted = fixture(persisted)) {
+            assertThat(restarted.service.authenticateSshUser("root", KEY_ONE.getPublic().getEncoded()))
+                    .isInstanceOf(AuthenticationResult.Failure.class);
+            assertThat(restarted.service.authenticateSshUser("root", KEY_THREE.getPublic().getEncoded()))
+                    .isInstanceOf(AuthenticationResult.Success.class);
+        }
+    }
+
+    @Test
     void systemOidcPreservesRootKeyGenerationAndRejectsLockedOrRecoveryRoot() {
         String issuer = "https://sso.example.test";
         OidcProvider provider = new OidcProvider("sso", URI.create(issuer), "client", "secret", 172800, 0);

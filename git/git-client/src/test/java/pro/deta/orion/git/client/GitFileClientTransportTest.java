@@ -27,6 +27,24 @@ class GitFileClientTransportTest {
     }
 
     @Test
+    void reopensAnExistingConfigurationWorktreeWithoutChangingItsCommitOrContent() throws Exception {
+        Path directory = tempDir.resolve("configuration");
+        Path configuration = directory.resolve("config/orion.xml");
+        try (Git git = Git.init().setDirectory(directory.toFile()).setInitialBranch("configuration").call()) {
+            Files.createDirectories(configuration.getParent());
+            Files.writeString(configuration, "persisted ACL");
+            git.add().addFilepattern("config/orion.xml").call();
+            String commit = git.commit().setMessage("seed configuration")
+                    .setAuthor("Test", "test@example.test").call().name();
+            GitFileClientTransport.openOrInitialize(directory, false);
+            GitFileClientTransport.openOrInitialize(directory, true);
+            assertThat(git.getRepository().resolve("HEAD").name()).isEqualTo(commit);
+            assertThat(git.getRepository().getFullBranch()).isEqualTo("refs/heads/configuration");
+            assertThat(Files.readString(configuration)).isEqualTo("persisted ACL");
+        }
+    }
+
+    @Test
     void rejectsOrdinaryFilesAndDoesNotCreateWhenDisabled() throws Exception {
         Path directory = tempDir.resolve("ordinary");
         Files.createDirectories(directory);
