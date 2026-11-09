@@ -145,7 +145,7 @@ whose start time differs from the stored identity.
 
 Do not delete active PID records or run `clean` against their directory. The
 records cover these development launch commands only; they do not discover
-processes started by direct `mvn` or `java` invocations. `ORION_DEV_RUN_DIR` can
+processes started by direct `./mvnw` or `java` invocations. `ORION_DEV_RUN_DIR` can
 override the record directory; use the same value for start, status, and stop.
 
 The packaged distribution's `start/stop/status` commands have their own existing
@@ -182,7 +182,7 @@ dependencies for focused tests, and uses ordinary system temporary storage.
 Build caching can reuse successful results. To bypass it:
 
 ```sh
-make test MAVEN='mvn -Dmaven.build.cache.enabled=false'
+make test MAVEN='./mvnw -Dmaven.build.cache.enabled=false'
 ```
 
 For integration services and browser tests, follow

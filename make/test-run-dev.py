@@ -51,7 +51,7 @@ def service_double(role, worker=False):
 
 
 class RunDevTest(unittest.TestCase):
-    def exercise(self, fail=None, stubborn=None, browser=""):
+    def exercise(self, fail=None, stubborn=None, browser="", default_maven=False):
         with tempfile.TemporaryDirectory(prefix="orion-run-dev-test-") as directory:
             state = Path(directory)
             checkout = state / "checkout with spaces"
@@ -59,14 +59,18 @@ class RunDevTest(unittest.TestCase):
             (checkout / "make").symlink_to(ROOT / "make", target_is_directory=True)
             (checkout / "Makefile").symlink_to(ROOT / "Makefile")
             executable = " ".join(shlex.quote(part) for part in [sys.executable, __file__, "--service"])
+            wrapper = checkout / "mvnw"
+            wrapper.write_text(f'#!/bin/sh\nexec {executable} server "$@"\n')
+            wrapper.chmod(0o755)
             environment = {**os.environ, "DEV_TEST_STATE": directory,
                            "DEV_TEST_FAIL": fail or "", "DEV_TEST_STUBBORN": stubborn or "",
                            "ORION_KEY_MATERIAL_PASSWORD": "synthetic-test-password", "BROWSER": browser,
                            "MAKEFLAGS": "", "MFLAGS": "", "MAKELEVEL": "0",
                            "ORION_DEV_RUN_DIR": str(state / "processes")}
+            environment.pop("MAVEN", None)
             process = subprocess.Popen(
                 ["make", "--no-print-directory", "-j2", "-f", str(ROOT / "Makefile"), "run", "dev",
-                 f"MAVEN={executable} server", f"NPM={executable} frontend",
+                 *([] if default_maven else [f"MAVEN={executable} server"]), f"NPM={executable} frontend",
                  "ORION_ARGS=--example", f"ORION_ROOT={state / 'server state'}"],
                 cwd=checkout, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, start_new_session=True,
@@ -114,6 +118,9 @@ class RunDevTest(unittest.TestCase):
 
     def test_ctrl_c_stops_both_services_and_their_descendants(self):
         self.exercise()
+
+    def test_default_maven_uses_checkout_wrapper_with_spaces_in_path(self):
+        self.exercise(default_maven=True)
 
     def test_server_failure_stops_frontend_and_orphaned_server_descendant(self):
         self.exercise(fail="server")

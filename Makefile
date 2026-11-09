@@ -1,4 +1,4 @@
-MAVEN ?= mvn
+MAVEN ?= ./mvnw
 TEST_TIMEOUT ?= 20m
 UV ?= uv
 INTEGRATION_TEST_ARGS ?=

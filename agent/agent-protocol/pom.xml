@@ -32,8 +32,10 @@
                 <directory>src/test/resources</directory>
             </testResource>
             <testResource>
-                <directory>protocol/fixtures</directory>
-                <targetPath>protocol</targetPath>
+                <directory>${project.basedir}</directory>
+                <includes>
+                    <include>protocol/fixtures/**</include>
+                </includes>
             </testResource>
         </testResources>
     </build>

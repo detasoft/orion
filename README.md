@@ -19,7 +19,8 @@ change between revisions.
 ## Requirements
 
 - JDK 21.
-- Maven 3.9 or newer.
+- Maven Daemon 2.0.0-rc-3 (preview, bundling Maven 4.0.0-rc-3) is downloaded automatically by `./mvnw`.
+  No separate Maven installation is required; the first invocation needs network access.
 - `make`, `ssh`, and `curl` are optional, but the local admin helpers use them.
 
 ## Quick Start
@@ -35,7 +36,7 @@ The equivalent Maven command is:
 
 ```sh
 export ORION_KEY_MATERIAL_PASSWORD='choose-a-local-development-password'
-mvn -pl core/bootstrap -am -Prun-server -Dorion.run.arguments="--create-if-missing" process-classes
+./mvnw -pl core/bootstrap -am -Prun-server -Dorion.run.arguments="--create-if-missing" process-classes
 ```
 
 For subsequent starts, use `make run server` with the same material password.
@@ -84,7 +85,7 @@ for process status, stopping, and PID records.
 
 By default the server uses `orion_root` as its base directory and
 `orion_root/repos` as repository storage. This directory is outside Maven's
-`target` tree, so `mvn clean` does not remove generated keys or the local ACL.
+`target` tree, so `./mvnw clean` does not remove generated keys or the local ACL.
 The protected `material.p12` key-material store is created in the local
 `orion` repository alongside `orion.xml`; its password is read only from
 `ORION_KEY_MATERIAL_PASSWORD`. SSH commands use the client's normal SSH
@@ -192,7 +193,7 @@ environment variable.
 Build runnable bootstrap artifacts with the `dev` profile:
 
 ```sh
-mvn package -Pdev -pl core/bootstrap -am
+./mvnw package -Pdev -pl core/bootstrap -am
 ```
 
 The build attaches two single-file jars:
@@ -210,7 +211,7 @@ The executable jar also gets a convenience checksum:
 Build the self-contained `jlink` distribution with the optional `dist` profile:
 
 ```sh
-mvn package -Pdev,dist -pl core/bootstrap -am
+./mvnw package -Pdev,dist -pl core/bootstrap -am
 ```
 
 The distribution build writes an unpacked image and an archive:
@@ -1040,19 +1041,19 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for local setup, process lifecycle, PID rec
 Use `make test` for routine verification and
 `make test MODULE=<module> TEST='<test-locator>'` for focused tests.
 Set `LOG=/tmp/orion-tests.log` to save Maven output to a file.
-Make invokes Maven directly, without a checkout lock or RAM disk; temporary files
-use the normal system location.
+Make invokes the pinned Maven Daemon through the official wrapper. Test and compile goals
+share a Git checkout lock; temporary files use the normal system location.
 
 Run routine local tests with the `dev` Maven profile:
 
 ```sh
-mvn package -Pdev
+./mvnw package -Pdev
 ```
 
 Run the standard development verification:
 
 ```sh
-mvn verify -Pdev
+./mvnw verify -Pdev
 ```
 
 Build caching is enabled for Maven package builds. The Make test goals run through
@@ -1065,23 +1066,24 @@ To force fresh verification, including after changing external Git/SSH tools or
 the JDK, bypass the cache:
 
 ```sh
-make test MAVEN='mvn -Dmaven.build.cache.enabled=false'
+make test MAVEN='./mvnw -Dmaven.build.cache.enabled=false'
 ```
 
-The same override works with focused `make test` invocations. To try the installed Maven daemon,
-pass `MAVEN='mvnd --batch-mode'`; Maven remains the default.
+The same override works with focused `make test` invocations. The wrapper pins the daemon
+and its bundled Maven version; `.mvn/mvnd.properties` selects the `smart` builder.
+Use `./mvnw --version` to inspect the toolchain and `./mvnw --stop` to stop its daemons.
 
 Unit tests use normal log levels by default. Enable project DEBUG logging for a
 local test run with:
 
 ```sh
-mvn package -Pdev -Dorion.test.debug=true
+./mvnw package -Pdev -Dorion.test.debug=true
 ```
 
 Tune the test log level and categories when needed:
 
 ```sh
-mvn package -Pdev \
+./mvnw package -Pdev \
   -Dorion.test.debug=true \
   -Dorion.test.log.level=TRACE \
   -Dorion.test.log.categories=pro.deta.orion.git,org.eclipse.jgit=WARN

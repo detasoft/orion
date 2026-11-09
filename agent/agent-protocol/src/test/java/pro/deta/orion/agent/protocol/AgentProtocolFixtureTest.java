@@ -122,7 +122,7 @@ class AgentProtocolFixtureTest {
     private static byte[] fixture(String name) throws IOException {
         ClassLoader classLoader = AgentProtocolFixtureTest.class.getClassLoader();
         try (InputStream input = Objects.requireNonNull(
-                classLoader.getResourceAsStream("protocol/" + name),
+                classLoader.getResourceAsStream("protocol/fixtures/" + name),
                 "missing fixture " + name)) {
             String hex = new String(input.readAllBytes(), StandardCharsets.US_ASCII).replaceAll("\\s", "");
             return HexFormat.of().parseHex(hex);
