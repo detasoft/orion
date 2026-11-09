@@ -66,7 +66,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AgentSessionAcceptanceIT {
     private static final AgentLabel LABEL = new AgentLabel("acceptance");
     private static final SessionId SESSION = new SessionId("one");
-    private static final Path HOST = Path.of("../../session-host/target/cargo/debug/session-host")
+    private static final Path HOST = Path.of("../../agent/session-host/target/cargo/debug/session-host")
             .toAbsolutePath().normalize();
     private static final Path UI = Path.of("../../net/frontend/ui").toAbsolutePath().normalize();
     @TempDir Path directory;
