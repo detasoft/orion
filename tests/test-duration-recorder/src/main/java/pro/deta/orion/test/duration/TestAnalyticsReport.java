@@ -1,5 +1,7 @@
 package pro.deta.orion.test.duration;
 
+import pro.deta.orion.test.duration.TestDurationData.TestRecord;
+
 import jdk.jfr.consumer.RecordedEvent;
 import jdk.jfr.consumer.RecordedFrame;
 import jdk.jfr.consumer.RecordedMethod;
@@ -141,101 +143,7 @@ public final class TestAnalyticsReport {
     }
 
     private static List<TestRecord> readTestRecords(Path durationsFile) throws IOException {
-        if (!Files.isRegularFile(durationsFile)) {
-            return List.of();
-        }
-
-        List<TestRecord> records = new ArrayList<>();
-        for (String line : Files.readAllLines(durationsFile, StandardCharsets.UTF_8)) {
-            if (!line.isBlank()) {
-                records.add(parseTestRecord(line));
-            }
-        }
-        return records;
-    }
-
-    private static TestRecord parseTestRecord(String json) {
-        return new TestRecord(
-                jsonString(json, "runId"),
-                jsonString(json, "module"),
-                jsonString(json, "testId"),
-                jsonString(json, "className"),
-                jsonString(json, "methodName"),
-                jsonString(json, "displayName"),
-                jsonString(json, "status"),
-                jsonLong(json, "durationMillis"),
-                jsonString(json, "startedAt"),
-                jsonString(json, "finishedAt"),
-                jsonString(json, "reason")
-        );
-    }
-
-    private static String jsonString(String json, String key) {
-        int offset = jsonValueOffset(json, key);
-        if (offset < 0 || offset >= json.length() || json.charAt(offset) != '"') {
-            return "";
-        }
-
-        StringBuilder value = new StringBuilder();
-        for (int i = offset + 1; i < json.length(); i++) {
-            char c = json.charAt(i);
-            if (c == '"') {
-                return value.toString();
-            }
-            if (c != '\\' || i + 1 >= json.length()) {
-                value.append(c);
-                continue;
-            }
-
-            char escaped = json.charAt(++i);
-            switch (escaped) {
-                case '"' -> value.append('"');
-                case '\\' -> value.append('\\');
-                case '/' -> value.append('/');
-                case 'b' -> value.append('\b');
-                case 'f' -> value.append('\f');
-                case 'n' -> value.append('\n');
-                case 'r' -> value.append('\r');
-                case 't' -> value.append('\t');
-                case 'u' -> {
-                    if (i + 4 < json.length()) {
-                        value.append((char) Integer.parseInt(json.substring(i + 1, i + 5), 16));
-                        i += 4;
-                    }
-                }
-                default -> value.append(escaped);
-            }
-        }
-        return value.toString();
-    }
-
-    private static long jsonLong(String json, String key) {
-        int offset = jsonValueOffset(json, key);
-        if (offset < 0) {
-            return 0;
-        }
-
-        int end = offset;
-        while (end < json.length() && "-0123456789".indexOf(json.charAt(end)) >= 0) {
-            end++;
-        }
-        if (end == offset) {
-            return 0;
-        }
-        return Long.parseLong(json.substring(offset, end));
-    }
-
-    private static int jsonValueOffset(String json, String key) {
-        String marker = "\"" + key + "\":";
-        int offset = json.indexOf(marker);
-        if (offset < 0) {
-            return -1;
-        }
-        offset += marker.length();
-        while (offset < json.length() && Character.isWhitespace(json.charAt(offset))) {
-            offset++;
-        }
-        return offset;
+        return TestDurationData.readAll(durationsFile);
     }
 
     private static JfrReport readJfrRecordings(Path runDirectory) throws IOException {
@@ -1226,11 +1134,6 @@ public final class TestAnalyticsReport {
                        Path byteArrayTestAllocationsCsv, Path allocationsCsv, Path byteArrayAllocationsCsv,
                        Path jfrEventsCsv, Path cpuFlameGraph, Path testAllocationFlameGraph,
                        Path allocationFlameGraph) {
-    }
-
-    private record TestRecord(String runId, String module, String testId, String className, String methodName,
-                              String displayName, String status, long durationMillis, String startedAt,
-                              String finishedAt, String reason) {
     }
 
     private record ModuleSummary(String module, int total, int successful, int failed, int aborted, int skipped,

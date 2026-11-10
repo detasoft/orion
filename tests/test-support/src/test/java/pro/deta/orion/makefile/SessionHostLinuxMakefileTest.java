@@ -210,7 +210,7 @@ class SessionHostLinuxMakefileTest {
     private Path repositoryRoot() {
         Path current = Path.of("").toAbsolutePath();
         while (current != null) {
-            if (Files.isRegularFile(current.resolve("Makefile"))
+            if (Files.isRegularFile(current.resolve("make/session-host-linux-test.sh"))
                     && Files.isRegularFile(current.resolve("pom.xml"))) {
                 return current;
             }

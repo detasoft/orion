@@ -34,6 +34,42 @@ import static org.junit.platform.engine.discovery.DiscoverySelectors.selectMetho
 
 class TestDurationRecorderTest {
     @Test
+    void separatesDefaultRunFilesAndRecordsTheStartingThread(@TempDir Path temp) throws Exception {
+        String oldDirectory = System.getProperty("user.dir");
+        String oldOutput = System.getProperty(TestDurationRecorder.OUTPUT_PROPERTY);
+        String oldRun = System.getProperty(TestDurationRecorder.RUN_ID_PROPERTY);
+        String oldEnabled = System.getProperty(TestDurationRecorder.ENABLED_PROPERTY);
+        Files.createDirectory(temp.resolve(".git"));
+        try {
+            System.setProperty("user.dir", temp.toString());
+            System.clearProperty(TestDurationRecorder.OUTPUT_PROPERTY);
+            System.setProperty(TestDurationRecorder.ENABLED_PROPERTY, "true");
+            for (String run : List.of("first/run", "second/run")) {
+                System.setProperty(TestDurationRecorder.RUN_ID_PROPERTY, run);
+                executeSampleTests();
+                Path output = temp.resolve(".test-durations/runs")
+                        .resolve(java.net.URLEncoder.encode(run, java.nio.charset.StandardCharsets.UTF_8) + ".jsonl");
+                List<TestDurationData.TestRecord> records = TestDurationData.readAll(output);
+                assertEquals(4, records.size());
+                for (TestDurationData.TestRecord record : records) {
+                    assertEquals(run, record.runId());
+                    assertTrue(record.processId() > 0);
+                    if (!record.status().equals("SKIPPED")) {
+                        assertEquals(Thread.currentThread().threadId(), record.threadId());
+                        assertEquals(Thread.currentThread().getName(), record.threadName());
+                    }
+                }
+            }
+            assertTrue(Files.notExists(temp.resolve(".test-durations/test-durations.jsonl")));
+        } finally {
+            restoreProperty("user.dir", oldDirectory);
+            restoreProperty(TestDurationRecorder.OUTPUT_PROPERTY, oldOutput);
+            restoreProperty(TestDurationRecorder.RUN_ID_PROPERTY, oldRun);
+            restoreProperty(TestDurationRecorder.ENABLED_PROPERTY, oldEnabled);
+        }
+    }
+
+    @Test
     void savesThreadDumpsWhileATestIsBlockedAndWhenATestFails(@TempDir Path temp) throws Exception {
         String originalEnabled = System.getProperty(TestDurationRecorder.ENABLED_PROPERTY);
         String originalOutput = System.getProperty(TestDurationRecorder.OUTPUT_PROPERTY);

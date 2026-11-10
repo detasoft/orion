@@ -111,7 +111,7 @@ them over direct `mvn test` invocations.
 The test-duration listener saves JVM thread dumps for failed tests and, every
 30 seconds, for tests still running past that threshold. Dumps include active test
 IDs, elapsed times, and child processes. They are written to `test-diagnostics/`
-beside the duration JSONL output (by default `.test-durations/test-diagnostics/`);
+beside the duration JSONL output (by default `.test-durations/runs/test-diagnostics/`);
 the test output prints their paths. For a faster diagnostic run, pass
 `MAVEN='mvn -Dorion.testDiagnostics.thresholdMillis=2000'` to the focused Make
 command. Use `make test-jfr` when a recording of preceding activity is needed.

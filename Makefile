@@ -182,3 +182,4 @@ test-jfr-report: ## Generate a report from existing JFR analytics
 		-Dexec.args="$(TEST_ANALYTICS_REPORT_ARGS)"
 
 include make/server.mk
+include tests/test-support/Makefile

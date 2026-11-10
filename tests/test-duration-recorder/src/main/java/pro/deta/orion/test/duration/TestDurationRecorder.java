@@ -62,7 +62,8 @@ public final class TestDurationRecorder implements TestExecutionListener {
 
         TestDurationJfrEvent event = new TestDurationJfrEvent();
         event.begin();
-        StartedTest started = new StartedTest(System.nanoTime(), Instant.now(), event);
+        Thread thread = Thread.currentThread();
+        StartedTest started = new StartedTest(System.nanoTime(), Instant.now(), thread.threadId(), thread.getName(), event);
         startedTests.put(testIdentifier.getUniqueId(), started);
     }
 
@@ -73,7 +74,7 @@ public final class TestDurationRecorder implements TestExecutionListener {
         }
 
         synchronized (records) {
-            records.add(toJson(testIdentifier, "SKIPPED", 0, Instant.now(), Instant.now(), reason));
+            records.add(toJson(testIdentifier, "SKIPPED", 0, Instant.now(), Instant.now(), reason, 0, ""));
         }
         recordJfrEvent(new TestDurationJfrEvent(), testIdentifier, "SKIPPED", 0, reason, false);
     }
@@ -99,7 +100,8 @@ public final class TestDurationRecorder implements TestExecutionListener {
         String status = testExecutionResult.getStatus().name();
         String reason = testExecutionResult.getThrowable().map(Throwable::toString).orElse("");
         synchronized (records) {
-            records.add(toJson(testIdentifier, status, durationMillis, startedAt, finishedAt, reason));
+            records.add(toJson(testIdentifier, status, durationMillis, startedAt, finishedAt, reason,
+                    started == null ? 0 : started.threadId(), started == null ? "" : started.threadName()));
         }
         TestDurationJfrEvent event = started == null ? new TestDurationJfrEvent() : started.event();
         recordJfrEvent(event, testIdentifier, status, durationMillis, reason, started != null);
@@ -183,7 +185,8 @@ public final class TestDurationRecorder implements TestExecutionListener {
         try (FileChannel channel = FileChannel.open(output, StandardOpenOption.CREATE,
                 StandardOpenOption.WRITE, StandardOpenOption.APPEND);
              FileLock ignored = channel.lock()) {
-            channel.write(StandardCharsets.UTF_8.encode(payload));
+            java.nio.ByteBuffer bytes = StandardCharsets.UTF_8.encode(payload);
+            while (bytes.hasRemaining()) channel.write(bytes);
         }
     }
 
@@ -224,7 +227,8 @@ public final class TestDurationRecorder implements TestExecutionListener {
         Path workingDirectory = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
         Optional<Path> repositoryRoot = findRepositoryRoot(workingDirectory);
         if (repositoryRoot.isPresent()) {
-            return repositoryRoot.get().resolve(".test-durations").resolve("test-durations.jsonl");
+            return repositoryRoot.get().resolve(".test-durations/runs")
+                    .resolve(java.net.URLEncoder.encode(runId(), StandardCharsets.UTF_8) + ".jsonl");
         }
 
         return workingDirectory.resolve("target")
@@ -245,9 +249,12 @@ public final class TestDurationRecorder implements TestExecutionListener {
     }
 
     private static String toJson(TestIdentifier testIdentifier, String status, long durationMillis,
-                                 Instant startedAt, Instant finishedAt, String reason) {
+                                 Instant startedAt, Instant finishedAt, String reason, long threadId, String threadName) {
         return "{"
-                + "\"schemaVersion\":1,"
+                + "\"schemaVersion\":2,"
+                + "\"processId\":" + ProcessHandle.current().pid() + ","
+                + "\"threadId\":" + threadId + ","
+                + "\"threadName\":\"" + json(threadName) + "\","
                 + "\"runId\":\"" + json(runId()) + "\","
                 + "\"module\":\"" + json(moduleName()) + "\","
                 + "\"testId\":\"" + json(testId(testIdentifier)) + "\","
@@ -360,6 +367,7 @@ public final class TestDurationRecorder implements TestExecutionListener {
         return escaped.toString();
     }
 
-    private record StartedTest(long nanoTime, Instant instant, TestDurationJfrEvent event) {
+    private record StartedTest(long nanoTime, Instant instant, long threadId, String threadName,
+                               TestDurationJfrEvent event) {
     }
 }
