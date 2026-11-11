@@ -80,7 +80,7 @@ run: ## Start a component: make run <server|agent|dev|session>
 ifeq ($(RUN_COMPONENT),server)
 run: require-key-material-password
 	node "$(CURDIR)/make/dev-process.cjs" run server -- \
-		$(MAVEN) -Dmaven.build.cache.enabled=false -pl core/bootstrap -am -Prun-server \
+		$(MAVEN) -B -Dmaven.build.cache.enabled=false -pl core/bootstrap -am -Prun-server \
 		-Dorion.run.arguments="$(ORION_ARGS)" process-classes
 else ifeq ($(RUN_COMPONENT),agent)
 	node "$(CURDIR)/make/dev-process.cjs" run agent -- \

@@ -63,6 +63,11 @@ new installation, not to replace missing keys in an existing installation. Keep
 the password for subsequent starts and follow the
 [key-material backup guide](docs/key-material-backup-and-restore.md).
 
+Server launches append stdout and stderr to `core/bootstrap/target/logs/server.log`.
+The terminal shows the log path and the generated `---ROOT PASSWORD: ...` line immediately.
+The log includes that password and is created with owner-only permissions.
+Use `tail -f core/bootstrap/target/logs/server.log` to follow startup and runtime diagnostics.
+
 While the server is running, enroll the admin SSH key from another terminal:
 
 ```sh
@@ -159,6 +164,7 @@ Neither is replaced by the checkout's development-process records.
 | `orion_root/` | Default local server state, including protected key material |
 | `orion_root/agentd-local/` | Default connected AgentD state and its process lock |
 | `orion_root/logs/` | Default scoped server logs |
+| `core/bootstrap/target/logs/server.log` | Development server stdout and stderr across launches |
 | `target/dev-processes/` | Development launcher PID records |
 | Module `target/` directories | Maven and native build outputs |
 | `net/frontend/ui/node_modules/` | UI development dependencies |

@@ -4,6 +4,7 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { setTimeout: delay } = require('node:timers/promises');
 const { constants } = require('node:os');
+const { createInterface } = require('node:readline');
 
 const services = ['server', 'agent', 'vite'];
 const directory = path.resolve(__dirname, '..', process.env.ORION_DEV_RUN_DIR || 'target/dev-processes');
@@ -95,12 +96,39 @@ async function run(service, command, args) {
         process.on(signal, () => stop(128 + constants.signals[signal], signal));
     }
     try {
-        child = spawn(command, args, { detached: true, stdio: 'inherit' });
+        const logFile = service === 'server' ? path.resolve('core/bootstrap/target/logs/server.log') : null;
+        let logDescriptor;
+        if (logFile) {
+            fs.mkdirSync(path.dirname(logFile), { recursive: true });
+            logDescriptor = fs.openSync(logFile, 'a', 0o600);
+            console.log(`Server log: ${logFile}`);
+        }
+        try {
+            child = spawn(command, args, {
+                detached: true, stdio: logFile ? ['inherit', 'pipe', 'pipe'] : 'inherit',
+            });
+        } catch (error) {
+            if (logDescriptor !== undefined) fs.closeSync(logDescriptor);
+            throw error;
+        }
+        if (logFile) {
+            for (const stream of [child.stdout, child.stderr]) {
+                createInterface({ input: stream }).on('line', line => {
+                    fs.writeSync(logDescriptor, `${line}\n`);
+                    const passwordLine = line.indexOf('---ROOT PASSWORD: ');
+                    if (passwordLine >= 0) console.log(line.slice(passwordLine));
+                });
+            }
+            child.on('close', () => fs.closeSync(logDescriptor));
+        }
         child.on('error', error => {
             console.error(error.message);
             stop(1);
         });
-        child.on('exit', (code, signal) => stop(code ?? 128 + constants.signals[signal]));
+        child.on('exit', (code, signal) => {
+            if (logFile && (code !== 0 || signal)) console.error(`Server stopped; see ${logFile}`);
+            stop(code ?? 128 + constants.signals[signal]);
+        });
         record.process = child.pid ? identity(child.pid) : null;
         fs.writeFileSync(temporary, JSON.stringify(record), { flag: 'wx', mode: 0o600 });
         fs.renameSync(temporary, file);
