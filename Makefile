@@ -13,7 +13,7 @@ SKILL_DIRS := $(sort $(dir $(wildcard .agents/skills/*/SKILL.md)))
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dist clean compile-only compile-all test test-all integration-test test-jfr test-jfr-report xml-schema dependency-audit \
+.PHONY: help dist dist-image clean compile-only compile-all test test-all integration-test test-jfr test-jfr-report xml-schema dependency-audit \
 	dependency-minimize \
 	skill-check skills-check docker-exec build-processes \
 	cargo-init rust-install rust-maven-plugin-install session-host session-host-test session-host-linux-test
@@ -50,6 +50,9 @@ build-processes: ## Show running Maven builds and Make test processes
 
 dist: ## Package the bootstrap distribution
 	$(MAVEN) package -Pdist -pl core/bootstrap -am
+
+dist-image: ## Prepare the bootstrap distribution directory without creating an archive
+	$(MAVEN) package -Pdist -pl core/bootstrap -am -Dorion.distribution.archive.skip=true
 
 clean: ## Clean Maven outputs and this repository's build cache
 	$(MAVEN) clean -Pdev,clean-build-cache -T 4 -q

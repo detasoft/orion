@@ -26,7 +26,7 @@ async function main() {
       await response.body?.cancel()
       if (response.status === 401 || response.ok) break
     } catch { /* The backend may still be compiling or starting. */ }
-    if (Date.now() >= deadline) throw new Error('Orion is not ready. Check make run server and retry make open-ui.')
+    if (Date.now() >= deadline) throw new Error('Orion is not ready. Check make run-server and retry make open-ui.')
     await delay(500)
   }
   let token = process.env.ORION_TOKEN?.trim()

@@ -13,6 +13,10 @@
 
     <artifactId>bootstrap</artifactId>
 
+    <properties>
+        <orion.distribution.archive.skip>false</orion.distribution.archive.skip>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>pro.deta.orion.core.ref</groupId>
@@ -252,6 +256,18 @@
                                             <arg value="--output"/>
                                             <arg value="${project.build.directory}/orion-dist/runtime"/>
                                         </exec>
+                                    </target>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>archive-jlink-distribution</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>run</goal>
+                                </goals>
+                                <configuration>
+                                    <skip>${orion.distribution.archive.skip}</skip>
+                                    <target>
                                         <tar destfile="${project.build.directory}/orion-dist.tar.gz"
                                              compression="gzip"
                                              longfile="gnu">
@@ -280,6 +296,7 @@
                                     <goal>attach-artifact</goal>
                                 </goals>
                                 <configuration>
+                                    <skipAttach>${orion.distribution.archive.skip}</skipAttach>
                                     <artifacts>
                                         <artifact>
                                             <file>${project.build.directory}/orion-dist.tar.gz</file>

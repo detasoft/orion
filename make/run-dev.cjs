@@ -52,7 +52,7 @@ function start(command, args, options = {}) {
 }
 
 console.log('Starting Orion and Vite; press Ctrl-C to stop both.');
-start(process.argv[2] || 'make', ['--no-print-directory', 'run', 'server'], {
+start(process.argv[2] || 'make', ['--no-print-directory', 'run-server'], {
     env: {
         ...process.env,
         MAKEFLAGS: (process.env.MAKEFLAGS || '').replace(/--jobserver-(?:auth|fds)=\S+/g, ''),

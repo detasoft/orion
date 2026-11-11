@@ -30,7 +30,8 @@ ISSUE_TOKEN_COMMAND = ssh $(ORION_SSH_OPTIONS) -o BatchMode=yes \
 	-o PreferredAuthentications=publickey -o PasswordAuthentication=no \
 	-p $(ORION_SSH_PORT) -l root $(ORION_SSH_HOST) issue-token $(ORION_TOKEN_TTL_SECONDS)
 
-.PHONY: init-server run run-packaged-server open-ui enroll-admin-key require-key-material-password
+.PHONY: init-server run-server run-agent run-dev run-session start-server
+.PHONY: open-ui enroll-admin-key require-key-material-password
 .PHONY: status stop issue-token issue-token-raw
 .PHONY: browser-test browser-acme-test prepare-browser-test
 .PHONY: ssh-state ssh-status list-repos clone-repository clone-repo clone-http-repo
@@ -60,48 +61,29 @@ enroll-admin-key: ## Enroll an admin SSH key
 		-l root $(ORION_SSH_HOST) enroll-key
 	@printf 'Admin SSH key enrolled using the SSH client configuration.\n'
 
-ifneq ($(filter run,$(MAKECMDGOALS)),)
-ifneq ($(firstword $(MAKECMDGOALS)),run)
-$(error Usage: make run <server|agent|dev|session>)
-endif
-ifneq ($(words $(MAKECMDGOALS)),2)
-$(error Usage: make run <server|agent|dev|session>)
-endif
-RUN_COMPONENT := $(word 2,$(MAKECMDGOALS))
-ifeq ($(filter server agent dev session,$(RUN_COMPONENT)),)
-$(error Unknown component '$(RUN_COMPONENT)'; expected server, agent, dev or session)
-endif
-.PHONY: $(RUN_COMPONENT)
-$(RUN_COMPONENT):
-	@:
-endif
-
-run: ## Start a component: make run <server|agent|dev|session>
-ifeq ($(RUN_COMPONENT),server)
-run: require-key-material-password
+run-server: require-key-material-password ## Build and start the Orion server
 	node "$(CURDIR)/make/dev-process.cjs" run server -- \
-		$(MAKE) --no-print-directory run-packaged-server
-else ifeq ($(RUN_COMPONENT),agent)
+		$(MAKE) --no-print-directory start-server
+
+run-agent: ## Start the local agent
 	node "$(CURDIR)/make/dev-process.cjs" run agent -- \
-		$(MAVEN) -pl agentd -am -Pdev,run-agent \
+		$(MAVEN) -pl agent/agentd -am -Pdev,run-agent \
 		-Dagentd.run.arguments="$(AGENT_ARGS)" process-classes
-else ifeq ($(RUN_COMPONENT),dev)
-run: require-key-material-password
+
+run-dev: require-key-material-password ## Start Orion and Vite with API forwarding
 	+node "$(CURDIR)/make/run-dev.cjs" "$(MAKE)" "$(NPM)"
-else ifeq ($(RUN_COMPONENT),session)
-run: session-host
-	$(MAVEN) package -Pdev,agentd-local-session -T 4 -q -pl agentd -am -DskipTests \
+
+run-session: session-host ## Start a local terminal session; optionally set COMMAND
+	$(MAVEN) package -Pdev,agentd-local-session -T 4 -q -pl agent/agentd -am -DskipTests \
 		-Dagentd.local.command='$(COMMAND)'
-endif
 
 # Keep assembly inside the supervised process so duplicate starts and Ctrl-C cover the build too.
-run-packaged-server:
-	$(MAKE) dist MAVEN="$(MAVEN) -B -DskipTests"
-	tar -xzf "$(CURDIR)/core/bootstrap/target/orion-dist.tar.gz" -C "$(CURDIR)/core/bootstrap/target"
-	exec "$(CURDIR)/core/bootstrap/target/orion/bin/orion" run $(ORION_ARGS)
+start-server:
+	$(MAKE) dist-image MAVEN="$(MAVEN) -B -DskipTests"
+	exec "$(CURDIR)/core/bootstrap/target/orion-dist/bin/orion" run $(ORION_ARGS)
 
 init-server: ## Initialize key material and run the Orion server for the first time
-	$(MAKE) run server ORION_ARGS="--create-if-missing $(ORION_ARGS)"
+	$(MAKE) run-server ORION_ARGS="--create-if-missing $(ORION_ARGS)"
 
 open-ui: ## Open the running development UI already signed in; optionally set URL (default localhost:4173)
 	node "$(CURDIR)/make/open-dev-ui.js" '$(if $(URL),$(URL),http://localhost:4173)'
@@ -135,8 +117,8 @@ browser-acme-test: prepare-browser-test
 
 # Scenario:
 # 1. Export ORION_KEY_MATERIAL_PASSWORD, then initialize the server: make init-server
-#    For subsequent starts: make run server
-#    To recover the root user and password: make run server ORION_ARGS=--reset-root-pass
+#    For subsequent starts: make run-server
+#    To recover the root user and password: make run-server ORION_ARGS=--reset-root-pass
 # 2. Enroll a key selected by the SSH client with the generated Orion root password.
 # 3. Issue a temporary admin token and export it into the current shell:
 #      eval "$$(make -s issue-token)"
@@ -194,7 +176,7 @@ admin-acl-with-token: ## Issue a token and query the admin ACL
 ## Run all Git transport checks
 check-git-all: check-ssh-git-push-create check-jetty-git check-ssh-git check-ssh-git-clone
 
-# Check the Jetty HTTP Git smart discovery endpoint exposed by make run server.
+# Check the Jetty HTTP Git smart discovery endpoint exposed by make run-server.
 #   make check-jetty-git
 check-jetty-git: ## Check HTTP Git discovery
 	@token="$$($(ISSUE_TOKEN_COMMAND))" || exit $$?; \
@@ -217,7 +199,7 @@ check-jetty-git: ## Check HTTP Git discovery
 		{ echo "Missing fetch capability advertisement" >&2; exit 1; }; \
 	printf 'Jetty HTTP Git discovery OK: %s/info/refs?service=git-upload-pack\n' "$(ORION_CHECK_HTTP_GIT_URL)"
 
-# Check Git upload-pack over Orion SSH exposed by make run server.
+# Check Git upload-pack over Orion SSH exposed by make run-server.
 #   make check-ssh-git
 check-ssh-git: ## Check Git upload-pack over SSH
 	@token="$$($(ISSUE_TOKEN_COMMAND))" || exit $$?; \
@@ -256,7 +238,7 @@ check-ssh-git-push-create: ## Check SSH push repository creation
 		push $(ORION_CHECK_GIT_URL) HEAD:refs/heads/main
 	printf 'SSH Git push auto-create OK: %s\n' "$(ORION_CHECK_GIT_URL)"
 
-# Check full Git clone over Orion SSH exposed by make run server.
+# Check full Git clone over Orion SSH exposed by make run-server.
 #   make check-ssh-git-clone
 check-ssh-git-clone: ## Check a full Git clone over SSH
 	rm -rf $(ORION_CHECK_SSH_CLONE_DIR)

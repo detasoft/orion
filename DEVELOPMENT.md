@@ -6,24 +6,27 @@ Run the commands below from the repository root on macOS or Linux.
 
 | Process | Start | Purpose |
 | --- | --- | --- |
-| Orion server | `make run server` | Backend, packaged UI, HTTP on `8000`, SSH on `8022` by default |
-| AgentD | `make run agent` | Local agent connected to Orion; requires a running server and enrolled admin key |
+| Orion server | `make run-server` | Backend, packaged UI, HTTP on `8000`, SSH on `8022` by default |
+| AgentD | `make run-agent` | Local agent connected to Orion; requires a running server and enrolled admin key |
 | Vite | `npm --prefix net/frontend/ui run dev` | UI development on `4173`, with hot updates and `/api` proxied to `8000` |
-| Server + Vite | `make run dev` | Start both in one terminal; exiting either stops the other |
+| Server + Vite | `make run-dev` | Start both in one terminal; exiting either stops the other |
 
-These commands run in the foreground. `make run dev` does not start AgentD: start the
+These commands run in the foreground. `make run-dev` does not start AgentD: start the
 agent in another terminal after Orion is ready. Ctrl-C stops the processes owned
 by the command, including their descendants. A process that does not stop within
 ten seconds is killed.
 
-Maven builds the server distribution with its build cache enabled. The launcher extracts
-the archive and starts `core/bootstrap/target/orion/bin/orion run` with its bundled JVM,
+Maven prepares the server distribution directory with its build cache enabled. The launcher
+starts `core/bootstrap/target/orion-dist/bin/orion run` directly with its bundled JVM,
 using the same entry point as a deployed server. Java serves the packaged frontend;
-`make run dev` also starts Vite with hot updates and `/api` proxied to Java on port `8000`.
+`make run-dev` also starts Vite with hot updates and `/api` proxied to Java on port `8000`.
 Node.js coordinates development processes and runs Vite; no Python, RAM disk, or global
 Maven lock is used in this startup path. The process launcher prevents duplicate services within one
 checkout, but does not serialize Maven builds. Avoid concurrent builds that
 rewrite the same module's `target` directory.
+
+`make dist-image` prepares that directory without creating an archive. `make dist` also
+creates `core/bootstrap/target/orion-dist.tar.gz` for delivery.
 
 ## Prerequisites
 
@@ -33,7 +36,7 @@ rewrite the same module's `target` directory.
 - Rust toolchain `1.97.0` for the native session host. `make rust-install`
   installs the pinned toolchain, installing rustup first if necessary.
 - A desktop browser. Automatic opening uses `open` on macOS and `xdg-open` on
-  Linux; `BROWSER=none` disables opening during `make run dev`.
+  Linux; `BROWSER=none` disables opening during `make run-dev`.
 
 Python remains a tool for optional maintenance scripts; it is
 not required to start the server, agent, Vite, or Maven tests. Docker is needed
@@ -80,19 +83,19 @@ make enroll-admin-key
 The command uses the SSH client's key configuration and prompts for the initial
 Orion root password. Enrollment is needed for the local agent launcher and for
 automatic development UI login. Stop the initial server with Ctrl-C before
-switching to `make run dev`.
+switching to `make run-dev`.
 
 ## Daily development
 
 ```sh
 export ORION_KEY_MATERIAL_PASSWORD='your-existing-store-password'
-make run dev
+make run-dev
 ```
 
 Once Orion is ready, start AgentD in a separate terminal:
 
 ```sh
-make run agent
+make run-agent
 ```
 
 The agent requests a launch permit over SSH and connects to
@@ -101,7 +104,7 @@ HTTP; HTTPS still validates certificates. Use `AGENT_ARGS='--help'` to inspect
 the available server, state-directory, label, and SSH options. Include
 `--allow-unsecure` explicitly when overriding arguments for an HTTP server.
 
-Vite opens a browser with an authenticated development session under `make run dev`.
+Vite opens a browser with an authenticated development session under `make run-dev`.
 The opener waits up to two minutes for Orion and obtains a token through the
 enrolled SSH key. For an already running Vite instance:
 
@@ -118,12 +121,12 @@ use the URL printed at startup.
 `ORION_ARGS` supplies server arguments, for example:
 
 ```sh
-make run server ORION_ARGS=--reset-root-pass
+make run-server ORION_ARGS=--reset-root-pass
 ```
 
-`make run session COMMAND=/bin/sh` is a separate local terminal-session
+`make run-session COMMAND=/bin/sh` is a separate local terminal-session
 diagnostic. It builds the Rust session host and runs AgentD's `terminal start`
-command; it is not the connected agent started by `make run agent`.
+command; it is not the connected agent started by `make run-agent`.
 
 ## Status, stopping, and PID records
 
@@ -135,7 +138,7 @@ make stop
 ```
 
 `SERVICE` accepts `server`, `agent`, or `vite`. Without it, commands inspect or
-stop all three. Stopping the server or Vite owned by `make run dev` also ends its paired
+stop all three. Stopping the server or Vite owned by `make run-dev` also ends its paired
 process; the separately started AgentD remains independent.
 
 The launcher writes `target/dev-processes/server.pid`, `agent.pid`, and

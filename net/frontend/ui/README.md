@@ -128,7 +128,7 @@ From the repository root, start the backend and frontend in separate terminals:
 ```sh
 # Backend: use the password for the existing key-material store.
 export ORION_KEY_MATERIAL_PASSWORD='your-local-development-password'
-make run server
+make run-server
 ```
 
 ```sh
