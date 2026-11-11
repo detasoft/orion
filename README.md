@@ -73,7 +73,8 @@ immediately removes it from the address and keeps it in the tab's session storag
 Production builds do not accept these login links. No separate browser profile,
 Playwright session, or container is used. Node.js and the system browser opener are required.
 
-`make package` prepares the distribution directory with Maven's build cache enabled.
+`make package` prepares the distribution directory with Maven's build cache enabled,
+without running Java, frontend, or Rust tests. Use `make test` to run tests.
 `make run-server` starts `core/bootstrap/target/orion-dist/bin/orion run` with its bundled JVM
 without invoking Maven. Rebuild explicitly after backend or packaged frontend changes.
 Local startup does not create or extract a distribution archive; `make dist` creates it for delivery.

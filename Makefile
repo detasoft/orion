@@ -51,8 +51,8 @@ build-processes: ## Show running Maven builds and Make test processes
 dist: ## Package the bootstrap distribution
 	$(MAVEN) package -Pdist -pl core/bootstrap -am
 
-package: ## Prepare the bootstrap distribution directory without creating an archive
-	$(MAVEN) package -Pdist -pl core/bootstrap -am -Dorion.distribution.archive.skip=true
+package: ## Build the bootstrap distribution directory without tests or an archive
+	$(MAVEN) package -Pdist -pl core/bootstrap -am -DskipTests -Dorion.distribution.archive.skip=true
 
 clean: ## Clean Maven outputs and this repository's build cache
 	$(MAVEN) clean -Pdev,clean-build-cache -T 4 -q

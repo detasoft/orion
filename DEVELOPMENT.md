@@ -26,7 +26,8 @@ Maven lock is used in this startup path. The process launcher prevents duplicate
 checkout, but does not serialize Maven builds. Avoid concurrent builds that
 rewrite the same module's `target` directory.
 
-`make package` prepares that directory without creating an archive. `make dist` also
+`make package` prepares that directory without running tests or creating an archive.
+Use `make test` for tests. `make dist` also
 creates `core/bootstrap/target/orion-dist.tar.gz` for delivery.
 
 At startup, `make run-dev` prints the Orion backend URL and Vite prints its actual `Local` URL.

@@ -18,6 +18,7 @@
         <rust-maven-plugin.version>0.1.0</rust-maven-plugin.version>
         <rust.incremental>true</rust.incremental>
         <rust.release>false</rust.release>
+        <skipTests>false</skipTests>
         <maven.build.cache.input.1>.</maven.build.cache.input.1>
         <maven.build.cache.input.2>src</maven.build.cache.input.2>
         <maven.build.cache.input.3>tests</maven.build.cache.input.3>
@@ -62,6 +63,9 @@
                         <goals>
                             <goal>test</goal>
                         </goals>
+                        <configuration>
+                            <skip>${skipTests}</skip>
+                        </configuration>
                     </execution>
                     <execution>
                         <id>cargo-test-on-clean</id>
@@ -69,6 +73,9 @@
                         <goals>
                             <goal>test-on-clean</goal>
                         </goals>
+                        <configuration>
+                            <skip>${skipTests}</skip>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>
