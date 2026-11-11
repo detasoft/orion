@@ -10,8 +10,6 @@ TEST_ANALYTICS_REPORT_ARGS ?=
 TEST_ANALYTICS_MAIN = pro.deta.orion.test.duration.TestAnalyticsReport
 TEST_JFR_MAVEN_ARGS ?=
 SKILL_DIRS := $(sort $(dir $(wildcard .agents/skills/*/SKILL.md)))
-ORION_MAVEN_LOCK_RUN = $(if $(filter Darwin,$(shell uname -s)),lockf -k,flock) \
-	'$(shell git rev-parse --path-format=absolute --git-common-dir)/orion-maven.lock'
 
 .DEFAULT_GOAL := help
 
@@ -54,13 +52,13 @@ dist: ## Package the bootstrap distribution
 	$(MAVEN) package -Pdist -pl core/bootstrap -am
 
 clean: ## Clean Maven outputs and this repository's build cache
-	$(ORION_MAVEN_LOCK_RUN) $(MAVEN) clean -Pdev,clean-build-cache -T 4 -q
+	$(MAVEN) clean -Pdev,clean-build-cache -T 4 -q
 
 compile-only: ## Compile production code without compiling or running tests
-	$(ORION_MAVEN_LOCK_RUN) $(MAVEN) compile -Pdev -T 4 -q -Dmaven.test.skip=true
+	$(MAVEN) compile -Pdev -T 4 -q -Dmaven.test.skip=true
 
 compile-all: ## Compile production and test code without running tests
-	$(ORION_MAVEN_LOCK_RUN) $(MAVEN) test-compile -Pdev -T 4 -q -DskipTests
+	$(MAVEN) test-compile -Pdev -T 4 -q -DskipTests
 
 test: ## Run package with unit tests; MODULE+TEST select tests, LOG sets a log file
 test-all: ## Run verify with unit and integration tests, including the Git matrix; supports MODULE+TEST and LOG
@@ -69,7 +67,7 @@ test test-all:
 		|| { [ -z '$(strip $(value MODULE))' ] && [ -n '$(strip $(value TEST))' ]; }; then \
 		echo 'Set both MODULE and TEST for focused tests.' >&2; exit 2; \
 	fi
-	timeout --verbose --kill-after=10s $(TEST_TIMEOUT) $(ORION_MAVEN_LOCK_RUN) \
+	timeout --verbose --kill-after=10s $(TEST_TIMEOUT) \
 	$(MAVEN) $(if $(filter test-all,$@),verify,package) -Pdev -T 4 -q \
 		$(if $(strip $(value MODULE)),-pl '$(value MODULE)' -am \
 		$(if $(filter test-all,$@),-Dit.test='$(value TEST)' -Dfailsafe.failIfNoSpecifiedTests=false,\

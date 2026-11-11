@@ -116,8 +116,8 @@ the test output prints their paths. For a faster diagnostic run, pass
 `MAVEN='mvn -Dorion.testDiagnostics.thresholdMillis=2000'` to the focused Make
 command. Use `make test-jfr` when a recording of preceding activity is needed.
 
-`make test` and `make test-all` limit the whole invocation, including waiting for
-the build lock, to 20 minutes (`TEST_TIMEOUT=20m`). GNU `timeout` sends TERM at
+`make test` and `make test-all` limit the whole invocation to 20 minutes
+(`TEST_TIMEOUT=20m`). GNU `timeout` sends TERM at
 the deadline and KILL after another 10 seconds if needed. It must be on `PATH`
 (on macOS it is supplied by Coreutils).
 
