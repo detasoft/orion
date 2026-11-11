@@ -16,8 +16,9 @@ agent in another terminal after Orion is ready. Ctrl-C stops the processes owned
 by the command, including their descendants. A process that does not stop within
 ten seconds is killed.
 
-Maven prepares the server distribution directory with its build cache enabled. The launcher
-starts `core/bootstrap/target/orion-dist/bin/orion run` directly with its bundled JVM,
+Build explicitly with `make package` before the first start and after backend or packaged
+frontend changes. Starting the server does not invoke Maven. The launcher starts
+`core/bootstrap/target/orion-dist/bin/orion run` directly with its bundled JVM,
 using the same entry point as a deployed server. Java serves the packaged frontend;
 `make run-dev` also starts Vite with hot updates and `/api` proxied to Java on port `8000`.
 Node.js coordinates development processes and runs Vite; no Python, RAM disk, or global
@@ -25,8 +26,16 @@ Maven lock is used in this startup path. The process launcher prevents duplicate
 checkout, but does not serialize Maven builds. Avoid concurrent builds that
 rewrite the same module's `target` directory.
 
-`make dist-image` prepares that directory without creating an archive. `make dist` also
+`make package` prepares that directory without creating an archive. `make dist` also
 creates `core/bootstrap/target/orion-dist.tar.gz` for delivery.
+
+At startup, `make run-dev` prints the Orion backend URL and Vite prints its actual `Local` URL.
+Both endpoints remain accessible: by default, Java serves the packaged UI at `http://localhost:8000`,
+and Vite serves the development UI at `http://localhost:4173` with `/api` forwarded to Java.
+Set `VITE_PORT` to request a different Vite port, for example `make run-dev VITE_PORT=5173`.
+`ORION_HTTP_HOST` and `ORION_HTTP_PORT` set the proxy destination and must match the listener
+in Orion's `transport.http` configuration. Make passes this address as `VITE_BACKEND_URL`
+and the UI port as `VITE_PORT`; npm does not launch or configure Orion.
 
 ## Prerequisites
 
@@ -60,6 +69,7 @@ make rust-maven-plugin-install
 Set the password for the protected key-material store in each server terminal:
 
 ```sh
+make package
 export ORION_KEY_MATERIAL_PASSWORD='choose-a-local-development-password'
 make init-server
 ```

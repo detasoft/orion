@@ -9,6 +9,7 @@ ORION_SSH_HOST ?= localhost
 ORION_SSH_PORT ?= 8022
 ORION_HTTP_HOST ?= localhost
 ORION_HTTP_PORT ?= 8000
+VITE_PORT ?= 4173
 ORION_SSH_USER ?= root
 ORION_SSH_OPTIONS ?=
 ORION_TOKEN_TTL_SECONDS ?= 3600
@@ -30,7 +31,7 @@ ISSUE_TOKEN_COMMAND = ssh $(ORION_SSH_OPTIONS) -o BatchMode=yes \
 	-o PreferredAuthentications=publickey -o PasswordAuthentication=no \
 	-p $(ORION_SSH_PORT) -l root $(ORION_SSH_HOST) issue-token $(ORION_TOKEN_TTL_SECONDS)
 
-.PHONY: init-server run-server run-agent run-dev run-session start-server
+.PHONY: init-server run-server run-agent run-dev run-session require-server-package
 .PHONY: open-ui enroll-admin-key require-key-material-password
 .PHONY: status stop issue-token issue-token-raw
 .PHONY: browser-test browser-acme-test prepare-browser-test
@@ -61,26 +62,30 @@ enroll-admin-key: ## Enroll an admin SSH key
 		-l root $(ORION_SSH_HOST) enroll-key
 	@printf 'Admin SSH key enrolled using the SSH client configuration.\n'
 
-run-server: require-key-material-password ## Build and start the Orion server
+require-server-package:
+	@test -x "$(CURDIR)/core/bootstrap/target/orion-dist/bin/orion" \
+		-a -x "$(CURDIR)/core/bootstrap/target/orion-dist/runtime/bin/java" \
+		-a -f "$(CURDIR)/core/bootstrap/target/orion-dist/lib/orion.jar" || { \
+		echo 'Server distribution is missing. Build it first with: make package' >&2; exit 2; \
+	}
+
+run-server: require-key-material-password require-server-package ## Start the built Orion server
 	node "$(CURDIR)/make/dev-process.cjs" run server -- \
-		$(MAKE) --no-print-directory start-server
+		"$(CURDIR)/core/bootstrap/target/orion-dist/bin/orion" run $(ORION_ARGS)
 
 run-agent: ## Start the local agent
 	node "$(CURDIR)/make/dev-process.cjs" run agent -- \
 		$(MAVEN) -pl agent/agentd -am -Pdev,run-agent \
 		-Dagentd.run.arguments="$(AGENT_ARGS)" process-classes
 
-run-dev: require-key-material-password ## Start Orion and Vite with API forwarding
-	+node "$(CURDIR)/make/run-dev.cjs" "$(MAKE)" "$(NPM)"
+run-dev: require-key-material-password require-server-package ## Start built Orion and Vite with API forwarding
+	VITE_BACKEND_URL="http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)" VITE_PORT="$(VITE_PORT)" \
+		node "$(CURDIR)/make/run-dev.cjs" "$(NPM)" \
+		"$(CURDIR)/core/bootstrap/target/orion-dist/bin/orion" run $(ORION_ARGS)
 
 run-session: session-host ## Start a local terminal session; optionally set COMMAND
 	$(MAVEN) package -Pdev,agentd-local-session -T 4 -q -pl agent/agentd -am -DskipTests \
 		-Dagentd.local.command='$(COMMAND)'
-
-# Keep assembly inside the supervised process so duplicate starts and Ctrl-C cover the build too.
-start-server:
-	$(MAKE) dist-image MAVEN="$(MAVEN) -B -DskipTests"
-	exec "$(CURDIR)/core/bootstrap/target/orion-dist/bin/orion" run $(ORION_ARGS)
 
 init-server: ## Initialize key material and run the Orion server for the first time
 	$(MAKE) run-server ORION_ARGS="--create-if-missing $(ORION_ARGS)"

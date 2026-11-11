@@ -49,6 +49,7 @@ function groupSignal(pid, signal) {
         process.kill(-pid, signal);
         return true;
     } catch (error) {
+        if (signal === 0 && error.code === 'EPERM') return true;
         if (error.code !== 'ESRCH') throw error;
         return false;
     }
@@ -168,8 +169,6 @@ async function stopService(service) {
 async function main() {
     const [action, service, separator, command, ...args] = process.argv.slice(2);
     if (action === 'run') {
-        // Recursive Make recipes also execute under make -n.
-        if (/^[a-zA-Z]*n/.test((process.env.MAKEFLAGS || '').split(' ')[0])) return;
         if (separator !== '--' || !command) throw new Error('Usage: dev-process.cjs run <service> -- <command> [args]');
         await run(service, command, args);
         return;

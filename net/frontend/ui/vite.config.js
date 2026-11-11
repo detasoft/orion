@@ -9,9 +9,9 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
-    port: 4173,
+    port: Number(process.env.VITE_PORT || 4173),
     proxy: {
-      '/api': 'http://localhost:8000',
+      '/api': process.env.VITE_BACKEND_URL || 'http://localhost:8000',
     },
   },
   test: {

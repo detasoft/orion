@@ -3,9 +3,6 @@ const { spawn } = require('node:child_process');
 const { resolve } = require('node:path');
 const { constants } = require('node:os');
 
-// Recursive Make recipes also execute under make -n.
-if (/^[a-zA-Z]*n/.test((process.env.MAKEFLAGS || '').split(' ')[0])) process.exit(0);
-
 const children = [];
 let stopping = false;
 
@@ -15,6 +12,7 @@ function signalGroup(child, signal) {
         process.kill(-child.pid, signal);
         return true;
     } catch (error) {
+        if (signal === 0 && error.code === 'EPERM') return true;
         if (error.code !== 'ESRCH') throw error;
         return false;
     }
@@ -52,13 +50,10 @@ function start(command, args, options = {}) {
 }
 
 console.log('Starting Orion and Vite; press Ctrl-C to stop both.');
-start(process.argv[2] || 'make', ['--no-print-directory', 'run-server'], {
-    env: {
-        ...process.env,
-        MAKEFLAGS: (process.env.MAKEFLAGS || '').replace(/--jobserver-(?:auth|fds)=\S+/g, ''),
-    },
-});
-start('/bin/sh', ['-c', `${process.argv[3] || 'npm'} run dev -- --open`], {
+console.log(`Orion backend: ${process.env.VITE_BACKEND_URL}`);
+console.log('Vite UI: use the Local URL printed by npm below.');
+start(process.execPath, [resolve('make/dev-process.cjs'), 'run', 'server', '--', ...process.argv.slice(3)]);
+start('/bin/sh', ['-c', `${process.argv[2] || 'npm'} run dev -- --open`], {
     cwd: resolve('net/frontend/ui'),
     env: { ...process.env, BROWSER: process.env.BROWSER || resolve('make/open-dev-ui.js') },
 });
