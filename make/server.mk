@@ -30,7 +30,7 @@ ISSUE_TOKEN_COMMAND = ssh $(ORION_SSH_OPTIONS) -o BatchMode=yes \
 	-o PreferredAuthentications=publickey -o PasswordAuthentication=no \
 	-p $(ORION_SSH_PORT) -l root $(ORION_SSH_HOST) issue-token $(ORION_TOKEN_TTL_SECONDS)
 
-.PHONY: init-server run open-ui enroll-admin-key require-key-material-password
+.PHONY: init-server run run-packaged-server open-ui enroll-admin-key require-key-material-password
 .PHONY: status stop issue-token issue-token-raw
 .PHONY: browser-test browser-acme-test prepare-browser-test
 .PHONY: ssh-state ssh-status list-repos clone-repository clone-repo clone-http-repo
@@ -80,8 +80,7 @@ run: ## Start a component: make run <server|agent|dev|session>
 ifeq ($(RUN_COMPONENT),server)
 run: require-key-material-password
 	node "$(CURDIR)/make/dev-process.cjs" run server -- \
-		$(MAVEN) -B -Dmaven.build.cache.enabled=false -pl core/bootstrap -am -Prun-server \
-		-Dorion.run.arguments="$(ORION_ARGS)" process-classes
+		$(MAKE) --no-print-directory run-packaged-server
 else ifeq ($(RUN_COMPONENT),agent)
 	node "$(CURDIR)/make/dev-process.cjs" run agent -- \
 		$(MAVEN) -pl agentd -am -Pdev,run-agent \
@@ -94,6 +93,12 @@ run: session-host
 	$(MAVEN) package -Pdev,agentd-local-session -T 4 -q -pl agentd -am -DskipTests \
 		-Dagentd.local.command='$(COMMAND)'
 endif
+
+# Keep assembly inside the supervised process so duplicate starts and Ctrl-C cover the build too.
+run-packaged-server:
+	$(MAKE) dist MAVEN="$(MAVEN) -B -DskipTests"
+	tar -xzf "$(CURDIR)/core/bootstrap/target/orion-dist.tar.gz" -C "$(CURDIR)/core/bootstrap/target"
+	exec "$(CURDIR)/core/bootstrap/target/orion/bin/orion" run $(ORION_ARGS)
 
 init-server: ## Initialize key material and run the Orion server for the first time
 	$(MAKE) run server ORION_ARGS="--create-if-missing $(ORION_ARGS)"

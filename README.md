@@ -32,13 +32,6 @@ export ORION_KEY_MATERIAL_PASSWORD='choose-a-local-development-password'
 make init-server
 ```
 
-The equivalent Maven command is:
-
-```sh
-export ORION_KEY_MATERIAL_PASSWORD='choose-a-local-development-password'
-./mvnw -pl core/bootstrap -am -Prun-server -Dorion.run.arguments="--create-if-missing" process-classes
-```
-
 For subsequent starts, use `make run server` with the same material password.
 Both goals accept additional application options through `ORION_ARGS`.
 `init-server` explicitly permits creating missing key material; do not use it
@@ -74,8 +67,10 @@ immediately removes it from the address and keeps it in the tab's session storag
 Production builds do not accept these login links. No separate browser profile,
 Playwright session, or container is used. Node.js and the system browser opener are required.
 
-`make run server` disables Maven build-cache restoration because the `process-classes`
-launch needs reactor dependency outputs that cached builds may not make available.
+`make run server` builds the distribution with Maven's build cache enabled, extracts the
+distribution archive, and starts its bundled `bin/orion run` launcher and JVM.
+The packaged frontend is served by Java. `make run dev` additionally starts Vite with
+hot updates and `/api` requests proxied to Java on `localhost:8000`.
 `make run dev` forwards `ORION_ARGS`, `MAVEN`, and `NPM` to its child processes. To select a
 base directory through `ORION_ROOT`, use `bootstrap.baseDir: env:ORION_ROOT`
 in your configuration. Ctrl-C stops both process trees; processes that ignore shutdown

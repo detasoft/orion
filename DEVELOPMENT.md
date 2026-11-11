@@ -16,9 +16,12 @@ agent in another terminal after Orion is ready. Ctrl-C stops the processes owned
 by the command, including their descendants. A process that does not stop within
 ten seconds is killed.
 
-Maven compiles and runs the Java entry points. Node.js coordinates development
-processes and runs Vite; no Python, RAM disk, or global Maven lock is used in this
-startup path. The process launcher prevents duplicate services within one
+Maven builds the server distribution with its build cache enabled. The launcher extracts
+the archive and starts `core/bootstrap/target/orion/bin/orion run` with its bundled JVM,
+using the same entry point as a deployed server. Java serves the packaged frontend;
+`make run dev` also starts Vite with hot updates and `/api` proxied to Java on port `8000`.
+Node.js coordinates development processes and runs Vite; no Python, RAM disk, or global
+Maven lock is used in this startup path. The process launcher prevents duplicate services within one
 checkout, but does not serialize Maven builds. Avoid concurrent builds that
 rewrite the same module's `target` directory.
 
@@ -32,7 +35,7 @@ rewrite the same module's `target` directory.
 - A desktop browser. Automatic opening uses `open` on macOS and `xdg-open` on
   Linux; `BROWSER=none` disables opening during `make run dev`.
 
-Python remains a tool for optional maintenance scripts and launcher tests; it is
+Python remains a tool for optional maintenance scripts; it is
 not required to start the server, agent, Vite, or Maven tests. Docker is needed
 for the external integration-test fixture, not for the basic local environment.
 
