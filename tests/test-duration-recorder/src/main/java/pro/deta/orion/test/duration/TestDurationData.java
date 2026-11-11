@@ -120,36 +120,4 @@ final class TestDurationData {
                               String finishedAt, String reason, long processId, long threadId, String threadName) {
     }
 
-    static String json(Object value) {
-        if (value == null) return "null";
-        if (value instanceof Number || value instanceof Boolean) return value.toString();
-        if (value instanceof java.util.Map<?, ?> map) {
-            List<String> entries = new ArrayList<>();
-            for (java.util.Map.Entry<?, ?> entry : map.entrySet()) {
-                entries.add(json(entry.getKey().toString()) + ":" + json(entry.getValue()));
-            }
-            return "{" + String.join(",", entries) + "}";
-        }
-        if (value instanceof Iterable<?> items) {
-            List<String> entries = new ArrayList<>();
-            for (Object item : items) entries.add(json(item));
-            return "[" + String.join(",", entries) + "]";
-        }
-        StringBuilder result = new StringBuilder("\"");
-        for (char character : value.toString().toCharArray()) {
-            switch (character) {
-                case '"' -> result.append("\\\"");
-                case '\\' -> result.append("\\\\");
-                case '\n' -> result.append("\\n");
-                case '\r' -> result.append("\\r");
-                case '\t' -> result.append("\\t");
-                default -> {
-                    if (character < 32) result.append(String.format("\\u%04x", (int) character));
-                    else result.append(character);
-                }
-            }
-        }
-        return result.append('"').toString();
-    }
-
 }

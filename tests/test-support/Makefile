@@ -31,10 +31,10 @@ export ORION_TEST_ANALYSIS_DATA := $(DATA)
 .PHONY: test-runs test-summary test-find test-concurrency test-compare
 
 test-runs: ## List recent recorded runs; N=10 selects the last ten
-test-summary: ## Aggregate test history; N=10 BY=module|class|method
-test-find: ## Find recorded tests; NAME=... MODULE=... STATUS=FAILED TOP=20
-test-concurrency: ## Analyze overlapping tests; RUN=... AT=<ISO-instant> is optional
-test-compare: ## Compare two runs; defaults to the latest two, or BASE=... RUN=...
+test-summary: ## Show a summary and longest tests; optional N=10 BY=class|method
+test-find: ## Show the 20 longest tests; optional N=10 NAME=...
+test-concurrency: ## Show observed test and process concurrency
+test-compare: ## Compare the latest two runs
 test-runs test-summary test-find test-concurrency test-compare: $(TEST_ANALYSIS_CLASS)
 	@$(JAVA) -cp "$(TEST_ANALYSIS_CLASSES)" pro.deta.orion.test.duration.TestRunAnalysis $(patsubst test-%,%,$@)
 

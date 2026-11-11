@@ -24,43 +24,51 @@ silently substitute a different run or remove the bounds.
 
 ## Queries
 
-| Goal | Useful options |
+All goals print terminal tables. Start with `make test-summary`: it includes
+both module totals and the 20 longest individual test executions, sorted by
+duration descending. No options are required.
+
+| Goal | Result |
 | --- | --- |
-| `make test-runs` | `N=10` |
-| `make test-summary` | `N=10 BY=module` or `BY=class` or `BY=method` |
-| `make test-find` | `RUN=... NAME=substring MODULE=substring STATUS=FAILED MIN=100 TOP=20` |
-| `make test-concurrency` | `RUN=...`; optionally `AT=<ISO-instant>` |
-| `make test-compare` | `BASE=<older-id> RUN=<newer-id> BY=method` |
+| `make test-summary` | Summary and longest tests from the latest run |
+| `make test-summary N=10 BY=class` | Aggregate the last ten runs by class |
+| `make test-summary N=10 BY=method` | Aggregate the last ten runs by method |
+| `make test-find` | The 20 longest individual test executions |
+| `make test-runs N=10` | Recent recorded runs |
+| `make test-concurrency` | Observed test/process/thread peaks and busiest intervals |
+| `make test-compare` | Mean-duration changes between the latest two runs |
 
-`N=1`, `BY=module`, `TOP=20` are defaults. Compare defaults to the newest two
-runs. Names and module filters are literal substrings, not shell expressions or
-regular expressions. `MIN` is milliseconds. `TOP` limits output, not analysis;
-inspect `matched`, `totalGroups`, `totalIntervals`, and `testsAtTimeCount` before
-claiming that a returned list is exhaustive.
+For investigations, pin `RUN=<id>`; compare also accepts `BASE=<id>`.
+Use `NAME=<literal substring>` to narrow tests, `MODULE=<substring>` for modules,
+or `STATUS=FAILED` for recorded failures. `TOP` changes the default 20-row limit.
+`MIN` is the minimum duration in milliseconds; concurrency accepts `AT=<ISO-instant>`.
+These are optional refinements, not prerequisites. Grouping defaults to module;
+`N=1` selects the latest run. Repeat `DATA` on every query using supplied data.
 
-Summary includes per-run counts, mean/p95/max durations and mixed outcomes.
-Compare reports mean-duration differences with both sample counts; a group
-missing from one run was not observed there, which does not prove deletion.
+Tables show a bounded selection. Read the matched-record count and group count
+before treating displayed rows as exhaustive. Longest-test rows are individual
+executions, not method averages. Summary and comparison durations are milliseconds.
+A missing group in a comparison does not prove deletion.
 
 ## Interpret results
 
 - Preserve module-qualified class/method identities and cite selected run IDs.
-- `inputTruncated` and `sources` describe the actual byte ranges read. Partial
-  input supports only partial conclusions.
+- A `PARTIAL INPUT` warning means only part of the selected input was read;
+  conclusions must be restricted accordingly.
 - Recorded executions can include deliberately failing nested test fixtures.
   Use the build exit status and Surefire/Failsafe reports for the build verdict.
-- `runCompletionKnown` is false: files contain flushed test plans, not a durable
+- `Completion: unknown` means files contain flushed test plans, not a durable
   whole-build completion marker. An absent test may still be running or unflushed.
-- `wallMillis` spans observed test intervals, not the complete Maven invocation.
+- `WALL ms` spans observed test intervals, not the complete Maven invocation.
   Summed test durations can exceed wall time because tests overlap.
 - Concurrency uses half-open intervals `[start, end)` and excludes skipped tests.
-  `busiestIntervals` is a bounded selection, not a complete chronological trace.
+  The busiest intervals are a bounded selection, not a complete chronological trace.
 - Known process/thread peaks use recorded identities. Old records lack them;
   zero known processes does not mean no JVM ran.
 - Overlap is not CPU utilization, configured worker count, or proof of resource
   contention. Use existing JFR reports when CPU/allocation evidence is needed.
-- Mixed successful/failed outcomes identify candidates for investigation; they
-  do not by themselves prove flakiness or the cause of a slowdown.
+- Successful and failed executions of the same test identify candidates for
+  investigation; they do not prove flakiness or the cause of a slowdown.
 
 Report observations and uncertainties separately. Do not start another test run
 merely to inspect existing data.

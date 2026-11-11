@@ -32,9 +32,8 @@ public final class TestRunAnalysis {
 
     public static void main(String[] args) throws IOException {
         if (args.length == 0 || args[0].equals("--help")) {
-            System.out.println("Commands: runs, summary, find, concurrency, compare\n"
-                    + "Options: data=PATH n=1 by=module|class|method run=ID base=ID name=TEXT module=TEXT\n"
-                    + "         status=FAILED min=0 top=20 at=ISO_INSTANT\n"
+            System.out.println("Commands: summary (overview + longest tests), find (longest tests), runs, concurrency, compare\n"
+                    + "Usually no options needed. Use n=10 for recent runs, by=class|method for grouping.\n"
                     + "Reads at most 8 MiB per selected file and 64 MiB per query. Never starts tests.");
             return;
         }
@@ -48,7 +47,105 @@ public final class TestRunAnalysis {
             if (pair.length != 2) throw new IllegalArgumentException("Expected option=value: " + args[index]);
             options.put(pair[0], pair[1]);
         }
-        System.out.println(TestDurationData.json(analyze(args[0], options)));
+        System.out.print(render(analyze(args[0], options)));
+    }
+
+    /** Formats query results as terminal tables, including scope and incomplete-input warnings. */
+    private static String render(Map<String, Object> result) {
+        StringBuilder output = new StringBuilder("Runs: " + result.get("runIds") + "\n");
+        output.append("Matched records: ").append(result.get("matched"))
+                .append(" | Completion: unknown\n");
+        if (Boolean.TRUE.equals(result.get("inputTruncated"))) {
+            output.append("PARTIAL INPUT: results cover only the recorded byte ranges read.\n");
+        }
+        switch (result.get("command").toString()) {
+            case "runs" -> table(output, "Recorded runs", rows(result, "runs"),
+                    "RUN", "group", "TESTS", "samples", "FAILED", "failed", "SKIPPED", "skipped",
+                    "WALL ms", "wallMillis", "TOTAL ms", "totalMillis", "MAX ms", "maxMillis");
+            case "summary" -> {
+                table(output, "Summary by " + result.get("by") + " (ms; " + result.get("totalGroups") + " groups)",
+                        rows(result, "groups"),
+                        "GROUP", "group", "SAMPLES", "samples", "MEAN", "meanMillis", "P95", "p95Millis",
+                        "MAX", "maxMillis", "TOTAL", "totalMillis", "FAILED", "failed");
+                longestTable(output, rows(result, "tests"));
+            }
+            case "find" -> longestTable(output, rows(result, "tests"));
+            case "compare" -> {
+                output.append("Baseline: ").append(result.get("baseline"))
+                        .append(" | Current: ").append(result.get("current")).append('\n');
+                table(output, "Mean duration comparison (ms)", rows(result, "groups"),
+                        "GROUP", "group", "OLD N", "baselineSamples", "NEW N", "currentSamples",
+                        "OLD MEAN", "baselineMeanMillis", "NEW MEAN", "currentMeanMillis",
+                        "DELTA", "deltaMeanMillis", "RATIO", "ratio",
+                        "OLD FAIL", "baselineFailed", "NEW FAIL", "currentFailed");
+            }
+            case "concurrency" -> {
+                List<Map<String, Object>> runs = rows(result, "concurrency");
+                table(output, "Observed concurrency", runs, "RUN", "runId", "PEAK TESTS", "peakTests",
+                        "MEAN TESTS", "meanTests", "PEAK PROCESSES", "peakKnownProcesses",
+                        "PEAK THREADS", "peakKnownThreads", "UNKNOWN PID", "unknownProcessRecords");
+                for (Map<String, Object> run : runs) {
+                    table(output, "Tests at peak: " + run.get("runId") + " / " + run.get("peakAt"),
+                            rows(run, "testsAtPeak"), "TEST", "testId", "MODULE", "module",
+                            "PID", "processId", "THREAD", "threadId", "DURATION ms", "durationMillis");
+                    table(output, "Busiest intervals (" + run.get("totalIntervals") + " total)",
+                            rows(run, "busiestIntervals"), "START", "startedAt", "END", "finishedAt",
+                            "TESTS", "tests", "PROCESSES", "knownProcesses", "THREADS", "knownThreads");
+                    if (run.containsKey("at")) {
+                        table(output, "Tests at " + run.get("at") + " (" + run.get("testsAtTimeCount") + " total)",
+                                rows(run, "testsAtTime"), "TEST", "testId", "MODULE", "module",
+                                "PID", "processId", "THREAD", "threadId");
+                    }
+                }
+            }
+            default -> throw new IllegalArgumentException("Unknown result command: " + result.get("command"));
+        }
+        return output.toString();
+    }
+
+    private static void longestTable(StringBuilder output, List<Map<String, Object>> tests) {
+        table(output, "Longest tests (ms)", tests, "DURATION", "durationMillis", "STATUS", "status",
+                "MODULE", "module", "TEST", "testId", "RUN", "runId");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> rows(Map<String, Object> result, String key) {
+        return (List<Map<String, Object>>) result.getOrDefault(key, List.of());
+    }
+
+    private static void table(StringBuilder output, String title, List<Map<String, Object>> rows,
+                              String... columns) {
+        output.append('\n').append(title).append(" — showing ").append(rows.size()).append(" rows\n");
+        if (rows.isEmpty()) {
+            output.append("No matching records.\n");
+            return;
+        }
+        int[] widths = new int[columns.length / 2];
+        List<List<String>> cells = new ArrayList<>();
+        for (int index = 0; index < widths.length; index++) widths[index] = columns[index * 2].length();
+        for (Map<String, Object> row : rows) {
+            List<String> values = new ArrayList<>();
+            for (int index = 0; index < widths.length; index++) {
+                Object value = row.get(columns[index * 2 + 1]);
+                String text = value == null ? "-" : value instanceof Double number
+                        ? String.format(Locale.ROOT, "%.2f", number) : value.toString();
+                StringBuilder clean = new StringBuilder();
+                for (char character : text.toCharArray()) {
+                    clean.append(Character.isISOControl(character) ? ' ' : character);
+                }
+                values.add(clean.toString());
+                widths[index] = Math.max(widths[index], clean.length());
+            }
+            cells.add(values);
+        }
+        for (int row = -1; row < cells.size(); row++) {
+            for (int column = 0; column < widths.length; column++) {
+                String value = row == -1 ? columns[column * 2] : cells.get(row).get(column);
+                output.append(value);
+                if (column + 1 < widths.length) output.append(" ".repeat(widths[column] - value.length() + 2));
+            }
+            output.append('\n');
+        }
     }
 
     static Map<String, Object> analyze(String command, Map<String, String> options) throws IOException {
@@ -146,13 +243,7 @@ public final class TestRunAnalysis {
                 result.put("totalGroups", summaries.size());
                 result.put("groups", limit(summaries, top));
             }
-            case "find" -> {
-                matching.sort(Comparator.comparingLong(TestRecord::durationMillis).reversed()
-                        .thenComparing(TestRecord::testId));
-                List<Map<String, Object>> tests = new ArrayList<>();
-                for (TestRecord record : limit(matching, top)) tests.add(test(record));
-                result.put("tests", tests);
-            }
+            case "find" -> { }
             case "concurrency" -> {
                 List<Map<String, Object>> concurrency = new ArrayList<>();
                 for (String run : runs) concurrency.add(concurrency(run, matching, top, at));
@@ -183,6 +274,13 @@ public final class TestRunAnalysis {
                 result.put("groups", limit(changes, top));
             }
             default -> throw new AssertionError(command);
+        }
+        if (command.equals("summary") || command.equals("find")) {
+            matching.sort(Comparator.comparingLong(TestRecord::durationMillis).reversed()
+                    .thenComparing(TestRecord::testId));
+            List<Map<String, Object>> tests = new ArrayList<>();
+            for (TestRecord record : limit(matching, top)) tests.add(test(record));
+            result.put("tests", tests);
         }
         return result;
     }
