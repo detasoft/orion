@@ -16,8 +16,8 @@ agent in another terminal after Orion is ready. Ctrl-C stops the processes owned
 by the command, including their descendants. A process that does not stop within
 ten seconds is killed.
 
-Build explicitly with `make package` before the first start and after backend or packaged
-frontend changes. Starting the server does not invoke Maven. The launcher starts
+`make run-server` and `make run-dev` build the application automatically without tests,
+using Maven's build cache. The launcher then starts
 `core/bootstrap/target/orion-dist/bin/orion run` directly with its bundled JVM,
 using the same entry point as a deployed server. Java serves the packaged frontend;
 `make run-dev` also starts Vite with hot updates and `/api` proxied to Java on port `8000`.
@@ -26,8 +26,8 @@ Maven lock is used in this startup path. The process launcher prevents duplicate
 checkout, but does not serialize Maven builds. Avoid concurrent builds that
 rewrite the same module's `target` directory.
 
-`make package` prepares that directory without running tests or creating an archive.
-Use `make test` for tests. `make dist` also
+Local startup prepares that directory without creating an archive.
+Use `make test` for tests. `make dist`
 creates `core/bootstrap/target/orion-dist.tar.gz` for delivery.
 
 At startup, `make run-dev` prints the Orion backend URL and Vite prints its actual `Local` URL.
@@ -70,7 +70,6 @@ make rust-maven-plugin-install
 Set the password for the protected key-material store in each server terminal:
 
 ```sh
-make package
 export ORION_KEY_MATERIAL_PASSWORD='choose-a-local-development-password'
 make init-server
 ```

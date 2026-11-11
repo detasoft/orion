@@ -28,7 +28,6 @@ change between revisions.
 Initialize and start Orion with the bundled local development configuration:
 
 ```sh
-make package
 export ORION_KEY_MATERIAL_PASSWORD='choose-a-local-development-password'
 make init-server
 ```
@@ -43,12 +42,12 @@ For UI development, start Orion and Vite together from the repository root:
 
 ```sh
 npm --prefix net/frontend/ui ci # Once, or after frontend dependencies change.
-make package # After backend or packaged frontend changes.
 make run-dev
 ```
 
 Keep `ORION_KEY_MATERIAL_PASSWORD` set to the existing store's password.
-`make run-dev` starts the built Orion and Vite concurrently using Node.js, which the frontend already requires.
+`make run-dev` builds Orion without tests and starts it alongside Vite using Node.js,
+which the frontend already requires. No separate build command is needed.
 The built distribution runs Orion, and npm runs Vite at `http://localhost:4173`.
 Vite opens your normal default browser already signed in.
 The terminal prints Orion's backend URL and Vite's separate `Local` URL; both are accessible directly.
@@ -73,14 +72,14 @@ immediately removes it from the address and keeps it in the tab's session storag
 Production builds do not accept these login links. No separate browser profile,
 Playwright session, or container is used. Node.js and the system browser opener are required.
 
-`make package` prepares the distribution directory with Maven's build cache enabled,
-without running Java, frontend, or Rust tests. Use `make test` to run tests.
-`make run-server` starts `core/bootstrap/target/orion-dist/bin/orion run` with its bundled JVM
-without invoking Maven. Rebuild explicitly after backend or packaged frontend changes.
+`make run-server` and `make run-dev` automatically prepare the distribution directory with
+Maven's build cache enabled, without running Java, frontend, or Rust tests. Use `make test`
+to run tests. Orion then starts through `core/bootstrap/target/orion-dist/bin/orion run`
+with its bundled JVM.
 Local startup does not create or extract a distribution archive; `make dist` creates it for delivery.
 The packaged frontend is served by Java. `make run-dev` additionally starts Vite with
 hot updates and `/api` requests proxied to Java on `localhost:8000`.
-`make run-dev` forwards `ORION_ARGS` and `NPM` to its child processes. To select a
+`make run-dev` forwards `ORION_ARGS`, `MAVEN`, and `NPM` to its child processes. To select a
 base directory through `ORION_ROOT`, use `bootstrap.baseDir: env:ORION_ROOT`
 in your configuration. Ctrl-C stops both process trees; processes that ignore shutdown
 are killed after ten seconds. If either service exits, the other is stopped too.

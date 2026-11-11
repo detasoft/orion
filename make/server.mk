@@ -31,7 +31,7 @@ ISSUE_TOKEN_COMMAND = ssh $(ORION_SSH_OPTIONS) -o BatchMode=yes \
 	-o PreferredAuthentications=publickey -o PasswordAuthentication=no \
 	-p $(ORION_SSH_PORT) -l root $(ORION_SSH_HOST) issue-token $(ORION_TOKEN_TTL_SECONDS)
 
-.PHONY: init-server run-server run-agent run-dev run-session require-server-package
+.PHONY: init-server run-server run-agent run-dev run-session start-server
 .PHONY: open-ui enroll-admin-key require-key-material-password
 .PHONY: status stop issue-token issue-token-raw
 .PHONY: browser-test browser-acme-test prepare-browser-test
@@ -62,26 +62,23 @@ enroll-admin-key: ## Enroll an admin SSH key
 		-l root $(ORION_SSH_HOST) enroll-key
 	@printf 'Admin SSH key enrolled using the SSH client configuration.\n'
 
-require-server-package:
-	@test -x "$(CURDIR)/core/bootstrap/target/orion-dist/bin/orion" \
-		-a -x "$(CURDIR)/core/bootstrap/target/orion-dist/runtime/bin/java" \
-		-a -f "$(CURDIR)/core/bootstrap/target/orion-dist/lib/orion.jar" || { \
-		echo 'Server distribution is missing. Build it first with: make package' >&2; exit 2; \
-	}
-
-run-server: require-key-material-password require-server-package ## Start the built Orion server
+run-server: require-key-material-password ## Build without tests and start the Orion server
 	node "$(CURDIR)/make/dev-process.cjs" run server -- \
-		"$(CURDIR)/core/bootstrap/target/orion-dist/bin/orion" run $(ORION_ARGS)
+		$(MAKE) --no-print-directory start-server
 
 run-agent: ## Start the local agent
 	node "$(CURDIR)/make/dev-process.cjs" run agent -- \
 		$(MAVEN) -pl agent/agentd -am -Pdev,run-agent \
 		-Dagentd.run.arguments="$(AGENT_ARGS)" process-classes
 
-run-dev: require-key-material-password require-server-package ## Start built Orion and Vite with API forwarding
+run-dev: require-key-material-password ## Build without tests and start Orion alongside Vite
 	VITE_BACKEND_URL="http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)" VITE_PORT="$(VITE_PORT)" \
 		node "$(CURDIR)/make/run-dev.cjs" "$(NPM)" \
-		"$(CURDIR)/core/bootstrap/target/orion-dist/bin/orion" run $(ORION_ARGS)
+		$(MAKE) --no-print-directory start-server
+
+start-server:
+	$(MAVEN) package -Pdist -pl core/bootstrap -am -DskipTests -Dorion.distribution.archive.skip=true
+	exec "$(CURDIR)/core/bootstrap/target/orion-dist/bin/orion" run $(ORION_ARGS)
 
 run-session: session-host ## Start a local terminal session; optionally set COMMAND
 	$(MAVEN) package -Pdev,agentd-local-session -T 4 -q -pl agent/agentd -am -DskipTests \

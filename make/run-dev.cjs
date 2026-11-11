@@ -3,6 +3,9 @@ const { spawn } = require('node:child_process');
 const { resolve } = require('node:path');
 const { constants } = require('node:os');
 
+// Recursive Make recipes also execute under make -n.
+if (/^[a-zA-Z]*n/.test((process.env.MAKEFLAGS || '').split(' ')[0])) process.exit(0);
+
 const children = [];
 let stopping = false;
 
