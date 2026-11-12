@@ -144,6 +144,8 @@ class BootstrapProxyEndpointIT {
                                 ? component.httpTransport().boundHttpPort() : component.sshTransport().boundPort();
                         if (launch == 0) {
                             var acl = component.orionAccessControlService();
+                            String staleRevision = ((pro.deta.orion.util.VcRevision.Stored)
+                                    component.configurationEditor().current().revision()).value();
                             TestRuntimeBootstrap.withAccess(component.configurationEditor(),
                     new pro.deta.orion.internal.ChangeMetadata(UserEmail.EMPTY, "add root test key"), edit -> {
                                 assertThat(edit.addSshCredentials("root",
@@ -159,11 +161,12 @@ class BootstrapProxyEndpointIT {
                             var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
                             var before = mapper.readTree(RuntimeHttpTestSupport.request(
                                     "GET", proxyApi, TestBearerTokens.bearer(token)).body());
+                            assertThat(before.get("revision").asText()).isNotEqualTo(staleRevision);
                             var source = target.getBootstrap().getConfiguration();
                             Map<String, Object> command = new java.util.LinkedHashMap<>();
                             command.put("action", "create");
                             command.put("scope", "system");
-                            command.put("revision", before.get("revision").asText());
+                            command.put("revision", staleRevision);
                             command.put("alias", "configuration");
                             command.put("upstream", source.getLocation().substring(4));
                             command.put("ref", REF);

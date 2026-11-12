@@ -388,6 +388,42 @@ contained separate release/build changes from another session, so this is
 working-tree verification, not a complete integration result for a new clean
 candidate. Automatic scoped review found no blocking issues.
 
+#### Proxy-test revision-conflict setup repair
+
+The proxy endpoint test expected HTTP 409 while supplying the current revision
+returned by GET after adding root's SSH key. That request correctly received
+201. The test now captures the revision before that configuration edit and
+asserts that GET reports a different revision. Its first POST uses the stale
+revision and must receive 409; the subsequent GET/retry uses the current
+revision and must receive 201. No API behavior was changed.
+
+Both HTTP/SSH parameters passed the complete scenario, including scoped
+clone/push, denied operations, private-cache checks, and restart: two tests,
+zero failures/errors/skips, 16.19 s class time. Log:
+`/tmp/orion-task21-proxy-stale-revision-green.log`. This diagnostic checkout
+contains the original `7afc159a` candidate plus the startup-test and proxy-test
+repairs; it is not a claim that the unchanged candidate passed.
+
+The non-vacuity mutation replaced the first POST's stale revision with the
+current GET revision. Both parameters failed exactly at the expected conflict:
+`expected: 409, but was: 201`, with no errors/skips. Log:
+`/tmp/orion-task21-proxy-stale-revision-mutated.log`. The stale-revision change
+was then restored for the final focused verification.
+The restored version passed again: two tests, zero failures/errors/skips,
+15.77 s class time, Make exit 0. Log:
+`/tmp/orion-task21-proxy-stale-revision-restored.log`.
+
+The first required root `make test` failed while Surefire loaded the unchanged
+`ConfigurationSecretXmlTest`, with `ClassNotFoundException`; the class file
+was present when inspected afterward. Log:
+`/tmp/orion-task21-proxy-precommit.log`. This failure is retained separately
+from the proxy scenario and its cause is not established by the focused runs.
+After a pause, the same required root command passed, exit 0, without an
+additional code fix: `/tmp/orion-task21-proxy-precommit-retry1.log`.
+Automatic scoped review found no blocking issues. The shared working-tree
+verification includes separate release/build work committed by another session
+as `0f519f2d`; it does not certify a clean complete integration matrix.
+
 ## Historical evidence
 
 - [28 October verification](verification-2026-10-28.md) and
