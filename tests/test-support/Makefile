@@ -30,6 +30,10 @@ export ORION_TEST_ANALYSIS_DATA := $(DATA)
 
 .PHONY: test-runs test-summary test-find test-concurrency test-compare
 
+.PHONY: test-buckets
+test-buckets: ## Show duration buckets and p50/p80/p95; optional N=10
+	@python3 "$(TEST_ANALYSIS_ROOT)/tests/test-support/test-buckets.py"
+
 test-runs: ## List recent recorded runs; N=10 selects the last ten
 test-summary: ## Show a summary and longest tests; optional N=10 BY=class|method
 test-find: ## Show the 20 longest tests; optional N=10 NAME=...
