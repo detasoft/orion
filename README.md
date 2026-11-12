@@ -19,7 +19,8 @@ change between revisions.
 ## Requirements
 
 - JDK 21.
-- Maven Daemon 2.0.0-rc-3 (preview, bundling Maven 4.0.0-rc-3) is downloaded automatically by `./mvnw`.
+- Maven Daemon 2.0.0-rc-4-deta-1 (Detasoft fork, bundling Maven 4.0.0-rc-7) is downloaded by `./mvnw`.
+  The pinned ZIP uses the JVM client and is tested on macOS ARM64; other platforms are not validated.
   No separate Maven installation is required; the first invocation needs network access.
 - `make`, `ssh`, and `curl` are optional, but the local admin helpers use them.
 
