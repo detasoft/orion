@@ -366,6 +366,28 @@ expected `ControlResult.Processes`, received `Failed(AMBIGUOUS_DELIVERY)` with
 for the requested integration methods; the subsequent focused run above does.
 This additional native-control timeout remains untriaged and is not dismissed.
 
+#### Startup-test ownership repair
+
+The restart test opened independent native-repository providers while the
+runtime could hold an access to the same `refs.mv` file. Its disk assertions
+now run after shutdown; during restart it checks that the active configuration
+revision equals the original stored commit. The final persisted ACL contents
+and HEAD are checked again after shutdown. No production ownership, locking,
+or timeout behavior was changed.
+
+The repaired method passed twice in focused Failsafe runs, one test with zero
+failures/errors/skips each; the final class time was 1.368 s. Logs:
+`/tmp/orion-task21-restart-ownership-green.log` and
+`/tmp/orion-task21-restart-ownership-restored.log`. Temporarily restoring the
+old test also passed in `/tmp/orion-task21-restart-ownership-mutated.log`;
+the lock collision is timing-dependent, not a deterministic failure on every
+execution. Earlier full and focused failing evidence remains above.
+The required root `make test` with cache disabled also passed, exit 0;
+log: `/tmp/orion-task21-restart-precommit.log`. The shared working tree
+contained separate release/build changes from another session, so this is
+working-tree verification, not a complete integration result for a new clean
+candidate. Automatic scoped review found no blocking issues.
+
 ## Historical evidence
 
 - [28 October verification](verification-2026-10-28.md) and

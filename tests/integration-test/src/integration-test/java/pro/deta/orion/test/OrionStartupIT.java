@@ -115,15 +115,19 @@ class OrionStartupIT {
         Path orionRoot = tempDir.resolve("orion");
 
         try (StartedOrion ignored = startServerWithConfig(serverConfiguration(orionRoot))) {
-            assertInitialConfigurationCreated(orionRoot);
+            assertThat(ignored.component().configurationEditor().current().result())
+                    .isInstanceOf(pro.deta.orion.util.Result.Success.class);
         }
 
+        assertInitialConfigurationCreated(orionRoot);
         String initialAclCommit = aclHead(orionRoot);
 
-        try (StartedOrion ignored = startServerWithConfig(serverConfiguration(orionRoot))) {
-            assertInitialConfigurationCreated(orionRoot);
-            assertThat(aclHead(orionRoot)).isEqualTo(initialAclCommit);
+        try (StartedOrion restarted = startServerWithConfig(serverConfiguration(orionRoot))) {
+            assertThat(restarted.component().configurationEditor().current().revision())
+                    .isEqualTo(new pro.deta.orion.util.VcRevision.Stored(initialAclCommit));
         }
+        assertInitialConfigurationCreated(orionRoot);
+        assertThat(aclHead(orionRoot)).isEqualTo(initialAclCommit);
     }
 
     @Test
