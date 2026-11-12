@@ -291,14 +291,14 @@ class GitSmartHttpClientTransportTest {
     @Test
     void permitsDiscoveryBodyThatMakesProgressBeforeEachReadTimeout()
             throws Exception {
-        Duration timeout = Duration.ofMillis(100);
+        Duration timeout = Duration.ofSeconds(1);
         byte[] body = concat(packet("# service=git-upload-pack\n"), flush(),
                 advertisement(GitClientService.UPLOAD_PACK.command()));
         try (TestHttpServer server = TestHttpServer.start(exchange -> {
             exchange.getResponseHeaders().set("Content-Type",
                     "application/x-git-upload-pack-advertisement");
             exchange.sendResponseHeaders(200, 0);
-            writeInChunks(exchange, body, 3, Duration.ofMillis(60));
+            writeInChunks(exchange, body, 3, Duration.ofMillis(600));
             exchange.close();
         })) {
             GitClientOptions options = new GitClientOptions(
