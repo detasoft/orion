@@ -35,7 +35,7 @@ the current candidate. No Orion public release is authorized by this report.
 | Ordinary distribution build, tests enabled and cache disabled | PASS | `make dist MAVEN='./mvnw -Dmaven.build.cache.enabled=false -l /tmp/orion-task21-20261112-dist.log'`, exit 0, `BUILD SUCCESS`, 2 min 24 s Maven wall clock. No test-skipping option was used. |
 | Extracted archive executable permissions and help | PASS | Fresh extraction to `/tmp/orion-task21-install-tu1c8fb4`; `orion/bin/orion` and `orion/runtime/bin/java` have executable mode `0755`. Direct `orion/bin/orion --help` exited 0 without chmod or a Java override. Does not establish service startup, Git behavior, or recovery. |
 | Isolated packaged first start and restart | PASS | `/tmp/orion-task21-runtime-wct8hmog`, fresh temporary state and loopback ports. First start explicitly used `--create-if-missing`; restart did not. Both served the HTTP schema (200, 3202 bytes) and SSH banner `SSH-2.0-APACHE-SSHD-2.13.2`. Both processes were stopped after readiness checks. Password stayed in process memory; logs omit password/token lines. Enrollment, authenticated Git operations, and backup/restore were not exercised. |
-| Full integration and cross-engine matrix | NOT TESTED | Requires a current uncached `make test-all` result; the 28 October failures are historical evidence only. |
+| Full integration and cross-engine matrix, candidate `7afc159a` | FAIL | Awake uncached rerun completed with mvnd exit 1, Make exit 2: 4,229 JVM tests, three failures, one error, six skipped. Detailed outcomes below. |
 | Focused historical SSH configuration-push integration check | FAIL | The reactor stopped in a prerequisite unit test before the selected integration test ran. `/tmp/orion-task21-20261112-ssh-config.log`: `GitSmartHttpClientTransportTest.permitsDiscoveryBodyThatMakesProgressBeforeEachReadTimeout:312` returned a discovery read timeout instead of success. This is not evidence of an SSH scenario failure. |
 | SSH configuration-push retry after timing fix, candidate `dff458b8` | FAIL | The selected integration method executed: one test, one failure, zero errors/skips, 1.713 s class time. `GitSshTransportEndToEndIT.directConfigurationPushRetainsValidStateUntilAValidCommitArrives:189` expected `invalid`, observed `unavailable`. Log: `/tmp/orion-task21-ssh-config-after-timing.log`. |
 | Backup/restore, upgrade/rollback, clean-host installation | NOT TESTED | Current packaged first-start/restart checks use this existing macOS host. They do not establish recovery, upgrade/rollback, or a clean Linux installation. |
@@ -140,6 +140,12 @@ needed before chronological coverage can be certified. The user has offered to
 provide the original text. The reconstructed file has not been integrated into
 the local candidate or used to mark any day complete.
 
+The owner subsequently supplied the original 28–30 October messages. Their
+faithful translations are now in [daily-plans.md](daily-plans.md); the earlier
+reconstructions for those dates are superseded. The original 26–27 October
+messages remain unavailable, so those dates are explicitly open rather than
+silently skipped.
+
 ## Chronological execution
 
 ### 2026-10-25: original scope and technical audit
@@ -156,9 +162,209 @@ audit before committing to missing features or a final release scope.
 | Define and freeze the supported preview scope | NOT TESTED | The conversation identifies Git clone/fetch/push, repository creation, authentication, ACL, installation/update, and data recovery as candidates. Product version, accepted risks, external operator, and support commitments require owner decisions where not already recorded. |
 | Preserve the six-week roadmap separately from daily execution | IN PROGRESS | A complete chronological plan export was requested in the source chat for `daily-plans.md`; no plan item is marked complete by that request. |
 
-Later days will be entered in source order after the complete plan inventory is
-available. Their requirements are not considered executed merely because they
-repeat an earlier check. No date gap is silently treated as completion.
+### 2026-10-26 and 2026-10-27: source gap
+
+Original daily messages have not been supplied. No reconstructed instructions
+are executed or marked complete on their behalf. Work below establishes useful
+release evidence without claiming an uninterrupted completed chronology.
+
+### 2026-10-28: clean distribution, contents, and first-user PULL
+
+| Assignment | Status | Evidence / remaining work |
+| --- | --- | --- |
+| Task 21.1: build from a clean checkout and record SHA/result/artifact | FAIL (audit outcome established) | Local clone `/tmp/orion-task21-clean-7afc159a`, SHA `7afc159ad7b284b2c24b9e26d3c06f2225b31bee`; initial `git status --short` empty. Ordinary `make dist` with tests and build cache disabled returned Make exit 2, Maven `BUILD FAILURE`, 1 min 3 s. AgentD had 333 tests, 9 failures, zero errors/skips. The live native-host tests expected the absent `agent/session-host/target/cargo/debug/session-host`. Log: `/tmp/orion-task21-clean-7afc159a-dist.log`. No archive produced. Shared installed toolchains/dependency caches remain an explicit limit. |
+| Task 21.5: version, configuration, launch scripts, and notices | BLOCKED (failure alternative recorded) | No clean-build archive exists; the source plan explicitly permits recording the build cause instead of inspecting a missing artifact. Earlier `a6bb30c3` archive results remain separately identified above and are not attributed to `7afc159a`. Maven/UI version mismatch and exact-artifact dependency inventory remain open. |
+| First-user PULL scenario | PARTIAL | Owner confirms: first user is the owner; required job is proxying Git to GitHub through Orion. S3 is optional, desirable rather than mandatory for `v0.1.0`. Urgency and proven limitations of alternatives were not supplied and are not invented. |
+
+The concrete preview scenario is: the owner accesses a GitHub-backed repository
+through Orion and can verify the advertised Git operations against the upstream
+commit history. Existing local-repository push/clone evidence alone cannot
+certify GitHub proxying. README's system-proxy behavior and bootstrap-proxy
+tests are existing mechanisms to inspect; an actual GitHub repository, required
+credentials, supported directions, and acceptance must be identified before a
+real GitHub smoke run. No external repository was modified for this report.
+
+The clean-build cause is localized: the `dist` profile in
+`agent/session-host/pom.xml` sets `rust.release=true`, producing the release
+binary. AgentD's live-peer tests explicitly open the debug-path binary, for
+example `NativeControlLivePeerTest.extractSessionHost()` at line 412. A working
+checkout with a preexisting debug binary can therefore pass while a clean
+distribution build fails. The earlier successful prepared-checkout build did
+not expose this prerequisite. No copied binary, prebuild, skipped test, or
+fallback path was used to hide the clean-build failure.
+
+### 2026-10-29: localize SSH state and run the complete matrix
+
+| Assignment | Status | Evidence / remaining work |
+| --- | --- | --- |
+| Identify the component producing the SSH configuration status mismatch | PASS (localization only) | Current `dff458b8` failure reproduced, expected `invalid`, observed `unavailable`. `BlobOrionConfigurationStorage.read()` maps XML codec errors to `Result.Failure(GENERAL)`; `OrionConfigurationEditor.status()` maps every failed document load to `unavailable`. The malformed XML is therefore classified as unavailable after a successful repository push/read. Stored and prior active revision assertions preceding the validation assertion passed. No behavior fix is claimed. |
+| Complete `make test-all` on one identified revision | FAIL / incomplete matrix | `make test-all MAVEN='./mvnw -Dmaven.build.cache.enabled=false' LOG=/tmp/orion-task21-clean-7afc159a-test-all.log`, same isolated `7afc159a` checkout, Make exit 2. The log records `RemoteAgentdProvisionerTest.detachedAgentdUsesBundledSessionHostAfterSshCloses:166` with a provisioning SSH operation timeout; the client then reports no daemon message within 3000 ms and Make reports mvnd error 100. No complete green integration matrix is established. |
+
+The localization points to configuration-load/error classification and the
+editor's status projection, rather than SSH authentication. It does not prove
+the subsequent valid repair activates successfully: the method stops at the
+earlier failed assertion. A repair must preserve last-valid configuration and
+distinguish malformed content from missing/unreadable source data.
+
+The full-run provisioning report has 68 module tests with one error and no
+failures/skips. The failing class reports eight tests with one error; the error
+is `ProvisioningException: SSH provisioning operation timed out`. Follow-up
+diagnostics below establish host suspension during this run; a focused awake
+rerun passed. This does not establish a green complete matrix.
+Remaining reactor coverage cannot be inferred from an aborted daemon stream.
+
+#### Follow-up: apparent hang and daemon disconnect
+
+The macOS power log records clamshell sleep at 18:31:25 on 12 November,
+followed by short maintenance wakes and repeated sleep until lid wake at
+20:39:54. Daemon `23cd709d` heartbeat gaps match those sleep intervals.
+For example, it logged heartbeats at 18:48:45 and then 19:03:59;
+macOS slept at 18:48:43 and woke at 19:03:59. The provisioning error was
+dispatched at 18:48:38, exactly the wake following 863 seconds of sleep.
+These timings strongly implicate suspension in the timeout rather than a
+continuously running 861-second SSH operation.
+
+The mvnd client waits for a heartbeat for 3000 ms. Its communication-failure
+path removes the daemon from the registry. The daemon recorded a broken pipe
+at 19:20:35, a registry-related stop request at 19:20:40, and completion of
+the abandoned build at 19:28:59. It subsequently accepted the S3 request.
+A thread dump at 20:56:51 showed normal idle server waits and no active
+builder threads. There is no evidence of a persisting Maven deadlock.
+The exact client scheduling at wake was not captured, so suspension-related
+heartbeat expiry is a supported explanation, not a controlled reproduction.
+
+The same checkout and mvnd passed this focused awake rerun, Make exit 0:
+
+```sh
+make test MODULE=agent/agent-provisioning \
+  TEST='RemoteAgentdProvisionerTest#detachedAgentdUsesBundledSessionHostAfterSshCloses' \
+  MAVEN='./mvnw -Dmaven.build.cache.enabled=false' \
+  LOG=/tmp/orion-task21-provisioning-awake.log
+```
+
+Surefire records one test, zero failures/errors/skips, class time 1.150 s.
+The previous failure remains recorded; this rerun does not prove immunity
+to other timing faults. Further full-run evidence must come from an awake
+host. Sleep/wake resilience of the mvnd connection remains a separate
+tooling concern; no heartbeat thresholds or test timeouts were changed.
+
+### 2026-10-30: explain SSH/S3 failures and record next steps
+
+| Assignment | Status | Evidence / remaining work |
+| --- | --- | --- |
+| Explain whether SSH failure belongs to validation, activation, or API reply | PASS (localization only) | Same reproduced configuration-load/status classification path as 29 October. Repeated requirement retained explicitly; no fix or complete recovery scenario is claimed. |
+| Classify S3 metadata rejection failure | PASS (current focused check) | Same `7afc159a` checkout, same mvnd, cache disabled. Failsafe executed `S3NativeGitRepositoryProviderIT#listsAllPagesAndRejectsCorruptOrMisplacedMetadata`: one test, zero failures/errors/skips, method time 4.614 s. The historical failure was not reproduced; no historical root cause is claimed. |
+| Decide whether S3 is mandatory | PASS (owner decision) | Owner explicitly says S3 is not mandatory for `v0.1.0`, but desirable. This does not hide or excuse failing tests. |
+| Preserve outcomes, cause, and next step in Task 21 | IN PROGRESS | This report retains exact methods, revisions, logs, limits, configuration-status localization, host-suspension diagnostics, and focused S3 success. A complete green matrix remains outstanding. |
+
+The focused S3 command used `make test-all MODULE=git/git-s3-storage` with
+the method above, `MAVEN='./mvnw -Dmaven.build.cache.enabled=false'`, and
+`LOG=/tmp/orion-task21-clean-7afc159a-s3-metadata.log`. The daemon accepted
+it at 20:40:48, entered Failsafe at 20:41:53, and finished with exit code 0
+at 20:41:58. The empty log was initially mistaken for a queued build.
+With `-q`, this successful run emitted no textual messages: mvnd's file log
+stores textual output, not lifecycle or heartbeat events. The daemon events
+and Failsafe XML establish actual execution. No ordinary-Maven bypass was
+used and no daemon was killed.
+
+### Awake complete-matrix rerun for 29 October
+
+On the unchanged clean-checkout candidate `7afc159a`, the following run reached
+normal build completion at 21:05:41, with mvnd exit 1 and Make exit 2:
+
+```sh
+caffeinate -i make test-all \
+  MAVEN='./mvnw -Dmaven.build.cache.enabled=false' \
+  LOG=/tmp/orion-task21-7afc159a-awake-test-all.log
+```
+
+Fresh Surefire/Failsafe XML reports contain 4,229 JVM test cases: 4,219 passed,
+three failed, one errored, six skipped. Copies were preserved before focused
+reruns under `/tmp/orion-task21-awake-matrix-reports`, including `summary.json`.
+These counts exclude frontend and Rust cases. No complete green run is claimed.
+
+| Failing method | Observed result | Next step |
+| --- | --- | --- |
+| `GitSshTransportEndToEndIT.directConfigurationPushRetainsValidStateUntilAValidCommitArrives` | Expected `invalid`, received `unavailable` | Repair configuration-load/status classification while retaining last-valid active state; localization is recorded above. |
+| `BootstrapProxyEndpointIT.scopedClientsCloneAndPushThroughAliasAcrossRestartWhileCacheRemainsPrivate`, HTTP and SSH parameters | Both expected HTTP 409, received 201 at line 178 | Reproduce separately and establish whether the expected conflict and request revision are valid before changing the API or assertion. |
+| `OrionStartupIT.restartUsesExistingStorageWithoutRewritingAcl` | `Cannot open repository orion`, caused by H2 `refs.mv` lock and `OverlappingFileLockException` | Reproduce separately; inspect concurrent runtime access versus the test's independently opened repository provider. |
+
+Skipped cases belong to `ReferenceGitControlMatrixIT` (one),
+`PlaywrightExternalServicesIT` (one), `IntegrationCloudflareIT` (one),
+`DistributionArchiveIT` (two, distribution profile absent), and
+`GitBlobStorageTest` (one). Their exclusion remains explicit. The separate
+distribution-profile run below executed both archive tests without skips.
+
+`BootstrapProxyTransportIT` passed both HTTP/SSH parameters, and
+`S3BootstrapProxyColdStartIT` passed. This establishes local-upstream behavior,
+not a real GitHub smoke test. The public proxy endpoint scenario still fails.
+
+### 2026-10-31: packaging confirmation and week 2 priorities
+
+The owner supplied the original 31 October message; it is preserved in
+[daily-plans.md](daily-plans.md). The source gaps for 26–27 October remain open.
+
+The same `7afc159a` checkout passed the archive check with mvnd exit 0:
+
+```sh
+caffeinate -i make test-all MODULE=core/bootstrap TEST=DistributionArchiveIT \
+  MAVEN='./mvnw -Pdist -Dmaven.build.cache.enabled=false' \
+  LOG=/tmp/orion-task21-7afc159a-dist-archive.log
+```
+
+Failsafe reports two tests, zero failures/errors/skips, 2.999 s class time.
+The distribution profile executed `create-jlink-distribution` and
+`attach-jlink-distribution`; both executable-mode preservation and fresh
+extraction with bundled Java were checked. No `chmod` repair was applied to
+the extraction. Artifact: 82,434,269 bytes, SHA-256
+`69d069dd0178aaa1b093108d479ec247e9a8d7eb6c36e6c19c2837f5e23e4200`.
+
+This checkout had already run dev builds, so its debug session-host binary
+was present. Archive-test success does not resolve the earlier clean `dist`
+failure or establish byte-for-byte reproducibility across builds.
+
+#### Blocker triage and immediate queue
+
+| Required area | Current classification | Next step | Preview gate |
+| --- | --- | --- | --- |
+| SSH configuration push | Confirmed status mismatch, localized to malformed-document classification | Preserve last-valid state and distinguish invalid content from unavailable storage, then rerun the full repair sequence | Blocks claiming the advertised configuration failure/recovery contract |
+| S3 metadata integrity | Historical failure not reproduced; all five `S3NativeGitRepositoryProviderIT` methods passed in the awake matrix | Retain coverage; do not invent a historical cause | S3 is optional by owner decision; exclude unsupported claims if not shipped |
+| npm security findings | Fresh registry audit on 13 November: ten affected packages, three high and seven moderate; production-only audit retains one high `source-map-js` finding | Apply compatible fixes and verify frontend behavior; establish actual exposure in the packaged bundle | Security triage gate remains open; audit severity alone is not proof of packaged exploitability |
+| Complete green matrix | Confirmed failing run, with proxy conflict and restart-lock failures in addition to SSH status | Repair reproducible failures and rerun on one final SHA with explicit skips | Blocks release readiness |
+
+Audit commands used the Maven-installed Node/npm under
+`net/frontend/ui/target/node/node/`: `npm audit --json` and
+`npm audit --omit=dev --json`, both exit 1. No dependencies were modified.
+High findings affect `brace-expansion`, `source-map-js`, and `vite`; the
+production-only finding is `source-map-js` (GHSA-68fv-2mgg-jv7q).
+
+The immediate repair queue is bounded to three checkpoints:
+
+1. Make first-checkout distribution builds independent of an existing debug
+   session-host binary; preserve tests and distribution release binaries.
+2. Repair deterministic release-matrix failures in their owners: first the
+   independently reproduced startup lock and proxy conflict scenarios, then
+   malformed-configuration status. Preserve the original behavioral assertions
+   unless investigation demonstrates that their setup or contract is wrong.
+3. Resolve npm findings with compatible dependency changes and frontend tests;
+   retain explicit exposure/accepted-risk decisions where a fix is unavailable.
+
+A focused Failsafe rerun on the same SHA reproduced both proxy failures and
+the startup lock error: three tests, two failures, one error, zero skipped.
+Log: `/tmp/orion-task21-7afc159a-failsafe-only.log`. It used the existing Make
+goal with the selected integration methods and a Surefire filter matching no
+unit tests; this is diagnostic evidence, not another full-suite result.
+The startup error occurred on the second start (line 124), rather than line 118
+in the full run. Both accesses open a separate provider while the runtime is
+active, so test-side ownership and runtime concurrency must be distinguished.
+
+An earlier attempted focused run stopped in prerequisite unit method
+`NativeControlLivePeerTest.listsAndSignalsAProcessThroughTheRealHost`:
+expected `ControlResult.Processes`, received `Failed(AMBIGUOUS_DELIVERY)` with
+`native control operation timed out`. Log:
+`/tmp/orion-task21-7afc159a-new-failures.log`. That attempt provides no outcome
+for the requested integration methods; the subsequent focused run above does.
+This additional native-control timeout remains untriaged and is not dismissed.
 
 ## Historical evidence
 
