@@ -288,6 +288,7 @@
           <artifactId>maven-surefire-plugin</artifactId>
           <version>3.3.0</version>
           <configuration>
+            <redirectTestOutputToFile>true</redirectTestOutputToFile>
             <argLine>${argLine} ${orion.test.jvm.args} --enable-native-access=ALL-UNNAMED</argLine>
             <systemPropertyVariables>
               <orion.testDurations.enabled>${orion.testDurations.enabled}</orion.testDurations.enabled>
@@ -308,6 +309,7 @@
           <artifactId>maven-failsafe-plugin</artifactId>
           <version>3.3.0</version>
           <configuration>
+            <redirectTestOutputToFile>true</redirectTestOutputToFile>
             <argLine>${argLine} ${orion.test.jvm.args} --enable-native-access=ALL-UNNAMED</argLine>
             <systemPropertyVariables>
               <orion.testDurations.enabled>${orion.testDurations.enabled}</orion.testDurations.enabled>
@@ -431,18 +433,6 @@
               <compilerReuseStrategy>reuseCreated</compilerReuseStrategy>
               <showCompilationChanges>true</showCompilationChanges>
               <skipMultiThreadWarning>true</skipMultiThreadWarning>
-            </configuration>
-          </plugin>
-          <plugin>
-            <artifactId>maven-surefire-plugin</artifactId>
-            <configuration>
-              <redirectTestOutputToFile>true</redirectTestOutputToFile>
-            </configuration>
-          </plugin>
-          <plugin>
-            <artifactId>maven-failsafe-plugin</artifactId>
-            <configuration>
-              <redirectTestOutputToFile>true</redirectTestOutputToFile>
             </configuration>
           </plugin>
         </plugins>

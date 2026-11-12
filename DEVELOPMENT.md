@@ -201,6 +201,13 @@ npm --prefix net/frontend/ui test
 `MODULE` and `TEST` must be supplied together. `LOG` is optional for full and
 focused Maven tests. Make uses `package -Pdev -T 4 -q`, includes reactor
 dependencies for focused tests, and uses ordinary system temporary storage.
+
+Java test stdout and stderr go to a separate file for each test class in its module:
+`target/surefire-reports/<test-class>-output.txt` for unit tests and
+`target/failsafe-reports/<test-class>-output.txt` for integration tests.
+This also applies to direct Maven invocations without `-Pdev`. Test summaries and
+failure reports remain in the Maven console; `LOG` separately captures Maven's build output.
+
 Build caching can reuse successful results. To bypass it:
 
 ```sh
