@@ -52,6 +52,10 @@ Python remains a tool for optional maintenance scripts; it is
 not required to start the server, agent, Vite, or Maven tests. Docker is needed
 for the external integration-test fixture, not for the basic local environment.
 
+Maven ignores repositories declared by dependencies. Downloads use Maven Central and
+repositories explicitly configured by the project or Maven settings, so dependency POMs
+cannot add download hosts such as Shibboleth. This policy is set in `.mvn/maven.config`.
+
 Install frontend dependencies once and after the lockfile changes:
 
 ```sh
