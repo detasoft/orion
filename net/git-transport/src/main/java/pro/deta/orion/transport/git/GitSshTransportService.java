@@ -2,7 +2,6 @@ package pro.deta.orion.transport.git;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.sshd.common.AttributeRepository;
 import org.apache.sshd.common.file.FileSystemFactory;
@@ -37,7 +36,6 @@ import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Singleton
-@RequiredArgsConstructor(onConstructor_ = @Inject)
 public class GitSshTransportService implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
     public static final AttributeRepository.AttributeKey<UserIdentity> SSH_AUTHENTICATED_USER = new AttributeRepository.AttributeKey<>();
     private static final long STOP_WAIT_MILLIS = 500;
@@ -50,6 +48,16 @@ public class GitSshTransportService implements ServiceLifecycleStateMachineAdapt
     private final KeyPairProvider sshHostKeys;
     private final OrionSshAuthenticator authenticator;
 
+    @Inject
+    public GitSshTransportService(BootstrapConfiguration orionConfiguration, SshCommandFactory commandFactory,
+                                  OrionShell shellFactory, KeyPairProvider sshHostKeys,
+                                  OrionSshAuthenticator authenticator) {
+        this.orionConfiguration = orionConfiguration;
+        this.commandFactory = commandFactory;
+        this.shellFactory = shellFactory;
+        this.sshHostKeys = sshHostKeys;
+        this.authenticator = authenticator;
+    }
 
     public void onStart() {
         SshTransportConfig config = sshTransportConfig();

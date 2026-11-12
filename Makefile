@@ -1,4 +1,6 @@
 MAVEN ?= ./mvnw
+CENTRAL_MAVEN ?= mvn
+GITHUB_REPO ?= detasoft/orion
 TEST_TIMEOUT ?= 20m
 UV ?= uv
 INTEGRATION_TEST_ARGS ?=
@@ -13,6 +15,7 @@ SKILL_DIRS := $(sort $(dir $(wildcard .agents/skills/*/SKILL.md)))
 
 .DEFAULT_GOAL := help
 
+.PHONY: publish-github publish-central
 .PHONY: help dist clean compile-only compile-all test test-all integration-test test-jfr test-jfr-report xml-schema dependency-audit \
 	dependency-minimize \
 	skill-check skills-check docker-exec build-processes \
@@ -50,6 +53,58 @@ build-processes: ## Show running Maven builds and Make test processes
 
 dist: ## Package the bootstrap distribution
 	$(MAVEN) package -Pdist -pl core/bootstrap -am
+
+publish-github: ## Publish a host-platform archive; set VERSION and RELEASE_NOTES, and GPG_KEY for stable releases
+	@set -eu; \
+		printf '%s\n' '$(VERSION)' | grep -Eq '^[0-9][A-Za-z0-9._-]*$$' \
+			|| { echo 'Set VERSION, e.g. VERSION=1.0-SNAPSHOT.' >&2; exit 2; }; \
+		test -f '$(RELEASE_NOTES)' \
+			|| { echo 'Set RELEASE_NOTES to the approved release notes file.' >&2; exit 2; }; \
+		prerelease=; \
+		case '$(VERSION)' in *-SNAPSHOT) prerelease=--prerelease ;; \
+			*) test -n '$(GPG_KEY)' || { echo 'Set GPG_KEY for a stable release.' >&2; exit 2; } ;; esac; \
+		tag='v$(VERSION)'; \
+		test "$$(git rev-parse "$$tag^{commit}")" = "$$(git rev-parse HEAD)" \
+			|| { echo 'Check out the release tag before publishing.' >&2; exit 2; }; \
+		test -z "$$(git status --porcelain)" \
+			|| { echo 'Commit or stash working-tree changes before publishing.' >&2; exit 2; }; \
+		gh auth status --hostname github.com; \
+		test "$$(gh api 'repos/$(GITHUB_REPO)/commits/'"$$tag" --jq .sha)" = "$$(git rev-parse HEAD)" \
+			|| { echo 'Push the release tag to GitHub before publishing.' >&2; exit 2; }; \
+		$(MAVEN) package --serial -b singlethreaded -Pdist,publish -pl core/bootstrap -am \
+			-Drevision='$(VERSION)' -DskipTests; \
+		platform=$$(uname -s | tr '[:upper:]' '[:lower:]'); \
+		asset="orion-$(VERSION)-$$platform-$$(uname -m).tar.gz"; \
+		mkdir -p core/bootstrap/target/release; \
+		cp core/bootstrap/target/orion-dist.tar.gz "core/bootstrap/target/release/$$asset"; \
+		cp core/bootstrap/target/bom.json "core/bootstrap/target/release/$$asset.cyclonedx.json"; \
+		cd core/bootstrap/target/release; \
+		shasum -a 256 "$$asset" > "$$asset.sha256"; \
+		set -- "$$asset" "$$asset.sha256" "$$asset.cyclonedx.json"; \
+		if [ -z "$$prerelease" ]; then \
+			gpg --armor --detach-sign --local-user '$(GPG_KEY)' --output "$$asset.asc" "$$asset"; \
+			set -- "$$@" "$$asset.asc"; \
+		fi; \
+		if gh release view "$$tag" --repo '$(GITHUB_REPO)' >/dev/null 2>&1; then \
+			gh release upload "$$tag" "$$@" --repo '$(GITHUB_REPO)'; \
+		else \
+			gh release create "$$tag" "$$@" --repo '$(GITHUB_REPO)' --verify-tag \
+				--title 'Orion $(VERSION)' --notes-file '$(abspath $(RELEASE_NOTES))' $$prerelease; \
+		fi
+
+publish-central: ## Publish Maven artifacts; set VERSION and SONATYPE_USERNAME/SONATYPE_PASSWORD
+	@set -eu; \
+		printf '%s\n' '$(VERSION)' | grep -Eq '^[0-9][A-Za-z0-9._-]*$$' \
+			|| { echo 'Set VERSION, e.g. VERSION=1.0-SNAPSHOT.' >&2; exit 2; }; \
+		test -n "$${SONATYPE_USERNAME:-}" && test -n "$${SONATYPE_PASSWORD:-}" \
+			|| { echo 'Set SONATYPE_USERNAME and SONATYPE_PASSWORD to a Central Portal user token.' >&2; exit 2; }; \
+		case "$$($(firstword $(CENTRAL_MAVEN)) -q --version)" in 3.*) ;; \
+			*) echo 'Central publishing requires Maven 3; set CENTRAL_MAVEN=/path/to/mvn.' >&2; exit 2 ;; esac; \
+		sign=; \
+		case '$(VERSION)' in *-SNAPSHOT) sign=-Dgpg.skip=true ;; esac; \
+		$(CENTRAL_MAVEN) deploy -Pcentral,publish -pl core/bootstrap -am \
+			-Drevision='$(VERSION)' -DskipTests -Dmaven.build.cache.enabled=false \
+			$(if $(GPG_KEY),-Dgpg.keyname='$(GPG_KEY)') $$sign
 
 clean: ## Clean Maven outputs and this repository's build cache
 	$(MAVEN) clean -Pdev,clean-build-cache -T 4 -q

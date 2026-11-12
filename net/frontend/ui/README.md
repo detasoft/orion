@@ -1,5 +1,9 @@
 # Orion Admin UI
 
+The Maven artifact contains static frontend resources, with no Java API to
+document. Its `sources` artifact contains the UI sources and build configuration;
+its `javadoc` artifact contains this guide.
+
 A small Vue 3 administration console served by Orion. The UI uses same-origin
 Admin API routes and never asks for a separate server URL. Use **Connect to Orion**
 or the sidebar server card to provide an Admin API bearer token. Open **Settings**

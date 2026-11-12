@@ -256,6 +256,67 @@ sudo ln -s /opt/orion/orion.jar /etc/init.d/orion
 sudo service orion start
 ```
 
+### Publishing
+
+Two local Make goals publish a version without running tests:
+
+```sh
+make publish-github VERSION=1.0-SNAPSHOT RELEASE_NOTES=/tmp/orion-release-notes.md
+make publish-central VERSION=1.0-SNAPSHOT
+```
+
+Before public distribution, update the version and dates in `RELEASES.md` and
+the corresponding BSL parameters in `LICENSE`. Run the applicable release
+checks separately; publishing does not establish that those checks passed.
+
+For GitHub, authenticate with `gh auth login`, check out a clean, committed
+version, and push its `v<VERSION>` tag to `detasoft/orion` first. `RELEASE_NOTES`
+must name a file containing the approved public release text; keep it outside
+the checkout. The goal creates a GitHub Release using that text and the title
+`Orion <VERSION>`. A version ending in `-SNAPSHOT` creates a prerelease.
+An existing release receives additional platform assets without replacing
+existing files or changing its notes. Override `GITHUB_REPO` for another repository.
+
+The uploaded archive is named `orion-<VERSION>-<os>-<arch>.tar.gz`. It contains
+the existing host-specific `jlink` distribution, including its embedded legal
+notices. A SHA-256 checksum and CycloneDX JSON SBOM accompany it. This is a
+build for the current host, not a cross-platform build. The SBOM describes
+Maven dependencies; it does not inventory npm packages or Rust crates.
+Stable versions also require `GPG_KEY=<fingerprint>` and upload a detached
+archive signature. The selected signing key must be available to GPG.
+
+For Central, register the `pro.deta` namespace, enable snapshots for it, and
+generate a Central Portal user token. Export its two values as
+`SONATYPE_USERNAME` and `SONATYPE_PASSWORD`, and configure Maven's
+`~/.m2/settings.xml` with this server entry:
+
+```xml
+<server>
+  <id>central</id>
+  <username>${env.SONATYPE_USERNAME}</username>
+  <password>${env.SONATYPE_PASSWORD}</password>
+</server>
+```
+
+`publish-central` builds bootstrap and its reactor dependencies, including
+the parent BOM, with sources and Javadoc artifacts. The bootstrap SBOM is
+attached as a Maven artifact. This goal uses an installed Maven 3 through
+`CENTRAL_MAVEN` (default: `mvn`, version 3.9.2 or newer), because the Sonatype plugin currently does
+not support Maven 4. Override it with `CENTRAL_MAVEN=/path/to/maven-3/bin/mvn`
+when `mvn` selects another installation. Ordinary builds and GitHub publishing
+continue to use `MAVEN` (default: `./mvnw`). Snapshot versions go to
+`https://central.sonatype.com/repository/maven-snapshots/` without GPG signing.
+Stable versions are signed with Maven GPG Plugin and published automatically
+through Central Portal after validation; the command waits for publication.
+This goal bypasses the Maven build cache so POM preparation, signing and
+publishing execute on every invocation. It does not delete the cache or affect
+ordinary builds and server startup.
+Use `GPG_KEY=<fingerprint>` to select a signing key.
+Token values and signing passphrases must stay outside the repository.
+
+The standalone Rust Maven Plugin has its own publishing configuration and is
+not published by either goal.
+
 ### Release Verification
 
 Published releases should be verified with a detached GPG signature:

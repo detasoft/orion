@@ -8,6 +8,38 @@
     <version>${revision}</version>
     <packaging>pom</packaging>
 
+    <name>Orion BOM</name>
+    <description>Orion server and its supporting modules.</description>
+    <url>https://github.com/detasoft/orion</url>
+    <inceptionYear>2026</inceptionYear>
+    <organization>
+        <name>DETA PRO B.V.</name>
+        <url>https://www.deta-it.com</url>
+    </organization>
+    <licenses>
+        <license>
+            <name>Business Source License 1.1, changing to GNU Affero General Public License v3.0 or later</name>
+            <url>https://github.com/detasoft/orion/blob/HEAD/LICENSE</url>
+            <distribution>repo</distribution>
+            <comments>See LICENSE for Orion-specific BSL parameters and commercial contacts.</comments>
+        </license>
+    </licenses>
+    <developers>
+        <developer>
+            <id>detasoft</id>
+            <name>DETA PRO B.V.</name>
+            <organization>DETA PRO B.V.</organization>
+            <organizationUrl>https://www.deta-it.com</organizationUrl>
+        </developer>
+    </developers>
+    <scm child.scm.connection.inherit.append.path="false"
+         child.scm.developerConnection.inherit.append.path="false" child.scm.url.inherit.append.path="false">
+        <connection>scm:git:https://github.com/detasoft/orion.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/detasoft/orion.git</developerConnection>
+        <url>https://github.com/detasoft/orion</url>
+        <tag>HEAD</tag>
+    </scm>
+
     <properties>
         <revision>1.0-SNAPSHOT</revision>
         <netty.version>4.2.1.Final</netty.version>
@@ -214,4 +246,79 @@
         </dependencies>
     </dependencyManagement>
 
+    <profiles>
+        <profile>
+            <id>central</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>flatten-maven-plugin</artifactId>
+                        <version>1.9.0</version>
+                        <configuration>
+                            <flattenMode>resolveCiFriendliesOnly</flattenMode>
+                            <updatePomFile>true</updatePomFile>
+                            <outputDirectory>${project.build.directory}</outputDirectory>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>resolve-published-version</id>
+                                <phase>process-resources</phase>
+                                <goals><goal>flatten</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>0.12.0</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>central</publishingServerId>
+                            <autoPublish>true</autoPublish>
+                            <waitUntil>published</waitUntil>
+                        </configuration>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>3.4.0</version>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <goals><goal>jar-no-fork</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <version>3.12.0</version>
+                        <configuration>
+                            <doclint>none</doclint>
+                            <detectJavaApiLink>false</detectJavaApiLink>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>attach-javadoc</id>
+                                <goals><goal>jar</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>3.2.8</version>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals><goal>sign</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
