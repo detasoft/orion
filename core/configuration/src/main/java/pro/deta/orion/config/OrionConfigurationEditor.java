@@ -99,8 +99,9 @@ public final class OrionConfigurationEditor implements ServiceLifecycleStateMach
             case Result.Success<OrionDocument> ignored -> new ConfigurationStatus(
                     revisionValue(read.revision()), activeRevision,
                     document(read) instanceof Result.Success<?> ? "valid" : "invalid");
-            case Result.Failure<OrionDocument> ignored ->
-                    new ConfigurationStatus(revisionValue(read.revision()), activeRevision, "unavailable");
+            case Result.Failure<OrionDocument> failure -> new ConfigurationStatus(
+                    revisionValue(read.revision()), activeRevision,
+                    failure.code() == Result.FailureCode.INVALID_CONTENT ? "invalid" : "unavailable");
         };
     }
 

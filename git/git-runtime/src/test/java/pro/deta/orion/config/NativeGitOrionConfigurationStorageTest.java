@@ -334,7 +334,7 @@ class NativeGitOrionConfigurationStorageTest {
                 .isInstanceOfSatisfying(
                         Result.Failure.class,
                         failure ->
-                                assertThat(failure.code()).isEqualTo(Result.FailureCode.GENERAL));
+                                assertThat(failure.code()).isEqualTo(Result.FailureCode.INVALID_CONTENT));
         assertThat(read.revision())
                 .isEqualTo(
                         repository.index().resolve(new VcRevision.Ref("refs/heads/configuration")));

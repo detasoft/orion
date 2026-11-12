@@ -115,6 +115,7 @@ public sealed interface Result<T> {
 
     enum FailureCode {
         GENERAL,
+        INVALID_CONTENT,
         CREATION_FAILED,
         FILE_ALREADY_EXISTS,
         NOT_SUPPORTED,

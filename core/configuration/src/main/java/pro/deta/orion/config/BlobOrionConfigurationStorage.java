@@ -51,6 +51,9 @@ public final class BlobOrionConfigurationStorage implements OrionVersionedConfig
                 byte[] bytes = operation.readContent();
                 try {
                     result = Result.of(codec.read(new ByteArrayInputStream(bytes)));
+                } catch (IOException | RuntimeException failure) {
+                    result = new Result.Failure<>(Result.FailureCode.INVALID_CONTENT,
+                            failure.getMessage(), failure);
                 } finally {
                     Arrays.fill(bytes, (byte) 0);
                 }
@@ -58,7 +61,7 @@ public final class BlobOrionConfigurationStorage implements OrionVersionedConfig
                 result = failure.getCause() instanceof FileNotFoundException
                         ? new Result.Failure<>(Result.FailureCode.NOT_FOUND)
                         : new Result.Failure<>(Result.FailureCode.GENERAL, failure.getMessage(), failure);
-            } catch (IOException | RuntimeException failure) {
+            } catch (RuntimeException failure) {
                 result = new Result.Failure<>(Result.FailureCode.GENERAL, failure.getMessage(), failure);
             }
             return new OrionDocumentRevision(result, operation.revision());

@@ -193,6 +193,11 @@ class GitSshTransportEndToEndIT {
                     serializeAccessControl(configurationPushAccessControl(true)), "repaired configuration");
             pushConfiguration(source, ssh);
 
+            assertThat(pro.deta.orion.util.OrionUtils.waitForCondition(
+                    () -> startedOrion.editor().current().revision()
+                            .equals(new pro.deta.orion.util.VcRevision.Stored(validC.name()))
+                            && startedOrion.accessControlService().userExists("recovered-user")))
+                    .as("repaired configuration and ACL become active").isTrue();
             ConfigurationStatus recovered = startedOrion.editor().status();
             assertThat(recovered.storedRevision()).contains(validC.name());
             assertThat(recovered.activeRevision()).contains(validC.name());

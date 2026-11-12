@@ -38,6 +38,7 @@ the current candidate. No Orion public release is authorized by this report.
 | Full integration and cross-engine matrix, candidate `7afc159a` | FAIL | Awake uncached rerun completed with mvnd exit 1, Make exit 2: 4,229 JVM tests, three failures, one error, six skipped. Detailed outcomes below. |
 | Focused historical SSH configuration-push integration check | FAIL | The reactor stopped in a prerequisite unit test before the selected integration test ran. `/tmp/orion-task21-20261112-ssh-config.log`: `GitSmartHttpClientTransportTest.permitsDiscoveryBodyThatMakesProgressBeforeEachReadTimeout:312` returned a discovery read timeout instead of success. This is not evidence of an SSH scenario failure. |
 | SSH configuration-push retry after timing fix, candidate `dff458b8` | FAIL | The selected integration method executed: one test, one failure, zero errors/skips, 1.713 s class time. `GitSshTransportEndToEndIT.directConfigurationPushRetainsValidStateUntilAValidCommitArrives:189` expected `invalid`, observed `unavailable`. Log: `/tmp/orion-task21-ssh-config-after-timing.log`. |
+| SSH malformed-configuration status and recovery after repair | PASS (focused repaired checkout) | Original SSH method passed with zero failures/errors/skips after the invalid-content classification and asynchronous test-wait repairs described below. This does not certify the unchanged older candidate or the complete integration matrix. |
 | Backup/restore, upgrade/rollback, clean-host installation | NOT TESTED | Current packaged first-start/restart checks use this existing macOS host. They do not establish recovery, upgrade/rollback, or a clean Linux installation. |
 | Security, dependency/license inventory, final artifact notices | NOT TESTED | Existing documentation and historical findings must be checked against current code and the actual archive. |
 
@@ -423,6 +424,53 @@ additional code fix: `/tmp/orion-task21-proxy-precommit-retry1.log`.
 Automatic scoped review found no blocking issues. The shared working-tree
 verification includes separate release/build work committed by another session
 as `0f519f2d`; it does not certify a clean complete integration matrix.
+
+#### Malformed-configuration status and SSH recovery repair
+
+`BlobOrionConfigurationStorage` now returns `Result.FailureCode.INVALID_CONTENT`
+only when source bytes were read successfully but document decoding failed.
+The existing result contract carries this distinction; no additional state,
+service, or exception type was introduced. `OrionConfigurationEditor.status()`
+reports that result as `invalid`. Missing and unreadable source data retain
+their prior `unavailable` classification. Revision tracking, byte clearing,
+and retention of the last valid active configuration remain unchanged.
+
+Six new focused cases cover malformed XML, unsupported schema version,
+schema-invalid XML, invalid-content retention followed by valid recovery,
+missing source data, and source-read I/O failure. Before implementation, four
+failed and two passed. With the fix, all six passed together with the seven
+existing editor cases. Logs: `/tmp/orion-task21-invalid-content-red.log` and
+`/tmp/orion-task21-invalid-content-green.log`.
+
+In a diagnostic checkout, changing the codec failure code back to `GENERAL`
+made the same four cases fail again (`expected INVALID_CONTENT, but was
+GENERAL`, and `expected invalid, but was unavailable`). Log:
+`/tmp/orion-task21-invalid-content-mutated.log`. The fix was restored afterward.
+The existing native-Git malformed-document assertion was updated from
+`GENERAL` to `INVALID_CONTENT`, preserving its exact storage-revision and
+edit-rejection checks. Review identified that assertion, and the first full
+unit run confirmed it as the failing expectation in
+`/tmp/orion-task21-invalid-content-precommit.log`.
+
+After status classification was fixed, the SSH scenario exposed its next
+assertion race: the repaired commit was stored, but asynchronous activation
+had not completed when the test read the active revision (line 198). Log:
+`/tmp/orion-task21-invalid-content-restored-ssh.log`. The test now uses the
+existing bounded condition wait for both the repaired revision and restored
+ACL user, then performs all original stored/active revision and status checks.
+It changes no production synchronization or timeout.
+
+The final related run passed: six new blob cases, seven editor cases, all
+17 native-Git configuration-storage cases, and the original SSH method
+`directConfigurationPushRetainsValidStateUntilAValidCommitArrives`, with
+zero failures/errors/skips and Make exit 0. SSH class time: 2.235 s. Log:
+`/tmp/orion-task21-invalid-content-ssh-recovery.log`. These diagnostic results
+use `7afc159a` plus the recorded startup/proxy test repairs and this change;
+they do not certify an unchanged original candidate or a complete green matrix.
+Automatic scoped review found no remaining blocking issues.
+The final required root `make test` also passed with cache disabled, exit 0:
+`/tmp/orion-task21-invalid-content-precommit-final.log`. No full integration
+matrix for the resulting committed candidate is claimed by that unit/package run.
 
 ## Historical evidence
 

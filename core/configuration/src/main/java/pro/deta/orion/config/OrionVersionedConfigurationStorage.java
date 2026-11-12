@@ -7,6 +7,7 @@ import pro.deta.orion.util.VcRevision;
 /**
  * Reads document results with independent storage revisions and saves against an expected revision.
  * Reading throws if the storage revision cannot be determined; Absent means confirmed absence.
+ * INVALID_CONTENT means source bytes were read but cannot be decoded as a configuration document.
  */
 public interface OrionVersionedConfigurationStorage {
     OrionDocumentRevision load();
