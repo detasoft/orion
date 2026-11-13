@@ -472,6 +472,67 @@ The final required root `make test` also passed with cache disabled, exit 0:
 `/tmp/orion-task21-invalid-content-precommit-final.log`. No full integration
 matrix for the resulting committed candidate is claimed by that unit/package run.
 
+#### npm security remediation and remaining findings
+
+On 13 November, the unchanged frontend dependency graph still reported three
+high and seven moderate npm findings. The remediation changes the exact dev
+pins Vite `8.2.2` to `8.3.8` and Vitest `4.1.11` to `4.1.12`, with compatible
+lockfile updates including `brace-expansion` `5.0.13` and `source-map-js`
+`1.2.2`. Production dependency declarations and Vue Test Utils `2.5.0` remain
+unchanged. No force option, dependency override, or downgrade was applied.
+
+The final full `npm audit --json` exits 1 with zero critical/high and five
+moderate affected packages. `npm audit --omit=dev --json` exits 0 with zero
+findings. These are npm registry results for this lockfile, not a complete
+Maven/Rust inventory or a proof of runtime exploitability.
+
+| Remaining package | Finding / dependency path | Reachability and next step |
+| --- | --- | --- |
+| `glob` `13.0.7` | GHSA-3g3m-2fjr-6pw4, cancellation bypass during filesystem traversal | Dev-only via Vue Test Utils → js-beautify; no production dependency path in the omit-dev audit. Track an upstream compatible fix. |
+| `minimatch` `10.2.6` | GHSA-g3hv-75wg-m249, globparts amplification DoS | Dev-only through glob/editorconfig. Do not process untrusted patterns in the development/test environment; track an upstream compatible fix. |
+| `editorconfig` | Inherits the minimatch finding | Dev-only js-beautify dependency; same remediation boundary. |
+| `js-beautify` | Inherits glob/editorconfig findings | Dev-only test formatting dependency; same remediation boundary. |
+| `@vue/test-utils` | Inherits js-beautify findings | Imported by frontend test files. Registry's proposed force fix downgrades it to `2.4.11`; that change was not applied. |
+
+Vue Test Utils `2.5.1` was checked and did not eliminate this chain, so its
+unnecessary patch update was removed. Moderate development-tool findings remain
+open; this is not an accepted-risk decision or a completely clean security gate.
+Production-only audit does not replace verification of the actual release SBOM.
+
+Bundled npm `10.9.7` initially failed while building the update graph with
+`TypeError: Cannot read properties of null (reading 'edgesOut')` in Arborist's
+`loadPeerSet`; lockfile-only generation failed identically. Diagnostic npm
+`11.21.2`, installed only under `/tmp/orion-task21-npm11`, generated the lockfile
+with the same pinned Node `22.22.2`. Bundled npm `10.9.7` then applied compatible
+audit fixes and successfully ran `npm ci`. The project's Node/npm pin was not
+changed. This establishes installability with the bundled tool, not that its
+original dependency-update bug has been fixed.
+
+With the bundled toolchain, `npm test` passed all 18 files / 277 tests, and
+`npm run build` exited 0 with Vite `8.3.8`. These frontend commands finished
+before Maven was started in the same directory. Audit and installation checks
+were performed without suppressing the remaining moderate findings.
+The required root `make test` with cache disabled also passed, exit 0:
+`/tmp/orion-task21-npm-security-precommit.log`. Automatic scoped review found
+no blocking issues. This is a unit/package result, not a complete integration
+matrix or a clean distribution build.
+
+#### Fresh distribution recheck after release-build changes
+
+A plain local clone `/tmp/orion-task21-clean-9e447041` initially had empty
+`git status --short` and SHA `9e447041f88bd3101ce17063867922edd7979b1a`.
+`caffeinate -i make dist` with cache disabled and Maven log
+`/tmp/orion-task21-clean-9e447041-dist.log` returned Make exit 2 before compilation:
+Maven reported that parent `pro.deta.orion:bom:pom:1.0-SNAPSHOT` could not be
+resolved in the reactor. No artifact was produced. This is a new earlier build
+blocker, not a verified resolution of the original missing debug-binary defect.
+The npm dependency edits were not present in that checkout.
+A diagnostic `./mvnw validate -N -Dmaven.build.cache.enabled=false
+-Drevision=1.0-SNAPSHOT` also exited 1 with the same parent-resolution failure;
+log: `/tmp/orion-task21-clean-bom-explicit-revision.log`. Merely supplying the
+default revision explicitly is therefore not an established fix. The cause
+remains to be isolated from the clean model-reading path.
+
 ## Historical evidence
 
 - [28 October verification](verification-2026-10-28.md) and
